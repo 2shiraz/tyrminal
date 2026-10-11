@@ -18,8 +18,7 @@ mod secret;
 pub use envelope::{MAX_PAYLOAD_LEN, PAD_BLOCK, RecordContext, SealedRecord};
 pub use error::VaultError;
 pub use header::{
-    Credential, FORMAT_VERSION, MAX_DEVICE_SLOTS, NewVault, SlotKind, UnlockedVault, VaultHeader,
-    create_vault,
+    Credential, FORMAT_VERSION, MAX_DEVICE_SLOTS, NewVault, SlotKind, UnlockedVault, VaultHeader, create_vault,
 };
 pub use kdf::{KdfProfile, PASSPHRASE_MAX_LEN, PASSPHRASE_MIN_NEW_LEN};
 pub use recovery::RecoveryKey;

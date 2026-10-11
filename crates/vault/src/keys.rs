@@ -7,11 +7,7 @@ pub(crate) const LABEL_KEK_RECOVERY: &[u8] = b"tyrminal.kek.recovery.v1";
 pub(crate) const LABEL_KEK_DEVICE: &[u8] = b"tyrminal.kek.device.v1";
 
 /// Derives a purpose-specific subkey from the vault root key (docs/crypto-format.md §2).
-pub(crate) fn subkey(
-    root: &SecretKey,
-    vault_id: &Id,
-    label: &[u8],
-) -> Result<SecretKey, VaultError> {
+pub(crate) fn subkey(root: &SecretKey, vault_id: &Id, label: &[u8]) -> Result<SecretKey, VaultError> {
     hkdf_key(root.expose(), vault_id, label)
 }
 
@@ -31,9 +27,6 @@ mod tests {
         assert_ne!(records.expose(), other_vault.expose());
         assert_ne!(records.expose(), root.expose());
         // Deterministic for the same inputs.
-        assert_eq!(
-            records.expose(),
-            subkey(&root, &v1, LABEL_RECORDS).unwrap().expose()
-        );
+        assert_eq!(records.expose(), subkey(&root, &v1, LABEL_RECORDS).unwrap().expose());
     }
 }

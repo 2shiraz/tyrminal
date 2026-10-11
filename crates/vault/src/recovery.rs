@@ -22,10 +22,7 @@ impl RecoveryKey {
     }
 
     fn check(key: &[u8; 32]) -> [u8; 2] {
-        let digest = Sha256::new()
-            .chain_update(CHECK_LABEL)
-            .chain_update(key)
-            .finalize();
+        let digest = Sha256::new().chain_update(CHECK_LABEL).chain_update(key).finalize();
         [digest[0], digest[1]]
     }
 
@@ -93,10 +90,7 @@ mod tests {
         let parsed = RecoveryKey::parse(&text).unwrap();
         assert_eq!(parsed.key().expose(), key.key().expose());
         let sloppy = text.to_lowercase().replace('-', " ");
-        assert_eq!(
-            RecoveryKey::parse(&sloppy).unwrap().key().expose(),
-            key.key().expose()
-        );
+        assert_eq!(RecoveryKey::parse(&sloppy).unwrap().key().expose(), key.key().expose());
     }
 
     #[test]
@@ -107,21 +101,9 @@ mod tests {
         let mut chars: Vec<char> = text.chars().collect();
         chars[0] = if chars[0] == '7' { '8' } else { '7' };
         let typo: String = chars.into_iter().collect();
-        assert_eq!(
-            RecoveryKey::parse(&typo).err(),
-            Some(VaultError::InvalidRecoveryKey)
-        );
-        for bad in [
-            "",
-            "short",
-            "!!!!!-!!!!!",
-            &"A".repeat(300),
-            &text[..text.len() - 1],
-        ] {
-            assert_eq!(
-                RecoveryKey::parse(bad).err(),
-                Some(VaultError::InvalidRecoveryKey)
-            );
+        assert_eq!(RecoveryKey::parse(&typo).err(), Some(VaultError::InvalidRecoveryKey));
+        for bad in ["", "short", "!!!!!-!!!!!", &"A".repeat(300), &text[..text.len() - 1]] {
+            assert_eq!(RecoveryKey::parse(bad).err(), Some(VaultError::InvalidRecoveryKey));
         }
     }
 

@@ -15,18 +15,13 @@ impl<'a> Reader<'a> {
 
     pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], VaultError> {
         let end = self.pos.checked_add(n).ok_or(VaultError::MalformedHeader)?;
-        let slice = self
-            .bytes
-            .get(self.pos..end)
-            .ok_or(VaultError::MalformedHeader)?;
+        let slice = self.bytes.get(self.pos..end).ok_or(VaultError::MalformedHeader)?;
         self.pos = end;
         Ok(slice)
     }
 
     pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], VaultError> {
-        self.take(N)?
-            .try_into()
-            .map_err(|_| VaultError::MalformedHeader)
+        self.take(N)?.try_into().map_err(|_| VaultError::MalformedHeader)
     }
 
     pub(crate) fn u8(&mut self) -> Result<u8, VaultError> {

@@ -8,7 +8,7 @@ HostKey /etc/ssh/lab/ssh_host_ed25519_key
 HostKey /etc/ssh/lab/ssh_host_rsa_key
 
 PermitRootLogin no
-AllowUsers tyr noforward
+AllowUsers tyr noforward nosession
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
@@ -18,6 +18,11 @@ MaxAuthTries 6
 MaxStartups 200:30:400
 MaxSessions 64
 LoginGraceTime 30
+
+# Lab only: every test client reaches the container from one NAT address and the suite
+# deliberately fails and abandons authentication, which would trip OpenSSH's per-source
+# penalties (9.8+) and drop unrelated tests. Never copy this line to a real server.
+PerSourcePenalties no
 
 AllowTcpForwarding yes
 GatewayPorts no
@@ -34,3 +39,7 @@ LogLevel VERBOSE
 Match User noforward
     AllowTcpForwarding no
     PermitOpen none
+
+# Authenticates, but every session channel open is refused (denied-channel fixture).
+Match User nosession
+    MaxSessions 0

@@ -71,20 +71,11 @@ pub(crate) fn seal(
 
     let mut nonce = [0u8; 24];
     getrandom::fill(&mut nonce).map_err(|_| VaultError::Randomness)?;
-    let cipher =
-        XChaCha20Poly1305::new_from_slice(key.expose()).map_err(|_| VaultError::Internal)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(key.expose()).map_err(|_| VaultError::Internal)?;
     cipher
-        .encrypt_in_place(
-            &XNonce::from(nonce),
-            &aad(vault_id, key_version, ctx),
-            &mut *buffer,
-        )
+        .encrypt_in_place(&XNonce::from(nonce), &aad(vault_id, key_version, ctx), &mut *buffer)
         .map_err(|_| VaultError::Internal)?;
-    Ok(SealedRecord {
-        key_version,
-        nonce,
-        ciphertext: core::mem::take(&mut *buffer),
-    })
+    Ok(SealedRecord { key_version, nonce, ciphertext: core::mem::take(&mut *buffer) })
 }
 
 pub(crate) fn open(
@@ -102,14 +93,9 @@ pub(crate) fn open(
         return Err(VaultError::MalformedRecord);
     }
     let mut buffer = Zeroizing::new(sealed.ciphertext.clone());
-    let cipher =
-        XChaCha20Poly1305::new_from_slice(key.expose()).map_err(|_| VaultError::Internal)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(key.expose()).map_err(|_| VaultError::Internal)?;
     cipher
-        .decrypt_in_place(
-            &XNonce::from(sealed.nonce),
-            &aad(vault_id, key_version, ctx),
-            &mut *buffer,
-        )
+        .decrypt_in_place(&XNonce::from(sealed.nonce), &aad(vault_id, key_version, ctx), &mut *buffer)
         .map_err(|_| VaultError::RecordAuthentication)?;
 
     // Authenticated from here on; these checks reject well-formed-but-wrong writers, not attackers.
@@ -117,10 +103,7 @@ pub(crate) fn open(
         return Err(VaultError::MalformedRecord);
     }
     let declared = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
-    let end = LEN_PREFIX
-        .checked_add(declared)
-        .filter(|&e| e <= buffer.len())
-        .ok_or(VaultError::MalformedRecord)?;
+    let end = LEN_PREFIX.checked_add(declared).filter(|&e| e <= buffer.len()).ok_or(VaultError::MalformedRecord)?;
     if declared > MAX_PAYLOAD_LEN || buffer[end..].iter().any(|&b| b != 0) {
         return Err(VaultError::MalformedRecord);
     }
@@ -137,22 +120,14 @@ mod tests {
         SecretKey::from_bytes([0x42; 32])
     }
     const VAULT: Id = [0x11; 16];
-    const CTX: RecordContext = RecordContext {
-        record_id: [0x22; 16],
-        kind: 3,
-        revision: 7,
-    };
+    const CTX: RecordContext = RecordContext { record_id: [0x22; 16], kind: 3, revision: 7 };
 
     #[test]
     fn round_trip_and_padding() {
         for len in [0usize, 1, 251, 252, 253, 4096, MAX_PAYLOAD_LEN] {
             let payload = vec![0xA5u8; len];
             let sealed = seal(&key(), &VAULT, 1, &CTX, &payload).unwrap();
-            assert_eq!(
-                (sealed.ciphertext.len() - TAG_LEN) % PAD_BLOCK,
-                0,
-                "len {len}"
-            );
+            assert_eq!((sealed.ciphertext.len() - TAG_LEN) % PAD_BLOCK, 0, "len {len}");
             assert_eq!(&*open(&key(), &VAULT, 1, &CTX, &sealed).unwrap(), &payload);
         }
     }
@@ -160,15 +135,9 @@ mod tests {
     #[test]
     fn oversized_payload_and_zero_revision_are_rejected() {
         let big = vec![0u8; MAX_PAYLOAD_LEN + 1];
-        assert_eq!(
-            seal(&key(), &VAULT, 1, &CTX, &big).err(),
-            Some(VaultError::PayloadTooLarge)
-        );
+        assert_eq!(seal(&key(), &VAULT, 1, &CTX, &big).err(), Some(VaultError::PayloadTooLarge));
         let ctx = RecordContext { revision: 0, ..CTX };
-        assert_eq!(
-            seal(&key(), &VAULT, 1, &ctx, b"x").err(),
-            Some(VaultError::MalformedRecord)
-        );
+        assert_eq!(seal(&key(), &VAULT, 1, &ctx, b"x").err(), Some(VaultError::MalformedRecord));
     }
 
     #[test]
@@ -186,30 +155,18 @@ mod tests {
 
         let other_vault = [0x12; 16];
         assert_eq!(open(&key(), &other_vault, 1, &CTX, &sealed).err(), auth);
-        let other_record = RecordContext {
-            record_id: [0x23; 16],
-            ..CTX
-        };
+        let other_record = RecordContext { record_id: [0x23; 16], ..CTX };
         assert_eq!(open(&key(), &VAULT, 1, &other_record, &sealed).err(), auth);
         let other_kind = RecordContext { kind: 4, ..CTX };
         assert_eq!(open(&key(), &VAULT, 1, &other_kind, &sealed).err(), auth);
         let other_revision = RecordContext { revision: 8, ..CTX };
-        assert_eq!(
-            open(&key(), &VAULT, 1, &other_revision, &sealed).err(),
-            auth
-        );
+        assert_eq!(open(&key(), &VAULT, 1, &other_revision, &sealed).err(), auth);
         let other_key = SecretKey::from_bytes([0x43; 32]);
         assert_eq!(open(&other_key, &VAULT, 1, &CTX, &sealed).err(), auth);
 
         // A relabelled key version is refused before decryption; a matching relabel fails the AAD.
-        assert_eq!(
-            open(&key(), &VAULT, 2, &CTX, &sealed).err(),
-            Some(VaultError::KeyVersionMismatch)
-        );
-        let relabelled = SealedRecord {
-            key_version: 2,
-            ..sealed.clone()
-        };
+        assert_eq!(open(&key(), &VAULT, 2, &CTX, &sealed).err(), Some(VaultError::KeyVersionMismatch));
+        let relabelled = SealedRecord { key_version: 2, ..sealed.clone() };
         assert_eq!(open(&key(), &VAULT, 2, &CTX, &relabelled).err(), auth);
     }
 
@@ -219,18 +176,12 @@ mod tests {
         for i in 0..sealed.ciphertext.len() * 8 {
             let mut t = sealed.clone();
             t.ciphertext[i / 8] ^= 1 << (i % 8);
-            assert_eq!(
-                open(&key(), &VAULT, 1, &CTX, &t).err(),
-                Some(VaultError::RecordAuthentication)
-            );
+            assert_eq!(open(&key(), &VAULT, 1, &CTX, &t).err(), Some(VaultError::RecordAuthentication));
         }
         for i in 0..24 * 8 {
             let mut t = sealed.clone();
             t.nonce[i / 8] ^= 1 << (i % 8);
-            assert_eq!(
-                open(&key(), &VAULT, 1, &CTX, &t).err(),
-                Some(VaultError::RecordAuthentication)
-            );
+            assert_eq!(open(&key(), &VAULT, 1, &CTX, &t).err(), Some(VaultError::RecordAuthentication));
         }
     }
 
@@ -239,22 +190,12 @@ mod tests {
         let sealed = seal(&key(), &VAULT, 1, &CTX, b"secret").unwrap();
         let mut short = sealed.clone();
         short.ciphertext.truncate(PAD_BLOCK + TAG_LEN - 1);
-        assert_eq!(
-            open(&key(), &VAULT, 1, &CTX, &short).err(),
-            Some(VaultError::MalformedRecord)
-        );
+        assert_eq!(open(&key(), &VAULT, 1, &CTX, &short).err(), Some(VaultError::MalformedRecord));
         let mut empty = sealed.clone();
         empty.ciphertext.clear();
-        assert_eq!(
-            open(&key(), &VAULT, 1, &CTX, &empty).err(),
-            Some(VaultError::MalformedRecord)
-        );
+        assert_eq!(open(&key(), &VAULT, 1, &CTX, &empty).err(), Some(VaultError::MalformedRecord));
         let mut huge = sealed;
-        huge.ciphertext
-            .resize(MAX_PAYLOAD_LEN + 2 * PAD_BLOCK + TAG_LEN, 0);
-        assert_eq!(
-            open(&key(), &VAULT, 1, &CTX, &huge).err(),
-            Some(VaultError::MalformedRecord)
-        );
+        huge.ciphertext.resize(MAX_PAYLOAD_LEN + 2 * PAD_BLOCK + TAG_LEN, 0);
+        assert_eq!(open(&key(), &VAULT, 1, &CTX, &huge).err(), Some(VaultError::MalformedRecord));
     }
 }

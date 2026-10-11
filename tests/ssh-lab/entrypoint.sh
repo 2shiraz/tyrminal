@@ -8,7 +8,7 @@ install -m 0644 -o root -g root /lab-in/authorized_keys /etc/ssh/lab/authorized_
 
 # The password comes from a file so it never appears in argv, the image or the container environment.
 password="$(cat /lab-in/password)"
-printf 'tyr:%s\nnoforward:%s\n' "$password" "$password" | chpasswd >/dev/null 2>&1
+printf 'tyr:%s\nnoforward:%s\nnosession:%s\n' "$password" "$password" "$password" | chpasswd >/dev/null 2>&1
 unset password
 
 exec /usr/sbin/sshd -D -e

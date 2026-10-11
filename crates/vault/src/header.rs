@@ -102,13 +102,7 @@ impl core::fmt::Debug for VaultHeader {
     }
 }
 
-fn slot_aad(
-    vault_id: &Id,
-    key_version: u32,
-    kind: SlotKind,
-    slot_id: &Id,
-    salt: &[u8; 32],
-) -> Vec<u8> {
+fn slot_aad(vault_id: &Id, key_version: u32, kind: SlotKind, slot_id: &Id, salt: &[u8; 32]) -> Vec<u8> {
     let mut aad = Vec::with_capacity(SLOT_AAD_LABEL.len() + 2 + 16 + 4 + 1 + 16 + 2 + 32);
     aad.extend_from_slice(SLOT_AAD_LABEL);
     aad.extend_from_slice(&FORMAT_VERSION.to_be_bytes());
@@ -135,28 +129,14 @@ fn wrap_slot(
     getrandom::fill(&mut nonce).map_err(|_| VaultError::Randomness)?;
 
     let kek = credential.kek(&salt)?;
-    let cipher =
-        XChaCha20Poly1305::new_from_slice(kek.expose()).map_err(|_| VaultError::Internal)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(kek.expose()).map_err(|_| VaultError::Internal)?;
     let mut buffer = Zeroizing::new(Vec::with_capacity(48));
     buffer.extend_from_slice(root.expose());
     cipher
-        .encrypt_in_place(
-            &XNonce::from(nonce),
-            &slot_aad(vault_id, key_version, kind, &id, &salt),
-            &mut *buffer,
-        )
+        .encrypt_in_place(&XNonce::from(nonce), &slot_aad(vault_id, key_version, kind, &id, &salt), &mut *buffer)
         .map_err(|_| VaultError::Internal)?;
-    let wrapped: [u8; 48] = buffer
-        .as_slice()
-        .try_into()
-        .map_err(|_| VaultError::Internal)?;
-    Ok(KeySlot {
-        kind,
-        id,
-        salt,
-        nonce,
-        wrapped,
-    })
+    let wrapped: [u8; 48] = buffer.as_slice().try_into().map_err(|_| VaultError::Internal)?;
+    Ok(KeySlot { kind, id, salt, nonce, wrapped })
 }
 
 fn unwrap_slot(
@@ -166,8 +146,7 @@ fn unwrap_slot(
     key_version: u32,
 ) -> Result<SecretKey, VaultError> {
     let kek = credential.kek(&slot.salt)?;
-    let cipher =
-        XChaCha20Poly1305::new_from_slice(kek.expose()).map_err(|_| VaultError::Internal)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(kek.expose()).map_err(|_| VaultError::Internal)?;
     let mut buffer = Zeroizing::new(slot.wrapped.to_vec());
     cipher
         .decrypt_in_place(
@@ -197,11 +176,7 @@ impl VaultHeader {
 
     /// Identifiers of the device (quick-unlock) slots, for matching against the OS secret store.
     pub fn device_slot_ids(&self) -> Vec<Id> {
-        self.slots
-            .iter()
-            .filter(|s| s.kind == SlotKind::Device)
-            .map(|s| s.id)
-            .collect()
+        self.slots.iter().filter(|s| s.kind == SlotKind::Device).map(|s| s.id).collect()
     }
 
     fn encode_unsigned(&self) -> Vec<u8> {
@@ -256,13 +231,7 @@ impl VaultHeader {
             if profile != kind.profile() {
                 return Err(VaultError::MalformedHeader);
             }
-            let slot = KeySlot {
-                kind,
-                id,
-                salt: r.array()?,
-                nonce: r.array()?,
-                wrapped: r.array()?,
-            };
+            let slot = KeySlot { kind, id, salt: r.array()?, nonce: r.array()?, wrapped: r.array()? };
             if slots.iter().any(|s| s.id == slot.id) {
                 return Err(VaultError::MalformedHeader);
             }
@@ -273,12 +242,7 @@ impl VaultHeader {
         if !r.is_empty() {
             return Err(VaultError::MalformedHeader);
         }
-        let header = Self {
-            vault_id,
-            key_version,
-            slots,
-            mac,
-        };
+        let header = Self { vault_id, key_version, slots, mac };
         header.check_slot_limits()?;
         Ok(header)
     }
@@ -334,31 +298,12 @@ pub fn create_vault(passphrase: &Passphrase) -> Result<NewVault, VaultError> {
     let root = SecretKey::generate()?;
     let recovery_key = RecoveryKey::generate()?;
     let slots = vec![
-        wrap_slot(
-            &Credential::Passphrase(passphrase),
-            &root,
-            &vault_id,
-            key_version,
-        )?,
-        wrap_slot(
-            &Credential::Recovery(&recovery_key),
-            &root,
-            &vault_id,
-            key_version,
-        )?,
+        wrap_slot(&Credential::Passphrase(passphrase), &root, &vault_id, key_version)?,
+        wrap_slot(&Credential::Recovery(&recovery_key), &root, &vault_id, key_version)?,
     ];
     let unlocked = UnlockedVault::from_root(root, vault_id, key_version)?;
-    let header = unlocked.sign(VaultHeader {
-        vault_id,
-        key_version,
-        slots,
-        mac: [0u8; MAC_LEN],
-    })?;
-    Ok(NewVault {
-        header,
-        unlocked,
-        recovery_key,
-    })
+    let header = unlocked.sign(VaultHeader { vault_id, key_version, slots, mac: [0u8; MAC_LEN] })?;
+    Ok(NewVault { header, unlocked, recovery_key })
 }
 
 fn check_new_passphrase(passphrase: &Passphrase) -> Result<(), VaultError> {
@@ -379,9 +324,7 @@ pub struct UnlockedVault {
 
 impl core::fmt::Debug for UnlockedVault {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("UnlockedVault")
-            .field("key_version", &self.key_version)
-            .finish_non_exhaustive()
+        f.debug_struct("UnlockedVault").field("key_version", &self.key_version).finish_non_exhaustive()
     }
 }
 
@@ -389,13 +332,7 @@ impl UnlockedVault {
     fn from_root(root: SecretKey, vault_id: Id, key_version: u32) -> Result<Self, VaultError> {
         let records = keys::subkey(&root, &vault_id, LABEL_RECORDS)?;
         let header_mac = keys::subkey(&root, &vault_id, LABEL_HEADER_MAC)?;
-        Ok(Self {
-            vault_id,
-            key_version,
-            root,
-            records,
-            header_mac,
-        })
+        Ok(Self { vault_id, key_version, root, records, header_mac })
     }
 
     pub fn vault_id(&self) -> Id {
@@ -407,19 +344,15 @@ impl UnlockedVault {
     }
 
     fn mac(&self, unsigned: &[u8]) -> Result<Hmac<Sha256>, VaultError> {
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(self.header_mac.expose())
-            .map_err(|_| VaultError::Internal)?;
+        let mut mac =
+            <Hmac<Sha256> as KeyInit>::new_from_slice(self.header_mac.expose()).map_err(|_| VaultError::Internal)?;
         mac.update(unsigned);
         Ok(mac)
     }
 
     fn sign(&self, mut header: VaultHeader) -> Result<VaultHeader, VaultError> {
         header.check_slot_limits()?;
-        header.mac = self
-            .mac(&header.encode_unsigned())?
-            .finalize()
-            .into_bytes()
-            .into();
+        header.mac = self.mac(&header.encode_unsigned())?.finalize().into_bytes().into();
         Ok(header)
     }
 
@@ -428,46 +361,25 @@ impl UnlockedVault {
         if header.vault_id != self.vault_id || header.key_version != self.key_version {
             return Err(VaultError::HeaderTampered);
         }
-        self.mac(&header.encode_unsigned())?
-            .verify_slice(&header.mac)
-            .map_err(|_| VaultError::HeaderTampered)
+        self.mac(&header.encode_unsigned())?.verify_slice(&header.mac).map_err(|_| VaultError::HeaderTampered)
     }
 
     /// Encrypts a record payload under a fresh random nonce.
     pub fn seal(&self, ctx: &RecordContext, payload: &[u8]) -> Result<SealedRecord, VaultError> {
-        envelope::seal(
-            &self.records,
-            &self.vault_id,
-            self.key_version,
-            ctx,
-            payload,
-        )
+        envelope::seal(&self.records, &self.vault_id, self.key_version, ctx, payload)
     }
 
     /// Authenticates and decrypts a record. The returned plaintext is zeroized on drop.
-    pub fn open(
-        &self,
-        ctx: &RecordContext,
-        sealed: &SealedRecord,
-    ) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    pub fn open(&self, ctx: &RecordContext, sealed: &SealedRecord) -> Result<Zeroizing<Vec<u8>>, VaultError> {
         envelope::open(&self.records, &self.vault_id, self.key_version, ctx, sealed)
     }
 
     /// Returns a header whose passphrase slot is replaced. Records are untouched (rewrap).
     /// Blocking (Argon2id). The caller persists the result atomically.
-    pub fn change_passphrase(
-        &self,
-        header: &VaultHeader,
-        new: &Passphrase,
-    ) -> Result<VaultHeader, VaultError> {
+    pub fn change_passphrase(&self, header: &VaultHeader, new: &Passphrase) -> Result<VaultHeader, VaultError> {
         check_new_passphrase(new)?;
         self.verify_header(header)?;
-        let slot = wrap_slot(
-            &Credential::Passphrase(new),
-            &self.root,
-            &self.vault_id,
-            self.key_version,
-        )?;
+        let slot = wrap_slot(&Credential::Passphrase(new), &self.root, &self.vault_id, self.key_version)?;
         let mut next = header.clone();
         next.slots.retain(|s| s.kind != SlotKind::Passphrase);
         next.slots.insert(0, slot);
@@ -475,18 +387,10 @@ impl UnlockedVault {
     }
 
     /// Replaces the recovery slot with a newly generated recovery key.
-    pub fn rotate_recovery_key(
-        &self,
-        header: &VaultHeader,
-    ) -> Result<(VaultHeader, RecoveryKey), VaultError> {
+    pub fn rotate_recovery_key(&self, header: &VaultHeader) -> Result<(VaultHeader, RecoveryKey), VaultError> {
         self.verify_header(header)?;
         let recovery_key = RecoveryKey::generate()?;
-        let slot = wrap_slot(
-            &Credential::Recovery(&recovery_key),
-            &self.root,
-            &self.vault_id,
-            self.key_version,
-        )?;
+        let slot = wrap_slot(&Credential::Recovery(&recovery_key), &self.root, &self.vault_id, self.key_version)?;
         let mut next = header.clone();
         next.slots.retain(|s| s.kind != SlotKind::Recovery);
         next.slots.push(slot);
@@ -494,21 +398,12 @@ impl UnlockedVault {
     }
 
     /// Adds a quick-unlock slot for a device secret that the caller stores in the OS secret store.
-    pub fn add_device_slot(
-        &self,
-        header: &VaultHeader,
-        secret: &SecretKey,
-    ) -> Result<(VaultHeader, Id), VaultError> {
+    pub fn add_device_slot(&self, header: &VaultHeader, secret: &SecretKey) -> Result<(VaultHeader, Id), VaultError> {
         self.verify_header(header)?;
         if header.slot_count(SlotKind::Device) >= MAX_DEVICE_SLOTS {
             return Err(VaultError::SlotLimit);
         }
-        let slot = wrap_slot(
-            &Credential::Device(secret),
-            &self.root,
-            &self.vault_id,
-            self.key_version,
-        )?;
+        let slot = wrap_slot(&Credential::Device(secret), &self.root, &self.vault_id, self.key_version)?;
         let id = slot.id;
         let mut next = header.clone();
         next.slots.push(slot);
@@ -516,16 +411,11 @@ impl UnlockedVault {
     }
 
     /// Removes a device slot. Passphrase and recovery slots cannot be removed this way.
-    pub fn remove_device_slot(
-        &self,
-        header: &VaultHeader,
-        slot_id: &Id,
-    ) -> Result<VaultHeader, VaultError> {
+    pub fn remove_device_slot(&self, header: &VaultHeader, slot_id: &Id) -> Result<VaultHeader, VaultError> {
         self.verify_header(header)?;
         let mut next = header.clone();
         let before = next.slots.len();
-        next.slots
-            .retain(|s| !(s.kind == SlotKind::Device && &s.id == slot_id));
+        next.slots.retain(|s| !(s.kind == SlotKind::Device && &s.id == slot_id));
         if next.slots.len() == before {
             return Err(VaultError::NoSuchSlot);
         }

@@ -1,0 +1,470 @@
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use russh::client::{self, Handle};
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::{ChannelMsg, Disconnect};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
+use tokio::sync::watch;
+use zeroize::Zeroizing;
+
+use crate::algorithms;
+use crate::auth::{AuthOutcome, ClientKey};
+use crate::channels::{ExecOutput, PtyRequest, ShellReader, ShellWriter, clamp_dimension};
+use crate::host_trust::{Endpoint, HostKeyRequest, HostKeyVerifier, PresentedHostKey, RejectReason, TrustVerdict};
+use crate::{SshError, Stage};
+
+/// Connection parameters. Contains no secret.
+#[derive(Debug, Clone)]
+pub struct ConnectOptions {
+    pub endpoint: Endpoint,
+    /// Limit for DNS resolution and for the TCP connect, each.
+    pub connect_timeout: Duration,
+    /// Limit for protocol progress during key exchange. Time spent inside the host-key verifier
+    /// (for example waiting on a trust dialog) is excluded; the verifier owns that timeout.
+    pub handshake_timeout: Duration,
+    /// Limit for each authentication round trip and channel request.
+    pub request_timeout: Duration,
+    pub keepalive_interval: Option<Duration>,
+}
+
+impl ConnectOptions {
+    pub fn new(endpoint: Endpoint) -> Self {
+        Self {
+            endpoint,
+            connect_timeout: Duration::from_secs(10),
+            handshake_timeout: Duration::from_secs(15),
+            request_timeout: Duration::from_secs(20),
+            keepalive_interval: Some(Duration::from_secs(30)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    KeyExchange,
+    Verifying,
+    Verified,
+}
+
+#[derive(Default)]
+struct TrustRecord {
+    verdict: Option<TrustVerdict>,
+    accepted: Option<PresentedHostKey>,
+    /// Untrusted pre-authentication banner text, bounded.
+    banner: Option<String>,
+}
+
+const MAX_BANNER_LEN: usize = 8 * 1024;
+
+struct Handler<V> {
+    endpoint: Endpoint,
+    resolved: Option<SocketAddr>,
+    verifier: V,
+    record: Arc<Mutex<TrustRecord>>,
+    phase: watch::Sender<Phase>,
+}
+
+impl<V> Handler<V> {
+    fn with_record<T>(&self, f: impl FnOnce(&mut TrustRecord) -> T) -> T {
+        // A poisoned lock only means another thread panicked while holding it; the data is plain.
+        let mut guard = self.record.lock().unwrap_or_else(|p| p.into_inner());
+        f(&mut guard)
+    }
+}
+
+impl<V: HostKeyVerifier> Handler<V> {
+    async fn check_key(&mut self, server_key: &PublicKeyOrCertificate) -> bool {
+        let presented = match server_key {
+            PublicKeyOrCertificate::PublicKey { key, .. } => PresentedHostKey::from_public_key(key),
+            // Never accepted merely for being signed; certificate validation is a later phase.
+            PublicKeyOrCertificate::Certificate(_) => {
+                self.with_record(|r| r.verdict = Some(TrustVerdict::Reject(RejectReason::CertificateUnsupported)));
+                return false;
+            }
+        };
+        let Some(presented) = presented else {
+            self.with_record(|r| r.verdict = Some(TrustVerdict::Reject(RejectReason::NotTrusted)));
+            return false;
+        };
+
+        // Re-keying: the key must be exactly the one accepted for this connection. No new prompt.
+        if let Some(accepted) = self.with_record(|r| r.accepted.clone()) {
+            let same = accepted == presented;
+            if !same {
+                self.with_record(|r| r.verdict = Some(TrustVerdict::Reject(RejectReason::ChangedDuringSession)));
+            }
+            return same;
+        }
+
+        let request = HostKeyRequest { endpoint: self.endpoint.clone(), resolved: self.resolved, key: presented };
+        let _ = self.phase.send(Phase::Verifying);
+        let verdict = self.verifier.verify(&request).await;
+        let _ = self.phase.send(Phase::Verified);
+        self.with_record(|r| {
+            r.verdict = Some(verdict);
+            if verdict == TrustVerdict::Accept {
+                r.accepted = Some(request.key);
+            }
+        });
+        verdict == TrustVerdict::Accept
+    }
+
+    fn store_banner(&self, banner: &str) {
+        let mut end = banner.len().min(MAX_BANNER_LEN);
+        while !banner.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.with_record(|r| r.banner = Some(banner[..end].to_owned()));
+    }
+}
+
+fn config(options: &ConnectOptions) -> Arc<client::Config> {
+    Arc::new(client::Config {
+        preferred: algorithms::preferred(),
+        keepalive_interval: options.keepalive_interval,
+        keepalive_max: 3,
+        nodelay: true,
+        ..Default::default()
+    })
+}
+
+/// A transport whose server identity has been accepted by the caller's verifier.
+///
+/// This is the only type with authentication methods (INV-02). It holds no credential.
+pub struct VerifiedConnection {
+    handle: Handle<ErasedHandler>,
+    host_key: PresentedHostKey,
+    record: Arc<Mutex<TrustRecord>>,
+    request_timeout: Duration,
+    authenticated: bool,
+}
+
+impl core::fmt::Debug for VerifiedConnection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VerifiedConnection")
+            .field("host_key", &self.host_key.fingerprint)
+            .field("authenticated", &self.authenticated)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Type-erased handler so `VerifiedConnection` is not generic over the verifier.
+struct ErasedHandler(Box<dyn ErasedCheck>);
+
+trait ErasedCheck: Send {
+    fn check<'a>(
+        &'a mut self,
+        key: &'a PublicKeyOrCertificate,
+    ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+    fn banner(&mut self, banner: &str);
+}
+
+impl<V: HostKeyVerifier> ErasedCheck for Handler<V> {
+    fn check<'a>(
+        &'a mut self,
+        key: &'a PublicKeyOrCertificate,
+    ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(self.check_key(key))
+    }
+
+    fn banner(&mut self, banner: &str) {
+        self.store_banner(banner);
+    }
+}
+
+impl client::Handler for ErasedHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, server_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+        Ok(self.0.check(server_key).await)
+    }
+
+    async fn auth_banner(&mut self, banner: &str, _session: &mut client::Session) -> Result<(), Self::Error> {
+        self.0.banner(banner);
+        Ok(())
+    }
+}
+
+/// Resolves, connects over TCP, performs key exchange and has `verifier` decide on the server's
+/// host key. Returns only after the verifier accepted. No credential is involved at any point.
+pub async fn connect<V: HostKeyVerifier>(
+    options: &ConnectOptions,
+    verifier: V,
+) -> Result<VerifiedConnection, SshError> {
+    let (host, port) = (options.endpoint.host.trim().to_owned(), options.endpoint.port);
+    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(&host).to_owned();
+    if host.is_empty() || host.len() > 253 || port == 0 {
+        return Err(SshError::Resolve);
+    }
+
+    let addrs: Vec<SocketAddr> =
+        match tokio::time::timeout(options.connect_timeout, tokio::net::lookup_host((host.as_str(), port))).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Resolving)),
+            Ok(Err(_)) => return Err(SshError::Resolve),
+            Ok(Ok(addrs)) => addrs.take(8).collect(),
+        };
+    if addrs.is_empty() {
+        return Err(SshError::Resolve);
+    }
+
+    let mut last = SshError::Unreachable;
+    for addr in addrs {
+        match tokio::time::timeout(options.connect_timeout, TcpStream::connect(addr)).await {
+            Err(_) => last = SshError::Timeout(Stage::Connecting),
+            Ok(Err(_)) => last = SshError::Unreachable,
+            Ok(Ok(stream)) => {
+                let _ = stream.set_nodelay(true);
+                return connect_stream(options, stream, Some(addr), verifier).await;
+            }
+        }
+    }
+    Err(last)
+}
+
+/// Like [`connect`], over an already established byte stream (a jump-host channel, a proxy, or a
+/// test harness). The same verification guarantee applies.
+pub async fn connect_stream<V, S>(
+    options: &ConnectOptions,
+    stream: S,
+    resolved: Option<SocketAddr>,
+    verifier: V,
+) -> Result<VerifiedConnection, SshError>
+where
+    V: HostKeyVerifier,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let record = Arc::new(Mutex::new(TrustRecord::default()));
+    let (phase_tx, mut phase_rx) = watch::channel(Phase::KeyExchange);
+    let handler = Handler {
+        endpoint: options.endpoint.clone(),
+        resolved,
+        verifier,
+        record: Arc::clone(&record),
+        phase: phase_tx,
+    };
+
+    let handshake = client::connect_stream(config(options), stream, ErasedHandler(Box::new(handler)));
+    tokio::pin!(handshake);
+
+    // The handshake deadline restarts on each phase change and is suspended while the verifier
+    // (possibly a human) is deciding.
+    let result = loop {
+        let phase = *phase_rx.borrow_and_update();
+        tokio::select! {
+            result = &mut handshake => break result,
+            changed = phase_rx.changed() => if changed.is_err() {
+                // Handler dropped: the handshake future is about to resolve; let it.
+                break (&mut handshake).await;
+            },
+            () = tokio::time::sleep(options.handshake_timeout), if phase != Phase::Verifying => {
+                let stage = if phase == Phase::KeyExchange { Stage::KeyExchange } else { Stage::VerifyingHost };
+                return Err(SshError::Timeout(stage));
+            }
+        }
+    };
+
+    let (verdict, accepted) = {
+        let guard = record.lock().unwrap_or_else(|p| p.into_inner());
+        (guard.verdict, guard.accepted.clone())
+    };
+    match (result, verdict, accepted) {
+        (Ok(handle), Some(TrustVerdict::Accept), Some(host_key)) => Ok(VerifiedConnection {
+            handle,
+            host_key,
+            record,
+            request_timeout: options.request_timeout,
+            authenticated: false,
+        }),
+        // A handle without a recorded acceptance must never be usable.
+        (Ok(handle), _, _) => {
+            let _ = handle.disconnect(Disconnect::ByApplication, "", "").await;
+            Err(SshError::Internal)
+        }
+        (Err(_), Some(TrustVerdict::Reject(reason)), _) => Err(SshError::HostKey(reason)),
+        (Err(err), _, _) => Err(SshError::from_russh(&err, Stage::KeyExchange)),
+    }
+}
+
+impl VerifiedConnection {
+    /// The host key the verifier accepted for this connection.
+    pub fn host_key(&self) -> &PresentedHostKey {
+        &self.host_key
+    }
+
+    /// Pre-authentication banner sent by the server, if any. Untrusted text: render as plain text.
+    pub fn banner(&self) -> Option<String> {
+        self.record.lock().unwrap_or_else(|p| p.into_inner()).banner.clone()
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.authenticated
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
+    async fn bounded<T>(
+        &self,
+        stage: Stage,
+        fut: impl Future<Output = Result<T, russh::Error>>,
+    ) -> Result<T, SshError> {
+        match tokio::time::timeout(self.request_timeout, fut).await {
+            Err(_) => Err(SshError::Timeout(stage)),
+            Ok(Err(err)) => Err(SshError::from_russh(&err, stage)),
+            Ok(Ok(value)) => Ok(value),
+        }
+    }
+
+    fn outcome(&mut self, result: russh::client::AuthResult) -> Result<AuthOutcome, SshError> {
+        match result {
+            russh::client::AuthResult::Success => {
+                self.authenticated = true;
+                Ok(AuthOutcome::Success)
+            }
+            // russh reports a connection that died while waiting for the reply as a failure with
+            // no remaining methods. That is a transport error, not a rejected credential, and must
+            // not be shown to the user as "wrong password".
+            russh::client::AuthResult::Failure { remaining_methods, .. }
+                if remaining_methods.is_empty() && self.handle.is_closed() =>
+            {
+                Err(SshError::Disconnected(Stage::Authenticating))
+            }
+            russh::client::AuthResult::Failure { remaining_methods, partial_success } => Ok(AuthOutcome::Failure {
+                remaining_methods: remaining_methods.iter().map(|m| <&str>::from(m).to_owned()).collect(),
+                partial_success,
+            }),
+        }
+    }
+
+    /// Password authentication. The password is copied once into the SSH library, which does not
+    /// zeroize it; this is a documented limit of the current backend.
+    pub async fn authenticate_password(
+        &mut self,
+        username: &str,
+        password: Zeroizing<String>,
+    ) -> Result<AuthOutcome, SshError> {
+        let timeout = self.request_timeout;
+        let fut = self.handle.authenticate_password(username, password.as_str());
+        let result = match tokio::time::timeout(timeout, fut).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
+            Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
+            Ok(Ok(result)) => result,
+        };
+        self.outcome(result)
+    }
+
+    /// Public-key authentication. RSA keys use the strongest SHA-2 signature the server announced;
+    /// SHA-1 `ssh-rsa` signatures are never produced.
+    pub async fn authenticate_key(&mut self, username: &str, key: &ClientKey) -> Result<AuthOutcome, SshError> {
+        let hash = if key.is_rsa() {
+            let best = self.bounded(Stage::Authenticating, self.handle.best_supported_rsa_hash()).await?;
+            // `Some(None)` means the server only does SHA-1 ssh-rsa; refuse rather than downgrade.
+            match best {
+                Some(Some(hash)) => Some(hash),
+                Some(None) => return Err(SshError::NoCommonAlgorithm),
+                None => Some(russh::keys::HashAlg::Sha256),
+            }
+        } else {
+            None
+        };
+        let with_alg = PrivateKeyWithHashAlg::new(Arc::new(key.private_key().clone()), hash);
+        let timeout = self.request_timeout;
+        let fut = self.handle.authenticate_publickey(username, with_alg);
+        let result = match tokio::time::timeout(timeout, fut).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
+            Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
+            Ok(Ok(result)) => result,
+        };
+        self.outcome(result)
+    }
+
+    /// Opens an interactive shell with a PTY.
+    pub async fn open_shell(&self, pty: &PtyRequest) -> Result<(ShellReader, ShellWriter), SshError> {
+        if !self.authenticated {
+            return Err(SshError::NotAuthenticated);
+        }
+        let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        let term: String = pty.term.chars().filter(|c| c.is_ascii_graphic()).take(64).collect();
+        let term = if term.is_empty() { "xterm-256color".to_owned() } else { term };
+        self.bounded(
+            Stage::OpeningChannel,
+            channel.request_pty(true, &term, clamp_dimension(pty.cols), clamp_dimension(pty.rows), 0, 0, &[]),
+        )
+        .await?;
+        self.await_reply(&mut channel).await?;
+        self.bounded(Stage::OpeningChannel, channel.request_shell(true)).await?;
+        self.await_reply(&mut channel).await?;
+        let (read, write) = channel.split();
+        Ok((ShellReader { read }, ShellWriter { write }))
+    }
+
+    /// Runs one command without a PTY and streams its output through the same bounded,
+    /// backpressured reader as a shell. `command` is interpreted by the remote user's shell;
+    /// callers must not build it from untrusted text.
+    pub async fn open_command(&self, command: &str) -> Result<(ShellReader, ShellWriter), SshError> {
+        if !self.authenticated {
+            return Err(SshError::NotAuthenticated);
+        }
+        let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
+        self.await_reply(&mut channel).await?;
+        let (read, write) = channel.split();
+        Ok((ShellReader { read }, ShellWriter { write }))
+    }
+
+    async fn await_reply(&self, channel: &mut russh::Channel<client::Msg>) -> Result<(), SshError> {
+        let wait = async {
+            loop {
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => return Ok(()),
+                    Some(ChannelMsg::Failure) => return Err(SshError::RequestDenied),
+                    Some(ChannelMsg::Close) | None => {
+                        return Err(SshError::Disconnected(Stage::OpeningChannel));
+                    }
+                    Some(_) => {}
+                }
+            }
+        };
+        tokio::time::timeout(self.request_timeout, wait).await.map_err(|_| SshError::Timeout(Stage::OpeningChannel))?
+    }
+
+    /// Runs one command without a PTY and collects bounded output. `command` is sent to the
+    /// remote user's shell by the server; callers must not build it from untrusted text.
+    pub async fn exec(&self, command: &str, max_output: usize, limit: Duration) -> Result<ExecOutput, SshError> {
+        if !self.authenticated {
+            return Err(SshError::NotAuthenticated);
+        }
+        let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
+        let collect = async {
+            let mut out = ExecOutput { stdout: Vec::new(), stderr: Vec::new(), exit_status: None };
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    ChannelMsg::Failure => return Err(SshError::RequestDenied),
+                    ChannelMsg::Data { data } => out.stdout.extend_from_slice(&data),
+                    ChannelMsg::ExtendedData { data, .. } => out.stderr.extend_from_slice(&data),
+                    ChannelMsg::ExitStatus { exit_status } => out.exit_status = Some(exit_status),
+                    ChannelMsg::Close => break,
+                    _ => {}
+                }
+                if out.stdout.len() + out.stderr.len() > max_output {
+                    let _ = channel.close().await;
+                    return Err(SshError::LimitExceeded);
+                }
+            }
+            Ok(out)
+        };
+        tokio::time::timeout(limit, collect).await.map_err(|_| SshError::Timeout(Stage::Connected))?
+    }
+
+    /// Politely disconnects. Dropping the connection also closes it.
+    pub async fn disconnect(self) {
+        let _ =
+            tokio::time::timeout(Duration::from_secs(2), self.handle.disconnect(Disconnect::ByApplication, "", "en"))
+                .await;
+    }
+}

@@ -101,6 +101,7 @@ async function up() {
     image: IMAGE,
     user: "tyr",
     noForwardUser: "noforward",
+    noSessionUser: "nosession",
     password,
     keys: {
       ed25519: join(client, "id_ed25519"),

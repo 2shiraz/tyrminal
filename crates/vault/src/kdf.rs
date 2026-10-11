@@ -42,20 +42,15 @@ const ARGON2_P_COST: u32 = 1;
 
 /// Derives the passphrase KEK. Blocking and memory-hard (64 MiB): run it off the async reactor and
 /// never concurrently for one vault.
-pub(crate) fn passphrase_kek(
-    passphrase: &Passphrase,
-    salt: &[u8; 32],
-) -> Result<SecretKey, VaultError> {
+pub(crate) fn passphrase_kek(passphrase: &Passphrase, salt: &[u8; 32]) -> Result<SecretKey, VaultError> {
     if passphrase.is_empty() || passphrase.len() > PASSPHRASE_MAX_LEN {
         return Err(VaultError::PassphraseLength);
     }
-    let params = Params::new(ARGON2_M_COST_KIB, ARGON2_T_COST, ARGON2_P_COST, Some(32))
-        .map_err(|_| VaultError::Internal)?;
+    let params =
+        Params::new(ARGON2_M_COST_KIB, ARGON2_T_COST, ARGON2_P_COST, Some(32)).map_err(|_| VaultError::Internal)?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = SecretKey::from_bytes([0u8; 32]);
-    argon
-        .hash_password_into(passphrase.expose(), salt, key.expose_mut())
-        .map_err(|_| VaultError::Internal)?;
+    argon.hash_password_into(passphrase.expose(), salt, key.expose_mut()).map_err(|_| VaultError::Internal)?;
     Ok(key)
 }
 
@@ -63,8 +58,7 @@ pub(crate) fn passphrase_kek(
 pub(crate) fn hkdf_key(ikm: &[u8; 32], salt: &[u8], info: &[u8]) -> Result<SecretKey, VaultError> {
     let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
     let mut key = SecretKey::from_bytes([0u8; 32]);
-    hk.expand(info, key.expose_mut())
-        .map_err(|_| VaultError::Internal)?;
+    hk.expand(info, key.expose_mut()).map_err(|_| VaultError::Internal)?;
     Ok(key)
 }
 
@@ -78,24 +72,15 @@ mod tests {
             assert_eq!(KdfProfile::from_id(p.id()), Ok(p));
         }
         for id in [0x0000, 0x0002, 0x00ff, 0x0101, 0xffff] {
-            assert_eq!(
-                KdfProfile::from_id(id),
-                Err(VaultError::UnsupportedKdfProfile)
-            );
+            assert_eq!(KdfProfile::from_id(id), Err(VaultError::UnsupportedKdfProfile));
         }
     }
 
     #[test]
     fn passphrase_length_bounds_are_enforced_before_kdf_work() {
         let salt = [7u8; 32];
-        assert_eq!(
-            passphrase_kek(&Passphrase::new(String::new()), &salt).err(),
-            Some(VaultError::PassphraseLength)
-        );
+        assert_eq!(passphrase_kek(&Passphrase::new(String::new()), &salt).err(), Some(VaultError::PassphraseLength));
         let long = Passphrase::new("x".repeat(PASSPHRASE_MAX_LEN + 1));
-        assert_eq!(
-            passphrase_kek(&long, &salt).err(),
-            Some(VaultError::PassphraseLength)
-        );
+        assert_eq!(passphrase_kek(&long, &salt).err(), Some(VaultError::PassphraseLength));
     }
 }
