@@ -9,3 +9,7 @@ paths = [
   '''tests/fixtures/vault-vectors/vectors\.json''',
   '''docs/crypto-format\.md''',
 ]
+# Algorithm names in prose match the generic-api-key entropy rule.
+regexes = [
+  '''XChaCha20-Poly1305''',
+]
