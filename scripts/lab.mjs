@@ -291,7 +291,6 @@ function sshdConfig({ port, inDir, version }) {
     "ListenAddress ::1",
     `HostKey ${toConfigPath(join(inDir, "hostkeys", "ssh_host_ed25519_key"))}`,
     `HostKey ${toConfigPath(join(inDir, "hostkeys", "ssh_host_rsa_key"))}`,
-    `PidFile ${toConfigPath(join(inDir, "sshd.pid"))}`,
     "PermitRootLogin no",
     `AllowUsers ${Object.values(LOCAL_USERS).join(" ")}`,
     "PasswordAuthentication yes",
@@ -332,13 +331,33 @@ function sshdConfig({ port, inDir, version }) {
 function localDown() {
   const pidsFile = join(runDir, "pids.json");
   if (existsSync(pidsFile)) {
-    for (const pid of JSON.parse(readFileSync(pidsFile, "utf8"))) {
-      if (isWindows) run("taskkill", ["/F", "/T", "/PID", String(pid)], { allowFail: true });
-      else privileged("kill", [String(pid)], { allowFail: true });
+    for (const pid of JSON.parse(readFileSync(pidsFile, "utf8"))) privileged("kill", [String(pid)], { allowFail: true });
+  }
+  const servicesFile = join(runDir, "services.json");
+  if (existsSync(servicesFile)) {
+    for (const service of JSON.parse(readFileSync(servicesFile, "utf8"))) {
+      run("sc.exe", ["stop", service], { allowFail: true });
+      run("sc.exe", ["delete", service], { allowFail: true });
     }
   }
   const usersFile = join(runDir, "users.json");
   if (existsSync(usersFile)) for (const name of JSON.parse(readFileSync(usersFile, "utf8"))) removeLocalUser(name);
+}
+
+/**
+ * Win32-OpenSSH needs SYSTEM rights to log a user on with a public key (S4U), so on Windows each
+ * lab server runs as a temporary demand-start service, and the lab files are restricted to SYSTEM
+ * and Administrators as sshd requires for host keys.
+ */
+function startWindowsService(name, sshd, config, logFile) {
+  const service = `tyrminal-lab-${name}`;
+  run("sc.exe", ["create", service, `binPath=`, `"${sshd}" -f "${config}" -E "${logFile}"`, "start=", "demand"]);
+  run("sc.exe", ["start", service]);
+  return service;
+}
+
+function restrictWindowsAcl(path) {
+  run("icacls", [path, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q"]);
 }
 
 async function localUp() {
@@ -369,6 +388,7 @@ async function localUp() {
     servers: {},
   };
   const pids = [];
+  const services = [];
   for (const name of SERVERS) {
     const inDir = serverHostKeys(name);
     if (!isWindows) chmodSync(inDir, 0o711);
@@ -378,15 +398,22 @@ async function localUp() {
     writeFileSync(config, sshdConfig({ port, inDir, version }), { mode: 0o644 });
     const logFile = join(inDir, "sshd.log");
     writeFileSync(logFile, "", { mode: 0o644 });
+    if (isWindows) {
+      restrictWindowsAcl(join(inDir, "hostkeys"));
+      run(sshd, ["-t", "-f", config]);
+      services.push(startWindowsService(name, sshd, config, logFile));
+      writeFileSync(join(runDir, "services.json"), JSON.stringify(services));
+      await waitForBanner(port);
+      lab.servers[name] = describeServer(name, inDir, port, { logFile, service: services.at(-1) });
+      continue;
+    }
     privileged(sshd, ["-t", "-f", config]);
-    // -D keeps sshd in the foreground of a detached child so its PID is known on every platform.
+    // -D keeps sshd in the foreground of a detached child so its PID is known.
     const args = ["-D", "-f", config, "-E", logFile];
-    const child = isWindows || isRoot()
-      ? spawn(sshd, args, { detached: true, stdio: "ignore" })
-      : spawn("sudo", ["-n", sshd, ...args], { detached: true, stdio: "ignore" });
+    const child = isRoot() ? spawn(sshd, args, { detached: true, stdio: "ignore" }) : spawn("sudo", ["-n", sshd, ...args], { detached: true, stdio: "ignore" });
     child.unref();
     await waitForBanner(port);
-    const pid = isWindows || isRoot()
+    const pid = isRoot()
       ? child.pid
       : Number(run("pgrep", ["-f", `${sshd} -D -f ${config}`]).split("\n").map(Number).sort((x, y) => y - x)[0]);
     pids.push(pid);
@@ -429,7 +456,7 @@ function status() {
   for (const [name, s] of Object.entries(lab.servers)) {
     const state = s.container
       ? run("docker", ["inspect", "-f", "{{.State.Status}}", s.container], { allowFail: true }) || "missing"
-      : `pid ${s.pid}`;
+      : s.service ?? `pid ${s.pid}`;
     console.log(`${name}: 127.0.0.1:${s.port} ${lab.mode} ${state}`);
   }
 }

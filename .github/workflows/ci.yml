@@ -1,0 +1,39 @@
+# Fast checks on every push and pull request: format, lint, typecheck, contracts, unit tests,
+# frontend build, feature matrix. Runs untrusted pull-request code with a read-only token and no
+# secrets (plain `pull_request`, never `pull_request_target`).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fast:
+    name: verify:fast (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: fast
+      - run: pnpm run verify:fast
+      - name: Keep evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-fast-linux
+          path: |
+            docs/reports/raw/
+          if-no-files-found: ignore
+          retention-days: 14

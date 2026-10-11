@@ -21,7 +21,11 @@ const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win
 
 const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
 const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
-const needsMac = () => (process.platform === "darwin" || process.platform === "win32" ? null : "no OS secret store adapter for this platform");
+const needsSecretStore = () => {
+  if (process.platform === "darwin" || process.platform === "win32") return null;
+  if (process.platform === "linux") return process.env.DBUS_SESSION_BUS_ADDRESS ? null : "no D-Bus session bus for the Secret Service (run under dbus-run-session with gnome-keyring)";
+  return "no OS secret store adapter for this platform";
+};
 
 const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
@@ -46,7 +50,7 @@ const SUITES = {
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsMac },
+    { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },

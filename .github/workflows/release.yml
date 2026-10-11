@@ -1,0 +1,147 @@
+# Manually triggered pre-release. It first re-runs every required suite (CI, Native on every
+# platform, Security) on the exact commit, then builds installers, checksums and SBOMs, and only
+# then creates a GitHub *pre-release*. Nothing here publishes a stable release, submits to an app
+# store or configures an updater.
+#
+# Signing switches on only when the corresponding repository secrets exist:
+#   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#            and for notarization APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
+#   Windows: WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD
+# Without them the artifacts are unsigned (macOS: ad-hoc signature only) and the notes say so.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Pre-release tag, e.g. v0.1.0-beta.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate request
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag is a pre-release version and notes exist
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$ ]] || { echo "only pre-release tags are allowed"; exit 1; }
+          test -f "docs/releases/$TAG.md" || { echo "missing docs/releases/$TAG.md"; exit 1; }
+
+  ci:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+  native:
+    needs: validate
+    uses: ./.github/workflows/native.yml
+  security:
+    needs: validate
+    uses: ./.github/workflows/security.yml
+
+  build:
+    name: Package ${{ matrix.platform }}
+    needs: [ci, native, security]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { platform: macos-arm64, os: macos-15 }
+          - { platform: windows-x64, os: windows-2025 }
+          - { platform: linux-x64, os: ubuntu-24.04 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: release-${{ matrix.platform }}
+
+      - name: Signing configuration (only when secrets exist)
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: node scripts/ci/release-signing.mjs
+
+      - name: Build installers
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
+      - name: Release policy against the built binary
+        run: node scripts/check-release.mjs --require-binary
+      - name: Collect artifacts
+        run: node scripts/ci/collect-artifacts.mjs "${{ matrix.platform }}" "${{ inputs.tag }}" dist-release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist-release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Create GitHub pre-release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: sbom
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist-release
+          merge-multiple: true
+      - name: SBOMs (Rust crates per workspace member, npm production dependencies)
+        run: |
+          cargo install --locked cargo-cyclonedx@0.5.9
+          cargo cyclonedx --format json --override-filename sbom.cdx
+          mkdir -p sbom
+          git ls-files --others --exclude-standard -- '*sbom.cdx.json' | while read -r f; do
+            cp "$f" "sbom/rust-$(basename "$(dirname "$f")").cdx.json"
+          done
+          pnpm sbom --sbom-format cyclonedx --prod > sbom/npm.cdx.json
+          tar -czf "dist-release/tyrminal-${{ inputs.tag }}-sbom.tar.gz" sbom
+      - name: Checksums
+        working-directory: dist-release
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create the pre-release (tag on this exact commit)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" dist-release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Tyrminal $TAG (pre-release, unsigned)" \
+            --notes-file "docs/releases/$TAG.md"

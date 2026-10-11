@@ -32,3 +32,8 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Fuzzing state
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/

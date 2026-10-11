@@ -1,0 +1,92 @@
+# Native build and test on each platform: unit tests, the SSH lab (Docker on Linux, a local
+# OpenSSH sshd on macOS and Windows), integration and security suites, the real application end
+# to end over WebDriver, and the release-policy check against a release binary.
+name: Native
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64, os: ubuntu-24.04, lab: docker }
+          - { platform: macos-arm64, os: macos-15, lab: local }
+          - { platform: windows-x64, os: windows-2025, lab: local }
+    env:
+      TYRMINAL_LAB_MODE: ${{ matrix.lab }}
+      # Disposable runner: the local lab may create its accounts and run sshd.
+      TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: native-${{ matrix.platform }}
+      - name: Platform details
+        run: |
+          uname -a || true
+          node --version; pnpm --version; rustc --version
+          pnpm run doctor || true
+
+      - name: verify:fast
+        run: pnpm run verify:fast
+
+      - name: Prepare Windows lab prerequisites
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/ci/windows-lab-setup.ps1
+      - name: Start SSH lab
+        run: pnpm run lab:up
+
+      - name: Integration suite
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            dbus-run-session -- scripts/ci/linux-test-keyring.sh pnpm run test:integration
+          else
+            pnpm run test:integration
+          fi
+      - name: Security suite
+        run: pnpm run test:security
+
+      - name: Build test application (e2e feature)
+        run: pnpm run build:e2e
+      - name: Native end-to-end suite
+        run: pnpm run test:native
+
+      - name: Release build (unsigned)
+        run: pnpm run build:desktop
+      - name: Release policy against the built binary
+        run: node scripts/check-release.mjs --require-binary
+
+      - name: Stop SSH lab
+        if: always()
+        run: pnpm run lab:down || true
+      - name: Keep evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-${{ matrix.platform }}
+          path: docs/reports/raw/
+          if-no-files-found: ignore
+          retention-days: 30

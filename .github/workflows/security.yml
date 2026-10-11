@@ -1,0 +1,72 @@
+# Supply-chain and secret hygiene: dependency advisories, licenses and sources (cargo-deny), npm
+# audit, a full-history secret scan, the release-policy check, and a short fuzzing smoke run.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: cargo-deny and npm audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: security
+      - name: Install cargo-deny (pinned)
+        run: cargo install --locked cargo-deny@0.20.2
+      - name: Advisories, licenses, bans, sources
+        run: cargo deny --all-features check
+      - name: npm advisories (production dependencies)
+        run: pnpm audit --prod --audit-level high
+      - name: Release policy (static)
+        run: node scripts/check-release.mjs
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.0 (checksum-verified)
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz
+          echo "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Scan
+        run: ./gitleaks git --redact --no-banner --config .gitleaks.toml .
+
+  fuzz:
+    name: Fuzz smoke (60 s per target)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Nightly toolchain and cargo-fuzz (pinned)
+        run: |
+          rustup toolchain install nightly-2026-09-01 --profile minimal
+          cargo install --locked cargo-fuzz@0.13.2
+      - name: Run each target
+        working-directory: fuzz
+        run: |
+          for target in $(cargo +nightly-2026-09-01 fuzz list); do
+            cargo +nightly-2026-09-01 fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=2048
+          done

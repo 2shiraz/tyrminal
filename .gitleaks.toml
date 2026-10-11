@@ -1,0 +1,11 @@
+# Secret scanning policy. Extends the default gitleaks rules. Allowlisted paths hold only public
+# test vectors or generated contract types, never credentials.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public known-answer vectors and documentation examples"
+paths = [
+  '''tests/fixtures/vault-vectors/vectors\.json''',
+  '''docs/crypto-format\.md''',
+]
