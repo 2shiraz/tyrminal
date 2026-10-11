@@ -1,0 +1,34 @@
+# Build output
+/target/
+**/target/
+node_modules/
+dist/
+*.tsbuildinfo
+apps/desktop/src-tauri/gen/schemas/
+
+# Test/lab runtime state (generated keys, sockets, logs). Never commit.
+tests/ssh-lab/.run/
+.lab/
+*.log
+coverage/
+playwright-report/
+test-results/
+
+# Local evidence that may hold machine-specific data
+docs/reports/raw/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+!tests/fixtures/**/*.pub
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

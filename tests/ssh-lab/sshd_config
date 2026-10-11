@@ -1,0 +1,36 @@
+# Tyrminal lab sshd. Host keys, authorized keys and the password are generated per run by scripts/lab.mjs.
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+ListenAddress ::
+
+HostKey /etc/ssh/lab/ssh_host_ed25519_key
+HostKey /etc/ssh/lab/ssh_host_rsa_key
+
+PermitRootLogin no
+AllowUsers tyr noforward
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile /etc/ssh/lab/authorized_keys
+StrictModes yes
+MaxAuthTries 6
+MaxStartups 200:30:400
+MaxSessions 64
+LoginGraceTime 30
+
+AllowTcpForwarding yes
+GatewayPorts no
+X11Forwarding no
+AllowAgentForwarding no
+PermitUserEnvironment no
+AcceptEnv TYR_*
+PrintMotd no
+Subsystem sftp internal-sftp
+
+# VERBOSE logs key fingerprints and auth attempts; tests read these to prove ordering (INV-02).
+LogLevel VERBOSE
+
+Match User noforward
+    AllowTcpForwarding no
+    PermitOpen none

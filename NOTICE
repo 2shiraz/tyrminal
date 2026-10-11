@@ -1,0 +1,9 @@
+Tyrminal
+Copyright 2026 The Tyrminal contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components are used under their own licenses. The dependency
+license policy is enforced by deny.toml; a generated attribution list is
+produced as part of the release gate (see docs/release-checklist.md) and is
+not yet bundled because no release artifact has been published.

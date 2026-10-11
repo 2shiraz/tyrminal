@@ -1,0 +1,17 @@
+{
+  "name": "tyrminal",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "doctor": "node scripts/doctor.mjs",
+    "docs:check": "node scripts/feature-matrix.mjs --check",
+    "lab:up": "node scripts/lab.mjs up",
+    "lab:down": "node scripts/lab.mjs down"
+  }
+}
