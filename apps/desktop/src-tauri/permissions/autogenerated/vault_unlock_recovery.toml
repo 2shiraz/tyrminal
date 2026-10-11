@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-unlock-recovery"
+description = "Enables the vault_unlock_recovery command without any pre-configured scope."
+commands.allow = ["vault_unlock_recovery"]
+
+[[permission]]
+identifier = "deny-vault-unlock-recovery"
+description = "Denies the vault_unlock_recovery command without any pre-configured scope."
+commands.deny = ["vault_unlock_recovery"]

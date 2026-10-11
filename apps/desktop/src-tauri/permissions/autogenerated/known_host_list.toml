@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-known-host-list"
+description = "Enables the known_host_list command without any pre-configured scope."
+commands.allow = ["known_host_list"]
+
+[[permission]]
+identifier = "deny-known-host-list"
+description = "Denies the known_host_list command without any pre-configured scope."
+commands.deny = ["known_host_list"]

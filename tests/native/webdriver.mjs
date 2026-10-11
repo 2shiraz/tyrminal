@@ -1,0 +1,188 @@
+// Minimal W3C WebDriver client for the embedded server in e2e builds (tauri-plugin-wdio-webdriver).
+// Plain `fetch` against loopback: no browser driver, no WebdriverIO dependency tree.
+
+const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
+
+export class WebDriverError extends Error {
+  constructor(command, payload) {
+    super(`${command}: ${payload?.error ?? "error"} — ${payload?.message ?? JSON.stringify(payload)}`);
+    this.name = "WebDriverError";
+    this.code = payload?.error;
+  }
+}
+
+export class Session {
+  #base;
+  #id;
+
+  constructor(base, id) {
+    this.#base = base;
+    this.#id = id;
+  }
+
+  static async create(port) {
+    const base = `http://127.0.0.1:${port}`;
+    const response = await fetch(`${base}/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ capabilities: { alwaysMatch: {} } }),
+    });
+    const body = await response.json();
+    if (!response.ok || !body.value?.sessionId) throw new WebDriverError("new session", body.value);
+    return new Session(base, body.value.sessionId);
+  }
+
+  async #call(method, path, payload) {
+    const response = await fetch(`${this.#base}/session/${this.#id}${path}`, {
+      method,
+      headers: payload === undefined ? {} : { "content-type": "application/json" },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      // A command that never answers must fail the test, not hang the run.
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.value?.error) throw new WebDriverError(`${method} ${path}`, body.value);
+    return body.value;
+  }
+
+  /** Finds one element by CSS selector, or returns null. */
+  async find(selector) {
+    try {
+      const value = await this.#call("POST", "/element", { using: "css selector", value: selector });
+      return value[ELEMENT_KEY];
+    } catch (error) {
+      if (error.code === "no such element") return null;
+      throw error;
+    }
+  }
+
+  async findAll(selector) {
+    const value = await this.#call("POST", "/elements", { using: "css selector", value: selector });
+    return value.map((entry) => entry[ELEMENT_KEY]);
+  }
+
+  /** Waits for an element, polling on explicit state rather than sleeping blindly. */
+  async waitFor(selector, { timeout = 15_000, describe = selector } = {}) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const element = await this.find(selector);
+      if (element) return element;
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${describe}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  async waitGone(selector, { timeout = 15_000 } = {}) {
+    const deadline = Date.now() + timeout;
+    while (await this.find(selector)) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${selector} to disappear`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  /** Waits until `probe()` returns a truthy value and returns it. */
+  async until(probe, { timeout = 15_000, describe = "condition" } = {}) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      let value;
+      try {
+        value = await probe();
+      } catch (error) {
+        // The element was replaced by a re-render between lookup and use: look again.
+        if (error.code !== "stale element reference") throw error;
+      }
+      if (value) return value;
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${describe}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  click(element) {
+    return this.#call("POST", `/element/${element}/click`, {});
+  }
+
+  type(element, text) {
+    return this.#call("POST", `/element/${element}/value`, { text });
+  }
+
+  clear(element) {
+    return this.#call("POST", `/element/${element}/clear`, {});
+  }
+
+  text(element) {
+    return this.#call("GET", `/element/${element}/text`);
+  }
+
+  attribute(element, name) {
+    return this.#call("GET", `/element/${element}/attribute/${name}`);
+  }
+
+  /** Runs a script in the page. Used for reading state the DOM API cannot express, never to bypass the UI. */
+  execute(script, args = []) {
+    return this.#call("POST", "/execute/sync", { script, args });
+  }
+
+  /** Runs a script that reports its result by calling the callback passed as its last argument. */
+  executeAsync(script, args = []) {
+    return this.#call("POST", "/execute/async", { script, args });
+  }
+
+  /** PNG screenshot of the WebView contents as a Buffer. */
+  async screenshot() {
+    return Buffer.from(await this.#call("GET", "/screenshot"), "base64");
+  }
+
+  /**
+   * Clicks the first button whose visible text is `label`. A leading decorative glyph (as on the
+   * navigation buttons) is ignored, so the match is on the words a user reads.
+   */
+  async clickButton(label, { within = "body", timeout = 15_000 } = {}) {
+    const element = await this.until(
+      async () => {
+        for (const candidate of await this.findAll(`${within} button`)) {
+          const text = (await this.text(candidate)).replace(/\s+/g, " ").trim();
+          if (text === label || text.replace(/^[^\p{L}\p{N}]+/u, "") === label) return candidate;
+        }
+        return null;
+      },
+      { timeout, describe: `button "${label}"` },
+    );
+    await this.click(element);
+  }
+
+  /** Types into the input associated with the label whose text is exactly `label`. */
+  async fill(label, text, { within = "body" } = {}) {
+    const id = await this.until(
+      () =>
+        this.execute(
+          `const root = document.querySelector(arguments[0]);
+           const label = [...(root?.querySelectorAll("label") ?? [])].find((l) => l.textContent.trim() === arguments[1]);
+           return label?.htmlFor || null;`,
+          [within, label],
+        ),
+      { describe: `field "${label}"` },
+    );
+    const element = await this.waitFor(`[id="${id}"]`);
+    await this.click(element);
+    await this.type(element, text);
+    return element;
+  }
+
+  async close() {
+    await this.#call("DELETE", "", undefined).catch(() => undefined);
+  }
+}
+
+export async function waitForServer(port, timeout = 30_000) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/status`);
+      if (response.ok) return;
+    } catch {
+      // not listening yet
+    }
+    if (Date.now() > deadline) throw new Error(`embedded WebDriver server did not start on port ${port}`);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+}

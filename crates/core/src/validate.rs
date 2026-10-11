@@ -99,7 +99,7 @@ pub(crate) fn id(value: &str) -> Result<Id, IpcError> {
         return Err(invalid("That identifier is not valid."));
     }
     let mut out = [0u8; 16];
-    for (i, pair) in bytes.chunks_exact(2).enumerate() {
+    for (i, pair) in bytes.as_chunks::<2>().0.iter().enumerate() {
         let hi = (pair[0] as char).to_digit(16);
         let lo = (pair[1] as char).to_digit(16);
         match (hi, lo) {

@@ -1,0 +1,8 @@
+{
+  "name": "@tyrminal/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/generated/index.ts" },
+  "types": "./src/generated/index.ts"
+}

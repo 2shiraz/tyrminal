@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-delete"
+description = "Enables the key_delete command without any pre-configured scope."
+commands.allow = ["key_delete"]
+
+[[permission]]
+identifier = "deny-key-delete"
+description = "Denies the key_delete command without any pre-configured scope."
+commands.deny = ["key_delete"]

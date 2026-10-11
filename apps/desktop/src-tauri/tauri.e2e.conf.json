@@ -1,0 +1,17 @@
+{
+  "identifier": "app.tyrminal.desktop.e2e",
+  "productName": "Tyrminal E2E",
+  "app": {
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "e2e-automation",
+          "description": "Test builds only: lets the embedded WebDriver server drive the main window.",
+          "windows": ["main"],
+          "permissions": ["wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-session-open-local"
+description = "Enables the session_open_local command without any pre-configured scope."
+commands.allow = ["session_open_local"]
+
+[[permission]]
+identifier = "deny-session-open-local"
+description = "Denies the session_open_local command without any pre-configured scope."
+commands.deny = ["session_open_local"]

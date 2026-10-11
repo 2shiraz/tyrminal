@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-session-trust-answer"
+description = "Enables the session_trust_answer command without any pre-configured scope."
+commands.allow = ["session_trust_answer"]
+
+[[permission]]
+identifier = "deny-session-trust-answer"
+description = "Denies the session_trust_answer command without any pre-configured scope."
+commands.deny = ["session_trust_answer"]

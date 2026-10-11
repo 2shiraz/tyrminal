@@ -12,6 +12,12 @@
     "doctor": "node scripts/doctor.mjs",
     "docs:check": "node scripts/feature-matrix.mjs --check",
     "lab:up": "node scripts/lab.mjs up",
-    "lab:down": "node scripts/lab.mjs down"
+    "lab:down": "node scripts/lab.mjs down",
+    "contracts": "node scripts/generate-contracts.mjs",
+    "contracts:check": "node scripts/generate-contracts.mjs --check",
+    "dev": "pnpm --filter @tyrminal/desktop tauri dev",
+    "build:desktop": "pnpm --filter @tyrminal/desktop tauri build",
+    "build:e2e": "node scripts/build-e2e.mjs",
+    "test:native": "node --test --test-concurrency=1 tests/native/app.test.mjs"
   }
 }
