@@ -1,0 +1,30 @@
+[package]
+name = "tyrminal-core"
+description = "Tyrminal application services: vault lifecycle, records and sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+getrandom = "0.4.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1.53", features = ["rt", "sync", "time", "macros"] }
+tyrminal-contracts = { path = "../contracts" }
+tyrminal-platform = { path = "../platform" }
+tyrminal-pty = { path = "../pty" }
+tyrminal-ssh = { path = "../ssh" }
+tyrminal-storage = { path = "../storage" }
+tyrminal-vault = { path = "../vault" }
+zeroize = { version = "1.9.1", features = ["serde"] }
+
+[dev-dependencies]
+rusqlite = "0.40.2"
+tempfile = "3"
+tokio = { version = "1.53", features = ["full"] }

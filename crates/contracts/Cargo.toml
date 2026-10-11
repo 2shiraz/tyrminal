@@ -1,0 +1,18 @@
+[package]
+name = "tyrminal-contracts"
+description = "Tyrminal IPC contract: DTOs, error codes and limits shared by core, adapter and UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+ts-rs = "12.0.1"
+
+[dev-dependencies]
+serde_json = "1.0.154"

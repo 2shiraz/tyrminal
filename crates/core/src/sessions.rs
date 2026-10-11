@@ -1,0 +1,680 @@
+//! Session registry and the per-session task.
+//!
+//! A session is an SSH shell or a local terminal. Each has one task that owns the transport and
+//! is the only thing that touches it. The renderer holds an opaque session id; every call is
+//! checked against the window that opened the session and the vault generation it was opened
+//! under (INV-06, INV-07). Prompts (host trust, password) are answered through the same checks.
+//!
+//! Output flow control (INV-12): the task counts bytes handed to the renderer and stops reading
+//! the transport once `MAX_UNACKED_OUTPUT` is outstanding. The renderer acknowledges bytes after
+//! its terminal has processed them. A stalled renderer therefore pauses the remote producer
+//! through SSH flow control (or the local PTY buffer); nothing is dropped and memory is bounded.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use tokio::sync::{Semaphore, mpsc, oneshot, watch};
+use tyrminal_contracts::limits::{
+    AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_SECRET_LEN, MAX_SESSIONS,
+    MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_UNACKED_OUTPUT, TERMINAL_OUTPUT_BATCH,
+    TRUST_PROMPT_TIMEOUT_SECS,
+};
+use tyrminal_contracts::{
+    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, TrustDecision, VaultStatus,
+};
+use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
+use tyrminal_ssh::{
+    AuthOutcome, ClientKey, ConnectOptions, HostKeyRequest, HostKeyVerifier, KeyError, KnownHost, PtyRequest,
+    RejectReason, ShellEvent, ShellReader, ShellWriter, SshError, TrustStatus, TrustVerdict, VerifiedConnection,
+    evaluate,
+};
+use zeroize::Zeroizing;
+
+use crate::error::{err, from_ssh, internal, invalid, not_found};
+use crate::validate;
+use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
+
+/// Where a session's output and events go. Implemented by the adapter over a per-session IPC
+/// channel; `false` means the receiver is gone and the session should end.
+pub trait SessionSink: Send + Sync + 'static {
+    fn output(&self, data: Vec<u8>) -> bool;
+    fn event(&self, event: SessionEvent) -> bool;
+}
+
+enum Input {
+    Data(Vec<u8>),
+    Resize(u16, u16),
+    Ack(usize),
+}
+
+#[derive(Default)]
+struct Prompts {
+    trust: Option<(String, oneshot::Sender<TrustDecision>)>,
+    auth: Option<(String, oneshot::Sender<Option<Zeroizing<String>>>)>,
+}
+
+struct Entry {
+    owner: String,
+    generation: u32,
+    input: mpsc::Sender<Input>,
+    close: watch::Sender<bool>,
+    prompts: Mutex<Prompts>,
+}
+
+impl Entry {
+    fn prompts(&self) -> std::sync::MutexGuard<'_, Prompts> {
+        self.prompts.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+pub struct Sessions {
+    vault: Arc<VaultService>,
+    entries: Mutex<HashMap<String, Arc<Entry>>>,
+    connect_slots: Arc<Semaphore>,
+}
+
+impl core::fmt::Debug for Sessions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Sessions")
+    }
+}
+
+fn random_token() -> Result<String, IpcError> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| internal())?;
+    Ok(validate::id_text(&bytes))
+}
+
+fn denied() -> IpcError {
+    // One answer for "no such session", "not your session" and "stale generation": a caller
+    // probing ids learns nothing about which sessions exist.
+    err(ErrorCode::AccessDenied, "That session is not available to this window.")
+}
+
+fn closed_event(error: Option<IpcError>, exit_status: Option<u32>) -> SessionEvent {
+    SessionEvent::Closed { error, exit_status }
+}
+
+impl Sessions {
+    pub(crate) fn new(vault: Arc<VaultService>) -> Arc<Self> {
+        Arc::new(Self {
+            vault,
+            entries: Mutex::new(HashMap::new()),
+            connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
+        })
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Entry>>> {
+        self.entries.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Looks up a session for a caller. Ownership and generation are checked on every call.
+    fn authorize(&self, owner: &str, session_id: &str) -> Result<Arc<Entry>, IpcError> {
+        let entry = self.entries().get(session_id).cloned().ok_or_else(denied)?;
+        if entry.owner != owner || entry.generation != self.vault.generation() {
+            return Err(denied());
+        }
+        Ok(entry)
+    }
+
+    fn register(&self, owner: &str, generation: u32) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
+        let id = random_token()?;
+        let (input, input_rx) = mpsc::channel(64);
+        let (close, _) = watch::channel(false);
+        let entry = Arc::new(Entry {
+            owner: owner.to_owned(),
+            generation,
+            input,
+            close,
+            prompts: Mutex::new(Prompts::default()),
+        });
+        let mut entries = self.entries();
+        if entries.len() >= MAX_SESSIONS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many sessions are open. Close one and try again."));
+        }
+        entries.insert(id.clone(), Arc::clone(&entry));
+        Ok((id, entry, input_rx))
+    }
+
+    /// Number of live sessions (for diagnostics and tests).
+    pub fn count(&self) -> usize {
+        self.entries().len()
+    }
+
+    /// Opens an SSH session to a saved host. Returns immediately; progress, prompts and the
+    /// final result arrive as events on `sink`.
+    pub async fn open_ssh(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let plan = self.vault.connection_plan(host_id).await?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation)?;
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let ctx = TaskContext::new(&this, &entry, &sink);
+            let body = run_ssh(&ctx, plan, cols, rows, input_rx);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// Opens a local terminal running the user's shell.
+    pub async fn open_local(
+        self: &Arc<Self>,
+        owner: &str,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let generation = self.vault.require_unlocked().await?;
+        let (id, entry, input_rx) = self.register(owner, generation)?;
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let body = run_local(&sink, cols, rows, input_rx);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// Runs a session body until it finishes, the user closes it, or the vault locks; then
+    /// reports the outcome and forgets the session. Dropping the body drops the transport.
+    async fn supervise(
+        &self,
+        session_id: &str,
+        entry: &Arc<Entry>,
+        sink: &Arc<dyn SessionSink>,
+        body: impl Future<Output = Outcome>,
+    ) {
+        let mut close = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        let generation = entry.generation;
+        let outcome = tokio::select! {
+            outcome = body => outcome,
+            _ = close.wait_for(|closed| *closed) => Outcome::ended(None),
+            () = locked_since(&mut vault, generation) => Outcome::failed(err(
+                ErrorCode::VaultLocked,
+                "The vault was locked, so this session was closed.",
+            )),
+        };
+        self.entries().remove(session_id);
+        *entry.prompts() = Prompts::default();
+        sink.event(SessionEvent::State {
+            state: if outcome.error.is_some() { SessionState::Failed } else { SessionState::Closed },
+        });
+        sink.event(closed_event(outcome.error, outcome.exit_status));
+    }
+
+    pub async fn write(&self, owner: &str, session_id: &str, data: Vec<u8>) -> Result<(), IpcError> {
+        if data.len() > MAX_TERMINAL_INPUT_CHUNK {
+            return Err(err(ErrorCode::LimitExceeded, "That input is too large to send at once."));
+        }
+        let entry = self.authorize(owner, session_id)?;
+        if data.is_empty() {
+            return Ok(());
+        }
+        entry.input.send(Input::Data(data)).await.map_err(|_| denied())
+    }
+
+    pub async fn resize(&self, owner: &str, session_id: &str, cols: u16, rows: u16) -> Result<(), IpcError> {
+        if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION {
+            return Err(invalid("The terminal size is out of range."));
+        }
+        let entry = self.authorize(owner, session_id)?;
+        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())
+    }
+
+    /// The renderer reports that its terminal has processed `bytes` of output.
+    pub async fn ack(&self, owner: &str, session_id: &str, bytes: u32) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        entry.input.send(Input::Ack(bytes as usize)).await.map_err(|_| denied())
+    }
+
+    pub fn close(&self, owner: &str, session_id: &str) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        entry.close.send_replace(true);
+        Ok(())
+    }
+
+    /// Closes every session a window owns (the window was closed or destroyed).
+    pub fn close_all_for_owner(&self, owner: &str) {
+        for entry in self.entries().values().filter(|e| e.owner == owner) {
+            entry.close.send_replace(true);
+        }
+    }
+
+    pub fn answer_trust(
+        &self,
+        owner: &str,
+        session_id: &str,
+        prompt_id: &str,
+        decision: TrustDecision,
+    ) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let mut prompts = entry.prompts();
+        match prompts.trust.take() {
+            Some((id, reply)) if id == prompt_id => {
+                let _ = reply.send(decision);
+                Ok(())
+            }
+            other => {
+                // A stale or guessed prompt id answers nothing and leaves the real prompt pending.
+                prompts.trust = other;
+                Err(not_found("That prompt is no longer waiting for an answer."))
+            }
+        }
+    }
+
+    /// Supplies (or, with `None`, cancels) a password or key passphrase the session asked for.
+    pub fn answer_auth(
+        &self,
+        owner: &str,
+        session_id: &str,
+        prompt_id: &str,
+        secret: Option<String>,
+    ) -> Result<(), IpcError> {
+        let secret = secret.map(Zeroizing::new);
+        if secret.as_ref().is_some_and(|s| s.is_empty() || s.len() > MAX_SECRET_LEN) {
+            return Err(invalid("Enter a password of at most 1024 bytes."));
+        }
+        let entry = self.authorize(owner, session_id)?;
+        let mut prompts = entry.prompts();
+        match prompts.auth.take() {
+            Some((id, reply)) if id == prompt_id => {
+                let _ = reply.send(secret);
+                Ok(())
+            }
+            other => {
+                prompts.auth = other;
+                Err(not_found("That prompt is no longer waiting for an answer."))
+            }
+        }
+    }
+}
+
+/// Resolves once the vault generation differs from the one a session was created under.
+async fn locked_since(vault: &mut watch::Receiver<VaultStatus>, generation: u32) {
+    if vault.wait_for(|status| status.generation != generation).await.is_err() {
+        // The vault service is gone: treat as locked.
+    }
+}
+
+struct Outcome {
+    error: Option<IpcError>,
+    exit_status: Option<u32>,
+}
+
+impl Outcome {
+    fn ended(exit_status: Option<u32>) -> Self {
+        Self { error: None, exit_status }
+    }
+    fn failed(error: IpcError) -> Self {
+        Self { error: Some(error), exit_status: None }
+    }
+}
+
+/// What the session task shares with its helpers.
+struct TaskContext {
+    vault: Arc<VaultService>,
+    connect_slots: Arc<Semaphore>,
+    entry: Arc<Entry>,
+    sink: Arc<dyn SessionSink>,
+}
+
+impl TaskContext {
+    fn new(sessions: &Arc<Sessions>, entry: &Arc<Entry>, sink: &Arc<dyn SessionSink>) -> Self {
+        Self {
+            vault: Arc::clone(&sessions.vault),
+            connect_slots: Arc::clone(&sessions.connect_slots),
+            entry: Arc::clone(entry),
+            sink: Arc::clone(sink),
+        }
+    }
+
+    fn state(&self, state: SessionState) {
+        self.sink.event(SessionEvent::State { state });
+    }
+
+    /// Asks the user for a secret and waits, bounded. `None` means cancelled or timed out.
+    async fn ask_secret(&self, kind: AuthPromptKind, username: &str, attempt: u32) -> Option<Zeroizing<String>> {
+        let prompt_id = random_token().ok()?;
+        let (reply, answer) = oneshot::channel();
+        self.entry.prompts().auth = Some((prompt_id.clone(), reply));
+        self.sink.event(SessionEvent::AuthPrompt {
+            prompt_id,
+            kind,
+            username: username.to_owned(),
+            attempt,
+            max_attempts: MAX_AUTH_ATTEMPTS,
+        });
+        let result = tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), answer).await;
+        self.entry.prompts().auth = None;
+        result.ok()?.ok()?
+    }
+}
+
+/// The application's host-key policy: known keys pass, changed keys are refused outright, and an
+/// unknown key waits for an explicit decision. Pressing "connect" is never implicit trust.
+struct PromptingVerifier {
+    known: Vec<(KnownHost, String)>,
+    generation: u32,
+    vault: Arc<VaultService>,
+    entry: Arc<Entry>,
+    sink: Arc<dyn SessionSink>,
+}
+
+impl HostKeyVerifier for PromptingVerifier {
+    async fn verify(&mut self, request: &HostKeyRequest) -> TrustVerdict {
+        self.sink.event(SessionEvent::State { state: SessionState::VerifyingHost });
+        let known: Vec<KnownHost> = self.known.iter().map(|(k, _)| k.clone()).collect();
+        match evaluate(&known, &request.endpoint, &request.key) {
+            TrustStatus::Trusted => TrustVerdict::Accept,
+            TrustStatus::Changed { known_keys } => {
+                let trusted_fingerprints = self
+                    .known
+                    .iter()
+                    .filter(|(k, _)| known_keys.contains(&k.public_key))
+                    .map(|(_, fingerprint)| fingerprint.clone())
+                    .collect();
+                self.sink.event(SessionEvent::HostKeyChanged {
+                    host: request.endpoint.host.clone(),
+                    port: request.endpoint.port,
+                    algorithm: request.key.algorithm.clone(),
+                    presented_fingerprint: request.key.fingerprint.clone(),
+                    trusted_fingerprints,
+                });
+                TrustVerdict::Reject(RejectReason::Changed)
+            }
+            TrustStatus::Unknown => {
+                let Ok(prompt_id) = random_token() else {
+                    return TrustVerdict::Reject(RejectReason::Cancelled);
+                };
+                let (reply, answer) = oneshot::channel();
+                self.entry.prompts().trust = Some((prompt_id.clone(), reply));
+                self.sink.event(SessionEvent::TrustPrompt {
+                    prompt_id,
+                    host: request.endpoint.host.clone(),
+                    port: request.endpoint.port,
+                    resolved_address: request.resolved.map(|a| a.ip().to_string()),
+                    algorithm: request.key.algorithm.clone(),
+                    fingerprint: request.key.fingerprint.clone(),
+                });
+                let decision = tokio::time::timeout(Duration::from_secs(TRUST_PROMPT_TIMEOUT_SECS), answer).await;
+                self.entry.prompts().trust = None;
+                match decision {
+                    Ok(Ok(TrustDecision::Once)) => TrustVerdict::Accept,
+                    Ok(Ok(TrustDecision::Always)) => {
+                        // If trust cannot be recorded (the vault locked meanwhile), do not connect.
+                        match self.vault.add_known_host(self.generation, &request.endpoint, &request.key).await {
+                            Ok(()) => TrustVerdict::Accept,
+                            Err(_) => TrustVerdict::Reject(RejectReason::Cancelled),
+                        }
+                    }
+                    _ => TrustVerdict::Reject(RejectReason::Cancelled),
+                }
+            }
+        }
+    }
+}
+
+fn auth_failed() -> IpcError {
+    err(ErrorCode::AuthFailed, "The server did not accept the sign-in. Check the user name and credentials.")
+}
+
+fn cancelled() -> IpcError {
+    err(ErrorCode::Cancelled, "The connection was cancelled.")
+}
+
+/// Authenticates according to the plan. Stored secrets are tried once; the user is then asked,
+/// at most `MAX_AUTH_ATTEMPTS` times. Nothing is ever typed into the terminal on the user's
+/// behalf, and no prompt text from the server triggers a stored password.
+async fn authenticate(
+    ctx: &TaskContext,
+    conn: &mut VerifiedConnection,
+    username: &str,
+    auth: PlanAuth,
+) -> Result<(), IpcError> {
+    match auth {
+        PlanAuth::Key { private_key, passphrase } => {
+            let mut passphrase = passphrase;
+            let mut attempt = 0;
+            let key = loop {
+                match ClientKey::from_openssh(&private_key, passphrase.as_deref().map(String::as_str)) {
+                    Ok(key) => break key,
+                    Err(KeyError::PassphraseRequired | KeyError::WrongPassphrase) if attempt < MAX_AUTH_ATTEMPTS => {
+                        attempt += 1;
+                        passphrase = Some(
+                            ctx.ask_secret(AuthPromptKind::KeyPassphrase, username, attempt)
+                                .await
+                                .ok_or_else(cancelled)?,
+                        );
+                    }
+                    Err(KeyError::PassphraseRequired | KeyError::WrongPassphrase) => {
+                        return Err(err(ErrorCode::WrongCredential, "The key's passphrase was not correct."));
+                    }
+                    Err(_) => return Err(err(ErrorCode::KeyInvalid, "The stored key could not be read.")),
+                }
+            };
+            match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
+                AuthOutcome::Success => Ok(()),
+                AuthOutcome::Failure { .. } => Err(auth_failed()),
+            }
+        }
+        PlanAuth::Password(stored) => {
+            if conn.authenticate_password(username, stored).await.map_err(|e| from_ssh(&e))?.is_success() {
+                return Ok(());
+            }
+            // The stored password was refused: fall through to asking, never silently loop.
+            ask_password(ctx, conn, username).await
+        }
+        PlanAuth::Ask => ask_password(ctx, conn, username).await,
+    }
+}
+
+async fn ask_password(ctx: &TaskContext, conn: &mut VerifiedConnection, username: &str) -> Result<(), IpcError> {
+    for attempt in 1..=MAX_AUTH_ATTEMPTS {
+        let password = ctx.ask_secret(AuthPromptKind::Password, username, attempt).await.ok_or_else(cancelled)?;
+        if conn.authenticate_password(username, password).await.map_err(|e| from_ssh(&e))?.is_success() {
+            return Ok(());
+        }
+    }
+    Err(auth_failed())
+}
+
+async fn run_ssh(
+    ctx: &TaskContext,
+    plan: ConnectionPlan,
+    cols: u16,
+    rows: u16,
+    input: mpsc::Receiver<Input>,
+) -> Outcome {
+    match connect_ssh(ctx, plan, cols, rows).await {
+        Ok((conn, reader, writer)) => {
+            ctx.state(SessionState::Connected);
+            // `conn` stays alive for the whole pump; dropping it closes the transport.
+            let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
+            conn.disconnect().await;
+            outcome
+        }
+        Err(error) => Outcome::failed(error),
+    }
+}
+
+async fn connect_ssh(
+    ctx: &TaskContext,
+    plan: ConnectionPlan,
+    cols: u16,
+    rows: u16,
+) -> Result<(VerifiedConnection, ShellReader, ShellWriter), IpcError> {
+    ctx.state(SessionState::Connecting);
+    // Bounds simultaneous connection attempts; released when this function returns.
+    let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
+
+    let verifier = PromptingVerifier {
+        known: plan.known_hosts,
+        generation: plan.generation,
+        vault: Arc::clone(&ctx.vault),
+        entry: Arc::clone(&ctx.entry),
+        sink: Arc::clone(&ctx.sink),
+    };
+    let options = ConnectOptions::new(plan.endpoint);
+    let mut conn = tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?;
+
+    if let Some(text) = conn.banner() {
+        ctx.sink.event(SessionEvent::Banner { text });
+    }
+    ctx.state(SessionState::Authenticating);
+    authenticate(ctx, &mut conn, &plan.username, plan.auth).await?;
+
+    ctx.state(SessionState::OpeningChannel);
+    let pty = PtyRequest { term: "xterm-256color".into(), cols: u32::from(cols), rows: u32::from(rows) };
+    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    Ok((conn, reader, writer))
+}
+
+async fn run_local(sink: &Arc<dyn SessionSink>, cols: u16, rows: u16, input: mpsc::Receiver<Input>) -> Outcome {
+    let mut spec = ShellSpec::new(tyrminal_pty::default_shell());
+    spec.cols = cols;
+    spec.rows = rows;
+    // Start in the user's home directory when it is known and valid.
+    spec.cwd = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(Into::into)
+        .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir());
+    #[cfg(unix)]
+    {
+        // A login shell, as terminal applications conventionally start.
+        spec.args = vec!["-l".into()];
+    }
+    match tyrminal_pty::spawn(&spec) {
+        Ok((reader, handle)) => {
+            sink.event(SessionEvent::State { state: SessionState::Connected });
+            pump(Transport::Local { reader, handle, recheck_size: None }, sink, input).await
+        }
+        Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
+    }
+}
+
+enum Transport {
+    Ssh { reader: ShellReader, writer: ShellWriter },
+    Local { reader: PtyReader, handle: PtyHandle, recheck_size: Option<tokio::time::Instant> },
+}
+
+enum TransportEvent {
+    Output(Vec<u8>),
+    Exit(Option<u32>),
+}
+
+impl Transport {
+    /// Next transport event; `None` when the transport has ended. Cancel-safe.
+    async fn next(&mut self) -> Option<TransportEvent> {
+        match self {
+            Self::Ssh { reader, .. } => loop {
+                match reader.next().await? {
+                    ShellEvent::Output(data) | ShellEvent::ExtendedOutput(data) => {
+                        return Some(TransportEvent::Output(data.to_vec()));
+                    }
+                    ShellEvent::ExitStatus(code) => return Some(TransportEvent::Exit(Some(code))),
+                    ShellEvent::ExitSignal(_) => return Some(TransportEvent::Exit(None)),
+                    ShellEvent::Eof => {}
+                }
+            },
+            Self::Local { reader, .. } => match reader.next().await? {
+                PtyEvent::Output(data) => Some(TransportEvent::Output(data)),
+                PtyEvent::Exit(code) => Some(TransportEvent::Exit(code)),
+            },
+        }
+    }
+
+    async fn write(&self, data: &[u8]) -> bool {
+        match self {
+            Self::Ssh { writer, .. } => writer.write(data).await.is_ok(),
+            Self::Local { handle, .. } => handle.write(data).await.is_ok(),
+        }
+    }
+
+    async fn resize(&mut self, cols: u16, rows: u16) {
+        match self {
+            Self::Ssh { writer, .. } => {
+                let _ = writer.resize(u32::from(cols), u32::from(rows)).await;
+            }
+            Self::Local { handle, recheck_size, .. } => {
+                let _ = handle.resize(cols, rows);
+                // Some shells overwrite a resize that races their own terminal setup; verify
+                // shortly afterwards (see `PtyHandle::ensure_size`).
+                *recheck_size = Some(tokio::time::Instant::now() + Duration::from_millis(150));
+            }
+        }
+    }
+
+    fn recheck_deadline(&self) -> Option<tokio::time::Instant> {
+        match self {
+            Self::Local { recheck_size, .. } => *recheck_size,
+            Self::Ssh { .. } => None,
+        }
+    }
+
+    fn recheck(&mut self) {
+        if let Self::Local { handle, recheck_size, .. } = self {
+            *recheck_size = match handle.ensure_size() {
+                // It had been overwritten: check once more in case the race repeats.
+                Ok(true) => Some(tokio::time::Instant::now() + Duration::from_millis(150)),
+                _ => None,
+            };
+        }
+    }
+}
+
+/// Moves bytes between the transport and the renderer until either side ends.
+async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: mpsc::Receiver<Input>) -> Outcome {
+    let mut unacked = 0usize;
+    let mut exit_status = None;
+    loop {
+        let recheck = transport.recheck_deadline();
+        tokio::select! {
+            biased;
+            message = input.recv() => match message {
+                // The registry entry (and with it the sender) is gone.
+                None => return Outcome::ended(exit_status),
+                Some(Input::Data(data)) => {
+                    if !transport.write(&data).await {
+                        return Outcome::failed(err(ErrorCode::Disconnected, "The connection was lost."));
+                    }
+                }
+                Some(Input::Resize(cols, rows)) => transport.resize(cols, rows).await,
+                Some(Input::Ack(bytes)) => unacked = unacked.saturating_sub(bytes),
+            },
+            () = async { tokio::time::sleep_until(recheck.unwrap_or_else(tokio::time::Instant::now)).await }, if recheck.is_some() => {
+                transport.recheck();
+            }
+            // Not polled while the renderer is behind: this is what applies backpressure.
+            event = transport.next(), if unacked < MAX_UNACKED_OUTPUT => match event {
+                None => return Outcome::ended(exit_status),
+                Some(TransportEvent::Exit(code)) => exit_status = code,
+                Some(TransportEvent::Output(mut batch)) => {
+                    // Coalesce what is immediately available into one message, bounded in size
+                    // and by a 1 ms wait, to keep IPC message counts down during bulk output.
+                    let mut ended = false;
+                    while batch.len() < TERMINAL_OUTPUT_BATCH {
+                        match tokio::time::timeout(Duration::from_millis(1), transport.next()).await {
+                            Ok(Some(TransportEvent::Output(more))) => batch.extend_from_slice(&more),
+                            Ok(Some(TransportEvent::Exit(code))) => exit_status = code,
+                            Ok(None) => { ended = true; break; }
+                            Err(_) => break,
+                        }
+                    }
+                    unacked += batch.len();
+                    if !sink.output(batch) || ended {
+                        return Outcome::ended(exit_status);
+                    }
+                }
+            },
+        }
+    }
+}

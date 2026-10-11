@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Supply-chain cool-down: never resolve a version published less than 7 days ago.
+minimumReleaseAge: 10080
+# Exception: vite 8.3.3 (2026-10-06) adds a dev-server `fs.serve` check that was backported to the
+# 6.x and 7.x lines the same day. Remove this entry once it is older than the cool-down.
+minimumReleaseAgeExclude:
+  - vite
+
+# No dependency may run install scripts unless it is listed here deliberately.
+onlyBuiltDependencies: []
