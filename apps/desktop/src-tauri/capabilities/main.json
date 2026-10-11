@@ -13,6 +13,7 @@
     "allow-vault-lock",
     "allow-vault-change-passphrase",
     "allow-vault-rotate-recovery-key",
+    "allow-vault-activity",
     "allow-host-list",
     "allow-host-save",
     "allow-host-delete",

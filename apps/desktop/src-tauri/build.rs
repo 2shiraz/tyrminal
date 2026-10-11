@@ -11,6 +11,7 @@ const COMMANDS: &[&str] = &[
     "vault_lock",
     "vault_change_passphrase",
     "vault_rotate_recovery_key",
+    "vault_activity",
     // inventory
     "host_list",
     "host_save",

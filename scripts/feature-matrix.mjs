@@ -3,6 +3,7 @@
 //
 //   node scripts/feature-matrix.mjs           merge: add missing IDs, keep existing tracking columns
 //   node scripts/feature-matrix.mjs --check   fail if an ID is missing, unknown, or has an invalid status
+//   node scripts/feature-matrix.mjs set ID[,ID...] key=value ...   update tracking columns of rows
 //
 // Research columns (title, evidence, sources, scope, phase) always come from the spec.
 // Tracking columns (platforms .. verified_at) are owned by the CSV and never overwritten.
@@ -110,6 +111,18 @@ function defaultStatus(row) {
 const spec = parseSpec();
 const existing = readExisting();
 const check = process.argv.includes("--check");
+
+if (process.argv[2] === "set") {
+  const ids = (process.argv[3] ?? "").split(",").filter(Boolean);
+  const updates = process.argv.slice(4).map((pair) => [pair.slice(0, pair.indexOf("=")), pair.slice(pair.indexOf("=") + 1)]);
+  for (const [key] of updates) if (!TRACKING.includes(key)) throw new Error(`not a tracking column: ${key}`);
+  for (const id of ids) {
+    const row = existing.get(id);
+    if (!row) throw new Error(`unknown id: ${id}`);
+    for (const [key, value] of updates) row[key] = value;
+    if (!STATUSES.has(row.status)) throw new Error(`${id}: invalid status "${row.status}"`);
+  }
+}
 
 if (check) {
   const problems = [];

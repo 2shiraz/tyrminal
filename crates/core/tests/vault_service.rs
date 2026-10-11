@@ -531,3 +531,49 @@ async fn uninitialized_vault_reports_its_state_and_refuses_everything_else() {
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Uninitialized);
     assert!(Path::new(&db_path(&dir)).exists());
 }
+
+/// The idle lock is enforced by the core. Activity postpones it; silence locks; it re-arms after
+/// every unlock.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
+    use std::time::{Duration, Instant};
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    let timeout = Duration::from_millis(400);
+    let timer = tokio::spawn(Arc::clone(&core.vault).run_idle_lock(timeout));
+    let mut status = core.vault.subscribe();
+
+    // Steady activity for three timeouts: still unlocked.
+    let started = Instant::now();
+    while started.elapsed() < timeout * 3 {
+        core.vault.note_activity();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
+
+    // Silence: locked within one timeout (plus scheduling slack), not before.
+    let quiet_from = Instant::now();
+    tokio::time::timeout(timeout * 4, status.wait_for(|s| s.state == VaultState::Locked))
+        .await
+        .expect("idle lock fired")
+        .unwrap();
+    assert!(
+        quiet_from.elapsed() >= timeout - Duration::from_millis(60),
+        "locked too early: {:?}",
+        quiet_from.elapsed()
+    );
+    assert_eq!(code(core.vault.list_hosts().await), ErrorCode::VaultLocked);
+
+    // Re-armed after unlocking again, with no activity reported at all.
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    tokio::time::timeout(timeout * 4, status.wait_for(|s| s.state == VaultState::Locked))
+        .await
+        .expect("idle lock re-armed")
+        .unwrap();
+
+    // Activity while locked does not unlock anything.
+    core.vault.note_activity();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(core.vault.status().await.unwrap().state, VaultState::Locked);
+    timer.abort();
+}

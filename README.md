@@ -3,19 +3,24 @@
 An open-source, local-first SSH client for Windows and macOS, with optional end-to-end encrypted sync
 planned. No account, subscription or vendor connection is needed for local use.
 
-> **Status: early development. Not usable as an application yet, not security reviewed, do not
-> store real credentials in it.** See [docs/progress.md](docs/progress.md) for exactly what exists
-> and [docs/blockers.md](docs/blockers.md) for what cannot be verified on the current machine.
+> **Status: early development, not security reviewed. Do not store credentials you cannot
+> rotate.** On macOS (Apple Silicon) the app can create an encrypted local vault, manage hosts and
+> keys, and open SSH and local terminal sessions with strict host-key verification. Windows is a
+> target but nothing has been built or tested there yet. See [docs/progress.md](docs/progress.md)
+> for exactly what exists and [docs/blockers.md](docs/blockers.md) for what cannot be verified.
 
 ## Develop
 
 Requirements: Rust (pinned in `rust-toolchain.toml`), Node 24+, pnpm 11, Docker for the SSH test lab.
 
 ```sh
+pnpm install
 pnpm doctor          # what this machine can build and test
-cargo test           # unit, property and known-answer tests
+pnpm dev             # run the desktop app in development
+pnpm verify:fast     # format, lint, types, unit/property/known-answer tests
 pnpm lab:up          # disposable OpenSSH servers on loopback for integration tests
-pnpm lab:down
+pnpm test:integration && pnpm test:security
+pnpm build:e2e && pnpm test:native   # drive the real application end to end
 ```
 
 ## Documentation

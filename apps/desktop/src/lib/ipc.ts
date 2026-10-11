@@ -62,6 +62,8 @@ export const vault = {
   unlock: (passphrase: string) => call<void>("vault_unlock", { passphrase }),
   unlockWithRecoveryKey: (recoveryKey: string) => call<void>("vault_unlock_recovery", { recoveryKey }),
   lock: () => call<void>("vault_lock"),
+  /** Tells the native idle-lock timer that the user is active. */
+  noteActivity: () => call<void>("vault_activity"),
   changePassphrase: (current: string, next: string) => call<void>("vault_change_passphrase", { current, new: next }),
   rotateRecoveryKey: (passphrase: string) => call<RecoveryKeyIssued>("vault_rotate_recovery_key", { passphrase }),
   /** Subscribes to vault state changes pushed by the native side. Returns an unsubscribe function. */

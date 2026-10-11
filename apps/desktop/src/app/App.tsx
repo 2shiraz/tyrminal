@@ -7,25 +7,28 @@ import { type AppError, toAppError, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
 import { AppShell } from "./AppShell";
 
-/** Vault idle lock: five minutes without keyboard or pointer activity (BUILD_SPEC §1.3). */
-const IDLE_LOCK_MS = 5 * 60 * 1000;
+/** How often, at most, input activity is reported to the native idle-lock timer. */
+const ACTIVITY_REPORT_INTERVAL_MS = 5_000;
 
-function useIdleLock(enabled: boolean) {
+/**
+ * Reports keyboard and pointer activity to the core, which owns the idle-lock timer (five
+ * minutes by default). The renderer only postpones the lock; it cannot prevent the core from
+ * locking when reports stop, for example because the renderer hung.
+ */
+function useActivityReports(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
-    let timer = window.setTimeout(lock, IDLE_LOCK_MS);
-    function lock() {
-      void vault.lock().catch(() => undefined);
-    }
-    function reset() {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(lock, IDLE_LOCK_MS);
+    let last = 0;
+    function report() {
+      const now = Date.now();
+      if (now - last < ACTIVITY_REPORT_INTERVAL_MS) return;
+      last = now;
+      void vault.noteActivity().catch(() => undefined);
     }
     const events = ["keydown", "pointerdown", "wheel"] as const;
-    for (const name of events) window.addEventListener(name, reset, { capture: true, passive: true });
+    for (const name of events) window.addEventListener(name, report, { capture: true, passive: true });
     return () => {
-      window.clearTimeout(timer);
-      for (const name of events) window.removeEventListener(name, reset, { capture: true });
+      for (const name of events) window.removeEventListener(name, report, { capture: true });
     };
   }, [enabled]);
 }
@@ -54,7 +57,7 @@ export function App() {
   }, [refresh]);
 
   const unlocked = status?.state === "unlocked" && !onboarding;
-  useIdleLock(unlocked);
+  useActivityReports(unlocked);
 
   if (error) {
     return (

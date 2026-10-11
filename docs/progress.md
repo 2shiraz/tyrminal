@@ -4,62 +4,81 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 
 ## Where things stand
 
-| Phase | State | Notes |
+| Phase | State | Report |
 |---|---|---|
-| 00 Repository baseline | Done | Spec preserved, feature matrix (302 rows), doctor, Docker SSH lab, blockers recorded |
-| 01 Feasibility spikes | In progress | Backend spikes done and tested; Tauri window + xterm + binary stream + measurements remain |
-| 02 Vault foundation | In progress | Crypto format v1 and storage implemented and tested; core services, IPC and UI remain |
-| 03 SSH vertical slice | In progress | `tyrminal-ssh` adapter passes 17 real-server tests; not yet wired into an application |
+| 00 Repository baseline | Gate met | `docs/reports/phase-00.md` |
+| 01 Feasibility spikes | Gate met on macOS; Windows and mobile open | `docs/reports/phase-01.md` |
+| 02 Vault foundation | In progress: vault works end to end; backup/restore, quick unlock and fault-injection tests missing | `docs/reports/phase-02-03.md` |
+| 03 SSH vertical slice | Gate met on macOS in the real app; reconnect and keyboard-interactive missing | `docs/reports/phase-02-03.md` |
 | 04–15 | Not started | |
 
-No feature in `docs/feature-matrix.csv` is VERIFIED: nothing has been exercised through a real
-packaged application yet, which is what the spec requires for SSH workflows.
+Feature matrix: 16 rows IMPLEMENTED_UNVERIFIED (tested on macOS, Windows blocked), 15 IN_PROGRESS,
+232 NOT_STARTED, 39 DEFERRED_BY_SCOPE. **Nothing is VERIFIED**: Windows is a declared platform and
+nothing has been built or run there (B-01).
 
-## Evidence so far (macOS 27.0.1, Apple M5, debug builds)
+## What works today (macOS, Apple Silicon)
 
-| Area | Command | Result |
+Launch with no account → create a local encrypted vault → confirm the recovery key → add hosts,
+import or generate keys → connect over SSH with an explicit first-use trust decision → interactive
+terminal tabs, plus a local terminal → lock (manual, on exit, or after five minutes idle, enforced
+in the core) → unlock by passphrase or recovery key. A changed host key blocks the connection
+before any credential is sent and can only be replaced by removing trust with a written reason.
+
+## Evidence
+
+| Suite | Command | Result |
 |---|---|---|
-| Vault crypto | `cargo test -p tyrminal-vault` | 33 passed, incl. 4 known-answer tests against libsodium/reference Argon2 vectors |
-| Storage | `cargo test -p tyrminal-storage` | 13 passed (real files, CAS, atomic batches, 0600 permissions, foreign/newer refusal) |
-| SSH unit | `cargo test -p tyrminal-ssh` | 9 passed |
-| SSH lab | `pnpm lab:up && cargo test -p tyrminal-ssh --test lab -- --ignored` | 17 passed, 12 consecutive runs, against OpenSSH 10.0p1 containers |
-| OS secret store | `cargo test -p tyrminal-platform -- --ignored` | macOS Keychain round trip passed; no item left behind |
-| Local PTY | `cargo test -p tyrminal-pty` | 9 passed, 30 consecutive runs (9,600 short-lived processes) |
-
-Windows: nothing has been built or run (blocker B-01).
+| Fast | `pnpm verify:fast` | 7 steps pass; 108 Rust tests |
+| Integration | `pnpm test:integration` | 17 SSH lab + 10 core session + 1 Keychain test pass |
+| Security | `pnpm test:security` | 6 steps pass |
+| Native | `pnpm test:native` | 9 tests on the real application pass; 25 consecutive runs |
+| Release policy | `pnpm check:release` | Pass (static and release-binary inspection) |
+| Performance | `node tests/performance/measure.mjs` | See phase-01 report; idle memory misses its target, unlock is faster than the target range |
 
 ## Findings worth keeping
 
-1. **russh reports a link that drops mid-authentication as an auth failure** with no remaining
-   methods. `tyrminal-ssh` maps that to `Disconnected(Authenticating)` so it is never shown as a
-   wrong password.
-2. **OpenSSH 9.8+ `PerSourcePenalties`** throttles a source address after failed/abandoned auth. The
-   lab disables it (all tests share one NAT address). Real users can hit this after repeated
-   failures; reconnect backoff (Phase 03) must respect it.
-3. **macOS discards unread PTY output when the last slave descriptor closes.** Short-lived local
-   programs lost their final bytes about 1 run in 40 until `tyrminal-pty` kept the slave open
-   until exit and drain.
-4. **GNU readline (macOS `/bin/sh`) can overwrite a resize** with the previous size (non-atomic
-   get-then-set), about 1 in 150 under stress. `PtyHandle::ensure_size` re-applies it; the session
-   layer must call it after a resize settles.
-5. `canonical_host` does not do IDNA mapping yet. This fails closed (extra prompt, never a false
-   match) and is tracked for Phase 03.
+1. russh reports a link that drops mid-authentication as an auth failure; mapped to a disconnect.
+2. OpenSSH 9.8+ `PerSourcePenalties` throttles a source after failed auth; disabled in the lab
+   only. Automatic reconnect (not built yet) must respect it.
+3. macOS discards unread PTY output when the last slave descriptor closes; `tyrminal-pty` holds
+   the slave until exit and drain.
+4. GNU readline (macOS `/bin/sh`) can overwrite a resize; the session re-checks the size.
+5. xterm.js 6 cannot load with `Object.prototype` frozen, so Tauri's `freezePrototype` is off.
+6. macOS `seq` prints numbers from 1,000,000 in scientific notation; do not use it for
+   line-exact workloads on macOS.
+7. The Tauri CLI runs cargo from `src-tauri`, so a relative `CARGO_TARGET_DIR` lands elsewhere.
+   A stale test binary caused a long false trail; `scripts/build-e2e.mjs` uses an absolute path.
+8. `canonical_host` has no IDNA mapping yet (fails closed).
 
-## Next task
+## Next tasks, in order
 
-Phase 01 remainder: create `apps/desktop` (Tauri 2.12 + React + xterm), stream PTY/SSH bytes to the
-renderer over a per-session channel with acknowledgement-based backpressure, then record startup,
-idle and stream measurements in `docs/reports/phase-01.md` and write ADR 0002 (dependency versions,
-licenses, limitations).
+1. **Phase 02 gate:** specify (in `docs/crypto-format.md`) and build the encrypted portable
+   backup and the validated restore with preview; add the file dialog plugin with scoped grants.
+2. Quick unlock: device key slot + OS secret store, with the "store unavailable" path tested.
+3. Fault injection: forced termination during header swap and record writes; disk-full.
+4. OS lock/suspend hooks (lock and disconnect); single-instance guard.
+5. Install cargo-deny and cargo-fuzz (B-06); write `deny.toml`; first fuzz targets for the vault
+   header and record decoders.
+6. Phase 03 remainder: reconnect with capped backoff, keyboard-interactive auth, negotiated
+   algorithm display, escape-sequence corpus tests.
+7. Idle memory: per-process footprint breakdown to explain the 212–278 MiB reading.
+8. Repository hygiene: SECURITY.md (needs a contact from the owner), CONTRIBUTING.md,
+   CODE_OF_CONDUCT.md, CHANGELOG.md, CI workflows, `docs/ipc-contract.md`, `docs/design-system.md`.
+9. Phase 04: groups, tags, inheritance, identities, OpenSSH/CSV import, 10,000-host search.
 
-Then Phase 02: `tyrminal-core` (vault state machine with lock generations, record codec with
-authenticated tombstones, serialized unlock), typed IPC contracts, onboarding/unlock/lock UI,
-backup/restore, canary-plaintext scan of DB/WAL files.
+## Questions for the owner (none block current work)
+
+- Confirm Apache-2.0, and whether the sync server should share it.
+- A security contact for SECURITY.md.
+- Whether a Windows machine or CI runner will be available; every Windows claim depends on it.
+- Whether the Argon2id cost should be raised given a 0.11 s unlock on this hardware.
 
 ## Resume commands
 
 ```sh
 pnpm doctor
-cargo test --workspace
-pnpm lab:up && cargo test -p tyrminal-ssh --test lab -- --ignored
+pnpm lab:up            # Docker Desktop must be running
+pnpm verify:fast && pnpm test:integration && pnpm test:security
+pnpm build:e2e && pnpm test:native
+pnpm dev               # run the app in development
 ```

@@ -77,6 +77,7 @@ pub struct VaultService {
     status: watch::Sender<VaultStatus>,
     generation: AtomicU32,
     failed_unlocks: AtomicU32,
+    last_activity: std::sync::Mutex<std::time::Instant>,
 }
 
 impl core::fmt::Debug for VaultService {
@@ -117,6 +118,7 @@ impl VaultService {
             status,
             generation: AtomicU32::new(0),
             failed_unlocks: AtomicU32::new(0),
+            last_activity: std::sync::Mutex::new(std::time::Instant::now()),
         }
     }
 
@@ -127,6 +129,43 @@ impl VaultService {
     /// Subscribes to state changes. Sessions use this to end themselves when the vault locks.
     pub fn subscribe(&self) -> watch::Receiver<VaultStatus> {
         self.status.subscribe()
+    }
+
+    /// Records user activity. The adapter calls this when the renderer reports input; it only
+    /// postpones the idle lock and reveals nothing.
+    pub fn note_activity(&self) {
+        *self.last_activity.lock().unwrap_or_else(|p| p.into_inner()) = std::time::Instant::now();
+    }
+
+    /// Locks the vault after `timeout` without activity, for as long as the service lives.
+    ///
+    /// The timer runs here, not in the renderer: a hung or crashed renderer stops reporting
+    /// activity and the vault still locks. (A compromised renderer can report fake activity;
+    /// that is inside the stated limits of what an unlocked, compromised renderer can do.)
+    pub async fn run_idle_lock(self: std::sync::Arc<Self>, timeout: Duration) {
+        let mut status = self.subscribe();
+        loop {
+            if status.wait_for(|s| s.state == VaultState::Unlocked).await.is_err() {
+                return;
+            }
+            self.note_activity();
+            loop {
+                let idle = self.last_activity.lock().unwrap_or_else(|p| p.into_inner()).elapsed();
+                if idle >= timeout {
+                    self.lock().await;
+                    break;
+                }
+                tokio::select! {
+                    () = tokio::time::sleep(timeout - idle) => {}
+                    changed = status.wait_for(|s| s.state != VaultState::Unlocked) => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     fn set_state(&self, state: VaultState) {

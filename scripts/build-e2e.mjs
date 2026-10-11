@@ -10,9 +10,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// `--release` builds the same test variant with the release profile, for performance
+// measurements only. It is still a test build and must never be distributed.
+const profile = process.argv.includes("--release") ? [] : ["--debug"];
 const result = spawnSync(
   "pnpm",
-  ["tauri", "build", "--debug", "--no-bundle", "--features", "e2e", "--config", "src-tauri/tauri.e2e.conf.json"],
+  ["tauri", "build", ...profile, "--no-bundle", "--features", "e2e", "--config", "src-tauri/tauri.e2e.conf.json"],
   {
     cwd: join(root, "apps", "desktop"),
     env: { ...process.env, CARGO_TARGET_DIR: join(root, "target", "e2e") },

@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+// Verification entry point. Each suite is a list of steps; every step's command, exit code and
+// duration is printed and written to docs/reports/raw/verify-<suite>.json (git-ignored evidence).
+//
+//   node scripts/verify.mjs fast          format, lint, typecheck, contracts, unit tests
+//   node scripts/verify.mjs integration   real SQLite/keychain/PTY and the SSH lab (needs Docker)
+//   node scripts/verify.mjs security      named negative tests and release-policy checks
+//   node scripts/verify.mjs native        packaged-app end-to-end tests (needs lab + e2e build)
+//
+// A step that cannot run because a prerequisite is missing is reported as BLOCKED and makes the
+// suite fail: a blocked check is never counted as passing.
+
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const labFile = join(root, "tests", "ssh-lab", ".run", "lab.json");
+const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win32" ? "tyrminal.exe" : "tyrminal");
+
+const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
+const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
+const needsMac = () => (process.platform === "darwin" || process.platform === "win32" ? null : "no OS secret store adapter for this platform");
+
+const cargo = (...args) => ["cargo", args];
+const pnpm = (...args) => ["pnpm", args];
+const node = (...args) => ["node", args];
+
+const SUITES = {
+  fast: [
+    { name: "rust format", cmd: cargo("fmt", "--all", "--check") },
+    { name: "rust lint", cmd: cargo("clippy", "--workspace", "--all-targets", "--", "-D", "warnings") },
+    { name: "rust unit and property tests", cmd: cargo("test", "--workspace", "--quiet") },
+    { name: "contracts are up to date", cmd: node("scripts/generate-contracts.mjs", "--check") },
+    { name: "typescript", cmd: pnpm("--filter", "@tyrminal/desktop", "typecheck") },
+    { name: "frontend build", cmd: pnpm("--filter", "@tyrminal/desktop", "build") },
+    { name: "feature matrix", cmd: node("scripts/feature-matrix.mjs", "--check") },
+  ],
+  integration: [
+    { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsMac },
+  ],
+  security: [
+    { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
+    { name: "vault service: canary scan, tampering, lock races", cmd: cargo("test", "-p", "tyrminal-core", "--test", "vault_service", "--quiet") },
+    { name: "storage: permissions, foreign/newer files, atomicity", cmd: cargo("test", "-p", "tyrminal-storage", "--quiet") },
+    { name: "host trust and credentials ordering (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored", "host_key", "credentials"), blockedBy: needsLab },
+    { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "release policy", cmd: node("scripts/check-release.mjs") },
+  ],
+  native: [
+    { name: "packaged application end to end", cmd: node("--test", "--test-concurrency=1", "tests/native/app.test.mjs"), blockedBy: () => needsLab() ?? needsE2e() },
+  ],
+};
+
+const suiteName = process.argv[2];
+const suite = SUITES[suiteName];
+if (!suite) {
+  console.error(`usage: verify.mjs ${Object.keys(SUITES).join("|")}`);
+  process.exit(2);
+}
+
+const results = [];
+for (const step of suite) {
+  const [command, args] = step.cmd;
+  const line = `${command} ${args.join(" ")}`;
+  const blocker = step.blockedBy?.();
+  if (blocker) {
+    console.log(`BLOCKED  ${step.name}\n         ${blocker}`);
+    results.push({ name: step.name, command: line, status: "BLOCKED", reason: blocker });
+    continue;
+  }
+  const started = Date.now();
+  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024 });
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  const ok = run.status === 0;
+  console.log(`${ok ? "ok     " : "FAILED "}  ${step.name}  (${seconds}s, exit ${run.status})\n         $ ${line}`);
+  if (!ok) console.log(`${run.stdout}${run.stderr}`.trim().split("\n").slice(-40).join("\n"));
+  results.push({ name: step.name, command: line, status: ok ? "PASSED" : "FAILED", exitCode: run.status, seconds: Number(seconds) });
+}
+
+const outDir = join(root, "docs", "reports", "raw");
+mkdirSync(outDir, { recursive: true });
+writeFileSync(
+  join(outDir, `verify-${suiteName}.json`),
+  `${JSON.stringify({ suite: suiteName, platform: `${process.platform}/${process.arch}`, finishedAt: new Date().toISOString(), results }, null, 2)}\n`,
+);
+
+const failed = results.filter((r) => r.status !== "PASSED");
+console.log(`\n${suiteName}: ${results.length - failed.length} passed, ${results.filter((r) => r.status === "FAILED").length} failed, ${results.filter((r) => r.status === "BLOCKED").length} blocked`);
+process.exit(failed.length === 0 ? 0 : 1);

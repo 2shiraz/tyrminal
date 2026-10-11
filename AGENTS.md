@@ -35,16 +35,20 @@ and `verified_commit` filled in (`pnpm docs:check` enforces this). Never delete 
 
 ## Commands
 
-Only commands listed here exist. Others named in the spec (§9.5) are added as their phase lands.
+The full list with prerequisites is in [docs/testing.md](docs/testing.md). The ones used most:
 
 | Command | What it does |
 |---|---|
 | `pnpm doctor` | Toolchain/SDK probe and which gates this machine can run |
-| `pnpm docs:check` | Feature-matrix completeness and status validity against the spec |
-| `pnpm lab:up` / `pnpm lab:down` | Start/stop the task-owned SSH lab (loopback only, generated credentials) |
+| `pnpm verify:fast` | Format, lint, typecheck, contracts, all default Rust tests, feature matrix |
+| `pnpm lab:up` / `pnpm lab:down` | Start/stop the task-owned SSH lab (Docker, loopback only) |
+| `pnpm test:integration` / `pnpm test:security` | Real-backend and negative tests against the lab |
+| `pnpm build:e2e` then `pnpm test:native` | Drive the real application end to end |
+| `pnpm check:release` | CSP, capabilities, feature graph and release-binary policy |
+| `pnpm contracts` | Regenerate TypeScript contracts after changing `crates/contracts` |
+| `pnpm dev` / `pnpm build:desktop` | Run in development / unsigned release build |
 
-See [docs/testing.md](docs/testing.md) for the growing list as later phases add `verify:fast`,
-`test:integration`, `test:security` and the rest.
+Commands the spec names that do not exist yet are listed in docs/testing.md.
 
 ## Layout
 

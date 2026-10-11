@@ -41,3 +41,10 @@ pub async fn vault_rotate_recovery_key(
 ) -> Result<RecoveryKeyIssued, IpcError> {
     state.core()?.vault.rotate_recovery_key(passphrase).await
 }
+
+/// The renderer saw keyboard or pointer input. Postpones the core's idle lock; returns nothing.
+#[tauri::command]
+pub async fn vault_activity(state: State<'_, AppState>) -> Result<(), IpcError> {
+    state.core()?.vault.note_activity();
+    Ok(())
+}

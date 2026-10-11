@@ -18,6 +18,10 @@
     "dev": "pnpm --filter @tyrminal/desktop tauri dev",
     "build:desktop": "pnpm --filter @tyrminal/desktop tauri build",
     "build:e2e": "node scripts/build-e2e.mjs",
-    "test:native": "node --test --test-concurrency=1 tests/native/app.test.mjs"
+    "test:native": "node scripts/verify.mjs native",
+    "verify:fast": "node scripts/verify.mjs fast",
+    "test:integration": "node scripts/verify.mjs integration",
+    "test:security": "node scripts/verify.mjs security",
+    "check:release": "node scripts/check-release.mjs"
   }
 }

@@ -15,6 +15,8 @@ use crate::state::AppState;
 
 /// Event carrying the non-secret vault status to the main window.
 const VAULT_STATUS_EVENT: &str = "vault-status";
+/// Inactivity after which the vault locks itself.
+const IDLE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 fn storage_error() -> IpcError {
     IpcError::new(ErrorCode::IoError, "Tyrminal could not open its data folder. No data was changed.")
@@ -61,6 +63,8 @@ pub fn run() {
                         let _ = handle.emit_to("main", VAULT_STATUS_EVENT, current);
                     }
                 });
+                // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
+                tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }
             app.manage(AppState::new(core));
             Ok(())
@@ -81,6 +85,7 @@ pub fn run() {
             commands::vault::vault_lock,
             commands::vault::vault_change_passphrase,
             commands::vault::vault_rotate_recovery_key,
+            commands::vault::vault_activity,
             commands::inventory::host_list,
             commands::inventory::host_save,
             commands::inventory::host_delete,
