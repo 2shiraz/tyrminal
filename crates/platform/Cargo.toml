@@ -1,0 +1,25 @@
+[package]
+name = "tyrminal-platform"
+description = "Tyrminal OS service adapters: secret store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+keyring-core = "1.0.0"
+thiserror = "2.0.21"
+zeroize = "1.9.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1.1.0"
+
+[dev-dependencies]
+getrandom = "0.4.3"
