@@ -89,6 +89,12 @@ export class App {
       throw new Error(`${error.message}\napplication output:\n${output}`);
     }
     const session = await Session.create(port);
+    try {
+      await session.waitForDocument();
+    } catch (error) {
+      child.kill("SIGKILL");
+      throw new Error(`${error.message}\napplication output:\n${output}`);
+    }
     const app = new App(child, session, dir, port);
     app.output = () => output;
     return app;

@@ -32,13 +32,43 @@ export class Session {
     return new Session(base, body.value.sessionId);
   }
 
-  async #call(method, path, payload) {
+  /** Sets the W3C session timeouts (milliseconds). */
+  setTimeouts(timeouts) {
+    return this.#call("POST", "/timeouts", timeouts);
+  }
+
+  /**
+   * Waits until the application document has finished loading. On WebKitGTK a script evaluation
+   * issued while the first page load is still in progress can be dropped and never answer, so
+   * readiness is probed with a short script timeout before the default one is restored.
+   */
+  async waitForDocument({ timeout = 30_000 } = {}) {
+    const deadline = Date.now() + timeout;
+    await this.setTimeouts({ script: 2_000 });
+    try {
+      for (;;) {
+        try {
+          const state = await this.#call("POST", "/execute/sync", { script: "return document.readyState + ':' + !!document.querySelector('#root > *')", args: [] }, 5_000);
+          if (state === "complete:true") return;
+        } catch (error) {
+          if (Date.now() > deadline) throw new Error(`application document did not load: ${error.message}`);
+        }
+        if (Date.now() > deadline) throw new Error("application document did not load");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    } finally {
+      await this.setTimeouts({ script: 30_000 });
+    }
+  }
+
+  async #call(method, path, payload, timeoutMs = 35_000) {
     const response = await fetch(`${this.#base}/session/${this.#id}${path}`, {
       method,
       headers: payload === undefined ? {} : { "content-type": "application/json" },
       body: payload === undefined ? undefined : JSON.stringify(payload),
-      // A command that never answers must fail the test, not hang the run.
-      signal: AbortSignal.timeout(30_000),
+      // A command that never answers must fail the test, not hang the run. Longer than the
+      // server's own 30 s script timeout, so its error (not an abort) is what gets reported.
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.value?.error) throw new WebDriverError(`${method} ${path}`, body.value);
