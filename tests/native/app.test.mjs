@@ -8,7 +8,7 @@
 // credentials are sent).
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -19,11 +19,16 @@ const PASSPHRASE = "native e2e passphrase 42";
 const lab = loadLab();
 
 function authLogLines(server) {
-  const container = lab.servers[server].container;
-  const out = execFileSync("docker", ["logs", container], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  // `docker logs` writes sshd's stderr to our stderr; capture both.
-  const err = execFileSync("sh", ["-c", `docker logs ${container} 2>&1 >/dev/null`], { encoding: "utf8" });
-  return `${out}${err}`.split("\n").filter((l) => /Accepted |Failed |Postponed |userauth/.test(l)).length;
+  const { container, logFile } = lab.servers[server];
+  let text;
+  if (logFile) {
+    text = readFileSync(logFile, "utf8");
+  } else {
+    // `docker logs` writes sshd's stderr to our stderr; capture both.
+    const r = spawnSync("docker", ["logs", container], { encoding: "utf8" });
+    text = `${r.stdout}${r.stderr}`;
+  }
+  return text.split("\n").filter((l) => /Accepted |Failed |Postponed |userauth/.test(l)).length;
 }
 
 describe("Tyrminal desktop application", { concurrency: false }, () => {

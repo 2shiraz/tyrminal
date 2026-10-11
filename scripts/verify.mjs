@@ -27,6 +27,12 @@ const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
 const node = (...args) => ["node", args];
 
+// Linux without a display (CI, containers) runs the WebKitGTK application under a virtual X server.
+const headless = ([command, args]) =>
+  process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+    ? ["xvfb-run", ["-a", "-s", "-screen 0 1440x900x24", command, ...args]]
+    : [command, args];
+
 const SUITES = {
   fast: [
     { name: "rust format", cmd: cargo("fmt", "--all", "--check") },
@@ -51,7 +57,7 @@ const SUITES = {
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
   ],
   native: [
-    { name: "packaged application end to end", cmd: node("--test", "--test-concurrency=1", "tests/native/app.test.mjs"), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 

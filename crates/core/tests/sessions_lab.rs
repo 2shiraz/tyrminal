@@ -51,10 +51,18 @@ impl Lab {
     fn key_text(&self, name: &str) -> String {
         std::fs::read_to_string(self.str(&format!("/keys/{name}"))).unwrap()
     }
-    fn auth_log_lines(&self, server: &str) -> usize {
+    /// The sshd log: a file in the container-free lab, `docker logs` in the container lab.
+    fn server_log(&self, server: &str) -> String {
+        if let Some(file) = self.0.pointer(&format!("/servers/{server}/logFile")).and_then(Value::as_str) {
+            return std::fs::read_to_string(file).expect("lab sshd log");
+        }
         let container = self.str(&format!("/servers/{server}/container"));
-        let out = Command::new("docker").args(["logs", &container]).output().unwrap();
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("docker").args(["logs", &container]).output().expect("docker logs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    }
+
+    fn auth_log_lines(&self, server: &str) -> usize {
+        let text = self.server_log(server);
         text.lines()
             .filter(|l| ["Accepted ", "Failed ", "Postponed ", "userauth"].iter().any(|n| l.contains(n)))
             .count()
@@ -296,7 +304,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     client.send("echo core-$((40+2)); id -un; stty size\n").await;
     client.output_until("core-42").await;
     client.output_until("30 100").await;
-    assert!(client.text.contains("tyr"));
+    assert!(client.text.contains(&f.lab.str("/user")));
 
     f.core.sessions.resize(WINDOW, &client.session, 140, 50).await.unwrap();
     client.send("stty size; echo resized-$((40+2))\n").await;

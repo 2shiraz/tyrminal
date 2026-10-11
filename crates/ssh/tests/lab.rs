@@ -66,11 +66,19 @@ impl Lab {
         ClientKey::from_openssh(&text, passphrase)
     }
 
-    /// sshd log lines that show any authentication activity.
-    fn auth_log_lines(&self, server: &str) -> Vec<String> {
+    /// The sshd log: a file in the container-free lab, `docker logs` in the container lab.
+    fn server_log(&self, server: &str) -> String {
+        if let Some(file) = self.0.pointer(&format!("/servers/{server}/logFile")).and_then(Value::as_str) {
+            return std::fs::read_to_string(file).expect("lab sshd log");
+        }
         let container = self.str(&format!("/servers/{server}/container"));
         let out = Command::new("docker").args(["logs", &container]).output().expect("docker logs");
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    }
+
+    /// sshd log lines that show any authentication activity.
+    fn auth_log_lines(&self, server: &str) -> Vec<String> {
+        let text = self.server_log(server);
         text.lines()
             .filter(|l| {
                 ["Accepted ", "Failed ", "Postponed ", "Invalid user", "userauth", "authentication failure"]
@@ -218,7 +226,7 @@ async fn ed25519_key_authenticates_and_runs_a_fixture_command() {
     assert_eq!(conn.host_key().algorithm, "ssh-ed25519");
     assert_eq!(conn.host_key().fingerprint, lab.str("/servers/a/hostKeyEd25519Fingerprint"));
     let out = conn.exec("echo tyrminal-fixture-ok; id -un", 4096, Duration::from_secs(10)).await.unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "tyrminal-fixture-ok\ntyr\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("tyrminal-fixture-ok\n{}\n", lab.user()));
     assert_eq!(out.exit_status, Some(0));
     conn.disconnect().await;
 }
