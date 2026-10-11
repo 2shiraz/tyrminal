@@ -103,6 +103,14 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_trust_answer,
             commands::sessions::session_auth_answer,
+            commands::snippets::snippet_list,
+            commands::snippets::snippet_save,
+            commands::snippets::snippet_delete,
+            commands::snippets::snippet_send,
+            commands::settings::prefs_get,
+            commands::settings::prefs_set,
+            commands::settings::host_recent,
+            commands::settings::link_open,
         ])
         .build(tauri::generate_context!());
 

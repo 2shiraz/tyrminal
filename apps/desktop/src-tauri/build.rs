@@ -31,6 +31,16 @@ const COMMANDS: &[&str] = &[
     "session_close",
     "session_trust_answer",
     "session_auth_answer",
+    // snippets
+    "snippet_list",
+    "snippet_save",
+    "snippet_delete",
+    "snippet_send",
+    // settings and shell
+    "prefs_get",
+    "prefs_set",
+    "host_recent",
+    "link_open",
 ];
 
 fn main() {

@@ -577,3 +577,79 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Locked);
     timer.abort();
 }
+
+/// Snippets (SNP-01..04): encrypted records with folders and multi-line text; validated; they
+/// persist across restarts, never appear in plaintext on disk, and are gone from memory on lock.
+#[tokio::test(flavor = "multi_thread")]
+async fn snippets_are_encrypted_records_that_persist_and_disappear_on_lock() {
+    use tyrminal_core::contracts::SnippetInput;
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    let canary = "echo SNIPPET-CANARY-7f3e";
+    let input = |id: Option<String>, name: &str, folder: &str, text: &str| SnippetInput {
+        id,
+        name: name.into(),
+        folder: folder.into(),
+        text: text.into(),
+    };
+    let deploy = core
+        .vault
+        .save_snippet(input(None, "Deploy", " /Ops/ Staging/ ", &format!("{canary}\r\nuptime")))
+        .await
+        .unwrap();
+    assert_eq!(deploy.folder, "Ops/Staging");
+    assert_eq!(deploy.text, format!("{canary}\nuptime"));
+    core.vault.save_snippet(input(None, "Disk", "", "df -h")).await.unwrap();
+
+    // Validation happens natively, whatever the UI sent.
+    for bad in [
+        input(None, "", "", "ls"),
+        input(None, "x", "", "  "),
+        input(None, "x", "a//b", "ls"),
+        input(None, "x", "", "printf '\u{1b}]52;c;AAAA\u{7}'"),
+        input(None, "x", "", &"y".repeat(64 * 1024 + 1)),
+    ] {
+        assert!(core.vault.save_snippet(bad).await.is_err());
+    }
+    assert_eq!(code(core.vault.save_snippet(input(Some("0".repeat(32)), "x", "", "ls")).await), ErrorCode::NotFound);
+
+    let edited = core.vault.save_snippet(input(Some(deploy.id.clone()), "Deploy v2", "Ops", "uptime")).await.unwrap();
+    assert_eq!(edited.id, deploy.id);
+    let list = core.vault.list_snippets().await.unwrap();
+    assert_eq!(list.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Disk", "Deploy v2"]);
+
+    // Nothing in plaintext on disk (the edited-away canary included).
+    core.vault.save_snippet(input(Some(deploy.id.clone()), "Deploy v3", "Ops", canary)).await.unwrap();
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.list_snippets().await), ErrorCode::VaultLocked);
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        assert!(!bytes.windows(canary.len()).any(|w| w == canary.as_bytes()), "snippet text found on disk");
+    }
+    drop(core);
+
+    let core = open(&dir);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let list = core.vault.list_snippets().await.unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[1].text, canary);
+    core.vault.delete_snippet(&list[0].id).await.unwrap();
+    assert_eq!(core.vault.list_snippets().await.unwrap().len(), 1);
+    assert_eq!(code(core.vault.delete_snippet(&list[0].id).await), ErrorCode::NotFound);
+}
+
+/// Preferences are not vault data: readable while locked, validated, and stored owner-only.
+#[tokio::test(flavor = "multi_thread")]
+async fn preferences_are_available_while_locked_and_validated() {
+    use tyrminal_core::contracts::{Preferences, ThemePreference};
+    let dir = TempDir::new().unwrap();
+    let core = open(&dir);
+    assert_eq!(core.preferences.get(), Preferences::default());
+    let mut prefs = Preferences::default();
+    prefs.theme = ThemePreference::Dark;
+    prefs.terminal.font_size = 99.0;
+    let stored = core.preferences.set(prefs).unwrap();
+    assert!((stored.terminal.font_size - 32.0).abs() < f32::EPSILON);
+    drop(core);
+    assert_eq!(open(&dir).preferences.get().theme, ThemePreference::Dark);
+}

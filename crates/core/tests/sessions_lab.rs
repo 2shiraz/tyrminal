@@ -770,3 +770,93 @@ async fn unreachable_and_denied_destinations_report_specific_errors() {
     );
     assert_eq!(f.core.sessions.count(), 0);
 }
+
+/// SNP-07 / TRM-14: a snippet is sent only to a session the calling window owns, its text comes
+/// from the vault at the session's generation, Run executes it and Paste only inserts it, and
+/// after a lock nothing is sent.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn snippets_reach_only_owned_sessions_and_stop_at_lock() {
+    use tyrminal_core::contracts::{SnippetInput, SnippetSendMode};
+    let f = fixture().await;
+    let s = &f.core.sessions;
+    let snippet = f
+        .core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "fixture".into(),
+            folder: "lab".into(),
+            text: "echo snip-$((40+2))\necho line-$((7*6))".into(),
+        })
+        .await
+        .unwrap();
+
+    let mut client = Client::open_local(&f.core).await;
+    client.until_connected().await;
+
+    // Another window cannot send it, and cannot tell a real session from a guessed one.
+    let foreign = s.send_snippet("detached-1", &client.session, &snippet.id, SnippetSendMode::Run, false).await;
+    let guessed = s.send_snippet("detached-1", &"f".repeat(32), &snippet.id, SnippetSendMode::Run, false).await;
+    assert_eq!(foreign.unwrap_err(), guessed.unwrap_err());
+    // A missing snippet on an owned session is reported as such.
+    let missing = s.send_snippet(WINDOW, &client.session, &"0".repeat(32), SnippetSendMode::Run, false).await;
+    assert_eq!(missing.unwrap_err().code, ErrorCode::NotFound);
+
+    s.send_snippet(WINDOW, &client.session, &snippet.id, SnippetSendMode::Run, false).await.unwrap();
+    client.output_until("snip-42").await;
+    client.output_until("line-42").await;
+    assert!(!client.text.contains("hijack"));
+
+    // Paste inserts without executing: the shell echoes the text but no result line follows.
+    client.send("stty -echo; echo paste-start\n").await;
+    client.output_until("paste-start").await;
+    let paste = f
+        .core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "p".into(),
+            folder: String::new(),
+            text: "echo pasted-$((1+1))".into(),
+        })
+        .await
+        .unwrap();
+    s.send_snippet(WINDOW, &client.session, &paste.id, SnippetSendMode::Paste, false).await.unwrap();
+    client.send("\u{3}").await; // Ctrl+C discards the pasted line.
+    client.output_until("^C").await;
+    client.send("echo after-paste\n").await;
+    client.output_until("after-paste").await;
+    assert!(!client.text.contains("pasted-2"), "Paste must not execute: {:?}", client.text);
+
+    // Lock: the session ends and the snippet can no longer be sent anywhere.
+    f.core.vault.lock().await;
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::VaultLocked));
+    let after = s.send_snippet(WINDOW, &client.session, &snippet.id, SnippetSendMode::Run, false).await;
+    assert_eq!(after.unwrap_err().code, ErrorCode::AccessDenied);
+}
+
+/// The home view's recent connections: a host is recorded when its session reaches the shell.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn connecting_records_the_host_as_recent() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    assert!(f.core.vault.recent_hosts().await.unwrap().is_empty());
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    client.until_connected().await;
+    // Recorded right after Connected is reported; poll the explicit state briefly.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let recent = f.core.vault.recent_hosts().await.unwrap();
+        if let Some(first) = recent.first() {
+            assert_eq!(first.id, host);
+            assert!(first.last_connected_at.is_some());
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "host was not recorded as recent");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}

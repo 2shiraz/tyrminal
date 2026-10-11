@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The trusted main window. It may call the application commands and nothing else: no filesystem, shell, HTTP, process, clipboard or opener plugin is granted.",
-  "windows": ["main"],
+  "description": "The trusted main window. It may call the application commands and nothing else: no filesystem, shell, HTTP, process, clipboard or opener plugin is granted. Links open only through the validated link_open command.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -30,6 +32,14 @@
     "allow-session-ack",
     "allow-session-close",
     "allow-session-trust-answer",
-    "allow-session-auth-answer"
+    "allow-session-auth-answer",
+    "allow-snippet-list",
+    "allow-snippet-save",
+    "allow-snippet-delete",
+    "allow-snippet-send",
+    "allow-prefs-get",
+    "allow-prefs-set",
+    "allow-host-recent",
+    "allow-link-open"
   ]
 }

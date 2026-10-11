@@ -3,4 +3,6 @@
 
 pub mod inventory;
 pub mod sessions;
+pub mod settings;
+pub mod snippets;
 pub mod vault;

@@ -21,7 +21,8 @@ use tyrminal_contracts::limits::{
     TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, TrustDecision, VaultStatus,
+    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, SnippetSendMode, TrustDecision,
+    VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -222,6 +223,28 @@ impl Sessions {
         entry.input.send(Input::Data(data)).await.map_err(|_| denied())
     }
 
+    /// Sends a saved snippet to a session the caller owns. The text is read from the vault here,
+    /// at the session's generation, so it never has to round-trip through the renderer and
+    /// nothing is sent after a lock. Nothing in the core runs a snippet on its own: this is only
+    /// reached from an explicit Paste or Run.
+    pub async fn send_snippet(
+        &self,
+        owner: &str,
+        session_id: &str,
+        snippet_id: &str,
+        mode: SnippetSendMode,
+        bracketed: bool,
+    ) -> Result<(), IpcError> {
+        // Ownership first: a wrong window learns nothing about which snippets exist.
+        let entry = self.authorize(owner, session_id)?;
+        let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let bytes = snippet_bytes(&text, mode, bracketed);
+        for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+            entry.input.send(Input::Data(chunk.to_vec())).await.map_err(|_| denied())?;
+        }
+        Ok(())
+    }
+
     pub async fn resize(&self, owner: &str, session_id: &str, cols: u16, rows: u16) -> Result<(), IpcError> {
         if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION {
             return Err(invalid("The terminal size is out of range."));
@@ -296,6 +319,28 @@ impl Sessions {
             }
         }
     }
+}
+
+/// The bytes a snippet sends. Lines end in carriage returns, as typed. `Paste` wraps the text in
+/// bracketed-paste markers when the terminal enabled that mode, so a shell inserts it without
+/// executing; snippet text is validated to contain no ESC, so it cannot close the bracket early.
+/// `Run` sends the lines and a final Enter.
+pub(crate) fn snippet_bytes(text: &str, mode: SnippetSendMode, bracketed: bool) -> Zeroizing<Vec<u8>> {
+    let body = text.trim_end_matches('\n').replace('\n', "\r");
+    let mut out = Zeroizing::new(Vec::with_capacity(body.len() + 12));
+    match mode {
+        SnippetSendMode::Paste if bracketed => {
+            out.extend_from_slice(b"\x1b[200~");
+            out.extend_from_slice(body.as_bytes());
+            out.extend_from_slice(b"\x1b[201~");
+        }
+        SnippetSendMode::Paste => out.extend_from_slice(body.as_bytes()),
+        SnippetSendMode::Run => {
+            out.extend_from_slice(body.as_bytes());
+            out.push(b'\r');
+        }
+    }
+    out
 }
 
 /// Resolves once the vault generation differs from the one a session was created under.
@@ -494,9 +539,12 @@ async fn run_ssh(
     rows: u16,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
+    let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     match connect_ssh(ctx, plan, cols, rows).await {
         Ok((conn, reader, writer)) => {
             ctx.state(SessionState::Connected);
+            // Recent connections. Best effort: failing to record must not end a working session.
+            let _ = ctx.vault.mark_connected(generation, &host_id).await;
             // `conn` stays alive for the whole pump; dropping it closes the transport.
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             conn.disconnect().await;
@@ -676,5 +724,19 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod snippet_tests {
+    use super::*;
+
+    #[test]
+    fn snippets_are_typed_lines_and_paste_is_bracketed_only_when_asked() {
+        let text = "uname -a\ndf -h\n";
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Run, false), b"uname -a\rdf -h\r");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Run, true), b"uname -a\rdf -h\r");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Paste, false), b"uname -a\rdf -h");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Paste, true), b"\x1b[200~uname -a\rdf -h\x1b[201~");
     }
 }

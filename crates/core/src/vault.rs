@@ -14,10 +14,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tokio::sync::{Mutex, watch};
-use tyrminal_contracts::limits::MAX_RECORDS_PER_KIND;
+use tyrminal_contracts::limits::{MAX_RECENT_HOSTS, MAX_RECORDS_PER_KIND};
 use tyrminal_contracts::{
     ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError, KeyImportInput, KeySummary, KnownHostSummary,
-    RecoveryKeyIssued, VaultState, VaultStatus,
+    RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState, VaultStatus,
 };
 use tyrminal_ssh::{ClientKey, Endpoint, KnownHost, PresentedHostKey};
 use tyrminal_storage::{Database, RecordRow, WriteCondition};
@@ -29,8 +29,8 @@ use zeroize::Zeroizing;
 
 use crate::error::{err, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
 use crate::records::{
-    Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_TRUST_EVENT, KeyRecord, KnownHostRecord,
-    StoredAuth, TrustEventRecord, decode, encode, tombstone,
+    Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT, KeyRecord,
+    KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
 };
 use crate::validate;
 
@@ -46,6 +46,19 @@ struct Open {
     hosts: BTreeMap<Id, Stored<HostRecord>>,
     ssh_keys: BTreeMap<Id, Stored<KeyRecord>>,
     known_hosts: BTreeMap<Id, Stored<KnownHostRecord>>,
+    snippets: BTreeMap<Id, Stored<SnippetRecord>>,
+}
+
+impl Open {
+    fn new(keys: UnlockedVault) -> Self {
+        Self {
+            keys,
+            hosts: BTreeMap::new(),
+            ssh_keys: BTreeMap::new(),
+            known_hosts: BTreeMap::new(),
+            snippets: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -57,6 +70,7 @@ struct Inner {
 
 /// What a session needs to connect, copied out of the vault at one generation.
 pub(crate) struct ConnectionPlan {
+    pub host_id: String,
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
@@ -106,6 +120,17 @@ fn host_summary(id: &Id, record: &HostRecord) -> HostSummary {
             StoredAuth::Password { .. } => HostAuth::StoredPassword,
             StoredAuth::Key { key_id } => HostAuth::Key { key_id: key_id.clone() },
         },
+        last_connected_at: record.last_connected_at,
+    }
+}
+
+fn snippet_summary(id: &Id, record: &SnippetRecord) -> SnippetSummary {
+    SnippetSummary {
+        id: validate::id_text(id),
+        name: record.name.clone(),
+        folder: record.folder.clone(),
+        text: record.text.clone(),
+        updated_at: record.updated_at,
     }
 }
 
@@ -221,12 +246,7 @@ impl VaultService {
             self.set_state(VaultState::Locked);
             return Ok(issued);
         }
-        inner.open = Some(Open {
-            keys: created.unlocked,
-            hosts: BTreeMap::new(),
-            ssh_keys: BTreeMap::new(),
-            known_hosts: BTreeMap::new(),
-        });
+        inner.open = Some(Open::new(created.unlocked));
         self.set_state(VaultState::Unlocked);
         Ok(issued)
     }
@@ -304,7 +324,7 @@ impl VaultService {
     /// Decrypts every row. Any authentication failure fails the whole unlock: a vault is opened
     /// completely or not at all, never with a silently missing or substituted record (INV-11).
     fn load_records(keys: UnlockedVault, rows: Vec<RecordRow>) -> Result<Open, IpcError> {
-        let mut open = Open { keys, hosts: BTreeMap::new(), ssh_keys: BTreeMap::new(), known_hosts: BTreeMap::new() };
+        let mut open = Open::new(keys);
         let damaged = || {
             err(
                 ErrorCode::VaultDamaged,
@@ -331,6 +351,7 @@ impl VaultService {
                 KIND_HOST => load!(HostRecord, open.hosts),
                 KIND_KEY => load!(KeyRecord, open.ssh_keys),
                 KIND_KNOWN_HOST => load!(KnownHostRecord, open.known_hosts),
+                KIND_SNIPPET => load!(SnippetRecord, open.snippets),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -483,19 +504,19 @@ impl VaultService {
             }
         };
 
-        let (id, revision) = match existing_id {
+        let (id, revision, last_connected_at) = match existing_id {
             Some(id) => {
                 let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
-                (id, current.revision + 1)
+                (id, current.revision + 1, current.record.last_connected_at)
             }
             None => {
                 if open.hosts.len() >= MAX_RECORDS_PER_KIND {
                     return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of hosts."));
                 }
-                (random_id().map_err(from_vault)?, 1)
+                (random_id().map_err(from_vault)?, 1, None)
             }
         };
-        let record = HostRecord { label, address, port, username, auth };
+        let record = HostRecord { label, address, port, username, auth, last_connected_at };
         let secret_len = match &record.auth {
             StoredAuth::Password { password } => password.len(),
             StoredAuth::Key { key_id } => key_id.len(),
@@ -516,6 +537,121 @@ impl VaultService {
         self.write::<HostRecord>(open, id, KIND_HOST, revision, None).await?;
         open.hosts.remove(&id);
         Ok(())
+    }
+
+    /// Hosts with a recorded connection, most recent first, at most `MAX_RECENT_HOSTS`.
+    pub async fn recent_hosts(&self) -> Result<Vec<HostSummary>, IpcError> {
+        let mut hosts: Vec<_> =
+            self.list_hosts().await?.into_iter().filter(|h| h.last_connected_at.is_some()).collect();
+        hosts.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at).then_with(|| a.id.cmp(&b.id)));
+        hosts.truncate(MAX_RECENT_HOSTS);
+        Ok(hosts)
+    }
+
+    /// Records that a session to `host_id` reached its shell. Written under the generation the
+    /// session was opened with, so a session that outlived a lock cannot write.
+    pub(crate) async fn mark_connected(&self, generation: u32, host_id: &str) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let Some(stored) = open.hosts.get(&id) else {
+            // Deleted while connecting: nothing to record.
+            return Ok(());
+        };
+        let revision = stored.revision + 1;
+        let previous = &stored.record;
+        let auth = match &previous.auth {
+            StoredAuth::AskPassword => StoredAuth::AskPassword,
+            StoredAuth::Password { password } => {
+                StoredAuth::Password { password: Zeroizing::new(password.as_str().to_owned()) }
+            }
+            StoredAuth::Key { key_id } => StoredAuth::Key { key_id: key_id.clone() },
+        };
+        let record = HostRecord {
+            label: previous.label.clone(),
+            address: previous.address.clone(),
+            port: previous.port,
+            username: previous.username.clone(),
+            auth,
+            last_connected_at: Some(now_unix()),
+        };
+        let secret_len = match &record.auth {
+            StoredAuth::Password { password } => password.len(),
+            StoredAuth::Key { key_id } => key_id.len(),
+            StoredAuth::AskPassword => 0,
+        };
+        let content_len = record.label.len() + record.address.len() + record.username.len() + secret_len;
+        self.write(open, id, KIND_HOST, revision, Some((&record, content_len))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    // ---------- snippets ----------
+
+    pub async fn list_snippets(&self) -> Result<Vec<SnippetSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.snippets.iter().map(|(id, s)| snippet_summary(id, &s.record)).collect();
+        list.sort_by(|a, b| {
+            (a.folder.to_lowercase(), a.name.to_lowercase(), &a.id).cmp(&(
+                b.folder.to_lowercase(),
+                b.name.to_lowercase(),
+                &b.id,
+            ))
+        });
+        Ok(list)
+    }
+
+    pub async fn save_snippet(&self, input: SnippetInput) -> Result<SnippetSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        let folder = validate::folder(&input.folder)?;
+        let text = validate::snippet_text(&input.text)?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.snippets.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of snippets."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = SnippetRecord { name, folder, text, updated_at: now_unix() };
+        let content_len = record.name.len() + record.folder.len() + record.text.len();
+        self.write(open, id, KIND_SNIPPET, revision, Some((&record, content_len))).await?;
+        let summary = snippet_summary(&id, &record);
+        open.snippets.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_snippet(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?.revision + 1;
+        self.write::<SnippetRecord>(open, id, KIND_SNIPPET, revision, None).await?;
+        open.snippets.remove(&id);
+        Ok(())
+    }
+
+    /// The text of a snippet, read under `generation`: after a lock nothing is returned.
+    pub(crate) async fn snippet_text(&self, generation: u32, id: &str) -> Result<Zeroizing<String>, IpcError> {
+        let id = validate::id(id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let stored = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
+        Ok(Zeroizing::new(stored.record.text.clone()))
     }
 
     // ---------- keys ----------
@@ -745,6 +881,7 @@ impl VaultService {
             })
             .collect();
         Ok(ConnectionPlan {
+            host_id: validate::id_text(&id),
             endpoint: Endpoint::new(host.address.clone(), host.port),
             username: host.username.clone(),
             auth,

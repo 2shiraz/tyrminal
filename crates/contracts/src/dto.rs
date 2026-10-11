@@ -68,6 +68,9 @@ pub struct HostSummary {
     pub port: u16,
     pub username: String,
     pub auth: HostAuth,
+    /// Unix seconds of the last connection that reached the shell, if any (recent connections).
+    #[ts(type = "number | null")]
+    pub last_connected_at: Option<u64>,
 }
 
 /// Authentication part of a host edit. `StoredPassword { password: None }` keeps the password
@@ -164,6 +167,133 @@ pub struct KnownHostSummary {
     /// Unix seconds when trust was recorded.
     #[ts(type = "number")]
     pub added_at: u64,
+}
+
+// ---------- snippets ----------
+
+/// A saved command. The text is shown to the user for editing and preview; it is sent to a
+/// session only by an explicit Paste or Run on a session the calling window owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SnippetSummary {
+    pub id: String,
+    pub name: String,
+    /// Slash-separated folder path, e.g. `Deploy/Staging`; empty for the top level.
+    pub folder: String,
+    pub text: String,
+    /// Unix seconds of the last edit.
+    #[ts(type = "number")]
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SnippetInput {
+    /// `None` creates a snippet; `Some` edits that snippet.
+    pub id: Option<String>,
+    pub name: String,
+    pub folder: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SnippetSendMode {
+    /// Insert the text at the prompt without running it (bracketed when the terminal asks for it).
+    Paste,
+    /// Send the text followed by Enter.
+    Run,
+}
+
+// ---------- preferences ----------
+
+/// Non-secret appearance and terminal preferences, stored in plain JSON next to the vault so the
+/// lock screen can use them. Validated and clamped natively on every write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RendererPreference {
+    /// GPU (WebGL) when available, falling back automatically.
+    #[default]
+    Auto,
+    /// Always the DOM renderer.
+    Compatibility,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct TerminalPreferences {
+    /// Id of a built-in color scheme.
+    pub scheme: String,
+    /// `jetbrains-mono` (bundled) or `system`.
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+    pub cursor_style: CursorStyle,
+    pub cursor_blink: bool,
+    /// Inner padding in CSS pixels.
+    pub padding: u16,
+    pub scrollback: u32,
+    pub ligatures: bool,
+    pub renderer: RendererPreference,
+    /// Ask before sending a paste with more than one line or more than `paste_warn_bytes` bytes.
+    pub confirm_multiline_paste: bool,
+    pub copy_on_select: bool,
+}
+
+impl Default for TerminalPreferences {
+    fn default() -> Self {
+        Self {
+            scheme: "tyrminal-night".into(),
+            font_family: "jetbrains-mono".into(),
+            font_size: 14.0,
+            line_height: 1.2,
+            letter_spacing: 0.0,
+            cursor_style: CursorStyle::Block,
+            cursor_blink: true,
+            padding: 10,
+            scrollback: 5_000,
+            ligatures: false,
+            renderer: RendererPreference::Auto,
+            confirm_multiline_paste: true,
+            copy_on_select: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Preferences {
+    pub theme: ThemePreference,
+    /// Reduce interface motion even if the OS does not ask for it.
+    pub reduce_motion: bool,
+    pub terminal: TerminalPreferences,
 }
 
 // ---------- sessions ----------
@@ -276,6 +406,11 @@ mod tests {
         };
         let auth = HostAuthInput::StoredPassword { password: Some("canary-password".into()) };
         let issued = RecoveryKeyIssued { recovery_key: "CANARY-RECOVERY".into() };
+        // Preferences are not secret, but they must deserialize from partial or older files.
+        let prefs: Preferences = serde_json::from_str(r#"{"theme":"dark","terminal":{"fontSize":16}}"#).unwrap();
+        assert_eq!(prefs.theme, ThemePreference::Dark);
+        assert!((prefs.terminal.font_size - 16.0).abs() < f32::EPSILON);
+        assert_eq!(prefs.terminal.scrollback, 5_000);
         let rendered = format!("{key:?} {auth:?} {issued:?}");
         assert!(!rendered.to_lowercase().contains("canary"), "{rendered}");
     }
