@@ -689,6 +689,8 @@ enum Transport {
 enum TransportEvent {
     Output(Vec<u8>),
     Exit(Option<u32>),
+    /// The link dropped without the remote side ending the session.
+    Lost,
 }
 
 impl Transport {
@@ -703,6 +705,7 @@ impl Transport {
                     ShellEvent::ExitStatus(code) => return Some(TransportEvent::Exit(Some(code))),
                     ShellEvent::ExitSignal(_) => return Some(TransportEvent::Exit(None)),
                     ShellEvent::Eof => {}
+                    ShellEvent::ConnectionLost => return Some(TransportEvent::Lost),
                 }
             },
             Self::Local { reader, .. } => match reader.next().await? {
@@ -751,6 +754,10 @@ impl Transport {
     }
 }
 
+fn lost() -> Outcome {
+    Outcome::failed(err(ErrorCode::Disconnected, "The connection was lost."))
+}
+
 /// Moves bytes between the transport and the renderer until either side ends.
 async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: mpsc::Receiver<Input>) -> Outcome {
     let mut unacked = 0usize;
@@ -764,7 +771,7 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                 None => return Outcome::ended(exit_status),
                 Some(Input::Data(data)) => {
                     if !transport.write(&data).await {
-                        return Outcome::failed(err(ErrorCode::Disconnected, "The connection was lost."));
+                        return lost();
                     }
                 }
                 Some(Input::Resize(cols, rows)) => transport.resize(cols, rows).await,
@@ -777,20 +784,30 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
             event = transport.next(), if unacked < MAX_UNACKED_OUTPUT => match event {
                 None => return Outcome::ended(exit_status),
                 Some(TransportEvent::Exit(code)) => exit_status = code,
+                Some(TransportEvent::Lost) => return lost(),
                 Some(TransportEvent::Output(mut batch)) => {
                     // Coalesce what is immediately available into one message, bounded in size
                     // and by a 1 ms wait, to keep IPC message counts down during bulk output.
                     let mut ended = false;
+                    let mut dropped = false;
                     while batch.len() < TERMINAL_OUTPUT_BATCH {
                         match tokio::time::timeout(Duration::from_millis(1), transport.next()).await {
                             Ok(Some(TransportEvent::Output(more))) => batch.extend_from_slice(&more),
                             Ok(Some(TransportEvent::Exit(code))) => exit_status = code,
+                            Ok(Some(TransportEvent::Lost)) => { dropped = true; break; }
                             Ok(None) => { ended = true; break; }
                             Err(_) => break,
                         }
                     }
                     unacked += batch.len();
-                    if !sink.output(batch) || ended {
+                    // The output that arrived before a drop is still shown.
+                    if !sink.output(batch) {
+                        return Outcome::ended(exit_status);
+                    }
+                    if dropped {
+                        return lost();
+                    }
+                    if ended {
                         return Outcome::ended(exit_status);
                     }
                 }

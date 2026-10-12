@@ -435,6 +435,7 @@ async fn interactive_shell_runs_commands_resizes_and_reports_exit_status() {
     writer.write(b"exit 7\n").await.unwrap();
     let mut status = None;
     while let Some(event) = tokio::time::timeout(Duration::from_secs(10), reader.next()).await.unwrap() {
+        assert!(!matches!(event, ShellEvent::ConnectionLost), "a normal exit is not a lost connection");
         if let ShellEvent::ExitStatus(code) = event {
             status = Some(code);
         }
@@ -617,8 +618,35 @@ async fn disconnect_during_authentication_and_mid_session_is_reported_not_hung()
     writer.write(b"echo alive-$((40+2))\n").await.unwrap();
     read_until(&mut reader, "alive-42\r\n", Duration::from_secs(10)).await;
     forwarder.cut_all();
-    let ended = tokio::time::timeout(Duration::from_secs(10), async { while reader.next().await.is_some() {} }).await;
-    assert!(ended.is_ok(), "reader must end after the link drops");
+    let events = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = reader.next().await {
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("reader must end after the link drops");
+    assert!(
+        matches!(events.last(), Some(ShellEvent::ConnectionLost)),
+        "a dropped link is reported as lost: {events:?}"
+    );
+
+    // The server process dies (as when a host reboots): also lost, not a normal end.
+    let conn = connected(&lab).await;
+    let (mut reader, writer) = conn.open_shell(&pty).await.unwrap();
+    writer.write(b"echo alive-$((40+2)); kill -9 $PPID\n").await.unwrap();
+    let events = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = reader.next().await {
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("reader must end after the server process dies");
+    assert!(matches!(events.last(), Some(ShellEvent::ConnectionLost)), "{events:?}");
+    assert!(reader.next().await.is_none(), "nothing follows ConnectionLost");
 }
 
 #[test]

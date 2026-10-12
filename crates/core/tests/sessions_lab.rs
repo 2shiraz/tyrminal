@@ -984,3 +984,23 @@ async fn keyboard_interactive_server_prompts_reach_the_user_and_sign_in() {
     client.answer(&auth_prompt(&prompt).0, None);
     assert_eq!(client.until_closed().await.0, Some(ErrorCode::Cancelled));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_dropped_connection_is_reported_as_lost_and_a_normal_exit_is_not() {
+    // The renderer offers automatic reconnect only for a lost connection, so the two endings
+    // must stay distinguishable.
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.send("exit 3\n").await;
+    assert_eq!(client.until_closed().await, (None, Some(3)));
+
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    client.until_connected().await;
+    client.send("kill -9 $PPID\n").await;
+    assert_eq!(client.until_closed().await, (Some(ErrorCode::Disconnected), None));
+}

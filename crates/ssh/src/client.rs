@@ -517,7 +517,7 @@ impl VerifiedConnection {
         self.bounded(Stage::OpeningChannel, channel.request_shell(true)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read }, ShellWriter { write }))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write }))
     }
 
     /// Runs one command without a PTY and streams its output through the same bounded,
@@ -531,7 +531,7 @@ impl VerifiedConnection {
         self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read }, ShellWriter { write }))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write }))
     }
 
     async fn await_reply(&self, channel: &mut russh::Channel<client::Msg>) -> Result<(), SshError> {

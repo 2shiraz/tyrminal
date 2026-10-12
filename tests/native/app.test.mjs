@@ -163,6 +163,26 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.until(async () => /again-42/.test(await terminalText()), { describe: "ssh still interactive" });
   });
 
+  test("a connection dropped by the server reconnects by itself", async () => {
+    // Kill this session's sshd process from inside the session: the TCP link ends without an
+    // SSH disconnect, as when a network drops. The app retries with backoff and reconnects
+    // with the stored trust and key; nothing is asked again.
+    await typeInTerminal("kill -9 $PPID\n");
+    await s
+      .until(async () => (await s.find('[data-testid="auto-reconnect"]')) !== null, { describe: "automatic reconnect countdown" })
+      .catch(async (error) => {
+        const pane = await s.execute(`return document.querySelector(".terminal-pane:not([hidden])")?.innerText.slice(-600) ?? ""`);
+        throw new Error(`${error.message}\n--- pane ---\n${pane}`);
+      });
+    await s.until(async () => /Connected/.test(await statusText()) && !(await s.find('[data-testid="auto-reconnect"]')), {
+      describe: "reconnected",
+      timeout: 20_000,
+    });
+    assert.equal(await s.find("dialog"), null, "reconnecting asked for nothing");
+    await typeInTerminal("echo back-$((40+2))\n");
+    await s.until(async () => /back-42/.test(await terminalText()), { describe: "reconnected session is interactive" });
+  });
+
   test("locking closes every session and nothing decrypted stays on screen", async () => {
     await s.clickButton("Lock vault", { within: "nav.sidebar" });
     await s.until(async () => (await heading()) === "Unlock your vault", { describe: "unlock screen" });
