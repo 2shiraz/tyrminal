@@ -112,7 +112,7 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B |
 |---|---|---|
-| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | — |
+| Working on | Release fix (2shiraz/tyrminal#3), then SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | — |
 | Done since split | — | — |
 | Blocked | — | — |
 
