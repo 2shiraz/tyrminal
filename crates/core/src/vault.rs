@@ -39,6 +39,9 @@ use crate::records::{
     KeyRecord, KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
 };
 use crate::validate;
+// agent B: tunnels and history
+use crate::records::{KIND_TUNNEL, TunnelRecord};
+use tyrminal_contracts::{TunnelInput, TunnelSummary};
 
 struct Stored<T> {
     revision: u64,
@@ -54,6 +57,8 @@ struct Open {
     known_hosts: BTreeMap<Id, Stored<KnownHostRecord>>,
     snippets: BTreeMap<Id, Stored<SnippetRecord>>,
     groups: BTreeMap<Id, Stored<GroupRecord>>,
+    // agent B: tunnels and history
+    tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
 }
 
 impl Open {
@@ -65,6 +70,8 @@ impl Open {
             known_hosts: BTreeMap::new(),
             snippets: BTreeMap::new(),
             groups: BTreeMap::new(),
+            // agent B: tunnels and history
+            tunnels: BTreeMap::new(),
         }
     }
 }
@@ -452,6 +459,8 @@ impl VaultService {
                 KIND_KNOWN_HOST => load!(KnownHostRecord, open.known_hosts),
                 KIND_SNIPPET => load!(SnippetRecord, open.snippets),
                 KIND_GROUP => load!(GroupRecord, open.groups),
+                // agent B: tunnels and history
+                KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1630,6 +1639,113 @@ impl VaultService {
             return Err(locked());
         }
         Ok(self.generation())
+    }
+}
+
+// agent B: tunnels and history
+impl VaultService {
+    fn tunnel_summary(open: &Open, id: &Id, record: &TunnelRecord) -> TunnelSummary {
+        let host_label =
+            validate::id(&record.host_id).ok().and_then(|host| open.hosts.get(&host)).map(|h| h.record.label.clone());
+        crate::tunnels::summary(validate::id_text(id), record, host_label)
+    }
+
+    pub async fn list_tunnels(&self) -> Result<Vec<TunnelSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.tunnels.iter().map(|(id, t)| Self::tunnel_summary(open, id, &t.record)).collect();
+        list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+        Ok(list)
+    }
+
+    /// Saves a rule after native validation; the host must exist.
+    pub async fn save_tunnel(&self, input: TunnelInput) -> Result<TunnelSummary, IpcError> {
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut record = crate::tunnels::normalize(&input)?;
+        record.updated_at = now_unix();
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if !open.hosts.contains_key(&validate::id(&record.host_id)?) {
+            return Err(not_found("That host no longer exists."));
+        }
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.tunnels.get(&id).ok_or_else(|| not_found("That tunnel no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.tunnels.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of tunnels."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let content_len = record.name.len() + record.host_id.len() + record.bind_host.len() + record.dest_host.len();
+        self.write(open, id, KIND_TUNNEL, revision, Some((&record, content_len))).await?;
+        let summary = Self::tunnel_summary(open, &id, &record);
+        open.tunnels.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    /// A copy of a rule under a new name, never set to start automatically.
+    pub async fn duplicate_tunnel(&self, id: &str) -> Result<TunnelSummary, IpcError> {
+        let source = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut record =
+            open.tunnels.get(&source).ok_or_else(|| not_found("That tunnel no longer exists."))?.record.clone();
+        if open.tunnels.len() >= MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of tunnels."));
+        }
+        record.name = crate::tunnels::copy_name(&record.name);
+        record.auto_start = false;
+        record.updated_at = now_unix();
+        let id = random_id().map_err(from_vault)?;
+        let content_len = record.name.len() + record.host_id.len() + record.bind_host.len() + record.dest_host.len();
+        self.write(open, id, KIND_TUNNEL, 1, Some((&record, content_len))).await?;
+        let summary = Self::tunnel_summary(open, &id, &record);
+        open.tunnels.insert(id, Stored { revision: 1, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_tunnel(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.tunnels.get(&id).ok_or_else(|| not_found("That tunnel no longer exists."))?.revision + 1;
+        self.write::<TunnelRecord>(open, id, KIND_TUNNEL, revision, None).await?;
+        open.tunnels.remove(&id);
+        Ok(())
+    }
+
+    /// One rule, read under `generation`: after a lock nothing is returned.
+    pub(crate) async fn tunnel_rule(&self, generation: u32, id: &str) -> Result<TunnelRecord, IpcError> {
+        let id = validate::id(id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(open.tunnels.get(&id).ok_or_else(|| not_found("That tunnel no longer exists."))?.record.clone())
+    }
+
+    /// The rules of `host_id` that start with every connection, read under `generation`.
+    pub(crate) async fn auto_start_tunnels(
+        &self,
+        generation: u32,
+        host_id: &str,
+    ) -> Result<Vec<(String, TunnelRecord)>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(open
+            .tunnels
+            .iter()
+            .filter(|(_, t)| t.record.auto_start && t.record.host_id == host_id)
+            .map(|(id, t)| (validate::id_text(id), t.record.clone()))
+            .collect())
     }
 }
 

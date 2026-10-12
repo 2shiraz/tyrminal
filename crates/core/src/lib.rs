@@ -15,6 +15,8 @@ mod records;
 mod sessions;
 mod validate;
 mod vault;
+// agent B: tunnels and history
+mod tunnels;
 
 pub use files::TransferSink;
 pub use preferences::PreferencesStore;

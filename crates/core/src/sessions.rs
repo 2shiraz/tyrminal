@@ -58,9 +58,9 @@ struct Prompts {
     auth: Option<(String, oneshot::Sender<Option<Zeroizing<String>>>)>,
 }
 
-struct Entry {
+pub(crate) struct Entry {
     owner: String,
-    generation: u32,
+    pub(crate) generation: u32,
     input: mpsc::Sender<Input>,
     close: watch::Sender<bool>,
     prompts: Mutex<Prompts>,
@@ -69,6 +69,9 @@ struct Entry {
     connection: Mutex<Option<Arc<VerifiedConnection>>>,
     /// The session's SFTP channel, opened on first use.
     sftp: Mutex<Option<Arc<Sftp>>>,
+    // agent B: tunnels and history
+    /// The saved host an SSH session was opened for (`None` for local terminals).
+    pub(crate) host_id: Option<String>,
 }
 
 impl Entry {
@@ -86,6 +89,8 @@ pub struct Sessions {
     connect_slots: Arc<Semaphore>,
     /// Running file transfers: owner window and cancel switch.
     transfers: Arc<Mutex<HashMap<String, Transfer>>>,
+    // agent B: tunnels and history
+    pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -117,7 +122,14 @@ impl Sessions {
             entries: Mutex::new(HashMap::new()),
             connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
             transfers: Arc::new(Mutex::new(HashMap::new())),
+            // agent B: tunnels and history
+            tunnel_runs: crate::tunnels::TunnelRuns::default(),
         })
+    }
+
+    // agent B: tunnels and history
+    pub(crate) fn vault(&self) -> &Arc<VaultService> {
+        &self.vault
     }
 
     fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Entry>>> {
@@ -133,7 +145,12 @@ impl Sessions {
         Ok(entry)
     }
 
-    fn register(&self, owner: &str, generation: u32) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
+    fn register(
+        &self,
+        owner: &str,
+        generation: u32,
+        host_id: Option<String>,
+    ) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
         let id = random_token()?;
         let (input, input_rx) = mpsc::channel(64);
         let (close, _) = watch::channel(false);
@@ -145,6 +162,7 @@ impl Sessions {
             prompts: Mutex::new(Prompts::default()),
             connection: Mutex::new(None),
             sftp: Mutex::new(None),
+            host_id,
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -170,11 +188,11 @@ impl Sessions {
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, Some(plan.host_id.clone()))?;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let ctx = TaskContext::new(&this, &entry, &sink);
+            let ctx = TaskContext::new(&this, &session_id, &entry, &sink);
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -190,7 +208,7 @@ impl Sessions {
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
         let generation = self.vault.require_unlocked().await?;
-        let (id, entry, input_rx) = self.register(owner, generation)?;
+        let (id, entry, input_rx) = self.register(owner, generation, None)?;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -221,6 +239,8 @@ impl Sessions {
             )),
         };
         self.entries().remove(session_id);
+        // agent B: tunnels and history
+        self.tunnel_runs.session_ended(session_id).await;
         *entry.prompts() = Prompts::default();
         sink.event(SessionEvent::State {
             state: if outcome.error.is_some() { SessionState::Failed } else { SessionState::Closed },
@@ -229,7 +249,11 @@ impl Sessions {
     }
 
     /// The connected SSH link of a session the caller owns.
-    fn connection(&self, owner: &str, session_id: &str) -> Result<(Arc<Entry>, Arc<VerifiedConnection>), IpcError> {
+    pub(crate) fn connection(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<(Arc<Entry>, Arc<VerifiedConnection>), IpcError> {
         let entry = self.authorize(owner, session_id)?;
         let conn = entry
             .connection
@@ -605,15 +629,19 @@ struct TaskContext {
     connect_slots: Arc<Semaphore>,
     entry: Arc<Entry>,
     sink: Arc<dyn SessionSink>,
+    sessions: Arc<Sessions>,
+    session_id: String,
 }
 
 impl TaskContext {
-    fn new(sessions: &Arc<Sessions>, entry: &Arc<Entry>, sink: &Arc<dyn SessionSink>) -> Self {
+    fn new(sessions: &Arc<Sessions>, session_id: &str, entry: &Arc<Entry>, sink: &Arc<dyn SessionSink>) -> Self {
         Self {
             vault: Arc::clone(&sessions.vault),
             connect_slots: Arc::clone(&sessions.connect_slots),
             entry: Arc::clone(entry),
             sink: Arc::clone(sink),
+            sessions: Arc::clone(sessions),
+            session_id: session_id.to_owned(),
         }
     }
 
@@ -832,6 +860,7 @@ async fn run_ssh(
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
+    let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
         Ok((conn, reader, writer)) => {
             if let Some(n) = conn.negotiated() {
@@ -843,6 +872,12 @@ async fn run_ssh(
                     strict_kex: n.strict_kex,
                 });
             }
+            // Registered before "connected" is reported, so a side operation requested as soon as
+            // the renderer sees the session connected (a tunnel, a key install) finds the link.
+            // `conn` stays alive for the whole pump; dropping it closes the transport. It is
+            // shared with the registry entry for side channels and taken back when the shell ends.
+            let conn = Arc::new(conn);
+            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             ctx.state(SessionState::Connected);
             // Recent connections. Best effort: failing to record must not end a working session.
             // Its own task, because closing the session drops this future: cancelled between the
@@ -852,10 +887,14 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
-            // `conn` stays alive for the whole pump; dropping it closes the transport. It is
-            // shared with the registry entry for side channels and taken back when the shell ends.
-            let conn = Arc::new(conn);
-            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
+            // Saved tunnels that start with every connection to this host. Their own task, so
+            // the shell is usable at once; it holds the connection only while starting them.
+            let (sessions, owner, session_id) =
+                (Arc::clone(&ctx.sessions), ctx.entry.owner.clone(), ctx.session_id.clone());
+            let (tunnel_conn, tunnel_host) = (Arc::clone(&conn), plan_host.clone());
+            tokio::spawn(async move {
+                sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
+            });
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
             ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();

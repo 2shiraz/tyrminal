@@ -71,3 +71,11 @@ pub const MAX_FILE_NAME_LEN: usize = 255;
 pub const MAX_DIR_ENTRIES: usize = 20_000;
 /// File transfers running at once.
 pub const MAX_TRANSFERS: usize = 8;
+
+// agent B: tunnels and history
+/// Simultaneous connections through one forward; further ones are refused and counted.
+pub const MAX_TUNNEL_CONNECTIONS: u32 = 64;
+/// Forwards running at once across all sessions.
+pub const MAX_ACTIVE_TUNNELS: usize = 32;
+/// Ended forwards kept in the active list so their outcome stays visible.
+pub const MAX_ENDED_TUNNELS: usize = 32;
