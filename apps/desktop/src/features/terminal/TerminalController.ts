@@ -42,6 +42,8 @@ export interface TerminalCallbacks {
   onRenderer(kind: RendererKind, fellBack: boolean): void;
   onResize(cols: number, rows: number): void;
   onSearchResults(index: number, total: number): void;
+  /** Bytes the user typed or pasted here (never the terminal's own replies), for broadcast. */
+  onUserInput?(bytes: Uint8Array): void;
 }
 
 const INPUT_CHUNK = 32 * 1024;
@@ -147,6 +149,9 @@ export class TerminalController {
    * from the session, parsed by xterm, sent as input, and input writes the native side refused.
    */
   private readonly counters = { rx: 0, parsed: 0, tx: 0, txFailed: 0, renders: 0 };
+  private fromUser = false;
+  /** Whether user input can be told apart from terminal replies (see the data handler). */
+  broadcastable = false;
 
   private publishCounters(): void {
     const d = this.container.dataset;
@@ -184,7 +189,22 @@ export class TerminalController {
     this.applyLigatures();
     this.fitNow();
 
-    this.term.onData((text) => this.send(this.encoder.encode(text)));
+    // xterm reports user input and its own replies to terminal queries through the same data
+    // event; its core flags user input synchronously just before. Only flagged data may be
+    // broadcast to other panes. Without the flag, broadcast is not offered at all.
+    const core = (this.term as unknown as { _core?: { coreService?: { onUserInput?: (cb: () => void) => { dispose(): void } } } })._core;
+    const userInput = core?.coreService?.onUserInput?.(() => {
+      this.fromUser = true;
+    });
+    this.broadcastable = userInput !== undefined;
+    if (userInput) this.cleanups.push(() => userInput.dispose());
+    this.term.onData((text) => {
+      const bytes = this.encoder.encode(text);
+      const fromUser = this.fromUser;
+      this.fromUser = false;
+      this.send(bytes);
+      if (fromUser) this.callbacks.onUserInput?.(bytes);
+    });
     this.term.onBinary((binary) => this.send(Uint8Array.from(binary, (ch) => ch.charCodeAt(0) & 0xff)));
     // The remote side controls the title: treat it as untrusted text.
     this.term.onTitleChange((title) => this.callbacks.onTitle(sanitizeTitle(title)));
@@ -482,6 +502,11 @@ export class TerminalController {
     if (count > 0 && this.sessionId && !this.disposed) {
       void sessions.ack(this.sessionId, count).catch(() => undefined);
     }
+  }
+
+  /** Input typed in another pane of a broadcasting tab; sent as if typed here. */
+  receiveBroadcast(bytes: Uint8Array): void {
+    this.send(bytes);
   }
 
   private send(bytes: Uint8Array): void {

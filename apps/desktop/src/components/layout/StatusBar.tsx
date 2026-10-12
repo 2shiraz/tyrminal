@@ -2,7 +2,7 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconRadio, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 export function StatusBar({
@@ -12,6 +12,8 @@ export function StatusBar({
   onTogglePanel,
   theme,
   onToggleTheme,
+  broadcast,
+  onStopBroadcast,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -19,6 +21,9 @@ export function StatusBar({
   onTogglePanel: (() => void) | undefined;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  /** Panes receiving this tab's typed input, when broadcasting. */
+  broadcast?: number | undefined;
+  onStopBroadcast?: (() => void) | undefined;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -63,6 +68,15 @@ export function StatusBar({
                 <IconShieldCheck size={13} />
                 {status.security.cipher.replace("@openssh.com", "")}
               </span>
+            </>
+          )}
+          {broadcast !== undefined && (
+            <>
+              <span className="status-sep" aria-hidden="true" />
+              <button type="button" className="status-item status-broadcast" data-testid="broadcast" onClick={onStopBroadcast} title={msg.status.broadcastStop}>
+                <IconRadio size={13} />
+                {msg.status.broadcast(broadcast)}
+              </button>
             </>
           )}
           {status?.clipboardAllowed && (

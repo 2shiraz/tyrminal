@@ -2887,3 +2887,18 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-xs);
   word-break: break-all;
 }
+
+/* Broadcast mode: every pane of the tab is outlined, and the status bar names it. */
+.pane[data-broadcast="true"] {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--warning) 70%, transparent);
+}
+
+.status-broadcast {
+  border: 0;
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--text);
+  border-radius: var(--radius-pill);
+  padding: 0 8px;
+  cursor: pointer;
+  font: inherit;
+}

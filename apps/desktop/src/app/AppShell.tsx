@@ -36,6 +36,7 @@ import {
   moveTab,
   neighbour,
   openTab,
+  panesOf,
   patchPane,
   renameTab,
   selectTab,
@@ -72,6 +73,9 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
+  // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
+  // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
+  const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -81,6 +85,46 @@ function Shell() {
   const tab = activeTab(ws);
   const pane = activePane(ws);
   const paneStatus = pane ? statuses[pane.id] : undefined;
+
+  /** Panes of a tab that can take part in broadcast: connected, and able to tell user input apart. */
+  const broadcastPanes = useCallback(
+    (tabId: number) => {
+      const t = wsRef.current.tabs.find((x) => x.id === tabId);
+      if (!t) return [];
+      return panesOf(t.layout).filter((id) => {
+        const h = handles.current.get(id);
+        return statuses[id]?.state === "connected" && h?.broadcastable() === true;
+      });
+    },
+    [statuses],
+  );
+  const tabCanBroadcast = tab ? panesOf(tab.layout).length > 1 && broadcastPanes(tab.id).length === panesOf(tab.layout).length : false;
+
+  useEffect(() => {
+    // Off when a broadcasting tab is gone, has one pane, or any pane is not connected.
+    setBroadcasting((current) => {
+      let next: Set<number> | null = null;
+      for (const id of current) {
+        const t = ws.tabs.find((x) => x.id === id);
+        const panes = t ? panesOf(t.layout) : [];
+        if (!t || panes.length < 2 || panes.some((p) => statuses[p]?.state !== "connected")) {
+          next ??= new Set(current);
+          next.delete(id);
+        }
+      }
+      return next ?? current;
+    });
+  }, [ws, statuses]);
+
+  const relayInput = useCallback(
+    (tabId: number, from: number, bytes: Uint8Array) => {
+      if (!broadcasting.has(tabId)) return;
+      for (const id of broadcastPanes(tabId)) {
+        if (id !== from) handles.current.get(id)?.receiveBroadcast(bytes);
+      }
+    },
+    [broadcasting, broadcastPanes],
+  );
 
   const navigate = useCallback((next: Destination) => {
     setDestination(next);
@@ -343,6 +387,8 @@ function Shell() {
                   if (handle) handles.current.set(paneId, handle);
                   else handles.current.delete(paneId);
                 }}
+                broadcasting={broadcasting}
+                onUserInput={relayInput}
               />
             )}
           </Suspense>
@@ -355,6 +401,12 @@ function Shell() {
           onTogglePanel={terminalVisible ? () => setPanelOpen((v) => !v) : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
+          broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
+          onStopBroadcast={() => {
+            if (!tab) return;
+            const id = tab.id;
+            setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+          }}
         />
       </div>
 
@@ -372,6 +424,20 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          broadcast={tab ? broadcasting.has(tab.id) : false}
+          onToggleBroadcast={
+            terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)
+              ? () => {
+                  const id = tab.id;
+                  setBroadcasting((current) => {
+                    const next = new Set(current);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  });
+                }
+              : undefined
+          }
           onDeployKey={
             pane?.target.kind === "ssh" && paneStatus?.state === "connected"
               ? () => {

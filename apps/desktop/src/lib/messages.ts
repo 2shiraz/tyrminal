@@ -141,9 +141,13 @@ export const msg = {
     toggleSnippets: "Show / hide snippets panel",
     toggleSidebar: "Show / hide sidebar",
     deployKey: "Install a public key on this server…",
+    broadcastOn: "Type into every pane of this tab",
+    broadcastOff: "Stop typing into every pane",
   },
   status: {
     noSession: "No terminal selected",
+    broadcast: (n: number) => `Typing into ${n} panes`,
+    broadcastStop: "Stop sending input to every pane",
     securityDetail: (s: { cipher: string; kex: string; mac: string; hostKey: string; strictKex: boolean }) =>
       `Encryption: ${s.cipher}${s.mac ? ` with ${s.mac}` : ""}. Key exchange: ${s.kex}${s.strictKex ? " (strict)" : ""}. Server key: ${s.hostKey}.`,
     renderer: (name: string) => `Renderer: ${name}`,

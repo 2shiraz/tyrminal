@@ -413,3 +413,38 @@ test("an uninitialized vault shows onboarding even when a status event beats the
   expect(await page.getByRole("heading", { level: 1 }).textContent()).toBe("Create your local vault");
   await expect(page.getByRole("heading", { name: "Unlock your vault" })).toHaveCount(0);
 });
+
+test("broadcast: typed input reaches every pane of the tab, terminal replies do not, and it stops when a pane drops", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  const paneText = (n: number) => page.locator(".pane .xterm-rows").nth(n).innerText();
+  // Not offered with a single pane.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox").fill("every pane");
+  await expect(page.getByRole("option", { name: /Type into every pane/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator(".pane")).toHaveCount(2);
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox").fill("every pane");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("broadcast")).toHaveText("Typing into 2 panes");
+  await expect(page.locator(".pane[data-broadcast]")).toHaveCount(2);
+  // Choosing the action returns focus to the terminal.
+  await expect(page.locator(".pane[data-focused=true] .xterm-helper-textarea")).toBeFocused();
+
+  // A terminal query answered by the focused pane's terminal is not copied to the other pane.
+  await output(page, "\u001b[6n");
+  await page.keyboard.type("hostname");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => paneText(0)).toContain("hostname: synthetic output");
+  await expect.poll(() => paneText(1)).toContain("hostname: synthetic output");
+  expect(await paneText(0)).not.toMatch(/\[\d+;\d+R/);
+
+  // A pane that stops being connected ends broadcast; it does not resume by itself.
+  await page.evaluate(() => (window as unknown as { __mockDrop: () => void }).__mockDrop());
+  await expect(page.getByTestId("broadcast")).toHaveCount(0);
+  await expect(page.locator(".pane[data-broadcast]")).toHaveCount(0);
+});

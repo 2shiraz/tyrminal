@@ -49,6 +49,10 @@ export interface PaneHandle {
   sessionId(): string | null;
   bracketedPaste(): boolean;
   connected(): boolean;
+  /** Whether user input can be told apart from terminal replies here (needed to broadcast). */
+  broadcastable(): boolean;
+  /** Input typed in another pane of a broadcasting tab. */
+  receiveBroadcast(bytes: Uint8Array): void;
 }
 
 interface TerminalViewProps {
@@ -69,6 +73,8 @@ interface TerminalViewProps {
   onOpenKnownHosts: () => void;
   onClose: () => void;
   register: (handle: PaneHandle | null) => void;
+  /** User input typed in this pane (for broadcast). */
+  onUserInput?: ((bytes: Uint8Array) => void) | undefined;
 }
 
 function Fingerprint({ value }: { value: string }) {
@@ -156,6 +162,7 @@ export function TerminalView(props: TerminalViewProps) {
       },
       onResize: (cols, rows) => publish({ cols, rows }),
       onSearchResults: (index, total) => setFindCount({ index, total }),
+      onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
       onEvent: (event) => {
         switch (event.type) {
           case "state":
@@ -241,6 +248,10 @@ export function TerminalView(props: TerminalViewProps) {
       sessionId: () => controllerRef.current?.id ?? null,
       bracketedPaste: () => controllerRef.current?.bracketedPaste ?? false,
       connected: () => status.current.state === "connected",
+      broadcastable: () => controllerRef.current?.broadcastable ?? false,
+      receiveBroadcast: (bytes) => {
+        if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
+      },
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

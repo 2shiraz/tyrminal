@@ -12,6 +12,7 @@ import {
   IconKeyRound,
   IconLock,
   IconPlay,
+  IconRadio,
   IconRows2,
   IconScrollText,
   IconSearch,
@@ -84,6 +85,8 @@ export function CommandPalette({
   onLocal,
   onSnippet,
   onDeployKey,
+  broadcast,
+  onToggleBroadcast,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -96,6 +99,9 @@ export function CommandPalette({
   onSnippet: (s: SnippetSummary) => void;
   /** Present only when the focused pane is a connected SSH session. */
   onDeployKey?: (() => void) | undefined;
+  /** Whether the active tab broadcasts input; toggle offered only for split, connected tabs. */
+  broadcast?: boolean | undefined;
+  onToggleBroadcast?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -156,6 +162,8 @@ export function CommandPalette({
       list.push(action("zoom-reset", msg.palette.zoomReset, <IconZoomIn size={16} />, () => onAction("zoomReset"), "zoomReset"));
       list.push(action("close-pane", msg.palette.closePane, <IconX size={16} />, () => onAction("closePane"), "closePane"));
     }
+    if (onToggleBroadcast)
+      list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
     list.push(action("theme", msg.palette.toggleTheme, <IconSun size={16} />, onToggleTheme));
     list.push(action("sidebar", msg.palette.toggleSidebar, <IconSidebar size={16} />, () => onAction("toggleSidebar"), "toggleSidebar"));
@@ -200,10 +208,16 @@ export function CommandPalette({
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
+  /** Closes the modal first: while it is open the page behind is inert and cannot take focus. */
+  function dismiss() {
+    ref.current?.close();
+    onClose();
+  }
+
   function choose(index: number) {
     const result = results[index];
     if (!result) return;
-    onClose();
+    dismiss();
     result.item.run();
   }
 
@@ -215,10 +229,10 @@ export function CommandPalette({
       aria-label={msg.palette.label}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        dismiss();
       }}
       onMouseDown={(event) => {
-        if (event.target === ref.current) onClose();
+        if (event.target === ref.current) dismiss();
       }}
     >
       <div className="palette-input">
