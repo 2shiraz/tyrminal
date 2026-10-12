@@ -141,3 +141,19 @@ pub async fn diagnostics_report(
 pub async fn serial_ports() -> Result<Vec<String>, IpcError> {
     Ok(tauri::async_runtime::spawn_blocking(tyrminal_core::serial_ports).await.unwrap_or_default())
 }
+
+/// Interface size: zooms the calling window's web view (CSS pixels grow, so layout, text and the
+/// terminal scale together and the OS keeps rendering at full resolution). The interface works out
+/// the factor from the preference or the window size; anything outside 0.5–2 is refused.
+#[tauri::command]
+pub async fn ui_zoom_set(window: tauri::WebviewWindow, scale: f64) -> Result<(), IpcError> {
+    if !scale.is_finite() || !(0.5..=2.0).contains(&scale) {
+        return Err(IpcError::new(
+            tyrminal_core::contracts::ErrorCode::InvalidInput,
+            "That interface size is not allowed.",
+        ));
+    }
+    window.set_zoom(scale).map_err(|_| {
+        IpcError::new(tyrminal_core::contracts::ErrorCode::IoError, "The interface size could not be changed.")
+    })
+}

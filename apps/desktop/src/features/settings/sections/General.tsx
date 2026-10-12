@@ -11,6 +11,7 @@ import { CommandNoticeSettings } from "../../notify/CommandNoticeSettings";
 import { SCHEMES, type TerminalScheme, lowContrastColors } from "../../terminal/schemes";
 import { msgSettings } from "../messages";
 import { SettingsGroup } from "../SettingsGroup";
+import { INTERFACE_SCALES } from "../../../app/interfaceScale";
 
 // The preview pulls in the terminal emulator; load it only when the Terminal section opens.
 const TerminalPreview = lazy(() => import("../../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -31,6 +32,22 @@ export function AppearanceSection() {
               { value: "dark", label: msg.settings.themeDark, icon: <IconMoon size={14} /> },
             ]}
           />
+        </SettingRow>
+        <SettingRow label={msgSettings.interfaceSize} hint={msgSettings.interfaceSizeHint} id="interface-size">
+          <select
+            className="select"
+            aria-label={msgSettings.interfaceSize}
+            value={prefs.interfaceScale ? String(prefs.interfaceScale) : "auto"}
+            onChange={(event) => {
+              const value = event.target.value;
+              update((p) => ({ ...p, interfaceScale: value === "auto" ? null : Number(value) }));
+            }}
+          >
+            <option value="auto">{msgSettings.interfaceSizeAuto}</option>
+            {INTERFACE_SCALES.map((scale) => (
+              <option key={scale} value={String(scale)}>{`${scale}%`}</option>
+            ))}
+          </select>
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup title={msgSettings.motion}>

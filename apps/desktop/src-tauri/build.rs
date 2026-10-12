@@ -97,6 +97,7 @@ const COMMANDS: &[&str] = &[
     "serial_ports",
     "host_recent",
     "link_open",
+    "ui_zoom_set",
     "app_info",
     // backup and restore
     "backup_export",

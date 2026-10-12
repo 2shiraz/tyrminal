@@ -570,7 +570,13 @@ pub struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hosts_view: Option<HostsViewPreferences>,
+    /// Interface size in percent, one of [`INTERFACE_SCALES`]. `None`: automatic, from the
+    /// window size.
+    pub interface_scale: Option<u16>,
 }
+
+/// The interface sizes the user can choose, in percent.
+pub const INTERFACE_SCALES: [u16; 5] = [90, 100, 110, 125, 150];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -632,6 +638,7 @@ impl Default for Preferences {
             production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
             hosts_view: None,
             no_port_suggestions: false,
+            interface_scale: None,
         }
     }
 }
