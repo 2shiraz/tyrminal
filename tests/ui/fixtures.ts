@@ -3,6 +3,11 @@ import type { Page } from "@playwright/test";
 import { installMockBackend } from "./mock-backend.js";
 
 export interface MockOptions {
+  /** The production tag preference (P-26); default "prod". */
+  productionTag?: string;
+  /** The saved Hosts layout. The app's default is list; specs written for cards ask for "grid",
+   *  which is the mock's default. `null` leaves it unset, so the app's own default applies. */
+  hostsLayout?: "grid" | "list" | null;
   scenario?: "unlocked" | "empty" | "onboarding" | "locked";
   theme?: "dark" | "light";
   scheme?: string;

@@ -11,6 +11,8 @@ import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
 import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
 import { msgP } from "../lib/messages-privilege";
+import { ProductionConfirm } from "../features/hosts/ProductionConfirm";
+import { useIsProduction } from "../features/hosts/production";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
@@ -52,6 +54,7 @@ import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
+import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
@@ -242,6 +245,25 @@ function Shell() {
     }
     panelMemory.retain(live);
   }, [ws, statuses]);
+
+  // Panes connected to a production host (P-26), with the host's label, from the saved host and
+  // the production tag; follows changes to either.
+  const isProduction = useIsProduction();
+  const productionPanes = useMemo(() => {
+    const byId = new Map((data.hosts.value ?? []).map((h) => [h.id, h]));
+    const out = new Map<number, string>();
+    for (const p of Object.values(ws.panes)) {
+      const host = p.target.kind === "ssh" ? byId.get(p.target.hostId) : undefined;
+      if (host && isProduction(host)) out.set(p.id, host.label);
+    }
+    return out as ReadonlyMap<number, string>;
+  }, [ws, data.hosts.value, isProduction]);
+  // A broadcast that includes production panes waits for its own confirmation (P-26).
+  const [confirmBroadcast, setConfirmBroadcast] = useState<{
+    tabId: number;
+    confirmed: ReadonlyMap<number, string>;
+    production: number[];
+  } | null>(null);
 
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
@@ -754,6 +776,7 @@ function Shell() {
               ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
               : null
           }
+          production={productionPanes}
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
@@ -860,6 +883,7 @@ function Shell() {
                 broadcasting={broadcasting}
                 broadcastPaneIds={memberPanes(members)}
                 onUserInput={relayInput}
+                production={productionPanes}
               />
             )}
           </Suspense>
@@ -1072,34 +1096,6 @@ function Shell() {
         />
       )}
 
-      {reviewing && (
-        <BroadcastReview
-          targets={reviewing.targets}
-          onCancel={() => {
-            setReviewing(null);
-            focusedHandle()?.focus();
-          }}
-          onConfirm={(chosen) => {
-            const { tabId, targets } = reviewing;
-            setReviewing(null);
-            const t = wsRef.current.tabs.find((x) => x.id === tabId);
-            const now = broadcastTargets(tabId);
-            const same =
-              t !== undefined &&
-              now.length === panesOf(t.layout).length &&
-              now.length === targets.length &&
-              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
-            if (!same) {
-              notify("danger", msgC.broadcast.changed);
-            } else {
-              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
-              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
-            }
-            focusedHandle()?.focus();
-          }}
-        />
-      )}
-
       {savingAs && (
         <SaveLayoutDialog
           initialName={ws.template?.name ?? ""}
@@ -1156,6 +1152,61 @@ function Shell() {
           }}
           onClose={() => {
             setSearchingSessions(false);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {reviewing && (
+        <BroadcastReview
+          targets={reviewing.targets}
+          production={productionPanes}
+          onCancel={() => {
+            setReviewing(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={(chosen) => {
+            const { tabId, targets } = reviewing;
+            setReviewing(null);
+            const t = wsRef.current.tabs.find((x) => x.id === tabId);
+            const now = broadcastTargets(tabId);
+            const same =
+              t !== undefined &&
+              now.length === panesOf(t.layout).length &&
+              now.length === targets.length &&
+              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            if (!same) {
+              notify("danger", msgC.broadcast.changed);
+            } else {
+              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
+              const production = [...confirmed.keys()].filter((id) => productionPanes.has(id));
+              if (confirmed.size >= 2 && production.length > 0) {
+                // Production panes join only after their own confirmation, naming the hosts (P-26).
+                setConfirmBroadcast({ tabId, confirmed, production });
+                return;
+              }
+              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
+            }
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {confirmBroadcast && (
+        <ProductionConfirm
+          title={msgProduction.broadcastTitle}
+          body={msgProduction.broadcastBody}
+          confirmLabel={msgProduction.broadcastConfirm}
+          hosts={[...new Set(confirmBroadcast.production.map((p) => productionPanes.get(p) ?? ""))].filter(Boolean)}
+          onCancel={() => {
+            setConfirmBroadcast(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const { tabId, confirmed } = confirmBroadcast;
+            setConfirmBroadcast(null);
+            // The same rules as any broadcast: pruned if a pane leaves, reconnects or stops.
+            setMembers((current) => withTab(current, tabId, confirmed));
             focusedHandle()?.focus();
           }}
         />

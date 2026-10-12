@@ -9,6 +9,7 @@ import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
 import { msgC } from "../../lib/messages-c";
+import { msgProduction } from "../../lib/messages-production";
 import { IconButton } from "../ui/controls";
 import { IconArrowUpRight, IconColumns2, IconGripVertical, IconMaximize2, IconMinimize2, IconRows2, IconX } from "../ui/icons";
 
@@ -42,6 +43,7 @@ export function PaneGrid({
   broadcasting,
   broadcastPaneIds,
   onUserInput,
+  production,
 }: {
   ws: Workspace;
   prefs: TerminalPreferences;
@@ -70,6 +72,8 @@ export function PaneGrid({
   /** Panes confirmed to receive broadcast input (P-13); others in a broadcasting tab were left out. */
   broadcastPaneIds?: ReadonlySet<number> | undefined;
   onUserInput: (tab: number, pane: number, bytes: Uint8Array) => void;
+  /** Panes connected to a production host (P-26): a red border and a "Production" label. */
+  production?: ReadonlyMap<number, string>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -118,6 +122,7 @@ export function PaneGrid({
               data-has-directory={pane.directory ? true : undefined}
               data-focused={focused}
               data-broadcast={broadcasting.has(tab.id) ? (broadcastPaneIds && !broadcastPaneIds.has(id) ? "excluded" : true) : undefined}
+              data-production={production?.has(id) || undefined}
               data-drop={dragPane && dragPane.over === id && dragPane.from !== id ? "swap" : undefined}
               aria-label={pane.label}
               style={style}
@@ -132,6 +137,12 @@ export function PaneGrid({
                 setDragPane(null);
               }}
             >
+              {/* A single pane shows the label in its corner; split panes in their header. */}
+              {!isSplit && production?.has(id) && (
+                <span className="badge badge-production pane-production">
+                  {msgProduction.label}
+                </span>
+              )}
               {isSplit && (
                 <div className="pane-header">
                   <span
@@ -153,6 +164,11 @@ export function PaneGrid({
                     {pane.label}
                     <span className="pane-identity"> · {pane.identity}</span>
                   </span>
+                  {production?.has(id) && (
+                    <span className="badge badge-production tab-production">
+                      {msgProduction.label}
+                    </span>
+                  )}
                   {broadcasting.has(tab.id) && broadcastPaneIds && !broadcastPaneIds.has(id) && <span className="faint">{msgI.broadcast.excluded}</span>}
                   {canOpen && (
                     <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>

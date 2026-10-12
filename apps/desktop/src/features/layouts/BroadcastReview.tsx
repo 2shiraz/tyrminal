@@ -5,6 +5,7 @@ import { IconRadio } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgI } from "../../lib/messages-input";
+import { msgProduction } from "../../lib/messages-production";
 
 export interface BroadcastTarget {
   paneId: number;
@@ -21,10 +22,13 @@ export interface BroadcastTarget {
  */
 export function BroadcastReview({
   targets,
+  production,
   onConfirm,
   onCancel,
 }: {
   targets: BroadcastTarget[];
+  /** Panes connected to a production host (P-26), marked in the list. */
+  production?: ReadonlyMap<number, string>;
   /** The panes the user kept. */
   onConfirm: (chosen: ReadonlySet<number>) => void;
   onCancel: () => void;
@@ -53,6 +57,7 @@ export function BroadcastReview({
               <span>{t.label}</span>
               <span className="faint mono">{t.identity}</span>
             </span>
+            {production?.has(t.paneId) && <span className="badge badge-production">{msgProduction.label}</span>}
           </li>
         ))}
       </ul>

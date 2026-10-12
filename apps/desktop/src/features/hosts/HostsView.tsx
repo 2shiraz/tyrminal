@@ -1,6 +1,19 @@
-import type { BulkHostChange, GroupSummary, HostOs, HostSummary, IdentityAssignment, KeySummary, SettingsTarget } from "@tyrminal/contracts";
+import type {
+  BulkHostChange,
+  GroupSummary,
+  HostOs,
+  HostSummary,
+  HostsFilter,
+  HostsLayout,
+  HostsSort,
+  HostsViewPreferences,
+  IdentityAssignment,
+  KeySummary,
+  SettingsTarget,
+} from "@tyrminal/contracts";
 import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
 import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
@@ -36,6 +49,7 @@ import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -44,6 +58,7 @@ import { groupPath } from "./hostForm";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+import { useIsProduction } from "./production";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
 import { EnvironmentDialog } from "./EnvironmentDialog";
@@ -83,8 +98,6 @@ function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number
   return out;
 }
 
-type GroupFilter = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
-
 function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
   const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
@@ -96,8 +109,8 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   );
 }
 
-type Layout = "grid" | "list";
-type Sort = "name" | "recent" | "address" | "group";
+/** How Hosts is shown until the user changes it; the choice is kept in preferences. */
+const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "all" } };
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
 function rangeBetween(order: string[], from: string, to: string): string[] {
@@ -119,11 +132,20 @@ export function HostsView({
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const notify = useToast();
+  const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
-  const [layout, setLayout] = useState<Layout>("grid");
-  const [sort, setSort] = useState<Sort>("name");
-  const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
+  // Layout, sort and group filter live in preferences, so they survive other views and restarts.
+  const { prefs, update } = usePreferences();
+  const view = prefs.hostsView ?? DEFAULT_VIEW;
+  const { layout, sort } = view;
+  const setView = useCallback(
+    (change: Partial<HostsViewPreferences>) => update((p) => ({ ...p, hostsView: { ...(p.hostsView ?? DEFAULT_VIEW), ...change } })),
+    [update],
+  );
+  const setLayout = (next: HostsLayout) => setView({ layout: next });
+  const setSort = (next: HostsSort) => setView({ sort: next });
+  const setFilter = (next: HostsFilter) => setView({ filter: next });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
   // state (a password typed but not set).
@@ -158,6 +180,10 @@ export function HostsView({
   const action = useAction();
   const keyList = keys.value ?? [];
   const groupList = groups.value ?? [];
+  // A remembered group that no longer exists shows every host.
+  const savedFilter = view.filter;
+  const filter: HostsFilter =
+    savedFilter.kind === "group" && groups.value && !groups.value.some((g) => g.id === savedFilter.id) ? { kind: "all" } : savedFilter;
   const tree = useMemo(() => groupTree(groupList), [groupList]);
 
   // Hosts with an open session, from the user's own tabs (no probing of servers).
@@ -482,7 +508,7 @@ export function HostsView({
                 />
               </div>
               <span className="spacer" />
-              <Segmented<Sort>
+              <Segmented<HostsSort>
                 label={msg.hosts.sort}
                 value={sort}
                 onChange={setSort}
@@ -493,7 +519,7 @@ export function HostsView({
                   { value: "group", label: msgD.inventory.sortGroup },
                 ]}
               />
-              <Segmented<Layout>
+              <Segmented<HostsLayout>
                 label={msg.hosts.view}
                 value={layout}
                 onChange={setLayout}
@@ -581,6 +607,7 @@ export function HostsView({
                       </div>
                       <div className="host-card-meta">
                         <div className="host-card-badges">
+                        {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                         {identityOf(host.id) ? (
                           <span className="badge">
                             <IconUser size={12} />
@@ -636,6 +663,7 @@ export function HostsView({
                       {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                     </span>
                   </div>
+                  {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                   {connected.has(host.id) && (
                     <span className="badge badge-success">
                       <span className="status-dot" data-tone="ok" aria-hidden="true" />

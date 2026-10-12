@@ -45,10 +45,15 @@ fn services_announced_on_the_chosen_network_are_found_cleaned_and_bounded_in_tim
     let started = discovery.start_on_interface("test", &lo, Duration::from_secs(8)).expect("start");
     assert!(started.running && started.found.is_empty());
 
+    // Count only this test's announcements: the machine itself may announce `_ssh._tcp` on
+    // loopback too (macOS runners' sshd does).
+    let own_host = host.trim_end_matches('.').to_owned();
+    let own =
+        |status: &tyrminal_core::contracts::DiscoveryStatus| status.found.iter().filter(|s| s.host == own_host).count();
     let deadline = Instant::now() + Duration::from_secs(8);
     let status = loop {
         let status = discovery.status("test");
-        if status.found.len() >= 2 || !status.running || Instant::now() > deadline {
+        if own(&status) >= 2 || !status.running || Instant::now() > deadline {
             break status;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -72,7 +77,7 @@ fn services_announced_on_the_chosen_network_are_found_cleaned_and_bounded_in_tim
     }
     let stopped = discovery.status("test");
     assert_eq!(stopped.seconds_left, 0);
-    assert_eq!(stopped.found.len(), status.found.len());
+    assert_eq!(own(&stopped), own(&status));
 
     // A browse also ends by itself when its time is up.
     discovery.start_on_interface("test", &lo, Duration::from_millis(600)).unwrap();

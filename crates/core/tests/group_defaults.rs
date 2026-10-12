@@ -25,6 +25,7 @@ fn group(name: &str, parent: Option<&str>) -> GroupInput {
         username: None,
         port: None,
         key_id: None,
+        production: false,
     }
 }
 
@@ -41,6 +42,7 @@ fn host(label: &str, group: Option<&str>) -> HostInput {
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 

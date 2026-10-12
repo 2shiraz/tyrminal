@@ -32,6 +32,7 @@ fn group(name: &str, parent: Option<&str>) -> GroupInput {
         username: None,
         port: None,
         key_id: None,
+        production: false,
     }
 }
 
@@ -48,6 +49,7 @@ fn host(label: &str, group: Option<&str>) -> HostInput {
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 
@@ -793,6 +795,49 @@ async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_
     core.vault.delete_group(&root.id).await.unwrap();
     assert_eq!(core.vault.list_identities().await.unwrap()[0].used_by, 0);
     assert!(core.vault.list_identity_assignments().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn production_is_set_on_hosts_or_groups_inherited_kept_and_copied() {
+    use tyrminal_core::contracts::ProductionSource;
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let live = v.save_group(GroupInput { production: true, ..group("Live", None) }).await.unwrap();
+    assert!(live.production);
+    let eu = v.save_group(group("EU", Some(&live.id))).await.unwrap();
+    assert!(!eu.production, "a group's own flag is not inherited into its summary");
+    let lab = v.save_group(group("Lab", None)).await.unwrap();
+
+    let deep = v.save_host(host("eu-db", Some(&eu.id))).await.unwrap();
+    assert_eq!(deep.production, Some(ProductionSource::Group));
+    let own = v.save_host(HostInput { production: true, ..host("bastion", Some(&lab.id)) }).await.unwrap();
+    assert_eq!(own.production, Some(ProductionSource::Host));
+    let plain = v.save_host(host("scratch", Some(&lab.id))).await.unwrap();
+    assert_eq!(plain.production, None);
+    // Tags never set the flag in the core; the production tag is applied by the interface.
+    let tagged = v.save_host(HostInput { tags: vec!["prod".into()], ..host("tagged", None) }).await.unwrap();
+    assert_eq!(tagged.production, None);
+
+    // A duplicate keeps the flag; moving out of the production group drops the inherited one.
+    let copy = v.duplicate_host(&own.id).await.unwrap();
+    assert_eq!(copy.production, Some(ProductionSource::Host));
+    v.bulk_update_hosts(std::slice::from_ref(&deep.id), BulkHostChange::MoveToGroup { group_id: Some(lab.id.clone()) })
+        .await
+        .unwrap();
+    let hosts = v.list_hosts().await.unwrap();
+    assert_eq!(hosts.iter().find(|h| h.id == deep.id).unwrap().production, None);
+
+    // Turning the group flag off clears it for everything below; the records survive a reopen.
+    v.save_group(GroupInput { id: Some(live.id.clone()), production: false, ..group("Live", None) }).await.unwrap();
+    v.save_host(HostInput { id: Some(deep.id.clone()), ..host("eu-db", Some(&eu.id)) }).await.unwrap();
+    assert_eq!(v.list_hosts().await.unwrap().iter().find(|h| h.id == deep.id).unwrap().production, None);
+    drop(core);
+    let reopened = Core::open(&dir.path().join("vault.db")).unwrap();
+    reopened.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let hosts = reopened.vault.list_hosts().await.unwrap();
+    assert_eq!(hosts.iter().find(|h| h.id == own.id).unwrap().production, Some(ProductionSource::Host));
+    assert!(!reopened.vault.list_groups().await.unwrap().iter().any(|g| g.production));
 }
 
 /// A saved target may name groups as well as hosts (SNP-06); the hosts of a group are worked out
