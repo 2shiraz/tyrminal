@@ -332,11 +332,16 @@ test("a dropped SSH session reconnects on its own with backoff; Stop retrying an
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/, { timeout: 5000 });
   expect(await opens()).toBe(before + 1);
 
-  // Stop retrying leaves the normal failure view with a manual Reconnect.
+  // Stop retrying leaves the normal failure view with a manual Reconnect. Time is paused so the
+  // one-second countdown cannot win the race against the click on a slow machine.
+  await page.clock.pauseAt(new Date("2026-10-11T12:00:01Z"));
   await page.evaluate(() => (window as unknown as { __mockDrop: () => void }).__mockDrop());
   await expect(notice).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(notice).toBeVisible(); // the paused countdown has not fired
   await page.getByRole("button", { name: "Stop retrying" }).click();
   await expect(notice).toHaveCount(0);
+  await page.clock.resume();
   await page.waitForTimeout(2500);
   expect(await opens()).toBe(before + 1);
   await page.getByRole("button", { name: "Reconnect", exact: true }).click();
