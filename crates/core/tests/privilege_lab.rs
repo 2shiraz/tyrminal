@@ -175,10 +175,12 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
 
     // A server-printed "sudo prompt" gets nothing on its own: after two seconds the terminal
     // input holds no bytes. (POSIX sh: the lab's login shell may be dash. The markers are split
-    // in the command so its echo never matches.)
+    // in the command so its echo never matches. Some terminals, such as WSL's, block a read with
+    // MIN 0 TIME 0, so a watchdog ends the read after two seconds; it then counts what it got.)
     c.send(concat!(
         "printf '[sudo] password for %s: ' \"$(id -un)\"; sleep 2; ",
-        "stty -echo -icanon min 0 time 0; n=$(dd bs=256 count=1 2>/dev/null | wc -c); stty sane; ",
+        "stty -echo -icanon min 0 time 0; ",
+        "n=$( (dd bs=256 count=1 </dev/tty 2>/dev/null & d=$!; (sleep 2; kill $d) >/dev/null 2>&1 & wait $d) | wc -c); stty sane; ",
         "echo \"SPO\"\"OF:$((n))\"\n"
     ))
     .await;
@@ -186,7 +188,8 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
     // Control: the same check does count bytes that arrive while the fake prompt is shown.
     c.send(concat!(
         "printf 'again: '; sleep 2; ",
-        "stty -echo -icanon min 0 time 0; n=$(dd bs=256 count=1 2>/dev/null | wc -c); stty sane; ",
+        "stty -echo -icanon min 0 time 0; ",
+        "n=$( (dd bs=256 count=1 </dev/tty 2>/dev/null & d=$!; (sleep 2; kill $d) >/dev/null 2>&1 & wait $d) | wc -c); stty sane; ",
         "echo \"CONT\"\"ROL:$((n))\"\n"
     ))
     .await;
