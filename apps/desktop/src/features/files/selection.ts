@@ -96,24 +96,8 @@ export function toggleKey(event: { metaKey: boolean; ctrlKey: boolean }): boolea
   return /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
 }
 
-/**
- * Immediate pressed feedback: the row is marked on pointer down and stays marked for at least
- * `PRESS_MS`, so even a quick click is visibly registered.
- */
-export const PRESS_MS = 100;
-
-export function pressFeedback(element: HTMLElement) {
-  const started = performance.now();
-  element.dataset.pressed = "true";
-  const release = () => {
-    window.removeEventListener("pointerup", release, true);
-    window.removeEventListener("pointercancel", release, true);
-    const left = Math.max(0, PRESS_MS - (performance.now() - started));
-    window.setTimeout(() => delete element.dataset.pressed, left);
-  };
-  window.addEventListener("pointerup", release, true);
-  window.addEventListener("pointercancel", release, true);
-}
+// Immediate pressed feedback now lives in lib/press.ts and covers every pressable element.
+export { PRESS_MS, pressFeedback } from "../../lib/press";
 
 /** How long typed letters keep adding to one type-ahead search. */
 export const TYPE_AHEAD_MS = 800;

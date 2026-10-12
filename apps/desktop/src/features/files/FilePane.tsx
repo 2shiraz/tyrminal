@@ -51,9 +51,10 @@ import { msgFiles } from "./messages";
 import { PathBar } from "./PathBar";
 import { NO_SELECTION, type Selection, pruneSelection, selectionSummary, single } from "./selection";
 import "./files.css";
+import { LOADING_DELAY_MS } from "../../lib/useDelayed";
 
 /** After this long, opening a folder shows a progress bar (the row shows it at once). */
-const SLOW_MS = 300;
+const SLOW_MS = LOADING_DELAY_MS;
 
 /** Drag payload between file panes (the Files panel's two panes, the SFTP tab's two panes). */
 export const FILE_DRAG = "application/x-tyrminal-files";
