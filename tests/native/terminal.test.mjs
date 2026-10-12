@@ -83,7 +83,13 @@ describe("terminal with real applications", { concurrency: false }, () => {
 
   test("wide and combining characters occupy the right number of cells", async () => {
     // Each pair of lines puts an X at the same column after different-width text.
-    await run("printf '日本語X\\nabcdefX\\n🚀X\\nabX\\ne\\314\\201X\\naX\\nWIDTH-DONE\\n'", "WIDTH-DONE");
+    // Octal escapes keep the typed command ASCII: this test is about rendering widths, and
+    // typing CJK through WebDriver depends on the platform's input method (IME is covered by
+    // the UI tests). The bytes are 日本語, 🚀 and e + U+0301.
+    await run(
+      "printf '\\346\\227\\245\\346\\234\\254\\350\\252\\236X\\nabcdefX\\n\\360\\237\\232\\200X\\nabX\\ne\\314\\201X\\naX\\nWIDTH-DONE\\n'",
+      /^WIDTH-DONE$/m,
+    );
     const xs = await s.execute(`
       const rows = [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows > div")];
       const xOf = (prefix) => {
