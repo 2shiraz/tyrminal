@@ -46,6 +46,11 @@ test("findings are listed most serious first and reviewing changes nothing", asy
   await expect(finding(section, '"db-primary" signs in with a password')).toContainText("asked for on each connection");
   await expect(finding(section, 'Key "Legacy RSA" has no passphrase of its own')).toContainText("Its passphrase is stored with it");
   await expect(finding(section, "retired.example is trusted only by an RSA host key")).toContainText("never SHA-1");
+  // Each explanation says how to fix the finding, so none is cut off (no clipped or ellipsized text).
+  const clipped = await section
+    .locator("li[data-kind] .row-sub")
+    .evaluateAll((items) => items.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent));
+  expect(clipped).toEqual([]);
 
   // Only the review was asked for: no write, no network-shaped command.
   const after = (await calls(page)).slice(before);

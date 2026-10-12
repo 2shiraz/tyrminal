@@ -4536,6 +4536,17 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   list-style: none;
 }
 
+/* security review (P-27): a finding's explanation says how to fix it, so it wraps instead of
+   being cut off; fingerprints break anywhere. The action buttons keep their width. */
+.review-findings .row-sub {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.review-findings .review-actions {
+  flex-shrink: 0;
+}
+
 /* tmux and screen session awareness (P-31) */
 .mux-sessions {
   display: flex;

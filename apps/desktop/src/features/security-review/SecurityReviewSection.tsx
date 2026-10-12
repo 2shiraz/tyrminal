@@ -198,7 +198,7 @@ export function SecurityReviewSection({ onOpenKeychain }: { onOpenKeychain: () =
             {msgSR.scope(review.keys, review.hosts, review.certificates, review.knownHosts)}
           </p>
           {review.findings.length > 0 && (
-            <ul className="list" aria-label={msgSR.title}>
+            <ul className="list review-findings" aria-label={msgSR.title}>
               {review.findings.map((f, i) => {
                 const severity = severityOf(f);
                 const d = describe(f);
@@ -213,7 +213,7 @@ export function SecurityReviewSection({ onOpenKeychain }: { onOpenKeychain: () =
                       </span>
                       <span className="row-sub">{d.body}</span>
                     </div>
-                    <div className="row-flex">{d.actions}</div>
+                    <div className="row-flex review-actions">{d.actions}</div>
                   </li>
                 );
               })}
