@@ -238,6 +238,84 @@ pub async fn list_local(root: &Path, rel: &[String], max: usize) -> Result<(Vec<
     Ok((entries, truncated))
 }
 
+/// A new or existing name inside a chosen local folder: one plain component this platform can
+/// use as-is (never altered silently).
+fn local_child(root: &Path, rel: &[String], name: &str) -> Result<PathBuf, IpcError> {
+    if !local_name_ok(name) {
+        return Err(err(ErrorCode::InvalidInput, "That name cannot be used on this computer."));
+    }
+    let mut path = local_within(root, rel)?;
+    path.push(name);
+    Ok(path)
+}
+
+/// Creates a folder inside a chosen local folder. An existing name is a conflict.
+pub async fn local_make_dir(root: &Path, rel: &[String], name: &str) -> Result<(), IpcError> {
+    let path = local_child(root, rel, name)?;
+    match tokio::fs::create_dir(&path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(conflict()),
+        Err(e) => Err(local_io(&e)),
+    }
+}
+
+/// Renames an item inside a chosen local folder. Never replaces anything: an existing target
+/// name is a conflict (checked with a hard link where possible, so there is no race).
+pub async fn local_rename(root: &Path, rel: &[String], from: &str, to: &str) -> Result<(), IpcError> {
+    let source = local_child(root, rel, from)?;
+    let target = local_child(root, rel, to)?;
+    let meta = tokio::fs::symlink_metadata(&source).await.map_err(|e| local_io(&e))?;
+    if tokio::fs::symlink_metadata(&target).await.is_ok() {
+        return Err(conflict());
+    }
+    if meta.is_file() {
+        match tokio::fs::hard_link(&source, &target).await {
+            Ok(()) => return tokio::fs::remove_file(&source).await.map_err(|e| local_io(&e)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(conflict()),
+            Err(_) => {}
+        }
+    }
+    tokio::fs::rename(&source, &target).await.map_err(|e| local_io(&e))
+}
+
+/// Deletes a file, a link (never what it points to) or an empty folder inside a chosen local
+/// folder. A folder that is not empty is refused; nothing is deleted recursively.
+pub async fn local_remove(root: &Path, rel: &[String], name: &str) -> Result<(), IpcError> {
+    let path = local_child(root, rel, name)?;
+    let meta = tokio::fs::symlink_metadata(&path).await.map_err(|e| local_io(&e))?;
+    let removed = if meta.is_dir() { tokio::fs::remove_dir(&path).await } else { tokio::fs::remove_file(&path).await };
+    removed.map_err(|e| {
+        if meta.is_dir() && e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound
+        {
+            err(ErrorCode::IoError, "Only an empty folder can be deleted.")
+        } else {
+            local_io(&e)
+        }
+    })
+}
+
+/// Sets the permission bits of a file or folder inside a chosen local folder (not of links).
+pub async fn local_set_mode(root: &Path, rel: &[String], name: &str, mode: u32) -> Result<(), IpcError> {
+    if mode > 0o7777 {
+        return Err(err(ErrorCode::InvalidInput, "That is not a permission mode."));
+    }
+    let path = local_child(root, rel, name)?;
+    let meta = tokio::fs::symlink_metadata(&path).await.map_err(|e| local_io(&e))?;
+    if meta.file_type().is_symlink() {
+        return Err(err(ErrorCode::InvalidInput, "Permissions of a link cannot be changed."));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).await.map_err(|e| local_io(&e))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+        Err(err(ErrorCode::InvalidInput, "Permission modes are not used on this computer."))
+    }
+}
+
 pub(crate) fn temp_name(name: &str, token: &str) -> String {
     // Keeps the temporary name within the usual 255-byte limit whatever the target name is.
     let short: String = name.chars().take(64).collect();
@@ -590,6 +668,65 @@ mod tests {
         let (entries, truncated) = list_local(&root, &rel(&["sub"]), 100).await.unwrap();
         assert_eq!((entries.len(), truncated), (1, false));
         assert_eq!(entries[0].size, Some(1));
+    }
+
+    #[tokio::test]
+    async fn local_changes_stay_inside_the_chosen_folder_and_never_replace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("chosen");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        std::fs::write(root.join("b.txt"), b"b").unwrap();
+        std::fs::write(dir.path().join("outside.txt"), b"keep").unwrap();
+        let none: &[String] = &[];
+
+        local_make_dir(&root, none, "new").await.unwrap();
+        assert!(root.join("new").is_dir());
+        assert_eq!(local_make_dir(&root, none, "new").await.unwrap_err().code, ErrorCode::Conflict);
+        // Names are single components: nothing outside the chosen folder can be reached.
+        for bad in ["..", "../x", "a/b", "a\\b", "", "."] {
+            assert_eq!(local_make_dir(&root, none, bad).await.unwrap_err().code, ErrorCode::InvalidInput, "{bad:?}");
+            assert!(local_remove(&root, none, bad).await.is_err(), "{bad:?}");
+        }
+        let up = vec!["..".to_owned()];
+        assert_eq!(local_remove(&root, &up, "outside.txt").await.unwrap_err().code, ErrorCode::AccessDenied);
+        assert!(dir.path().join("outside.txt").exists());
+
+        // Rename never replaces.
+        assert_eq!(local_rename(&root, none, "a.txt", "b.txt").await.unwrap_err().code, ErrorCode::Conflict);
+        assert_eq!(std::fs::read(root.join("b.txt")).unwrap(), b"b");
+        local_rename(&root, none, "a.txt", "c.txt").await.unwrap();
+        assert!(!root.join("a.txt").exists() && root.join("c.txt").exists());
+        local_rename(&root, none, "new", "renamed").await.unwrap();
+        assert!(root.join("renamed").is_dir());
+
+        // Delete: files and empty folders only, never recursively.
+        std::fs::write(root.join("sub/inside.txt"), b"x").unwrap();
+        assert_eq!(local_remove(&root, none, "sub").await.unwrap_err().code, ErrorCode::IoError);
+        assert!(root.join("sub/inside.txt").exists());
+        local_remove(&root, &["sub".to_owned()], "inside.txt").await.unwrap();
+        local_remove(&root, none, "sub").await.unwrap();
+        assert!(!root.join("sub").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // A link is removed itself; what it points to stays. Its target's mode is not changed through it.
+            std::os::unix::fs::symlink(dir.path().join("outside.txt"), root.join("link")).unwrap();
+            assert_eq!(local_set_mode(&root, none, "link", 0o600).await.unwrap_err().code, ErrorCode::InvalidInput);
+            local_remove(&root, none, "link").await.unwrap();
+            assert!(dir.path().join("outside.txt").exists());
+            // No step may be a link either.
+            std::os::unix::fs::symlink(dir.path(), root.join("escape")).unwrap();
+            let via = vec!["escape".to_owned()];
+            assert_eq!(local_remove(&root, &via, "outside.txt").await.unwrap_err().code, ErrorCode::AccessDenied);
+            assert_eq!(local_make_dir(&root, &via, "planted").await.unwrap_err().code, ErrorCode::AccessDenied);
+            assert!(dir.path().join("outside.txt").exists() && !dir.path().join("planted").exists());
+
+            local_set_mode(&root, none, "c.txt", 0o640).await.unwrap();
+            assert_eq!(std::fs::metadata(root.join("c.txt")).unwrap().permissions().mode() & 0o7777, 0o640);
+            assert_eq!(local_set_mode(&root, none, "c.txt", 0o10000).await.unwrap_err().code, ErrorCode::InvalidInput);
+        }
     }
 
     #[test]

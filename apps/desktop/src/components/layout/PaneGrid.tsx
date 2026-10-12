@@ -2,6 +2,7 @@ import type { TerminalPreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState } from "react";
 
 import { type Direction, type Pane, type Workspace, panesOf, paneRects } from "../../app/workspace";
+import { SftpView } from "../../features/sftp/SftpView";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { IconButton } from "../ui/controls";
@@ -86,6 +87,13 @@ export function PaneGrid({
                       </div>
                     )}
                     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+                      {pane.target.kind === "sftp" ? (
+                        <SftpView
+                          visible={visible}
+                          onIndicator={(indicator) => onPatch(id, { indicator })}
+                          onOpenKnownHosts={onOpenKnownHosts}
+                        />
+                      ) : (
                       <TerminalView
                         paneId={id}
                         target={pane.target}
@@ -104,6 +112,7 @@ export function PaneGrid({
                         register={(handle) => register(id, handle)}
                         onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                       />
+                      )}
                     </div>
                   </section>
                 );

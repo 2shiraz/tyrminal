@@ -125,6 +125,7 @@ pub fn run() {
                 core.sessions.close_all_for_owner(window.label());
                 // agent B: tunnels and history
                 core.sessions.stop_tunnels_for_owner(window.label());
+                core.discovery.forget(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -161,6 +162,7 @@ pub fn run() {
             commands::inventory::import_hosts,
             commands::sessions::session_open_ssh,
             commands::sessions::session_open_local,
+            commands::sessions::session_open_files,
             commands::sessions::session_write,
             commands::sessions::session_resize,
             commands::sessions::session_ack,
@@ -186,6 +188,10 @@ pub fn run() {
             commands::files::files_upload_finish,
             commands::files::files_upload_abort,
             commands::files::files_local_list,
+            commands::files::files_local_mkdir,
+            commands::files::files_local_rename,
+            commands::files::files_local_remove,
+            commands::files::files_local_chmod,
             commands::files::files_copy,
             commands::files::files_edit_open,
             commands::files::files_edit_status,
@@ -200,10 +206,15 @@ pub fn run() {
             commands::settings::terminal_choices,
             commands::settings::editor_pick_app,
             commands::settings::diagnostics_report,
+            commands::output::terminal_output_save,
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
             commands::settings::app_info,
+            commands::discovery::discovery_networks,
+            commands::discovery::discovery_start,
+            commands::discovery::discovery_status,
+            commands::discovery::discovery_stop,
             commands::backup::backup_export,
             commands::backup::backup_choose,
             commands::backup::backup_preview,
@@ -255,6 +266,14 @@ pub fn run() {
             commands::inventory::startup_effective,
             commands::inventory::group_defaults_get,
             commands::inventory::group_defaults_set,
+            // command history
+            commands::command_history::history_settings_get,
+            commands::command_history::history_settings_set,
+            commands::command_history::history_add,
+            commands::command_history::history_suggest,
+            commands::command_history::history_list,
+            commands::command_history::history_delete,
+            commands::command_history::history_clear,
         ])
         .build(tauri::generate_context!());
 

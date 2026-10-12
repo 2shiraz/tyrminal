@@ -24,7 +24,9 @@ import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import type { CommandRecord } from "./commandOutput";
 import { schemeById } from "./schemes";
+import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
 import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
@@ -58,6 +60,14 @@ export interface PaneHandle {
   receiveBroadcast(bytes: Uint8Array): void;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
+  /** P-28: matches in this pane's scrollback (in memory only). */
+  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  /** P-28: scrolls a match into view and selects it. */
+  revealMatch(match: ScrollbackMatch): void;
+  /** P-29: commands the shell integration marked, newest first (empty without it). */
+  commands(): CommandRecord[];
+  /** P-29: the output of one finished command, or null when it is gone. */
+  commandOutput(id: number): string | null;
 }
 
 export interface SessionEnvironment {
@@ -89,7 +99,7 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
 }
 
-function Fingerprint({ value }: { value: string }) {
+export function Fingerprint({ value }: { value: string }) {
   const { algorithm, groups } = groupFingerprint(value);
   return (
     <div className="fingerprint" aria-label={value}>
@@ -275,6 +285,10 @@ export function TerminalView(props: TerminalViewProps) {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
       environment: () => environment.current,
+      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      revealMatch: (match) => controllerRef.current?.revealMatch(match),
+      commands: () => controllerRef.current?.commandOutputs.list() ?? [],
+      commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);
@@ -702,7 +716,7 @@ function LinkDialog({ url, onClose, onOpened }: { url: string; onClose: () => vo
   );
 }
 
-function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
+export function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
   const [secret, setSecret] = useState("");
   const isPassword = prompt.kind === "password";
   const isKbd = prompt.kind === "keyboard_interactive";

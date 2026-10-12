@@ -17,13 +17,17 @@ import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
+// command history
+import { installHistoryCapture } from "../features/history/historyCapture";
 import { insertionBytes } from "../features/autocomplete/suggest";
-import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
+import { CommandOutputDialog } from "../features/terminal/CommandOutputDialog";
+import { SearchSessionsDialog } from "../features/terminal/SearchSessionsDialog";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
 import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
@@ -32,6 +36,7 @@ import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
   type Direction,
+  type PaneTarget,
   type Workspace,
   activePane,
   activeTab,
@@ -84,6 +89,8 @@ function Shell() {
   const data = useVaultData();
   const notify = useToast();
   const [destination, setDestination] = useState<Destination>("home");
+  // command history: remembers commands from shell-integration marks while history is on.
+  useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
   // The side panel beside the terminals: snippets or files, one at a time.
@@ -93,6 +100,9 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
+  // P-28 and P-29: search across sessions, and the command-output dialog for one pane.
+  const [searchingSessions, setSearchingSessions] = useState(false);
+  const [outputFor, setOutputFor] = useState<number | null>(null);
   // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
   // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
@@ -171,7 +181,7 @@ function Shell() {
     setSettingsAt((current) => ({ section: "about", n: (current?.n ?? 0) + 1 }));
   }, [navigate]);
 
-  const open = useCallback((target: TerminalTarget, label: string, identity: string, startIn?: string) => {
+  const open = useCallback((target: PaneTarget, label: string, identity: string, startIn?: string) => {
     setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
@@ -185,6 +195,8 @@ function Shell() {
   );
 
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
+  // An SFTP tab: two file panes (this computer and a host picker); never split.
+  const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -193,7 +205,7 @@ function Shell() {
 
   const split = useCallback((dir: Direction) => {
     const p = activePane(wsRef.current);
-    if (p) setWs((current) => splitPane(current, p.id, dir));
+    if (p && p.target.kind !== "sftp") setWs((current) => splitPane(current, p.id, dir));
   }, []);
 
   const closeFocused = useCallback(() => {
@@ -358,7 +370,8 @@ function Shell() {
   }, [runAction]);
 
   const terminalVisible = tab !== null;
-  const showPanel = sidePanel !== null && terminalVisible;
+  const sftpVisible = pane?.target.kind === "sftp";
+  const showPanel = sidePanel !== null && terminalVisible && !sftpVisible;
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
@@ -391,6 +404,7 @@ function Shell() {
         onSelectTab={(id) => setWs((current) => selectTab(current, id))}
         onOpenPalette={() => setPaletteOpen(true)}
         onLocalTerminal={openLocal}
+        onSftp={openSftp}
         onToggleCollapsed={() => setCollapsed((v) => !v)}
         onLock={() => void vault.lock().catch(() => undefined)}
         onOpenAbout={openAbout}
@@ -411,7 +425,7 @@ function Shell() {
           onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
           onSplit={(id, dir) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
-            if (t) setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
+            if (t && wsRef.current.panes[t.focused]?.target.kind !== "sftp") setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
           }}
           onDuplicate={(id) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
@@ -423,12 +437,13 @@ function Shell() {
             open(p.target, p.label, p.identity, cwd);
           }}
           onNewLocal={openLocal}
+          onNewSftp={openSftp}
           onOpenPalette={() => setPaletteOpen(true)}
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
           {!terminalVisible && destination === "home" && (
-            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
+            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onSftp={openSftp} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
           )}
           {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
@@ -489,7 +504,9 @@ function Shell() {
                     return next;
                   });
                 }}
-                onSplit={(paneId, dir) => setWs((current) => splitPane(current, paneId, dir))}
+                onSplit={(paneId, dir) => {
+                  if (wsRef.current.panes[paneId]?.target.kind !== "sftp") setWs((current) => splitPane(current, paneId, dir));
+                }}
                 onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
                 onOpenKnownHosts={() => navigate("knownHosts")}
                 register={(paneId, handle) => {
@@ -504,12 +521,12 @@ function Shell() {
         </main>
 
         <StatusBar
-          pane={terminalVisible ? pane : null}
-          status={terminalVisible ? paneStatus : undefined}
+          pane={terminalVisible && !sftpVisible ? pane : null}
+          status={terminalVisible && !sftpVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible ? () => togglePanel("snippets") : undefined}
+          onTogglePanel={terminalVisible && !sftpVisible ? () => togglePanel("snippets") : undefined}
           filesOpen={sidePanel === "files"}
-          onToggleFiles={terminalVisible ? () => togglePanel("files") : undefined}
+          onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
@@ -523,7 +540,7 @@ function Shell() {
 
       {paletteOpen && (
         <CommandPalette
-          hasTerminal={terminalVisible && pane !== null}
+          hasTerminal={terminalVisible && pane !== null && !sftpVisible}
           terminalConnected={paneStatus?.state === "connected"}
           onClose={() => {
             setPaletteOpen(false);
@@ -534,6 +551,7 @@ function Shell() {
           onAction={runAction}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
+          onSftp={openSftp}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={
@@ -557,6 +575,8 @@ function Shell() {
                 }
               : undefined
           }
+          onSearchSessions={ws.tabs.length > 0 ? () => setSearchingSessions(true) : undefined}
+          onCommandOutput={pane && focusedHandle()?.commands().length ? () => setOutputFor(pane.id) : undefined}
           onShellIntegration={
             pane && paneStatus?.state === "connected"
               ? () => {
@@ -566,6 +586,47 @@ function Shell() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {searchingSessions && (
+        <SearchSessionsDialog
+          tabs={ws.tabs.map((t) => ({
+            tabId: t.id,
+            title: tabTitle(ws, t),
+            panes: panesOf(t.layout).flatMap((paneId) => {
+              const handle = handles.current.get(paneId);
+              const p = ws.panes[paneId];
+              return handle && p ? [{ paneId, label: p.label, handle }] : [];
+            }),
+          }))}
+          onReveal={(paneId, match) => {
+            setSearchingSessions(false);
+            setWs((current) => focusPane(current, paneId));
+            // After the tab is in front and laid out.
+            window.requestAnimationFrame(() =>
+              window.requestAnimationFrame(() => {
+                const handle = handles.current.get(paneId);
+                handle?.revealMatch(match);
+                handle?.focus();
+              }),
+            );
+          }}
+          onClose={() => {
+            setSearchingSessions(false);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {outputFor !== null && handles.current.get(outputFor) && (
+        <CommandOutputDialog
+          handle={handles.current.get(outputFor) as PaneHandle}
+          label={ws.panes[outputFor]?.label ?? ""}
+          onClose={() => {
+            setOutputFor(null);
+            focusedHandle()?.focus();
+          }}
         />
       )}
 
