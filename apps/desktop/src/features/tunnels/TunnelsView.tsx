@@ -5,7 +5,7 @@ import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
-import { EmptyState, ErrorNotice, IconButton, SkeletonRows } from "../../components/ui/controls";
+import { BoxEmpty, ErrorNotice, IconButton, SkeletonRows } from "../../components/ui/controls";
 import { IconCopy, IconEllipsis, IconPencil, IconPlay, IconPlus, IconRoute, IconTrash2, IconUnplug } from "../../components/ui/icons";
 import { tunnels as tunnelsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -178,12 +178,8 @@ export function TunnelsView({ sessions, onConnect }: { sessions: ConnectedSessio
           <ErrorNotice error={rules.error} />
           {rules.value === null && !rules.error && <SkeletonRows count={2} />}
           {rules.value && all.length === 0 && (
-            <EmptyState icon={<IconRoute size={26} />} title={msgB.tunnels.emptyTitle} body={msgB.tunnels.emptyBody} headingLevel={3}>
-              <button type="button" className="btn btn-primary" onClick={() => setEditing({ tunnel: null })}>
-                <IconPlus size={16} />
-                {msgB.tunnels.add}
-              </button>
-            </EmptyState>
+            // The page header has the one "New tunnel" button.
+            <BoxEmpty title={msgB.tunnels.emptyTitle}>{msgB.tunnels.emptyBody}</BoxEmpty>
           )}
           {all.length > 0 && (
             <ul className="list" aria-label={msgB.tunnels.saved} data-testid="tunnel-rules">

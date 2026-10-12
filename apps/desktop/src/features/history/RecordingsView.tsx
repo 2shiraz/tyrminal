@@ -5,7 +5,7 @@ import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
 import {
-  EmptyState,
+  BoxEmpty,
   ErrorNotice,
   IconButton,
   Notice,
@@ -20,7 +20,6 @@ import {
   IconBookmarkCheck,
   IconChevronLeft,
   IconEllipsis,
-  IconHistory,
   IconPencil,
   IconPlay,
   IconScrollText,
@@ -278,17 +277,10 @@ export function RecordingsView() {
           <ErrorNotice error={logs.error ?? opening.error} />
           {logs.value === null && !logs.error && <SkeletonRows count={3} />}
           {logs.value && all.length === 0 && (
-            <EmptyState
-              icon={<IconHistory size={26} />}
-              title={msgB.recordings.emptyTitle}
-              body={current?.enabled ? msgB.recordings.emptyOnBody : msgB.recordings.emptyOffBody}
-              headingLevel={3}
-            />
+            <BoxEmpty title={msgB.recordings.emptyTitle}>{current?.enabled ? msgB.recordings.emptyOnBody : msgB.recordings.emptyOffBody}</BoxEmpty>
           )}
           {all.length > 0 && shown.length === 0 && (
-            <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-              {msgB.recordings.noMatches}
-            </p>
+            <BoxEmpty>{msgB.recordings.noMatches}</BoxEmpty>
           )}
           {shown.length > 0 && (
             <ul className="list" aria-label={msgB.recordings.title} data-testid="recordings">

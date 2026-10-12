@@ -398,10 +398,29 @@ export function EmptyState({
  * The empty state inside a box: one left-aligned sentence and at most one action, in place of a
  * centred illustration (docs/design/revamp.md §4).
  */
-export function BoxEmpty({ children, action }: { children: ReactNode; action?: ReactNode }) {
+export function BoxEmpty({
+  children,
+  action,
+  title,
+  headingLevel = 3,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+  /** A short heading above the sentence, for a box that is the page's main list. */
+  title?: string;
+  headingLevel?: 2 | 3;
+}) {
+  const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <div className="box-empty">
-      <p>{children}</p>
+      {title ? (
+        <div className="box-empty-text">
+          <Heading>{title}</Heading>
+          <p>{children}</p>
+        </div>
+      ) : (
+        <p>{children}</p>
+      )}
       {action}
     </div>
   );
