@@ -80,6 +80,9 @@ static SERVER_B: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 struct Forwarder {
     port: u16,
     target: Arc<Mutex<SocketAddr>>,
+    /// Local ports of the connections made to the backend, in order: what the server logs as the
+    /// client's port, so a test can pick its own connections out of a shared server's log.
+    upstream_ports: Arc<Mutex<Vec<u16>>>,
 }
 
 impl Forwarder {
@@ -87,18 +90,33 @@ impl Forwarder {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let target = Arc::new(Mutex::new(target));
-        let shared = Arc::clone(&target);
+        let upstream_ports = Arc::new(Mutex::new(Vec::new()));
+        let (shared, ports) = (Arc::clone(&target), Arc::clone(&upstream_ports));
         tokio::spawn(async move {
             while let Ok((mut inbound, _)) = listener.accept().await {
                 let backend = *shared.lock().unwrap();
+                let ports = Arc::clone(&ports);
                 tokio::spawn(async move {
                     if let Ok(mut outbound) = TcpStream::connect(backend).await {
+                        if let Ok(local) = outbound.local_addr() {
+                            ports.lock().unwrap().push(local.port());
+                        }
                         let _ = copy_bidirectional(&mut inbound, &mut outbound).await;
                     }
                 });
             }
         });
-        Self { port, target }
+        Self { port, target, upstream_ports }
+    }
+
+    /// Lines of `lines` that belong to one of this forwarder's connections.
+    fn own_lines(&self, lines: &[String]) -> Vec<String> {
+        let ports = self.upstream_ports.lock().unwrap().clone();
+        lines
+            .iter()
+            .filter(|l| ports.iter().any(|p| l.contains(&format!(" port {p} ")) || l.ends_with(&format!(" port {p}"))))
+            .cloned()
+            .collect()
     }
     fn retarget(&self, target: SocketAddr) {
         *self.target.lock().unwrap() = target;
@@ -402,7 +420,13 @@ impl Fixture {
     }
 
     async fn key_host(&self, server: &str) -> String {
-        let key_id = self.import("ed25519", None, false).await;
+        // The vault refuses a second copy of a key it holds, so a test with several key hosts
+        // shares the one imported lab key.
+        let existing = self.core.vault.list_keys().await.unwrap().into_iter().find(|k| k.label == "lab ed25519");
+        let key_id = match existing {
+            Some(key) => key.id,
+            None => self.import("ed25519", None, false).await,
+        };
         self.host("lab", self.lab.port(server), &self.lab.str("/user"), HostAuthInput::Key { key_id }).await
     }
 }
@@ -3132,7 +3156,13 @@ async fn a_run_only_connection_never_trusts_by_itself_and_refuses_a_changed_key(
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     assert_eq!(client.until_closed().await.0, None);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let lines = new_log_lines(&f.lab, "a", log_before);
+    // Server "a" is shared with tests running in parallel: only this test's connections count,
+    // and the filter must have found this connection's sign-in.
+    let lines = forwarder.own_lines(&new_log_lines(&f.lab, "a", log_before));
+    assert!(
+        lines.iter().any(|l| l.contains("Accepted publickey")),
+        "this connection's sign-in is in the log: {lines:#?}"
+    );
     for asked in ["Starting session: shell", "pty"] {
         assert!(!lines.iter().any(|l| l.contains(asked)), "a run-only connection asked for {asked:?}: {lines:#?}");
     }
