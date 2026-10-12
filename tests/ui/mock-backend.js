@@ -497,6 +497,33 @@ export function installMockBackend(options) {
       if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");
       return { token: a.token, rootName: "Projects", path: a.path, entries: localEntries(a.path), truncated: false };
     },
+    // Changes inside the chosen local folder (the SFTP tab's local pane).
+    files_local_mkdir: (a) => {
+      if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
+      if (!a.name || a.name.includes("/") || a.name === "..") fsErr("INVALID_INPUT", "That name cannot be used on this computer.");
+      const key = a.path.join("/");
+      const list = localTree.get(key) ?? [];
+      if (list.some((e) => e.name === a.name)) fsErr("CONFLICT", "Something with that name is already there.");
+      list.push({ name: a.name, kind: "dir" });
+      localTree.set(key, list);
+      localTree.set(key ? `${key}/${a.name}` : a.name, []);
+    },
+    files_local_rename: (a) => {
+      const list = localTree.get(a.path.join("/")) ?? [];
+      if (list.some((e) => e.name === a.to)) fsErr("CONFLICT", "Something with that name is already there.");
+      const entry = list.find((e) => e.name === a.from);
+      if (!entry) fsErr("NOT_FOUND", "The local file or folder is no longer there.");
+      entry.name = a.to;
+    },
+    files_local_remove: (a) => {
+      const key = a.path.join("/");
+      const list = localTree.get(key) ?? [];
+      const sub = key ? `${key}/${a.name}` : a.name;
+      if ((localTree.get(sub) ?? []).length > 0) fsErr("IO_ERROR", "Only an empty folder can be deleted.");
+      localTree.set(key, list.filter((e) => e.name !== a.name));
+      localTree.delete(sub);
+    },
+    files_local_chmod: () => null,
     files_edit_open: (a) => {
       const node = fs.get(childPath(a.dir, a.name));
       if (!node || node.kind !== "file") fsErr("INVALID_INPUT", "Only files can be opened for editing.");

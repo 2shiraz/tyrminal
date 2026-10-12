@@ -17,7 +17,7 @@ import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
-import type { TerminalTarget } from "../features/terminal/TerminalController";
+import { msgSftp } from "../features/sftp/messages";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
@@ -26,6 +26,7 @@ import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
   type Direction,
+  type PaneTarget,
   type Workspace,
   activePane,
   activeTab,
@@ -155,7 +156,7 @@ function Shell() {
     setWs((current) => selectTab(current, null));
   }, []);
 
-  const open = useCallback((target: TerminalTarget, label: string, identity: string) => {
+  const open = useCallback((target: PaneTarget, label: string, identity: string) => {
     setWs((current) => openTab(current, { target, label, identity }));
   }, []);
 
@@ -169,6 +170,8 @@ function Shell() {
   );
 
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
+  // An SFTP tab: two file panes (this computer and a host picker); never split.
+  const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -177,7 +180,7 @@ function Shell() {
 
   const split = useCallback((dir: Direction) => {
     const p = activePane(wsRef.current);
-    if (p) setWs((current) => splitPane(current, p.id, dir));
+    if (p && p.target.kind !== "sftp") setWs((current) => splitPane(current, p.id, dir));
   }, []);
 
   const closeFocused = useCallback(() => {
@@ -326,7 +329,8 @@ function Shell() {
   }, [runAction]);
 
   const terminalVisible = tab !== null;
-  const showPanel = sidePanel !== null && terminalVisible;
+  const sftpVisible = pane?.target.kind === "sftp";
+  const showPanel = sidePanel !== null && terminalVisible && !sftpVisible;
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
@@ -340,6 +344,7 @@ function Shell() {
         onSelectTab={(id) => setWs((current) => selectTab(current, id))}
         onOpenPalette={() => setPaletteOpen(true)}
         onLocalTerminal={openLocal}
+        onSftp={openSftp}
         onToggleCollapsed={() => setCollapsed((v) => !v)}
         onLock={() => void vault.lock().catch(() => undefined)}
         hostCount={data.hosts.value?.length ?? 0}
@@ -359,7 +364,7 @@ function Shell() {
           onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
           onSplit={(id, dir) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
-            if (t) setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
+            if (t && wsRef.current.panes[t.focused]?.target.kind !== "sftp") setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
           }}
           onDuplicate={(id) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
@@ -367,12 +372,13 @@ function Shell() {
             if (p) open(p.target, p.label, p.identity);
           }}
           onNewLocal={openLocal}
+          onNewSftp={openSftp}
           onOpenPalette={() => setPaletteOpen(true)}
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
           {!terminalVisible && destination === "home" && (
-            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
+            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onSftp={openSftp} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
           )}
           {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
@@ -433,7 +439,9 @@ function Shell() {
                     return next;
                   });
                 }}
-                onSplit={(paneId, dir) => setWs((current) => splitPane(current, paneId, dir))}
+                onSplit={(paneId, dir) => {
+                  if (wsRef.current.panes[paneId]?.target.kind !== "sftp") setWs((current) => splitPane(current, paneId, dir));
+                }}
                 onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
                 onOpenKnownHosts={() => navigate("knownHosts")}
                 register={(paneId, handle) => {
@@ -448,12 +456,12 @@ function Shell() {
         </main>
 
         <StatusBar
-          pane={terminalVisible ? pane : null}
-          status={terminalVisible ? paneStatus : undefined}
+          pane={terminalVisible && !sftpVisible ? pane : null}
+          status={terminalVisible && !sftpVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible ? () => togglePanel("snippets") : undefined}
+          onTogglePanel={terminalVisible && !sftpVisible ? () => togglePanel("snippets") : undefined}
           filesOpen={sidePanel === "files"}
-          onToggleFiles={terminalVisible ? () => togglePanel("files") : undefined}
+          onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
@@ -467,7 +475,7 @@ function Shell() {
 
       {paletteOpen && (
         <CommandPalette
-          hasTerminal={terminalVisible && pane !== null}
+          hasTerminal={terminalVisible && pane !== null && !sftpVisible}
           terminalConnected={paneStatus?.state === "connected"}
           onClose={() => {
             setPaletteOpen(false);
@@ -478,6 +486,7 @@ function Shell() {
           onAction={runAction}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
+          onSftp={openSftp}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={

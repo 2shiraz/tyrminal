@@ -153,6 +153,30 @@ a cancelled, failed or interrupted transfer never leaves a half-written file. If
 exists, Tyrminal asks: **Replace** or **Keep both** (which adds " (1)" and so on). Folders are
 never merged or replaced. Symbolic links inside folders are skipped and counted, never followed.
 
+### The SFTP tab
+
+Open an **SFTP** tab from the sidebar, the **+** menu of the tab strip, the Home page or the
+command palette. It shows two panes side by side: this computer on the left and **Connect to
+host** on the right. Either pane can show this computer or any saved SSH host; pick one from the
+list, or later from the pane's name at the top.
+
+- A host opens with file access only: Tyrminal checks the host key and signs in exactly as for
+  a terminal (same trust and password prompts, and a changed host key is refused), then opens
+  SFTP and nothing else. No shell or terminal is started on the server. Closing the tab, or
+  choosing another location for the pane, disconnects it.
+- On this computer, a pane shows a folder you choose and what is inside it, never anything
+  outside it.
+- Each pane has back and forward, **Up one folder**, clickable folder names (breadcrumbs), a
+  filter and columns **Name**, **Date Modified**, **Size** and **Kind** that sort when clicked;
+  the permissions appear under each name.
+- **Actions** (⋯) has New folder, Rename, Permissions, Delete (always asks first; a folder must
+  be empty), Refresh, hidden files and, with something selected, **Copy to** the other pane.
+  Delete and F2 also work on the selected item.
+- Drag an item onto the other pane to copy it there: this computer to a host, a host to this
+  computer, or one host to another (streamed through Tyrminal; nothing is saved locally).
+  Transfers appear in the queue at the bottom with progress and Cancel, and an existing name
+  asks for **Replace** or **Keep both** as everywhere else.
+
 **Edit** opens a remote file in a local application (Settings → Terminal → editors per file
 type, chosen with the system app picker). Nothing is uploaded until you click **Save**, and
 saving refuses if the file changed on the server since you opened it, unless you choose to

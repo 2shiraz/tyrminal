@@ -54,5 +54,23 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.getByRole("complementary", { name: "Snippets" })).toBeVisible();
       await audit(page);
     });
+
+    test("the SFTP tab: host picker, both panes listed, and the actions menu", async ({ page }) => {
+      await openApp(page, base);
+      await page.keyboard.press("Control+Shift+K");
+      await page.getByRole("combobox", { name: /Type a command/ }).fill("SFTP");
+      await page.keyboard.press("Enter");
+      const view = page.getByRole("region", { name: "SFTP file manager" });
+      await expect(view.getByRole("heading", { name: "Connect to host" })).toBeVisible();
+      await audit(page);
+      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
+      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await expect(view.getByRole("table", { name: /on api-gateway/ })).toBeVisible();
+      await view.getByRole("table", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
+      await audit(page);
+      await view.getByRole("button", { name: "Actions for the right pane" }).click();
+      await expect(page.getByRole("menu", { name: "Actions" })).toBeVisible();
+      await audit(page);
+    });
   });
 }

@@ -290,6 +290,13 @@ export const files = {
   /** Uploads the local copy; refused with CONFLICT if the server's copy changed, unless overwrite. */
   editSave: (editId: string, overwrite: boolean) => call<EditStatus>("files_edit_save", { editId, overwrite }),
   editClose: (editId: string) => call<void>("files_edit_close", { editId }),
+  /** Changes inside a local folder the user chose (by token); names are single components. */
+  localMkdir: (token: string, path: string[], name: string) => call<void>("files_local_mkdir", { token, path, name }),
+  localRename: (token: string, path: string[], from: string, to: string) =>
+    call<void>("files_local_rename", { token, path, from, to }),
+  localRemove: (token: string, path: string[], name: string) => call<void>("files_local_remove", { token, path, name }),
+  localChmod: (token: string, path: string[], name: string, mode: number) =>
+    call<void>("files_local_chmod", { token, path, name, mode }),
 };
 
 export const snippets = {
