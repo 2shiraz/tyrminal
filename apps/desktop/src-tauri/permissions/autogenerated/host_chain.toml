@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-chain"
+description = "Enables the host_chain command without any pre-configured scope."
+commands.allow = ["host_chain"]
+
+[[permission]]
+identifier = "deny-host-chain"
+description = "Denies the host_chain command without any pre-configured scope."
+commands.deny = ["host_chain"]

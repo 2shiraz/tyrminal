@@ -18,6 +18,8 @@ import {
   IconServer,
   IconSettings,
   IconX,
+  // agent B: tunnels and history
+  IconRoute,
 } from "../ui/icons";
 
 const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
@@ -27,6 +29,8 @@ const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
   keychain: IconKeyRound,
   knownHosts: IconFingerprint,
   settings: IconSettings,
+  // agent B: tunnels and history
+  tunnels: IconRoute,
 };
 
 export function TabStrip({

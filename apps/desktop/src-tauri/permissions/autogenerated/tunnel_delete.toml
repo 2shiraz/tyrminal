@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tunnel-delete"
+description = "Enables the tunnel_delete command without any pre-configured scope."
+commands.allow = ["tunnel_delete"]
+
+[[permission]]
+identifier = "deny-tunnel-delete"
+description = "Denies the tunnel_delete command without any pre-configured scope."
+commands.deny = ["tunnel_delete"]

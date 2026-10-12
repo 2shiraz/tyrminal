@@ -20,6 +20,8 @@ import {
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+// agent B: tunnels and history
+import { HopNotice } from "../tunnels/HopNotice";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
 import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -383,6 +385,8 @@ export function TerminalView(props: TerminalViewProps) {
             </div>
             {changed ? (
               <>
+                {/* agent B: tunnels and history */}
+                <HopNotice hop={changed.hop} />
                 <p>{msg.terminal.changedIntro}</p>
                 <div className="stack-xs">
                   <span className="label">{msg.terminal.changedPresented}</span>
@@ -440,6 +444,8 @@ export function TerminalView(props: TerminalViewProps) {
       {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}
       {showPrompts && trust && (
         <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => answerTrust("cancel")}>
+          {/* agent B: tunnels and history */}
+          <HopNotice hop={trust.hop} />
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
             {msg.terminal.trustIntro}
           </p>
@@ -695,6 +701,8 @@ function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: 
   return (
     <Dialog title={title} icon={<IconKeyRound size={18} />} onDismiss={() => onAnswer(null)}>
       <form className="stack" onSubmit={submit}>
+        {/* agent B: tunnels and history */}
+        <HopNotice hop={prompt.hop} />
         <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
           {body}
         </p>
