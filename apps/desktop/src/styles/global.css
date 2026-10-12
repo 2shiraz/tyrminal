@@ -3410,3 +3410,8 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .detached-note {
   padding: var(--space-5);
 }
+
+/* The selected item's secondary text keeps AA contrast on the accent background. */
+.focus-item[aria-current="true"] .faint {
+  color: var(--accent-text);
+}

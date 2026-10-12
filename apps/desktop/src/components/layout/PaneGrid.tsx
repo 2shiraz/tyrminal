@@ -132,7 +132,7 @@ export function PaneGrid({
                   <span className="status-dot" data-tone={pane.indicator} aria-hidden="true" />
                   <span className="truncate" style={{ flex: 1 }}>
                     {pane.label}
-                    <span style={{ opacity: 0.7 }}> · {pane.identity}</span>
+                    <span className="pane-identity"> · {pane.identity}</span>
                   </span>
                   {canOpen && (
                     <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>

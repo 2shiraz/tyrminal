@@ -666,3 +666,35 @@ test("palette and new-tab menu: switch to an open tab by name; reopen a recent c
   await expect(terminalTabs(page).nth(2)).toHaveText(new RegExp(label));
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(before + 1);
 });
+
+for (const theme of ["dark", "light"] as const)
+test(`accessibility (axe, WCAG 2.2 AA, ${theme}): focus layout, broadcast review, save-layout and encoding dialogs`, async ({ page }) => {
+  const { default: AxeBuilder } = await import("@axe-core/playwright");
+  const audit = async () => {
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).exclude(".xterm").analyze();
+    const summary = results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(" | ")}`);
+    expect(summary, summary.join("\n")).toEqual([]);
+  };
+  await openApp(page, { theme });
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
+  await page.keyboard.press("Control+Shift+Enter");
+  await expect(page.getByRole("navigation", { name: "Panes in this tab" })).toBeVisible();
+  await audit();
+  await page.keyboard.press("Control+Shift+Enter");
+
+  await paletteRun(page, "Type into every pane");
+  await expect(page.getByRole("alertdialog", { name: /Type into these 2 panes/ })).toBeVisible();
+  await audit();
+  await page.keyboard.press("Escape");
+
+  await paletteRun(page, "Save layout as");
+  await expect(page.getByRole("dialog", { name: "Save the open tabs as a layout" })).toBeVisible();
+  await audit();
+  await page.keyboard.press("Escape");
+
+  await paletteRun(page, "Change character encoding");
+  await expect(page.getByRole("dialog", { name: "Character encoding for this session" })).toBeVisible();
+  await audit();
+});
