@@ -2446,7 +2446,7 @@ impl Sessions {
                 // The engine's own errors (no such container, permission denied) arrive as
                 // terminal output and the exit status, as they are.
                 tokio::select! {
-                    outcome = pump(Transport::Ssh { reader, writer }, &entry.relay, input_rx, None) => outcome,
+                    outcome = pump(Transport::Ssh { reader, writer }, &entry.relay, &*sink, input_rx, None) => outcome,
                     why = until_ended(&parent) => Outcome::failed(ended(why)),
                 }
             };
