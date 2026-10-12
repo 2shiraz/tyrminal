@@ -1398,6 +1398,24 @@ kbd,
   border-top: 1px solid var(--border-subtle);
 }
 
+/* The version, small and muted under the footer actions; it opens Settings → About. */
+.sidebar-version {
+  justify-self: start;
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sidebar-version:hover {
+  color: var(--text-muted);
+}
+
+.shell[data-sidebar="collapsed"] .sidebar-version,
 .shell[data-sidebar="collapsed"] .nav-label,
 .shell[data-sidebar="collapsed"] .brand-name,
 .shell[data-sidebar="collapsed"] .sidebar-search .search-label,
@@ -2629,6 +2647,17 @@ mark {
 .auth-head p {
   color: var(--text-muted);
   font-size: var(--text-sm);
+}
+
+.auth-version {
+  position: absolute;
+  z-index: 1;
+  bottom: var(--space-4);
+  left: 0;
+  right: 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 .auth-foot {
