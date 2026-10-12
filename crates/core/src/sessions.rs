@@ -18,8 +18,8 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tyrminal_contracts::limits::{
     AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_DIR_ENTRIES, MAX_SECRET_LEN,
-    MAX_SESSIONS, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS, MAX_UNACKED_OUTPUT,
-    TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
+    MAX_SESSIONS, MAX_STARTUP_LINE_LEN, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS,
+    MAX_UNACKED_OUTPUT, TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostProtocol, IpcError, KeyDeployPreview, RemoteEntryKind,
@@ -138,6 +138,7 @@ pub struct Sessions {
     ended_logs: Mutex<std::collections::VecDeque<(String, String, Vec<String>)>>,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
+    pub(crate) recordings: crate::recording::Recordings,
     // agent D: inventory and snippets
     /// Snippet runs on exec channels, with their cancel switches.
     snippet_runs: crate::snippet_runs::Runs,
@@ -166,7 +167,7 @@ fn closed_event(error: Option<IpcError>, exit_status: Option<u32>) -> SessionEve
 }
 
 impl Sessions {
-    pub(crate) fn new(vault: Arc<VaultService>) -> Arc<Self> {
+    pub(crate) fn new(vault: Arc<VaultService>, logs_dir: std::path::PathBuf) -> Arc<Self> {
         Arc::new(Self {
             vault,
             entries: Mutex::new(HashMap::new()),
@@ -178,6 +179,7 @@ impl Sessions {
             ended_logs: Mutex::new(std::collections::VecDeque::new()),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
+            recordings: crate::recording::Recordings::new(logs_dir),
             // agent D: inventory and snippets
             snippet_runs: crate::snippet_runs::Runs::default(),
         })
@@ -279,7 +281,12 @@ impl Sessions {
         }
         let plan = self.vault.connection_plan(host_id).await?;
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), false)?;
-        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        // Session recording: wraps the relay, so a recording continues when the session moves
+        // to another window.
+        let relay: Arc<dyn SessionSink> = entry.relay.clone();
+        let sink = (self.recordings)
+            .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -300,11 +307,37 @@ impl Sessions {
         host_id: &str,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        self.open_files_with(owner, host_id, sink, false).await
+    }
+
+    /// A files-only connection that signs in to the host with a password the user types, whatever
+    /// the host is set to use, to install a key the server does not accept yet (with
+    /// [`Sessions::deploy_key_preview`] and [`Sessions::deploy_key`]). Host-key trust and the
+    /// password prompt are the normal ones; jump hosts sign in as they are set to.
+    pub async fn open_for_key_install(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        self.open_files_with(owner, host_id, sink, true).await
+    }
+
+    async fn open_files_with(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        sink: Arc<dyn SessionSink>,
+        ask_password: bool,
+    ) -> Result<SessionOpened, IpcError> {
         let endpoint = self.vault.host_endpoint(host_id).await?;
         if !matches!(endpoint.protocol, HostProtocol::Ssh) {
             return Err(invalid("Files are available for SSH hosts only."));
         }
-        let plan = self.vault.connection_plan(host_id).await?;
+        let mut plan = self.vault.connection_plan(host_id).await?;
+        if ask_password {
+            plan.auth = PlanAuth::Ask;
+        }
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
         // Nothing is ever sent to a terminal here: input, resize and snippets are refused before
         // they would reach this channel.
@@ -384,7 +417,7 @@ impl Sessions {
                 match crate::serial::open(&settings) {
                     Ok(link) => {
                         sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
-                        pump(Transport::Serial(link), &relay, input_rx, transcoder).await
+                        pump(Transport::Serial(link), &relay, &*relay, input_rx, transcoder).await
                     }
                     Err(error) => Outcome::failed(error),
                 }
@@ -437,7 +470,10 @@ impl Sessions {
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
         let (id, entry, input_rx) = self.register(owner, generation, sink, None, false)?;
         let relay = Arc::clone(&entry.relay);
-        let sink: Arc<dyn SessionSink> = relay.clone();
+        // Session recording (see open_ssh).
+        let sink = (self.recordings)
+            .wrap(&self.vault, generation, &id, "Local terminal".to_owned(), None, cols, rows, relay.clone())
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -505,6 +541,12 @@ impl Sessions {
         }
         // agent B: tunnels and history
         self.tunnel_runs.session_ended(session_id).await;
+        let reason = if self.vault.generation() == generation {
+            crate::records::LogEnd::Closed
+        } else {
+            crate::records::LogEnd::Locked
+        };
+        self.recordings.session_ended(&self.vault, session_id, reason).await;
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
@@ -519,6 +561,13 @@ impl Sessions {
     }
 
     /// The connected SSH link of a session the caller owns.
+    /// The window that owns a session now (it changes when the session moves to another window).
+    pub(crate) fn session_owner(&self, session_id: &str) -> Option<String> {
+        let entry = self.entries().get(session_id).cloned()?;
+        let owner = entry.owner().clone();
+        Some(owner)
+    }
+
     pub(crate) fn connection(
         &self,
         owner: &str,
@@ -1083,7 +1132,10 @@ impl Sessions {
             return Err(invalid("The terminal size is out of range."));
         }
         let entry = self.terminal(owner, session_id)?;
-        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())
+        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())?;
+        // Session recording
+        self.recordings.resize(session_id, cols, rows);
+        Ok(())
     }
 
     /// The renderer reports that its terminal has processed `bytes` of output.
@@ -1218,6 +1270,9 @@ impl Sessions {
             *owner = caller.to_owned();
             entry.relay.switch(sink);
         }
+        // Its forwards move with it, so the new window can list and stop them and closing the
+        // old window leaves them running.
+        self.tunnel_runs.reassign(&offer.session_id, caller);
         // Flow control changed; if the queue is full, queued input wakes the task anyway.
         let _ = entry.input.try_send(Input::Wake);
         Ok(offer.session_id)
@@ -1486,7 +1541,7 @@ async fn authenticate(
     auth: PlanAuth,
 ) -> Result<Option<ClientKey>, IpcError> {
     match auth {
-        PlanAuth::Key { private_key, passphrase } => {
+        PlanAuth::Key { private_key, passphrase, key_id, label } => {
             let mut passphrase = passphrase;
             let mut attempt = 0;
             let key = loop {
@@ -1506,10 +1561,33 @@ async fn authenticate(
                     Err(_) => return Err(err(ErrorCode::KeyInvalid, "The stored key could not be read.")),
                 }
             };
+            // Public facts only, so a refusal can be traced to the key that was offered.
+            let signs_with = conn.key_signature_algorithm(&key).await.map_err(|e| from_ssh(&e))?;
+            ctx.entry.log.note(&format!(
+                "offering the key \"{label}\" ({}, {}), signing with {signs_with}",
+                key.algorithm(),
+                key.fingerprint()
+            ));
             match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
                 // The key is kept only for agent forwarding, if the host has it on.
                 AuthOutcome::Success => Ok(Some(key)),
-                AuthOutcome::Failure { .. } => Err(auth_failed()),
+                AuthOutcome::Failure { remaining_methods, .. } => {
+                    ctx.entry.log.note(&crate::connlog::remaining_methods_line(&remaining_methods));
+                    // Say which key was refused, so the user can install it (or choose another).
+                    let hop = ctx.hop.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    let message = match hop.as_ref().filter(|h| h.index < h.total) {
+                        Some(jump) => format!(
+                            "The jump host \"{}\" did not accept the key \"{label}\". Its public key may not be installed there.",
+                            jump.label
+                        ),
+                        None => format!(
+                            "The server did not accept the key \"{label}\". Its public key may not be installed on this server."
+                        ),
+                    };
+                    ctx.entry.log.note(&format!("the server did not accept the key \"{label}\""));
+                    ctx.sink.event(SessionEvent::KeyRejected { key_id, label, hop });
+                    Err(IpcError { code: ErrorCode::AuthFailed, message })
+                }
             }
         }
         PlanAuth::Password(stored) => {
@@ -1620,7 +1698,7 @@ async fn run_ssh(
             // Startup snippets are typed alongside the pump, inside the session body: when the
             // session is closed or the vault locks, the supervisor drops both together, so the
             // typing (and the text not yet typed) never outlives the session.
-            let pumping = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder);
+            let pumping = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, &*ctx.sink, input, transcoder);
             let typing = async {
                 run_startup(&ctx.entry, startup).await;
                 std::future::pending::<Outcome>().await
@@ -1696,11 +1774,16 @@ async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
-    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy, plan.key_exchange);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
-    let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
+    let hops = plan
+        .jumps
+        .into_iter()
+        .map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy, hop.key_exchange));
     let mut chain: Vec<VerifiedConnection> = Vec::new();
-    for (index, (label, endpoint, username, auth, proxy)) in hops.chain(std::iter::once(first)).enumerate() {
+    for (index, (label, endpoint, username, auth, proxy, key_exchange)) in
+        hops.chain(std::iter::once(first)).enumerate()
+    {
         // Prompts name the hop when there is more than one, so a jump host's trust or password
         // prompt cannot be mistaken for the destination's.
         let hop = (total > 1).then(|| tyrminal_contracts::ChainPosition {
@@ -1736,18 +1819,26 @@ async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked
             entry: Arc::clone(&ctx.entry),
             sink: Arc::clone(&ctx.sink),
         };
-        let options = ConnectOptions::new(endpoint.clone());
+        let options = ConnectOptions { key_exchange, ..ConnectOptions::new(endpoint.clone()) };
+        let required = key_exchange == tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum;
+        let kex_error = |e: &SshError| match e {
+            SshError::NoCommonAlgorithm if required => err(
+                ErrorCode::ProtocolError,
+                "This server does not offer post-quantum key exchange, which this host requires. Nothing was sent to it.",
+            ),
+            other => from_ssh(other),
+        };
         let mut conn = match (chain.last(), proxy) {
-            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
+            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| kex_error(&e))?,
             (None, Some(proxy)) => {
                 let stream = tyrminal_ssh::connect_via_proxy(&proxy, &endpoint.host, endpoint.port)
                     .await
                     .map_err(crate::tunnels::proxy_error)?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
             (Some(via), _) => {
                 let stream = via.open_hop(&endpoint.host, endpoint.port).await.map_err(|e| hop_error(&e))?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
         };
         if let Some(n) = conn.negotiated() {
@@ -1904,6 +1995,16 @@ where
             note("startup snippet skipped: it was deleted");
             continue;
         };
+        // A line longer than the terminal's line buffer is cut or garbled, not run (macOS keeps
+        // 1024 bytes of an unfinished line while the shell is not reading), so it is not typed.
+        if let Some(line) = text.trim_end_matches('\n').split('\n').position(|l| l.len() > MAX_STARTUP_LINE_LEN) {
+            note(&format!(
+                "line {} of startup snippet \"{}\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed",
+                line + 1,
+                item.name
+            ));
+            continue;
+        }
         let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
         for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
             if !send(chunk.to_vec()).await {
@@ -1951,7 +2052,7 @@ async fn run_local(
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
             sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
-            pump(Transport::Local { reader, handle, recheck_size: None }, relay, input, None).await
+            pump(Transport::Local { reader, handle, recheck_size: None }, relay, &**sink, input, None).await
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
@@ -1992,7 +2093,8 @@ async fn run_telnet(
     let terminal = endpoint.terminal;
     let codec = crate::telnet::Codec::new(cols, rows, terminal.term.term());
     let link = TelnetLink { reader, writer, codec, replies: Vec::new() };
-    pump(Transport::Telnet(Box::new(link)), relay, input, crate::transcode::Transcoder::new(terminal.encoding)).await
+    pump(Transport::Telnet(Box::new(link)), relay, relay, input, crate::transcode::Transcoder::new(terminal.encoding))
+        .await
 }
 
 enum Transport {
@@ -2137,9 +2239,12 @@ fn lost() -> Outcome {
 }
 
 /// Moves bytes between the transport and the renderer until either side ends.
+/// `sink` carries flow control; `out` receives the output (the relay itself, or a recording that
+/// passes it on to the relay).
 async fn pump(
     mut transport: Transport,
     sink: &Relay,
+    out: &dyn SessionSink,
     mut input: mpsc::Receiver<Input>,
     mut transcoder: Option<crate::transcode::Transcoder>,
 ) -> Outcome {
@@ -2200,7 +2305,7 @@ async fn pump(
                         }
                     }
                     // The output that arrived before a drop is still shown.
-                    if !sink.output(batch) {
+                    if !out.output(batch) {
                         return Outcome::ended(exit_status);
                     }
                     if dropped {
@@ -2392,6 +2497,52 @@ mod snippet_tests {
                 "startup snippet \"one\" typed",
                 "startup snippet skipped: it was deleted",
                 "startup snippet \"two\" typed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_startup_snippet_with_a_line_too_long_for_a_terminal_is_skipped_not_garbled() {
+        let item = |name: &str, text: String| StartupItem { name: name.into(), text: Some(Zeroizing::new(text)) };
+        let fits = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 5));
+        let too_long = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 4));
+        assert_eq!(fits.len(), MAX_STARTUP_LINE_LEN);
+        let sent = std::sync::Mutex::new(Vec::<u8>::new());
+        let notes = std::sync::Mutex::new(Vec::<String>::new());
+        type_startup(
+            vec![
+                item("before", "echo before".into()),
+                // Every line counts, not just the first.
+                item("long", format!("echo ok\n{too_long}\necho never")),
+                item("multibyte", format!("echo {}", "é".repeat(MAX_STARTUP_LINE_LEN / 2))),
+                item("fits", format!("{fits}\n{fits}\n")),
+                item("after", "echo after".into()),
+            ],
+            |chunk| {
+                sent.lock().unwrap().extend_from_slice(&chunk);
+                async { true }
+            },
+            |line| notes.lock().unwrap().push(line.to_owned()),
+        )
+        .await;
+        let sent = String::from_utf8(sent.into_inner().unwrap()).unwrap();
+        assert!(
+            !sent.contains("echo ok") && !sent.contains("never") && !sent.contains('é'),
+            "nothing of a refused snippet is typed"
+        );
+        assert_eq!(sent, format!("echo before\r{fits}\r{fits}\recho after\r"));
+        assert_eq!(
+            *notes.lock().unwrap(),
+            [
+                "startup snippet \"before\" typed".to_owned(),
+                format!(
+                    "line 2 of startup snippet \"long\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                format!(
+                    "line 1 of startup snippet \"multibyte\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                "startup snippet \"fits\" typed".to_owned(),
+                "startup snippet \"after\" typed".to_owned(),
             ]
         );
     }

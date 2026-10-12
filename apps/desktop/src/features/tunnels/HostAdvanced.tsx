@@ -1,4 +1,4 @@
-import type { HostConnectionInput, HostSummary, InheritedRoute, ProxySummary, ProxyType } from "@tyrminal/contracts";
+import type { HostConnectionInput, HostSummary, InheritedRoute, KeyExchangeMode, ProxySummary, ProxyType } from "@tyrminal/contracts";
 import { useCallback, useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
@@ -15,6 +15,7 @@ interface Loaded {
   proxy: ProxySummary | null;
   /** HST-05: the host uses its group's route instead of its own. */
   inherit: boolean;
+  keyExchange: KeyExchangeMode;
 }
 
 /**
@@ -25,7 +26,8 @@ interface Loaded {
  * the editor) has a route, the host can use it instead of its own (HST-05).
  */
 export function useHostAdvanced(hostId: string | null, groupId: string | null = null) {
-  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, inherit: true });
+  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, inherit: true, keyExchange: "prefer_post_quantum" });
+  const [keyExchange, setKeyExchange] = useState<KeyExchangeMode>("prefer_post_quantum");
   const [inherit, setInherit] = useState(true);
   const [groupRoute, setGroupRoute] = useState<InheritedRoute | null>(null);
   const { groups } = useVaultData();
@@ -44,7 +46,8 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     void tunnelsApi.connection(hostId).then(
       (connection) => {
         if (!alive) return;
-        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, inherit: !connection.own });
+        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, inherit: !connection.own, keyExchange: connection.keyExchange });
+        setKeyExchange(connection.keyExchange);
         setInherit(!connection.own);
         setJumpHostId(connection.jumpHostId);
         if (connection.proxy) {
@@ -90,6 +93,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
   const input = useCallback(
     (): HostConnectionInput => ({
       jumpHostId,
+      keyExchange,
       proxy:
         proxyKind === "none"
           ? null
@@ -102,10 +106,11 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
             },
       inherit: usesGroup,
     }),
-    [jumpHostId, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
+    [jumpHostId, keyExchange, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
   );
 
   const changed =
+    keyExchange !== loaded.keyExchange ||
     usesGroup !== (loaded.inherit && groupRoute !== null) ||
     (!usesGroup &&
       (jumpHostId !== loaded.jumpHostId ||
@@ -140,6 +145,8 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     groupRoute,
     jumpHostId,
     setJumpHostId,
+    keyExchange,
+    setKeyExchange,
     proxy: { kind: proxyKind, host: proxyHost, port: proxyPort, user: proxyUser, password: proxyPassword, passwordStored },
     setProxyKind,
     setProxyHost,
@@ -152,6 +159,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
 }
 
 const PROXY_CHOICES: ProxyChoice[] = ["none", "http", "socks5"];
+const KEX_CHOICES: KeyExchangeMode[] = ["prefer_post_quantum", "require_post_quantum", "classic"];
 
 /** A route in words: "through bastion", "SOCKS5 proxy p.example", "directly". */
 export function routeSummary(route: { jumpHostId: string | null; proxy: ProxySummary | null }, labelOf: (id: string) => string): string {
@@ -175,7 +183,8 @@ export function HostAdvancedSection({
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
   const jump = options.find((h) => h.id === state.jumpHostId);
   const p = state.proxy;
-  const configured = state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null;
+  const configured =
+    state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null || state.keyExchange !== "prefer_post_quantum";
   const labelOf = (id: string) => (hosts.value ?? []).find((h) => h.id === id)?.label ?? msgB.advanced.missingJump;
   const route = state.groupRoute;
   const fields = (
@@ -271,6 +280,24 @@ export function HostAdvancedSection({
         )}
           </>
         )}
+
+        <label className="field">
+          <span className="label">{msgB.advanced.keyExchange}</span>
+          <select
+            className="select"
+            aria-label={msgB.advanced.keyExchange}
+            value={state.keyExchange}
+            disabled={!state.ready}
+            onChange={(event) => state.setKeyExchange(event.target.value as KeyExchangeMode)}
+          >
+            {KEX_CHOICES.map((choice) => (
+              <option key={choice} value={choice}>
+                {msgB.advanced.keyExchangeModes[choice]}
+              </option>
+            ))}
+          </select>
+          <span className="hint">{msgB.advanced.keyExchangeHints[state.keyExchange]}</span>
+        </label>
       </div>
   );
   if (embedded) return fields;

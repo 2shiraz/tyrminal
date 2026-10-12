@@ -14,6 +14,7 @@ mod discovery;
 mod dto;
 mod error;
 // agent B: tunnels and history
+mod history;
 mod tunnels;
 // agent D: inventory and snippets
 mod defaults;
@@ -35,6 +36,7 @@ pub use discovery::*;
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
+pub use history::*;
 pub use tunnels::*;
 
 // agent C: workspaces

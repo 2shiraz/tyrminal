@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { HighlightTone, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -23,10 +23,17 @@ import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import type { TokenKind } from "../highlight/builtins";
+import { highlightPalette } from "../highlight/palette";
+import { MouseMap } from "../mouse/mouseMap";
+import { type Token, tokenLinkProvider } from "../tokens/tokenLinks";
+import { CommandMarks } from "./commandMarks";
+import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
-import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { type PasteCheck, type PasteChecks, checkPaste, hasBracketEnd } from "./pasteSafety";
+import { decodeOsc52, ligatureRanges, parseOsc7, sanitizeTitle } from "./terminalPolicy";
 import { CommandOutputs } from "./commandOutput";
 import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
@@ -42,8 +49,8 @@ export interface TerminalCallbacks {
   onLink(url: string): void;
   /** The server asked to write `text` to the clipboard (OSC 52). */
   onClipboardWrite(text: string): void;
-  /** A paste needs review before it is sent; call `confirm` to send it. */
-  onPasteReview(text: string, bracketed: boolean, confirm: () => void): void;
+  /** A paste needs review before it is sent; `send` sends the reviewed (or cleaned) text. */
+  onPasteReview(text: string, check: PasteCheck, bracketed: boolean, send: (text: string) => void): void;
   onRenderer(kind: RendererKind, fellBack: boolean): void;
   onResize(cols: number, rows: number): void;
   onSearchResults(index: number, total: number): void;
@@ -53,6 +60,8 @@ export interface TerminalCallbacks {
   onOutput?(): void;
   /** Typed characters the session's encoding cannot represent; they were not sent. */
   onUnencodable?(chars: string[]): void;
+  /** The user clicked an address or (local terminals) a path in the output. */
+  onToken?(token: Token): void;
   /** The shell reported its working directory (OSC 7), already validated. */
   onDirectory?(path: string): void;
 }
@@ -187,6 +196,8 @@ export class TerminalController {
   private lastSize = { cols: 0, rows: 0 };
   private zoom = 0;
   private prefs: TerminalPreferences;
+  /** Paste checks for this session's host (P-25); every check is on unless the host lowers it. */
+  pasteChecks: PasteChecks = { multiline: true, trailingNewline: true };
   private readonly cleanups: (() => void)[] = [];
   /** Serializes input writes so chunks of one paste arrive in order. */
   private inputChain: Promise<void> = Promise.resolve();
@@ -201,6 +212,8 @@ export class TerminalController {
   /** Whether user input can be told apart from terminal replies (see the data handler). */
   broadcastable = false;
   private readonly highlighter: OutputHighlighter;
+  private readonly mouse: MouseMap;
+  private commands!: CommandMarks;
   private encoding = new SessionEncoding("utf-8");
 
   private publishCounters(): void {
@@ -231,12 +244,23 @@ export class TerminalController {
     this.term.unicode.activeVersion = "15-graphemes";
     // Detected URLs: activation is a click and then a confirmation dialog (never automatic).
     this.term.loadAddon(new WebLinksAddon((event, uri) => this.activateLink(event, uri)));
+    // Addresses and (local terminals) paths: hover underlines, a click opens their menu.
+    const tokens = this.term.registerLinkProvider(
+      tokenLinkProvider(this.term, { paths: () => this.target?.kind === "local", onToken: (token) => this.callbacks.onToken?.(token) }),
+    );
+    this.cleanups.push(() => tokens.dispose());
     this.term.options.linkHandler = {
       activate: (event, text) => this.activateLink(event, text),
       allowNonHttpProtocols: false,
     };
     this.term.open(container);
+    // Committed IME text sent exactly once and in order (TRM-11); xterm's own handling otherwise.
+    const composition = installComposition(this.term);
+    if (composition) this.cleanups.push(composition);
+    container.dataset.composition = composition ? "ordered" : "xterm";
     this.highlighter = new OutputHighlighter(this.term, this.toneColors());
+    this.mouse = new MouseMap(container, this.term, () => void this.pasteFromClipboard());
+    this.cleanups.push(() => this.mouse.dispose());
     this.applyRenderer();
     this.applyLigatures();
     this.fitNow();
@@ -267,6 +291,11 @@ export class TerminalController {
       if (this.prefs.copyOnSelect && this.term.hasSelection()) void this.copySelection();
     });
 
+    // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries. Registered
+    // first: xterm calls the most recent handler first and stops at one that returns true, so the
+    // handlers registered below only observe these sequences and pass them on (return false).
+    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+
     // OSC 52 (clipboard). Writes go to the owner for a consent decision; a read request ("?")
     // is never answered. Returning true marks the sequence handled so nothing else acts on it.
     this.term.parser.registerOscHandler(52, (data) => {
@@ -274,8 +303,7 @@ export class TerminalController {
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
       return true;
     });
-    // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
-    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+    // A duplicated SSH tab's folder: `cd` is typed in at the first marked prompt.
     // P-29: the output of each command between its shell-integration marks.
     this.commandOutputs = new CommandOutputs(this.term, () => this.sessionId);
     this.cleanups.push(() => this.commandOutputs.dispose());
@@ -288,11 +316,18 @@ export class TerminalController {
       }),
     );
 
+    // OSC 133: command boundaries from shell integration (separators and jumping).
+    this.commands = new CommandMarks(this.term, () => {
+      const scheme = schemeById(this.prefs.scheme);
+      return { failure: highlightPalette(scheme).danger, text: scheme.foreground };
+    });
+    this.cleanups.push(() => this.commands.dispose());
+
     // OSC 7: the shell's working directory, remembered for layout templates only.
     this.term.parser.registerOscHandler(7, (data) => {
       const path = parseOsc7(data);
       if (path !== null) this.callbacks.onDirectory?.(path);
-      // Observe only: shell integration (autocomplete/shellContext.ts) reads the same report.
+      // Observe only: the shell-integration handler registered earlier also needs the folder.
       return false;
     });
 
@@ -302,6 +337,8 @@ export class TerminalController {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      // The X11 primary selection after a middle click is never sent (see mouseMap.ts).
+      if (this.mouse.swallowPaste()) return;
       const text = event.clipboardData?.getData("text/plain") ?? "";
       this.pasteText(text);
     };
@@ -330,6 +367,7 @@ export class TerminalController {
    * prompt, and only when that prompt carries the shell integration's mark.
    */
   async start(target: TerminalTarget, startIn: string | null = null, attachToken?: string): Promise<void> {
+    this.target = target;
     await fontsReady(this.prefs);
     if (this.disposed) return;
     this.fitNow();
@@ -429,15 +467,16 @@ export class TerminalController {
     });
   }
 
-  private toneColors(): Record<HighlightTone, string> {
-    const s = schemeById(this.prefs.scheme);
-    return { danger: s.brightRed, warning: s.brightYellow, success: s.brightGreen, info: s.brightCyan };
+  /** Highlight colors from the current scheme, each readable on its background. */
+  private toneColors(): Record<TokenKind, string> {
+    return highlightPalette(schemeById(this.prefs.scheme));
   }
 
   /** Workspace preferences: output highlighting, Option as Meta, right click. Display only. */
   setWorkspace(ws: WorkspacePreferences): void {
     this.term.options.macOptionIsMeta = isMac && ws.optionAsMeta;
-    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord;
+    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord && !ws.rightClickPaste;
+    this.mouse.update({ rightClickPaste: ws.rightClickPaste ?? false, middleClickPaste: ws.middleClickPaste ?? false });
     this.highlighter.update(ws.highlight, this.toneColors());
   }
 
@@ -484,12 +523,32 @@ export class TerminalController {
   /** Sends text as a paste (bracketed when the remote enabled it), after review if needed. */
   pasteText(text: string): void {
     if (!text || this.disposed) return;
-    const send = () => this.term.paste(text);
-    if (this.prefs.confirmMultilinePaste && needsPasteReview(text)) {
-      this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, send);
-    } else {
-      send();
-    }
+    const check = checkPaste(text, {
+      multiline: this.prefs.confirmMultilinePaste && this.pasteChecks.multiline,
+      trailingNewline: this.pasteChecks.trailingNewline,
+    });
+    // The bracketed-paste end marker is never sent, whatever path the text took to get here.
+    const send = (final: string) => {
+      if (this.disposed || hasBracketEnd(final)) return;
+      this.term.paste(final);
+    };
+    if (check.review) this.callbacks.onPasteReview(text, check, this.term.modes.bracketedPasteMode, send);
+    else send(text);
+  }
+
+  /** Scrolls to the previous or next command (shell integration marks); false without one. */
+  jumpCommand(direction: -1 | 1): boolean {
+    return this.commands.jump(direction);
+  }
+
+  /** Copies the selection (palette action); false when nothing is selected. */
+  copy(): Promise<boolean> {
+    return this.copySelection();
+  }
+
+  /** Pastes the clipboard through the same review as a keyboard paste (palette action). */
+  paste(): void {
+    void this.pasteFromClipboard();
   }
 
   private activateLink(event: MouseEvent, uri: string): void {
@@ -520,6 +579,9 @@ export class TerminalController {
   /** Returns false for keys the terminal must not process. */
   private onKey(event: KeyboardEvent): boolean {
     if (event.type !== "keydown") return true;
+    // Keys an input method is processing (CJK composition) belong to it: no shortcut, copy or
+    // paste handling here, so xterm's composition helper sees every one of them.
+    if (event.isComposing || event.keyCode === 229) return true;
     // Application shortcuts are handled by the shell before the terminal sees them.
     if (actionFor(event) || tabIndexFor(event) !== null) return false;
     if (matches(event, bindings.copy)) {
@@ -713,6 +775,7 @@ export class TerminalController {
   }
 
   private released = false;
+  private target: TerminalTarget | null = null;
 
   /** The session is moving to another window: disposing this terminal must not close it. */
   release(on: boolean): void {

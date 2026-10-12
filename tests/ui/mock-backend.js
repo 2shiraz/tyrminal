@@ -32,7 +32,7 @@ export function installMockBackend(options) {
         letterSpacing: 0,
         cursorStyle: "block",
         cursorBlink: false,
-        padding: 10,
+        padding: 12,
         scrollback: 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
@@ -66,7 +66,7 @@ export function installMockBackend(options) {
       tags,
       lastConnectedAt: last,
       protocol: { type: "ssh" },
-      terminal: { encoding: "utf8", term: "xterm256color" },
+      terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
     });
     state.groups = [
@@ -151,9 +151,10 @@ export function installMockBackend(options) {
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
+    const keyRejected = kind === "ssh" && options.keyRejectedFor === host?.label && host.auth.kind === "key" && !state.deployed?.has(host.auth.keyId);
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked || passwordPrompt
+        ? trustPrompt || blocked || passwordPrompt || keyRejected
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -172,6 +173,22 @@ export function installMockBackend(options) {
       }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
+    }
+    // The server refuses the host's key until it has been installed (key_deploy).
+    if (keyRejected) {
+      const key = state.keys.find((k) => k.id === host.auth.keyId);
+      setTimeout(() => {
+        channelSend(s.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(s.events, { type: "key_rejected", keyId: key.id, label: key.label, hop: null });
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed", hop: null });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "AUTH_FAILED", message: `The server did not accept the key "${key.label}". Its public key may not be installed on this server.` },
+          exitStatus: null,
+        });
+      }, 40);
+      return { sessionId };
     }
     if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
       setTimeout(() => {
@@ -247,6 +264,8 @@ export function installMockBackend(options) {
     const text = new TextDecoder().decode(bytes);
     // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
     window.__mockReceived = (window.__mockReceived ?? "") + text;
+    // terminal input: the same per session, in order (IME, broadcast exclusion tests).
+    (window.__mockInputBySession ??= {})[sessionId] = (window.__mockInputBySession[sessionId] ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -460,6 +479,8 @@ export function installMockBackend(options) {
       const runs = new Map();
       const jumps = new Map();
       const proxies = new Map();
+      const keyExchanges = new Map();
+      window.__mockKeyExchanges = keyExchanges;
       window.__mockJumps = jumps;
       window.__mockProxies = proxies;
       let nextRule = 1;
@@ -554,9 +575,19 @@ export function installMockBackend(options) {
         },
         host_connection_get: (a) => {
           const own = window.__mockOwnRoute.has(a.hostId) || jumps.has(a.hostId) || proxies.has(a.hostId);
-          return { jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null, own, inherited: window.__mockInheritedRoute(a.hostId) };
+          return {
+            jumpHostId: jumps.get(a.hostId) ?? null,
+            proxy: proxies.get(a.hostId) ?? null,
+            own,
+            inherited: window.__mockInheritedRoute(a.hostId),
+            keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+          };
         },
         host_connection_set: (a) => {
+          if (!["prefer_post_quantum", "require_post_quantum", "classic"].includes(a.connection.keyExchange ?? "prefer_post_quantum")) {
+            throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
+          }
+          keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
           // HST-05: inheriting drops the host's own route.
           if (a.connection.inherit) {
             jumps.delete(a.hostId);
@@ -587,6 +618,113 @@ export function installMockBackend(options) {
         },
       };
     })(),
+    // Session recordings
+    ...(() => {
+      // Synthetic recordings. Nothing is encrypted here: the format and its verification are
+      // tested natively (crates/session-log, crates/core/tests/history.rs).
+      const b64 = (text) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+      const fail = (code, message) => {
+        throw { code, message };
+      };
+      let settings = { enabled: false, keepPerHost: 5, maxLogMib: 64 };
+      const base = Date.parse("2026-10-11T09:00:00Z");
+      const hostId = (label) => state.hosts.find((h) => h.label === label)?.id ?? null;
+      const hostile =
+        "deploy@staging-web:~$ cat notes\r\n" +
+        "\u001b]8;;https://attacker.example/\u0007open the runbook\u001b]8;;\u0007\r\n" +
+        "\u001b]52;c;cHduZWQ=\u0007\u001b]0;not your title\u0007" +
+        "rollout finished: 12 pods ready\r\ndeploy@staging-web:~$ ";
+      const logs = options.recordings
+        ? [
+            {
+              id: "a1".repeat(16),
+              title: "staging-web",
+              hostId: hostId("staging-web"),
+              kind: "ssh",
+              startedAt: base + 2 * 3600_000,
+              endedAt: base + 2 * 3600_000 + 754_000,
+              sizeBytes: 18_432,
+              state: "complete",
+              bookmarked: true,
+              comment: "Rollout of 2.4 — pods restarted twice",
+              frames: [
+                { type: "output", atMs: 0, data: b64("Welcome to Ubuntu 24.04.1 LTS\r\n") },
+                { type: "resize", atMs: 300, cols: 100, rows: 30 },
+                { type: "output", atMs: 900, data: b64(hostile) },
+              ],
+            },
+            {
+              id: "b2".repeat(16),
+              title: "api-gateway",
+              hostId: hostId("api-gateway"),
+              kind: "ssh",
+              startedAt: base + 3600_000,
+              endedAt: null,
+              sizeBytes: 4_096,
+              state: "incomplete",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("deploy@api-gateway:~$ uptime\r\n 09:12 up 41 days\r\n") }],
+            },
+            {
+              id: "c3".repeat(16),
+              title: "Local terminal",
+              hostId: null,
+              kind: "local",
+              startedAt: base,
+              endedAt: base + 61_000,
+              sizeBytes: 2_048,
+              state: "damaged",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("~ % make test\r\nok\r\n") }],
+            },
+          ]
+        : [];
+      window.__mockRecordings = logs;
+      const summary = ({ frames, ...log }) => ({ ...log });
+      const find = (id) => logs.find((l) => l.id === id) ?? fail("NOT_FOUND", "That recording no longer exists.");
+      return {
+        recording_settings_get: () => ({ ...settings }),
+        recording_settings_set: (a) => {
+          const next = a.settings;
+          if (!(next.keepPerHost >= 1 && next.keepPerHost <= 100)) fail("INVALID_INPUT", "Keep between 1 and 100 recordings per host.");
+          if (!(next.maxLogMib >= 1 && next.maxLogMib <= 512)) fail("INVALID_INPUT", "A recording's size limit must be between 1 and 512 MiB.");
+          // Saving takes a moment natively (an encrypted vault write); quick successive changes
+          // must not overwrite one another.
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              settings = { ...next };
+              resolve({ ...settings });
+            }, 150),
+          );
+        },
+        session_log_list: () => [...logs].sort((x, y) => y.startedAt - x.startedAt).map(summary),
+        session_log_storage: () => ({ count: logs.length, totalBytes: logs.reduce((n, l) => n + l.sizeBytes, 0) }),
+        session_log_bookmark: (a) => {
+          const log = find(a.id);
+          const comment = a.comment.trim();
+          if (comment.length > 2000) fail("INVALID_INPUT", "A comment can be at most 2,000 characters.");
+          Object.assign(log, { bookmarked: a.bookmarked, comment });
+          return summary(log);
+        },
+        session_log_delete: (a) => {
+          const log = find(a.id);
+          if (log.state === "recording") fail("INVALID_INPUT", "This session is still being recorded. Close it first.");
+          logs.splice(logs.indexOf(log), 1);
+        },
+        session_log_delete_all: () => {
+          const gone = logs.filter((l) => l.state !== "recording");
+          for (const log of gone) logs.splice(logs.indexOf(log), 1);
+          return gone.length;
+        },
+        session_log_open: (a) => {
+          const log = find(a.id);
+          if (log.state === "unreadable") fail("NOT_FOUND", "This recording's file is missing or cannot be read.");
+          return { log: summary(log), cols: 80, rows: 24, frames: log.frames, truncated: false };
+        },
+      };
+    })(),
     files_copy: (a) => {
       if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
       const node = fs.get(childPath(a.srcDir, a.name));
@@ -598,6 +736,7 @@ export function installMockBackend(options) {
       window.__mockTransfers.set(transferId, {
         finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -701,6 +840,11 @@ export function installMockBackend(options) {
       edits.delete(a.editId);
     },
     files_list: (a) => {
+      // Tests make the next listings fail to see the error state and its retry.
+      if ((window.__mockListFail ?? 0) > 0) {
+        window.__mockListFail -= 1;
+        fsErr("ACCESS_DENIED", "The server refused to list this folder.");
+      }
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
       if (!node) fsErr("NOT_FOUND", "That file or folder does not exist on the server.");
@@ -783,6 +927,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -809,6 +954,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },
@@ -905,7 +1051,7 @@ export function installMockBackend(options) {
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
         protocol: a.host.protocol ?? { type: "ssh" },
-        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: a.host.forwardAgent ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
@@ -1014,7 +1160,7 @@ export function installMockBackend(options) {
           tags: h.tags,
           lastConnectedAt: null,
           protocol: { type: "ssh" },
-          terminal: { encoding: "utf8", term: "xterm256color" },
+          terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
           forwardAgent: false,
         });
       }
@@ -1085,6 +1231,17 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
+    // Signs in with a typed password, whatever the host uses (to install a key).
+    session_open_key_install: (a) => {
+      const host = state.hosts.find((h) => h.id === a.hostId);
+      const sessionId = `${state.nextSession++}`.padStart(32, "a");
+      state.sessions.set(sessionId, { id: sessionId, output: null, events: a.events, user: host.username, host: host.label, line: "", files: true });
+      setTimeout(() => {
+        channelSend(a.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(a.events, { type: "auth_prompt", promptId: "k1", kind: "password", username: host.username, attempt: 1, maxAttempts: 3, message: null, echo: false, hop: null });
+      }, 20);
+      return { sessionId };
+    },
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
@@ -1099,7 +1256,11 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
-    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
+    session_diagnostics: () => {
+      // terminal input: tests can replace the lines or make the request fail.
+      if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
+      return window.__mockDiagnostics ?? ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"];
+    },
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {
@@ -1471,6 +1632,14 @@ export function installMockBackend(options) {
     state.sessions.delete(last.id);
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
+  };
+  // terminal input: drop the n-th open session (creation order), not only the newest.
+  window.__mockDropAt = (index) => {
+    const s = [...state.sessions.values()][index];
+    if (!s) return;
+    state.sessions.delete(s.id);
+    channelSend(s.events, { type: "state", state: "failed" });
+    channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);

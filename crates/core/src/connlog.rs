@@ -57,9 +57,42 @@ pub(crate) fn environment_line(sent: &[String], rejected: &[String]) -> String {
     line
 }
 
+/// The connection-log line for the sign-in methods a server says may continue after a refusal.
+/// The names come from the server: only method-name characters are kept, a few names at most.
+pub(crate) fn remaining_methods_line(methods: &[String]) -> String {
+    let names: Vec<String> = methods
+        .iter()
+        .map(|m| {
+            m.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '@')).take(64).collect::<String>()
+        })
+        .filter(|m| !m.is_empty())
+        .take(8)
+        .collect();
+    if names.is_empty() {
+        "the server named no other sign-in method".to_owned()
+    } else {
+        format!("server still allows: {}", names.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remaining_method_lines_keep_only_method_names() {
+        let methods = ["password".to_owned(), "publickey".to_owned()];
+        assert_eq!(remaining_methods_line(&methods), "server still allows: password, publickey");
+        let hostile = [
+            "pass\u{1b}[2Jword".to_owned(),
+            "x; rm -rf /".to_owned(),
+            String::new(),
+            "keyboard-interactive".to_owned(),
+        ];
+        assert_eq!(remaining_methods_line(&hostile), "server still allows: pass2Jword, xrm-rf, keyboard-interactive");
+        assert_eq!(remaining_methods_line(&[]), "the server named no other sign-in method");
+        assert_eq!(remaining_methods_line(&vec!["a".to_owned(); 20]).matches(", ").count(), 7);
+    }
 
     #[test]
     fn environment_lines_name_variables_and_refusals() {

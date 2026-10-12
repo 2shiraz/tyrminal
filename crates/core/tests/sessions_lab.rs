@@ -16,6 +16,7 @@ use tempfile::TempDir;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tyrminal_core::contracts::limits::MAX_STARTUP_LINE_LEN;
 use tyrminal_core::contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, HostProtocol, KeyImportInput, SessionEvent,
     SessionState, TransferEvent, TrustDecision, VaultState,
@@ -2737,8 +2738,12 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     let host_id = f.key_host("a").await;
     let mut ids = Vec::new();
     for i in 0..16 {
-        // Long enough lines that typing them all takes more than an instant.
-        let text = format!("echo startup-{i}-done # {}", "x".repeat(16 * 1024));
+        // Enough text that typing it all takes more than an instant, in lines a terminal accepts.
+        let mut text = String::new();
+        for j in 0..16 {
+            text.push_str(&format!("echo startup-{i}-{j} # {}\n", "x".repeat(MAX_STARTUP_LINE_LEN - 40)));
+        }
+        text.push_str(&format!("echo startup-{i}-done"));
         let saved = v
             .save_snippet(SnippetInput { id: None, name: format!("s{i}"), folder: String::new(), text })
             .await
@@ -2776,6 +2781,42 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     client.until_connected().await;
     client.output_until("startup-0-done").await;
     client.output_until("startup-15-done").await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_startup_snippet_with_a_line_too_long_for_the_terminal_is_skipped_and_the_rest_run() {
+    use tyrminal_core::contracts::{SettingsTarget, SnippetInput};
+    let f = fixture().await;
+    let v = &f.core.vault;
+    let host_id = f.key_host("a").await;
+    let mut ids = Vec::new();
+    for (name, text) in [
+        ("before", "echo startup-before-done".to_owned()),
+        // Typed as it is, the excess would be dropped by a macOS terminal and the lines after it garbled.
+        ("long", format!("echo startup-long-ran # {}", "x".repeat(16 * 1024))),
+        ("after", "echo startup-after-done".to_owned()),
+    ] {
+        let saved =
+            v.save_snippet(SnippetInput { id: None, name: name.into(), folder: String::new(), text }).await.unwrap();
+        ids.push(saved.id);
+    }
+    v.set_startup_snippets(SettingsTarget::Host { host_id: host_id.clone() }, Some(ids)).await.unwrap();
+
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.output_until("startup-before-done").await;
+    client.output_until("startup-after-done").await;
+    assert!(!client.text.contains("startup-long-ran"), "the over-long snippet was not typed");
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(
+        log.contains(&format!("line 1 of startup snippet \"long\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed")),
+        "{log}"
+    );
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
 }

@@ -13,7 +13,11 @@ export interface MockOptions {
   // agent B: tunnels and history
   /** Name the jump-chain hop in that trust prompt. */
   trustPromptHop?: { index: number; total: number; label: string };
+  /** Seed sample session recordings. */
+  recordings?: boolean;
   hostKeyChangedFor?: string;
+  /** The server refuses this host's key until it is installed (key_deploy). */
+  keyRejectedFor?: string;
   /** Simulate a WebView without WebGL (the GPU renderer must fall back). */
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */

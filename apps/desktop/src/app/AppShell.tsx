@@ -1,5 +1,5 @@
 import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
@@ -16,12 +16,12 @@ import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
-import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
@@ -31,17 +31,22 @@ import { shellContexts } from "../features/autocomplete/shellContext";
 // command history
 import { installHistoryCapture } from "../features/history/historyCapture";
 import { insertionBytes } from "../features/autocomplete/suggest";
-import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { CommandOutputDialog } from "../features/terminal/CommandOutputDialog";
 import { SearchSessionsDialog } from "../features/terminal/SearchSessionsDialog";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
-import { msgD } from "../lib/messages-d";
 import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
+import { extraPaletteItems } from "../features/commands/extraActions";
+import { ConnectionDetails } from "../features/connection/ConnectionDetails";
+import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
+import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
+import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
+import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
@@ -99,7 +104,8 @@ export type Destination =
   | "knownHosts"
   | "settings"
   // agent B: tunnels and history
-  | "tunnels";
+  | "tunnels"
+  | "recordings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -122,6 +128,7 @@ function Shell() {
   applyBindingOverrides(workspacePrefs(prefs.workspace).bindings);
   const data = useVaultData();
   const notify = useToast();
+  useSlowPatternNotice();
   const [destination, setDestination] = useState<Destination>("home");
   // command history: remembers commands from shell-integration marks while history is on.
   useEffect(() => installHistoryCapture(), []);
@@ -131,6 +138,16 @@ function Shell() {
   const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
   const panelOpen = sidePanel === "snippets";
   const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
+  // terminal input: the side panel's section (snippets, history, appearance; TRM-14)
+  const [panelSection, setPanelSection] = useState<PanelSection>("snippets");
+  const panelSectionRef = useRef(panelSection);
+  const sidePanelRef = useRef(sidePanel);
+  sidePanelRef.current = sidePanel;
+  panelSectionRef.current = panelSection;
+  const showSection = useCallback((section: PanelSection) => {
+    setPanelSection(section);
+    setSidePanel("snippets");
+  }, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
@@ -141,15 +158,20 @@ function Shell() {
   // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
   const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
+  // terminal input: the connection details dialog (CON-15)
+  const [details, setDetails] = useState<{ sessionId: string; label: string } | null>(null);
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // privilege prompts (KEY-18)
   const [inserting, setInserting] = useState<{ sessionId: string; hostId: string } | null>(null);
   // P-28 and P-29: search across sessions, and the command-output dialog for one pane.
   const [searchingSessions, setSearchingSessions] = useState(false);
   const [outputFor, setOutputFor] = useState<number | null>(null);
-  // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
-  // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
-  const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
+  // Tabs in broadcast mode with the panes the user confirmed. Kept in memory only: never saved,
+  // and switched off as soon as a confirmed pane stops being connected (a reconnect never
+  // resumes broadcasting silently). Panes left out in the review neither send nor receive.
+  const [members, setMembers] = useState<BroadcastMembers>(new Map());
+  const broadcasting = useMemo<ReadonlySet<number>>(() => new Set(members.keys()), [members]);
+  const stopBroadcast = useCallback((tabId: number) => setMembers((current) => withoutTab(current, tabId)), []);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
@@ -179,19 +201,17 @@ function Shell() {
   const tabCanBroadcast = tab ? panesOf(tab.layout).length > 1 && broadcastPanes(tab.id).length === panesOf(tab.layout).length : false;
 
   useEffect(() => {
-    // Off when a broadcasting tab is gone, has one pane, or any pane is not connected.
-    setBroadcasting((current) => {
-      let next: Set<number> | null = null;
-      for (const id of current) {
-        const t = ws.tabs.find((x) => x.id === id);
-        const panes = t ? panesOf(t.layout) : [];
-        if (!t || panes.length < 2 || panes.some((p) => statuses[p]?.state !== "connected")) {
-          next ??= new Set(current);
-          next.delete(id);
-        }
-      }
-      return next ?? current;
-    });
+    // Off when a broadcasting tab is gone, or a confirmed pane left it, dropped or reconnected.
+    setMembers((current) =>
+      pruneMembers(
+        current,
+        (tabId) => {
+          const t = ws.tabs.find((x) => x.id === tabId);
+          return t ? panesOf(t.layout) : null;
+        },
+        (paneId) => (statuses[paneId]?.state === "connected" ? (handles.current.get(paneId)?.sessionId() ?? null) : null),
+      ),
+    );
   }, [ws, statuses]);
 
   /** The panes (and their current sessions) that broadcast in `tabId` would send to. */
@@ -217,12 +237,13 @@ function Shell() {
 
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
-      if (!broadcasting.has(tabId)) return;
-      for (const id of broadcastPanes(tabId)) {
-        if (id !== from) handles.current.get(id)?.receiveBroadcast(bytes);
-      }
+      const live = (paneId: number) => {
+        const h = handles.current.get(paneId);
+        return statuses[paneId]?.state === "connected" && h?.broadcastable() === true ? (h.sessionId() ?? null) : null;
+      };
+      for (const id of relayTargets(members, tabId, from, live)) handles.current.get(id)?.receiveBroadcast(bytes);
     },
-    [broadcasting, broadcastPanes],
+    [members, statuses],
   );
 
   // A Settings section to open at (the sidebar's version opens About); any navigation clears it.
@@ -261,9 +282,9 @@ function Shell() {
 
   /** Splits `paneId` (the focused pane by default); at the pane limit, says so instead. */
   const split = useCallback(
-    (dir: Direction, seed?: { target: TerminalTarget; label: string; identity: string }, paneId?: number) => {
+    (dir: Direction, seed?: { target: PaneTarget; label: string; identity: string }, paneId?: number) => {
       const id = paneId ?? activePane(wsRef.current)?.id;
-      // An SFTP tab has one pane and is never split.
+      // An SFTP tab is never split.
       if (id === undefined || wsRef.current.panes[id]?.target.kind === "sftp") return;
       if (paneCount(wsRef.current) >= MAX_PANES) {
         notify("danger", msgC.panes.full);
@@ -277,7 +298,7 @@ function Shell() {
   const duplicate = useCallback(
     (id: number) => {
       const current = wsRef.current;
-      // Each copy starts in its pane's current folder when the shell integration reports it.
+      // Each copy starts in its source shell's current folder when the shell integration reports it.
       const next = duplicateTab(current, id, (paneId) => {
         const sessionId = handles.current.get(paneId)?.sessionId();
         return sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
@@ -369,7 +390,7 @@ function Shell() {
       for (const h of live) h?.release(true);
       try {
         await detachApi.open(input);
-        setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
+        stopBroadcast(tabId);
         setWs((current) => closeTab(current, tabId, { remember: false }));
         notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
       } catch (error) {
@@ -490,7 +511,12 @@ function Shell() {
           moveFocus("down");
           break;
         case "toggleSnippets":
-          togglePanel("snippets");
+          // From another section of the open panel, the snippets shortcut shows snippets.
+          if (sidePanelRef.current === "snippets" && panelSectionRef.current !== "snippets") setPanelSection("snippets");
+          else {
+            setPanelSection("snippets");
+            togglePanel("snippets");
+          }
           break;
         case "toggleFiles":
           togglePanel("files");
@@ -541,6 +567,12 @@ function Shell() {
           break;
         case "movePaneUp":
           moveFocused("up");
+          break;
+        case "previousCommand":
+          focusedHandle()?.jumpCommand(-1);
+          break;
+        case "nextCommand":
+          focusedHandle()?.jumpCommand(1);
           break;
         case "movePaneDown":
           moveFocused("down");
@@ -719,6 +751,7 @@ function Shell() {
               onConnect={connect}
             />
           )}
+          {!terminalVisible && destination === "recordings" && <RecordingsView />}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>
@@ -749,7 +782,12 @@ function Shell() {
                       }}
                     />
                   ) : showPanel ? (
-                    <SnippetsPanel
+                    <ConnectionPanel
+                      section={panelSection}
+                      onSection={setPanelSection}
+                      hostId={pane?.target.kind === "ssh" ? pane.target.hostId : null}
+                      onConnect={connect}
+                      onZoom={(step) => focusedHandle()?.zoom(step)}
                       target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
                       onSend={requestSnippet}
                       onClose={() => {
@@ -784,6 +822,7 @@ function Shell() {
                   else handles.current.delete(paneId);
                 }}
                 broadcasting={broadcasting}
+                broadcastPaneIds={memberPanes(members)}
                 onUserInput={relayInput}
               />
             )}
@@ -794,18 +833,17 @@ function Shell() {
           pane={terminalVisible && !sftpVisible ? pane : null}
           status={terminalVisible && !sftpVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible && !sftpVisible ? () => togglePanel("snippets") : undefined}
+          onTogglePanel={terminalVisible && !sftpVisible ? () => runAction("toggleSnippets") : undefined}
           filesOpen={sidePanel === "files"}
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           serverOpen={sidePanel === "server"}
           onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
-          broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
+          broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
           onStopBroadcast={() => {
             if (!tab) return;
-            const id = tab.id;
-            setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+            stopBroadcast(tab.id);
           }}
         />
       </div>
@@ -850,6 +888,24 @@ function Shell() {
           onLocal={openLocal}
           onSftp={openSftp}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          extra={extraPaletteItems({
+            hasTerminal: terminalVisible && tab !== null && pane !== null,
+            tabCount: ws.tabs.length,
+            split: tab ? panesOf(tab.layout).length > 1 : false,
+            onAction: runAction,
+            onCloseTab: () => tab && setWs((current) => closeTab(current, tab.id)),
+            onCloseOtherTabs: () => tab && setWs((current) => closeOtherTabs(current, tab.id)),
+            onCopy: () => void focusedHandle()?.copy(),
+            onPaste: () => focusedHandle()?.paste(),
+            onShowSection: showSection,
+            onDetails:
+              pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
+                ? () => {
+                    const sessionId = focusedHandle()?.sessionId();
+                    if (sessionId) setDetails({ sessionId, label: pane.label });
+                  }
+                : undefined,
+          })}
           openTabs={ws.tabs.map((t) => {
             const p = ws.panes[t.focused];
             return { id: t.id, title: tabTitle(ws, t), detail: p?.identity ?? "", onSelect: () => setWs((current) => selectTab(current, t.id)) };
@@ -890,7 +946,7 @@ function Shell() {
               ? () => {
                   const id = tab.id;
                   if (broadcasting.has(id)) {
-                    setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+                    stopBroadcast(id);
                     return;
                   }
                   setReviewing({ tabId: id, targets: broadcastTargets(id) });
@@ -967,6 +1023,64 @@ function Shell() {
         />
       )}
 
+      {reviewing && (
+        <BroadcastReview
+          targets={reviewing.targets}
+          onCancel={() => {
+            setReviewing(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={(chosen) => {
+            const { tabId, targets } = reviewing;
+            setReviewing(null);
+            const t = wsRef.current.tabs.find((x) => x.id === tabId);
+            const now = broadcastTargets(tabId);
+            const same =
+              t !== undefined &&
+              now.length === panesOf(t.layout).length &&
+              now.length === targets.length &&
+              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            if (!same) {
+              notify("danger", msgC.broadcast.changed);
+            } else {
+              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
+              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
+            }
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {savingAs && (
+        <SaveLayoutDialog
+          initialName={ws.template?.name ?? ""}
+          summary={((saved) => msgC.layouts.summary(saved.length, saved.reduce((n, t) => n + t.panes.length, 0)))(templateTabs(ws))}
+          onCancel={() => {
+            setSavingAs(false);
+            if (terminalVisible) focusedHandle()?.focus();
+          }}
+          onSave={async (name) => {
+            const failure = await saveLayout(name);
+            if (failure === null) setSavingAs(false);
+            return failure;
+          }}
+        />
+      )}
+
+      {/* terminal input: an address clicked in the output becomes a prefilled new host */}
+      <NewHostFromTerminal onDone={() => focusedHandle()?.focus()} />
+
+      {details && (
+        <ConnectionDetails
+          sessionId={details.sessionId}
+          label={details.label}
+          onClose={() => {
+            setDetails(null);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
       {searchingSessions && (
         <SearchSessionsDialog
           tabs={ws.tabs.map((t) => ({
@@ -997,33 +1111,6 @@ function Shell() {
         />
       )}
 
-      {reviewing && (
-        <BroadcastReview
-          targets={reviewing.targets}
-          onCancel={() => {
-            setReviewing(null);
-            focusedHandle()?.focus();
-          }}
-          onConfirm={() => {
-            const { tabId, targets } = reviewing;
-            setReviewing(null);
-            const t = wsRef.current.tabs.find((x) => x.id === tabId);
-            const now = broadcastTargets(tabId);
-            const same =
-              t !== undefined &&
-              now.length === panesOf(t.layout).length &&
-              now.length === targets.length &&
-              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
-            if (!same) {
-              notify("danger", msgC.broadcast.changed);
-            } else {
-              setBroadcasting((current) => new Set([...current, tabId]));
-            }
-            focusedHandle()?.focus();
-          }}
-        />
-      )}
-
       {outputFor !== null && handles.current.get(outputFor) && (
         <CommandOutputDialog
           handle={handles.current.get(outputFor) as PaneHandle}
@@ -1031,22 +1118,6 @@ function Shell() {
           onClose={() => {
             setOutputFor(null);
             focusedHandle()?.focus();
-          }}
-        />
-      )}
-
-      {savingAs && (
-        <SaveLayoutDialog
-          initialName={ws.template?.name ?? ""}
-          summary={msgC.layouts.summary(ws.tabs.length, paneCount(ws))}
-          onCancel={() => {
-            setSavingAs(false);
-            if (terminalVisible) focusedHandle()?.focus();
-          }}
-          onSave={async (name) => {
-            const failure = await saveLayout(name);
-            if (failure === null) setSavingAs(false);
-            return failure;
           }}
         />
       )}

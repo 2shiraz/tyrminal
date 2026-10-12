@@ -40,6 +40,7 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
+  IconHistory,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
@@ -53,6 +54,9 @@ import { msgP } from "../../lib/messages-privilege";
 import { msgSR } from "../../lib/messages-security-review";
 import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
+
+/** A palette entry; other features contribute entries through the `extra` prop. */
+export type PaletteItem = Item;
 
 interface Item {
   id: string;
@@ -117,6 +121,7 @@ export function CommandPalette({
   layouts,
   pick,
   openTabs,
+  extra,
   onShellIntegration,
   onInsertPassword,
   onSecurityReview,
@@ -167,6 +172,8 @@ export function CommandPalette({
     | undefined;
   /** Open tabs, so the palette can switch to one by name or destination. */
   openTabs?: { id: number; title: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Further actions contributed by other features (listed after the built-in actions). */
+  extra?: PaletteItem[] | undefined;
   /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
@@ -394,8 +401,11 @@ export function CommandPalette({
         run: onSecurityReview,
       });
     }
+    list.push(nav("recordings", <IconHistory size={16} />));
+    // terminal input: contributed actions
+    list.push(...(extra ?? []));
     return list;
-  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items

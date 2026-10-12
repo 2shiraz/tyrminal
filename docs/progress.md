@@ -13,7 +13,7 @@ suggestions), see `docs/work-split.md`. Owner requests are logged in `docs/reque
 | 00–03 | Gate met (reports in `docs/reports/`); screen-lock hook done (ADR 0007) |
 | 04 Inventory | Groups, tags, search, bulk, duplicate, imports, key deployment on main; presentation, PuTTY/MobaXterm/SecureCRT, keys (ECDSA/RSA, PPK, certificates, key files) in PR #5 (D); LAN discovery of SSH servers (HST-14, opt-in DNS-SD, ADR 0009) |
 | 05 Workspace | Tabs, splits, broadcast on main; layouts, detach-to-window (handoff core done by A) in PR #7 (C) |
-| 06 Files | SFTP browser, transfers, folders, two panes, copy between servers, edit sessions, desktop drop on main; Files panel keeps its place per session (#14) on main; SFTP tab with files-only connections on `claude/sftp-tab` |
+| 06 Files | SFTP browser, transfers, folders, two panes, copy between servers, edit sessions, desktop drop on main; Files panel keeps its place per session (#14); SFTP tab with files-only connections (#18); Files redesign (shared table, path bar, transfer drawer, row menus, inline rename, type-ahead, active pane and swap; `docs/design/files.md`) on `claude/sftp-tab` |
 | 07 Connections | Forwarding, jump hosts, proxies in PR #6 (B); Telnet, serial, protocol per host, encodings and terminal type on A's branch; Mosh deferred (ADR 0008) |
 | 08 Automation | Multi-host snippet runs, suggestions, shell integration on main; the shell's folder opens the files panel and carries into duplicated tabs, mark events for history (PR #10); logs and history next (B) |
 | 09 Release candidate | Diagnostics consent, update controls, user guide, upgrade test from beta.1, installer smoke test on A's branch |
@@ -48,6 +48,12 @@ Pre-release v0.1.0-beta.1 is published; v0.1.0-beta.2 follows once PR #6 and PR 
     WSL side are chosen inside WSL, and `wsl.exe -e` avoids a login shell re-parsing arguments.
 15. macOS: text typed through WebDriver must be ASCII (CJK and emoji never reached the shell);
     after an interrupt zsh continues a `;` list where bash abandons it.
+16. xterm.js 6 `paste()` only turns newlines into CR and wraps the text in `ESC[200~ … ESC[201~`;
+    it does not remove an end marker inside the text, so paste safety (P-25) refuses to send one.
+17. While a shell is not reading (starting up, or running a command) its tty is in canonical mode,
+    and macOS keeps only 1024 bytes of an unfinished line (Linux 4095, keeping the newline). A
+    longer typed line loses its excess and its newline, garbling the lines after it; pacing does
+    not help. Startup snippets therefore refuse lines over 1000 bytes.
 
 ## Next tasks, in order
 
