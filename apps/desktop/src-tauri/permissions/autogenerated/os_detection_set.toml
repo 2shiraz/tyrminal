@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-os-detection-set"
+description = "Enables the os_detection_set command without any pre-configured scope."
+commands.allow = ["os_detection_set"]
+
+[[permission]]
+identifier = "deny-os-detection-set"
+description = "Denies the os_detection_set command without any pre-configured scope."
+commands.deny = ["os_detection_set"]

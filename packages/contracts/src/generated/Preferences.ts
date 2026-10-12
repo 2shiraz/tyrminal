@@ -47,4 +47,9 @@ noPortSuggestions: boolean,
  * How Hosts is shown (layout, sort, group filter), kept across views and restarts. Absent
  * in files written before it existed.
  */
-hostsView?: HostsViewPreferences, };
+hostsView?: HostsViewPreferences, 
+/**
+ * Interface size in percent, one of [`INTERFACE_SCALES`]. `None`: automatic, from the
+ * window size.
+ */
+interfaceScale: number | null, };

@@ -202,6 +202,9 @@ function channels(onOutput: OutputHandler, onEvent: EventHandler) {
 export const sessions = {
   openSsh: (hostId: string, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
+  // quick connect: an address that is not saved; a typed password is used for this session only.
+  openQuick: (input: import("@tyrminal/contracts").QuickConnectInput, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
+    call<SessionOpened>("session_open_quick", { input, cols, rows, ...channels(onOutput, onEvent) }),
   /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
   openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
     call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),
@@ -347,6 +350,11 @@ export const snippets = {
    */
   send: (snippetId: string, sessionId: string, mode: SnippetSendMode, bracketed: boolean) =>
     call<void>("snippet_send", { snippetId, sessionId, mode, bracketed }),
+};
+
+/** The interface size of this window (native web view zoom, 0.5–2). */
+export const ui = {
+  setZoom: (scale: number) => call<void>("ui_zoom_set", { scale }),
 };
 
 export const preferences = {
@@ -631,6 +639,13 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+// OS auto-detection: read once per connection unless turned off; the result shows in host appearances.
+export const osDetection = {
+  enabled: () => call<boolean>("os_detection_get"),
+  /** Turning it off also forgets every detected OS. */
+  setEnabled: (enabled: boolean) => call<boolean>("os_detection_set", { enabled }),
 };
 
 // tmux and screen session awareness (P-31)

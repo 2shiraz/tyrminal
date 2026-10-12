@@ -98,6 +98,10 @@ pub(crate) struct Entry {
     // server at a glance
     /// The last server-panel answer and when it was read; also lets only one read run at a time.
     glance: tokio::sync::Mutex<Option<(tokio::time::Instant, tyrminal_contracts::ServerGlance)>>,
+    // quick connect
+    /// A connection to an address that is not saved: nothing about it is remembered (no command
+    /// history), so it leaves no trace in the vault.
+    unsaved: std::sync::atomic::AtomicBool,
 }
 
 impl Entry {
@@ -245,6 +249,7 @@ impl Sessions {
             ended: watch::channel(None).0,
             host_id,
             startup_left: std::sync::atomic::AtomicUsize::new(0),
+            unsaved: std::sync::atomic::AtomicBool::new(false),
             // server at a glance
             glance: tokio::sync::Mutex::new(None),
         });
@@ -283,12 +288,12 @@ impl Sessions {
             }
         }
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), false)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, plan.host_id.clone(), false)?;
         // Session recording: wraps the relay, so a recording continues when the session moves
         // to another window.
         let relay: Arc<dyn SessionSink> = entry.relay.clone();
         let sink = (self.recordings)
-            .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
+            .wrap(&self.vault, plan.generation, &id, plan.label.clone(), plan.host_id.clone(), cols, rows, relay)
             .await;
         // Quick port forwards (P-24): ports the output names are offered, never forwarded on their own.
         let sink = if plan.port_suggestions { crate::port_suggest::wrap(sink, &id, &self.suggested) } else { sink };
@@ -296,6 +301,42 @@ impl Sessions {
         let session_id = id.clone();
         tokio::spawn(async move {
             let ctx = TaskContext { terminal, forward_agent, ..TaskContext::new(&this, &session_id, &entry, &sink) };
+            let body = run_ssh(&ctx, plan, cols, rows, input_rx);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    // quick connect
+    /// Opens a session to an address that is not saved (Home's quick connect): SSH with the
+    /// normal host-key trust and sign-in prompts, or Telnet. Nothing is written to the vault: no
+    /// host, no recents, no command history, no recording, and a typed password is used for this
+    /// session only. Returns immediately; progress arrives on `sink` as for a saved host.
+    pub async fn open_quick(
+        self: &Arc<Self>,
+        owner: &str,
+        input: tyrminal_contracts::QuickConnectInput,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let plan = match self.vault.quick_plan(input).await? {
+            crate::vault::QuickPlan::Telnet(endpoint) => {
+                let opened = self.open_telnet(owner, endpoint, cols, rows, sink)?;
+                if let Some(entry) = self.entries().get(&opened.session_id) {
+                    entry.unsaved.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                return Ok(opened);
+            }
+            crate::vault::QuickPlan::Ssh(plan) => *plan,
+        };
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, None, false)?;
+        entry.unsaved.store(true, std::sync::atomic::Ordering::Relaxed);
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let ctx = TaskContext::new(&this, &session_id, &entry, &sink);
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -343,7 +384,7 @@ impl Sessions {
         if ask_password {
             plan.auth = PlanAuth::Ask;
         }
-        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, plan.host_id.clone(), true)?;
         // Nothing is ever sent to a terminal here: input, resize and snippets are refused before
         // they would reach this channel.
         drop(input_rx);
@@ -377,7 +418,7 @@ impl Sessions {
             return Err(invalid("Snippets run on hosts without an open session over SSH only."));
         }
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, plan.host_id.clone(), true)?;
         // No terminal: input, resize and terminal snippets are refused before reaching a channel.
         drop(input_rx);
         let sink: Arc<dyn SessionSink> = entry.relay.clone();
@@ -1201,6 +1242,9 @@ impl Sessions {
     /// history of the session's host. Does nothing while history is off.
     pub async fn history_add(&self, owner: &str, session_id: &str, command: &str) -> Result<(), IpcError> {
         let entry = self.authorize(owner, session_id)?;
+        if entry.unsaved.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
         let scope = entry.host_id.as_deref().unwrap_or(crate::command_history::LOCAL_SCOPE);
         self.vault.add_history(entry.generation, scope, command).await
     }
@@ -1211,6 +1255,9 @@ impl Sessions {
             return Ok(Vec::new());
         }
         let entry = self.authorize(owner, session_id)?;
+        if entry.unsaved.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(Vec::new());
+        }
         let scope = entry.host_id.as_deref().unwrap_or(crate::command_history::LOCAL_SCOPE);
         self.vault.suggest_history(entry.generation, scope, query).await
     }
@@ -1821,18 +1868,35 @@ async fn run_ssh(
             // Its own task, because closing the session drops this future: cancelled between the
             // database commit and the in-memory revision update, the next edit of the host would
             // see a false conflict.
-            let vault = Arc::clone(&ctx.vault);
-            tokio::spawn(async move {
-                let _ = vault.mark_connected(generation, &host_id).await;
-            });
+            // A quick connection (no saved host) has neither recents nor saved tunnels, and no
+            // OS to detect for a host.
+            if let Some(host_id) = host_id {
+                let vault = Arc::clone(&ctx.vault);
+                let recent_host = host_id.clone();
+                tokio::spawn(async move {
+                    let _ = vault.mark_connected(generation, &recent_host).await;
+                });
+                // OS auto-detection: one fixed read on its own exec channel, only when detection
+                // is on and nobody chose an OS for the host. Best effort and in the background.
+                let (vault, detect_conn) = (Arc::clone(&ctx.vault), Arc::clone(&conn));
+                tokio::spawn(async move {
+                    if vault.wants_os_detection(generation, &host_id).await.unwrap_or(false)
+                        && let Some(os) = crate::os_detect::detect(&detect_conn).await
+                    {
+                        let _ = vault.record_detected_os(generation, &host_id, os).await;
+                    }
+                });
+            }
             // Saved tunnels that start with every connection to this host. Their own task, so
             // the shell is usable at once; it holds the connection only while starting them.
-            let (sessions, owner, session_id) =
-                (Arc::clone(&ctx.sessions), ctx.entry.owner().clone(), ctx.session_id.clone());
-            let (tunnel_conn, tunnel_host) = (Arc::clone(&conn), plan_host.clone());
-            tokio::spawn(async move {
-                sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
-            });
+            if let Some(tunnel_host) = plan_host.clone() {
+                let (sessions, owner, session_id) =
+                    (Arc::clone(&ctx.sessions), ctx.entry.owner().clone(), ctx.session_id.clone());
+                let tunnel_conn = Arc::clone(&conn);
+                tokio::spawn(async move {
+                    sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
+                });
+            }
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
             // Startup snippets are typed alongside the pump, inside the session body: when the
             // session is closed or the vault locks, the supervisor drops both together, so the
@@ -1891,7 +1955,11 @@ async fn connect_ssh(
     ctx.state(SessionState::OpeningChannel);
     // Startup snippets (SNP-08), read only now that the host is trusted and signed in, under the
     // plan's generation: after a lock nothing is read or typed.
-    let startup = ctx.vault.session_startup(generation, &host_id).await?;
+    // A quick connection has no startup snippets: they belong to saved hosts and groups.
+    let startup = match &host_id {
+        Some(host_id) => ctx.vault.session_startup(generation, host_id).await?,
+        None => Vec::new(),
+    };
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
     let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
@@ -2103,10 +2171,12 @@ async fn run_files(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
             // `Connected` belongs to the session, not to a hop.
             *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = None;
             ctx.state(SessionState::Connected);
-            let vault = Arc::clone(&ctx.vault);
-            tokio::spawn(async move {
-                let _ = vault.mark_connected(generation, &host_id).await;
-            });
+            if let Some(host_id) = host_id {
+                let vault = Arc::clone(&ctx.vault);
+                tokio::spawn(async move {
+                    let _ = vault.mark_connected(generation, &host_id).await;
+                });
+            }
             while !conn.is_closed() {
                 tokio::time::sleep(FILES_LINK_CHECK).await;
             }

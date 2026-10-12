@@ -6,6 +6,7 @@ import { msg } from "../../lib/messages";
 import { formatSize, visibleName } from "../sftp/model";
 import { msgFiles } from "./messages";
 import { type Transfer, totals } from "./transfers";
+import { useExit } from "../../lib/exitGhost";
 
 function detail(t: Transfer): string {
   switch (t.state) {
@@ -41,11 +42,13 @@ export function TransferDrawer<T extends Transfer & { job?: unknown }>({
   onClear: () => void;
 }) {
   const [open, setOpen] = useState(true);
+  // When the last transfer is cleared, the drawer fades out rather than vanishing.
+  const exitRef = useExit<HTMLElement>({ evenFromKeyboard: true });
   if (transfers.length === 0) return null;
   const sum = totals(transfers);
   const overall = percent(sum.done, sum.total);
   return (
-    <section className="xfer" aria-label={msg.files.transfers} data-open={open || undefined}>
+    <section ref={exitRef} className="xfer" aria-label={msg.files.transfers} data-open={open || undefined}>
       <div className="xfer-head">
         <button type="button" className="xfer-toggle" aria-expanded={open} aria-label={open ? msgFiles.hideTransfers : msgFiles.showTransfers} onClick={() => setOpen((v) => !v)}>
           <IconChevronDown size={14} className="xfer-chevron" />

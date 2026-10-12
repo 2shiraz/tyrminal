@@ -396,6 +396,25 @@ impl GlanceSettingsRecord {
     }
 }
 
+// OS auto-detection
+pub(crate) const KIND_OS_DETECTION: u16 = 71;
+
+/// The OS each host reported when it was last connected to, and whether detection is off. One
+/// record; not secret. Ids of deleted hosts are dropped on the next change.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct OsDetectionRecord {
+    #[serde(default)]
+    pub off: bool,
+    #[serde(default)]
+    pub detected: Vec<(String, tyrminal_contracts::HostOs)>,
+}
+
+impl OsDetectionRecord {
+    pub fn content_len(&self) -> usize {
+        self.detected.iter().map(|(h, _)| h.len() + 8).sum::<usize>() + 8
+    }
+}
+
 // Session recordings
 pub(crate) const KIND_SESSION_LOG: u16 = 101;
 pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;

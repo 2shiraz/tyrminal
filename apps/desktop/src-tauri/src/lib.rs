@@ -164,6 +164,8 @@ pub fn run() {
             commands::inventory::import_preview,
             commands::inventory::import_hosts,
             commands::sessions::session_open_ssh,
+            // quick connect
+            commands::sessions::session_open_quick,
             commands::sessions::session_open_local,
             commands::sessions::session_open_files,
             commands::sessions::session_open_exec,
@@ -217,6 +219,7 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::settings::ui_zoom_set,
             commands::settings::app_info,
             commands::discovery::discovery_networks,
             commands::discovery::discovery_start,
@@ -320,6 +323,9 @@ pub fn run() {
             commands::server_glance::glance_host_set,
             // tmux and screen session awareness (P-31)
             commands::multiplexers::multiplexer_list,
+            // OS auto-detection
+            commands::os_detection::os_detection_get,
+            commands::os_detection::os_detection_set,
         ])
         .build(tauri::generate_context!());
 

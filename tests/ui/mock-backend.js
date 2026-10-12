@@ -26,6 +26,7 @@ export function installMockBackend(options) {
       // compromised-password check (SEC-11)
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
+      interfaceScale: null,
       ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
@@ -155,7 +156,9 @@ export function installMockBackend(options) {
     const exec = kind === "exec";
     const files = kind === "files" || exec;
     if (files) kind = "ssh";
-    const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
+    // quick connect: an unsaved address stands in for a host (no id; nothing is stored).
+    const quickHost = args.input ? { id: null, label: args.input.address, username: args.input.username || "tyr", protocol: { type: args.input.protocol } } : null;
+    const host = kind === "ssh" ? (quickHost ?? state.hosts.find((h) => h.id === args.hostId)) : null;
     const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files, exec };
     if (files && !exec) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
@@ -1091,6 +1094,12 @@ export function installMockBackend(options) {
       state.lastBackupAt = Math.floor(Date.now() / 1000);
       return "tyrminal-backup-2026-10-11.tyrbackup";
     },
+    // The native web view zoom, emulated with CSS zoom so layout (and terminal fit) follow it.
+    ui_zoom_set: (a) => {
+      if (!(a.scale >= 0.5 && a.scale <= 2)) throw { code: "INVALID_INPUT", message: "That interface size is not allowed." };
+      window.__mockZoom = [...(window.__mockZoom ?? []), a.scale];
+      document.documentElement.style.zoom = String(a.scale);
+    },
     backup_status: () => ({ lastExportAt: state.lastBackupAt ?? null }),
     backup_choose: () => ({ fileName: "tyrminal-backup-2026-10-11.tyrbackup", size: 48213 }),
     backup_preview: (a) => {
@@ -1379,6 +1388,14 @@ export function installMockBackend(options) {
       write(a.sessionId, new TextEncoder().encode(a.mode === "run" ? `${text}\r` : text));
     },
     session_open_ssh: (a) => openSession(a, "ssh"),
+    // quick connect: validated like the core (address shape, port, user for SSH).
+    session_open_quick: (a) => {
+      const { input } = a;
+      if (!/^\[?[A-Za-z0-9._:-]+\]?$/.test(input.address) || input.address.includes("@")) throw { code: "INVALID_INPUT", message: "The address must be a host name or an IP address, without a scheme, user or path." };
+      if (!(input.port >= 1 && input.port <= 65535)) throw { code: "INVALID_INPUT", message: "The port must be between 1 and 65535." };
+      if (input.protocol === "ssh" && !input.username && input.auth.kind !== "identity") throw { code: "INVALID_INPUT", message: "Enter the user name." };
+      return openSession(a, "ssh");
+    },
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
     // Signs in with a typed password, whatever the host uses (to install a key).
@@ -1562,7 +1579,17 @@ export function installMockBackend(options) {
           }
         }
       }
+      // OS auto-detection: what the server reported, when nobody chose an OS for the host.
+      for (const [hostId, os] of Object.entries(state.detectedOs ?? {})) {
+        if (!own.some((a) => a.hostId === hostId)) own.push({ hostId, os, inherited: false, detected: true });
+      }
       return own;
+    },
+    os_detection_get: () => state.osDetection !== false,
+    os_detection_set: (a) => {
+      state.osDetection = a.enabled;
+      if (!a.enabled) state.detectedOs = {};
+      return a.enabled;
     },
     group_defaults_get: (a) => groupDefaultsView(a.groupId),
     group_defaults_set: (a) => {
@@ -1924,7 +1951,8 @@ export function installMockBackend(options) {
     return [...out.values()].map((v) => (withOrigin ? v : { name: v.name, value: v.value }));
   };
   /** Identities in the mock: the list (passwords kept here only) and which target uses which. */
-  const identityState = { list: [], uses: new Map() };
+  // quick connect: a test can seed identities (options.identities).
+  const identityState = { list: options.identities ?? [], uses: new Map() };
   function identityAssignment(target) {
     const own = identityState.uses.get(target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`) ?? null;
     if (target.kind === "group") return { target, identityId: own, effectiveIdentityId: own, origin: own ? { kind: "host" } : null };

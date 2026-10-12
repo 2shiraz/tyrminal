@@ -30,7 +30,7 @@ export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {
   const keyLabel = (id: string | null) => keys.find((k) => k.id === id)?.label ?? null;
 
   return (
-    <section className="page-inner" aria-labelledby="identities-title" style={{ maxWidth: 900 }}>
+    <section className="page-inner" aria-labelledby="identities-title">
       <div className="page-header">
         <div className="page-title">
           <h2 id="identities-title">{msgD.identities.title}</h2>

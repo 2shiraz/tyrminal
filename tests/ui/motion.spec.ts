@@ -154,6 +154,80 @@ test("the terminal canvas never animates", async ({ page }) => {
   expect(report.duration.split(",").every((d) => d.trim() === "0s")).toBe(true);
 });
 
+// Exits (motion.md PR 2): a static, inert copy fades in place of what closed; the real element is
+// gone at once.
+const ghosts = (page: Page) => page.locator("[data-exit-ghost]");
+
+test.describe("exits", () => {
+  test("a menu closed with the pointer fades out as an inert copy; the menu itself is gone at once", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.getByRole("button", { name: "New tab" }).click();
+    await expect(newTabMenu(page)).toBeVisible();
+    await page.mouse.click(5, 400);
+    await expect(newTabMenu(page)).toHaveCount(0);
+    const ghost = ghosts(page).first();
+    await expect(ghost).toHaveAttribute("aria-hidden", "true");
+    expect(await ghost.evaluate((el) => ({ inert: el.hasAttribute("inert"), roles: el.querySelectorAll("[role]").length + (el.hasAttribute("role") ? 1 : 0) }))).toEqual({
+      inert: true,
+      roles: 0,
+    });
+    await expect(ghosts(page)).toHaveCount(0);
+  });
+
+  test("closed from the keyboard, or under reduced motion, nothing lingers", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.getByRole("button", { name: "New tab" }).click();
+    await expect(newTabMenu(page)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(newTabMenu(page)).toHaveCount(0);
+    expect(await ghosts(page).count()).toBe(0);
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await page.getByRole("button", { name: "New tab" }).click();
+    await page.mouse.click(5, 400);
+    await expect(newTabMenu(page)).toHaveCount(0);
+    expect(await ghosts(page).count()).toBe(0);
+  });
+
+  test("locking leaves no copy of a panel or toast behind", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.type("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+S");
+    await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Sent “Disk usage”" })).toBeVisible();
+    // Lock with the pointer, so the exits would otherwise play.
+    await page.getByRole("button", { name: "Lock vault" }).click();
+    await expect(page.getByRole("heading", { name: "Unlock your vault" })).toBeVisible();
+    expect(await ghosts(page).count()).toBe(0);
+    const text = await page.evaluate(() => document.body.innerText);
+    for (const leaked of ["Disk usage", "api-gateway", "df -h"]) expect(text).not.toContain(leaked);
+  });
+
+  test("a hovered toast stays until the pointer leaves", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.type("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+S");
+    await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
+    const toast = page.locator(".toast").filter({ hasText: "Sent “Disk usage”" });
+    await expect(toast).toBeVisible();
+    await toast.hover();
+    await page.waitForTimeout(5000);
+    await expect(toast).toBeVisible();
+    await page.mouse.move(5, 400);
+    await expect(toast).toHaveCount(0, { timeout: 6000 });
+
 // Moments (motion.md PR 4).
 test.describe("moments", () => {
   test("a wrong passphrase shakes the card once and puts focus back in the field", async ({ page }) => {

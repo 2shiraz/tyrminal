@@ -1,4 +1,4 @@
-import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTarget, LayoutTemplateSummary, QuickConnectInput, SnippetSummary } from "@tyrminal/contracts";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
@@ -56,10 +56,14 @@ import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
+// quick connect
+import { msgQuick } from "../lib/messages-quick";
+import { stashQuick } from "../lib/quickConnect";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
 import { type OpenLayout, openBeside, openMany } from "./multiOpen";
+import { stepScale } from "./interfaceScale";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -329,6 +333,17 @@ function Shell() {
     setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
+  // quick connect: an address that is not saved; its input goes to the new pane by a one-time token.
+  const quickConnect = useCallback(
+    (input: QuickConnectInput) => {
+      const token = stashQuick(input);
+      const label = input.address;
+      const identity = input.protocol === "ssh" && input.username ? msg.hosts.destination(input.username, input.address, input.port) : `${input.address}:${input.port}`;
+      open({ kind: "quick", token, protocol: input.protocol }, label, identity);
+    },
+    [open],
+  );
+
   const connect = useCallback(
     (host: HostSummary) => {
       open({ kind: "ssh", hostId: host.id }, host.label, hostIdentity(host));
@@ -381,6 +396,9 @@ function Shell() {
     [openSftp],
   );
   const openSftpHost = useCallback((host: { id: string; label: string }, path: string | null = null) => openSftpHosts([host], path), [openSftpHosts]);
+
+  /** Keyboard focus is in a terminal (its zoom keys then belong to it). */
+  const inTerminal = () => document.activeElement?.closest(".terminal-pane") != null;
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -488,6 +506,11 @@ function Shell() {
       const t = wsRef.current.tabs.find((x) => x.id === tabId);
       if (!t) return;
       const ids = panesOf(t.layout);
+      // quick connect: an unsaved connection's details stay in this window.
+      if (ids.some((id) => wsRef.current.panes[id]?.target.kind === "quick")) {
+        notify("danger", msgQuick.noDetach);
+        return;
+      }
       const live = ids.map((id) => handles.current.get(id)).filter((h) => h?.connected() && h.sessionId());
       if (live.length !== ids.length) {
         notify("danger", msgC.detach.notConnected);
@@ -590,15 +613,20 @@ function Shell() {
         case "find":
           focusedHandle()?.openFind();
           break;
+        // In a terminal these zoom that terminal; anywhere else they change the interface size.
         case "zoomIn":
-          focusedHandle()?.zoom("in");
-          break;
         case "zoomOut":
-          focusedHandle()?.zoom("out");
+        case "zoomReset": {
+          if (inTerminal()) {
+            focusedHandle()?.zoom(action === "zoomIn" ? "in" : action === "zoomOut" ? "out" : "reset");
+          } else {
+            update((p) => ({
+              ...p,
+              interfaceScale: action === "zoomReset" ? null : stepScale(p.interfaceScale, action === "zoomIn" ? 1 : -1),
+            }));
+          }
           break;
-        case "zoomReset":
-          focusedHandle()?.zoom("reset");
-          break;
+        }
         case "nextTab":
           setWs((current) => cycleTab(current, 1));
           break;
@@ -995,7 +1023,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

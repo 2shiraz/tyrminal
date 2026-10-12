@@ -8,4 +8,9 @@ export type HostAppearance = { hostId: string, os: HostOs,
 /**
  * The host sets no OS itself; this is its nearest group's default (HST-05).
  */
-inherited: boolean, };
+inherited: boolean, 
+/**
+ * Neither the host nor a group sets one: the server reported it when last connected to
+ * (OS auto-detection). A choice by the user always wins over it.
+ */
+detected: boolean, };
