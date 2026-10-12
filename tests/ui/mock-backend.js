@@ -775,22 +775,37 @@ export function installMockBackend(options) {
       state.groups = state.groups.filter((g) => g.id !== a.id);
     },
     import_preview: (a) => {
-      // A tiny stand-in for the core parser: one host per "Host <name>" line, ProxyCommand skipped.
+      // A tiny stand-in for the core parser: one host per "Host <name>" line, ProxyCommand
+      // ignored and noted, a single-hop ProxyJump to another host of the file kept as jumpVia.
       const hosts = [];
       const skipped = [];
       a.text.split("\n").forEach((line, i) => {
         const [key, value] = line.trim().split(/\s+/);
+        const last = hosts.at(-1);
         if (key?.toLowerCase() === "host" && value)
-          hosts.push({ label: value, address: value, port: 22, username: "", group: "", tags: [], notes: [] });
-        if (key?.toLowerCase() === "proxycommand")
-          skipped.push({ line: i + 1, text: line.trim(), reason: "runs a command; not imported (commands from imported files are never run)" });
+          hosts.push({ label: value, address: value, port: 22, username: "", group: "", tags: [], notes: [], jumpVia: null, jump: null });
+        if (key?.toLowerCase() === "proxycommand") {
+          skipped.push({ line: i + 1, text: line.trim(), reason: "runs a command; ignored (commands from imported files are never run)" });
+          last?.notes.push("Its ProxyCommand was ignored (commands from imported files are never run).");
+        }
+        if (key?.toLowerCase() === "proxyjump" && last) last.jump = value;
       });
+      for (const h of hosts) {
+        if (h.jump && hosts.some((x) => x.label === h.jump)) {
+          h.jumpVia = h.jump;
+          h.notes.push(`Goes through the jump host ${h.jump} (from ProxyJump).`);
+        }
+        delete h.jump;
+      }
       return { hosts, skipped, duplicates: hosts.filter((h) => state.hosts.some((x) => x.label === h.label)).map((h) => h.label) };
     },
     import_hosts: (a) => {
+      const firstId = 700 + state.hosts.length;
+      const ids = new Map(a.hosts.map((h, i) => [h.label, id(firstId + i)]));
       for (const h of a.hosts) {
+        if (h.jumpVia) window.__mockJumps.set(ids.get(h.label), ids.get(h.jumpVia));
         state.hosts.push({
-          id: id(700 + state.hosts.length),
+          id: ids.get(h.label),
           label: h.label,
           address: h.address,
           port: h.port,

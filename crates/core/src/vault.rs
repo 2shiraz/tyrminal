@@ -1329,9 +1329,28 @@ impl VaultService {
             }
         }
 
+        // Jump hosts (IMP-02) name another host of this import by label.
+        let mut ids: HashMap<String, Id> = HashMap::with_capacity(hosts.len());
+        for host in &hosts {
+            ids.entry(host.label.to_lowercase()).or_insert(random_id().map_err(from_vault)?);
+        }
         let mut new_hosts: Vec<(Id, HostRecord)> = Vec::with_capacity(hosts.len());
+        let mut used: std::collections::HashSet<Id> = std::collections::HashSet::new();
         for host in hosts {
             let group = resolved.get(&host.group).cloned().flatten();
+            let jump_host = match &host.jump_via {
+                Some(label) => Some(validate::id_text(ids.get(&label.to_lowercase()).ok_or_else(|| {
+                    invalid(
+                        "An imported host goes through a jump host that is not in this import. Preview the file again.",
+                    )
+                })?)),
+                None => None,
+            };
+            // Labels are unique in a preview; a repeated one gets its own id.
+            let id = match ids.get(&host.label.to_lowercase()) {
+                Some(id) if used.insert(*id) => *id,
+                _ => random_id().map_err(from_vault)?,
+            };
             let record = HostRecord {
                 label: host.label,
                 address: host.address,
@@ -1345,9 +1364,19 @@ impl VaultService {
                 terminal: tyrminal_contracts::HostTerminal::default(),
                 forward_agent: false,
                 // agent B: tunnels and history
-                connection: Default::default(),
+                connection: crate::records::StoredConnection { jump_host, proxy: None },
             };
-            new_hosts.push((random_id().map_err(from_vault)?, record));
+            new_hosts.push((id, record));
+        }
+        // No loops or over-long chains (only hosts of this import can point at each other).
+        {
+            let batch: HashMap<Id, Option<Id>> = new_hosts
+                .iter()
+                .map(|(id, r)| Ok((*id, r.connection.jump_host.as_deref().map(validate::id).transpose()?)))
+                .collect::<Result<_, IpcError>>()?;
+            for id in batch.keys() {
+                crate::tunnels::chain(id, |hop| Ok(batch.get(hop).copied().flatten()))?;
+            }
         }
         let mut rows = Vec::with_capacity(new_groups.len() + new_hosts.len());
         for (id, record) in &new_groups {
@@ -2126,6 +2155,7 @@ impl VaultService {
                 group: String::new(),
                 tags: Vec::new(),
                 notes: vec![format!("Trusted {} key {}", record.algorithm, record.fingerprint)],
+                jump_via: None,
             };
             match import::checked(candidate) {
                 Ok(host) => {
