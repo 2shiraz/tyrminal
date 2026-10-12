@@ -16,6 +16,8 @@ mod error;
 mod tunnels;
 // agent D: inventory and snippets
 mod inventory;
+// identities (KEY-15..18)
+mod identities;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
@@ -23,3 +25,5 @@ pub use error::{ErrorCode, IpcError};
 pub use tunnels::*;
 // agent D: inventory and snippets
 pub use inventory::*;
+// identities (KEY-15..18)
+pub use identities::*;

@@ -114,6 +114,12 @@ const COMMANDS: &[&str] = &[
     "prompt_marks_status",
     "prompt_marks_install",
     "prompt_marks_remove",
+    // identities (KEY-15..18)
+    "identity_list",
+    "identity_save",
+    "identity_delete",
+    "session_identity",
+    "session_insert_identity_password",
 ];
 
 fn main() {

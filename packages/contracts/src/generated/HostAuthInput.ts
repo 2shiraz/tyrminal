@@ -4,4 +4,4 @@
  * Authentication part of a host edit. `StoredPassword { password: None }` keeps the password
  * already stored; the UI never receives a stored password to echo back.
  */
-export type HostAuthInput = { "kind": "inherit" } | { "kind": "ask_password" } | { "kind": "stored_password", password: string | null, } | { "kind": "key", keyId: string, };
+export type HostAuthInput = { "kind": "inherit" } | { "kind": "ask_password" } | { "kind": "stored_password", password: string | null, } | { "kind": "key", keyId: string, } | { "kind": "identity", identityId: string, };

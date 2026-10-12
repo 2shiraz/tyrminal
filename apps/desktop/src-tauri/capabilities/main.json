@@ -109,6 +109,11 @@
     "allow-known-hosts-import",
     "allow-prompt-marks-status",
     "allow-prompt-marks-install",
-    "allow-prompt-marks-remove"
+    "allow-prompt-marks-remove",
+    "allow-identity-list",
+    "allow-identity-save",
+    "allow-identity-delete",
+    "allow-session-identity",
+    "allow-session-insert-identity-password"
   ]
 }

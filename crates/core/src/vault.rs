@@ -33,7 +33,7 @@ use zeroize::Zeroizing;
 
 use crate::error::{err, from_backup, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
 use crate::import;
-use crate::inventory::{self, EffectiveAuth, GroupIndex, Query, TreeError};
+use crate::inventory::{self, EffectiveAuth, GroupIndex, IdentityIndex, Query, TreeError};
 use crate::records::{
     Decoded, GroupRecord, HostRecord, KIND_GROUP, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT,
     KeyRecord, KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
@@ -47,10 +47,13 @@ use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE, KIND_KEY_CERTIFICATE,
     KeyCertificateRecord,
 };
+// identities (KEY-15..18)
+use crate::records::{IdentityRecord, KIND_IDENTITY};
 use tyrminal_contracts::{
     ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, KeyCertificate, KeyKind, KnownHostImportEntry,
     KnownHostImportPreview, KnownHostImportStatus,
 };
+use tyrminal_contracts::{IdentityInput, IdentityPasswordInput, IdentitySummary, SessionIdentity};
 
 struct Stored<T> {
     revision: u64,
@@ -72,6 +75,8 @@ struct Open {
     appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
     certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
     targets: BTreeMap<Id, Stored<ExecutionTargetRecord>>,
+    // identities (KEY-15..18)
+    identities: BTreeMap<Id, Stored<IdentityRecord>>,
 }
 
 impl Open {
@@ -89,6 +94,8 @@ impl Open {
             appearances: BTreeMap::new(),
             certificates: BTreeMap::new(),
             targets: BTreeMap::new(),
+            // identities (KEY-15..18)
+            identities: BTreeMap::new(),
         }
     }
 }
@@ -174,8 +181,12 @@ fn group_index(open: &Open) -> GroupIndex<'_> {
     open.groups.iter().map(|(id, s)| (validate::id_text(id), &s.record)).collect()
 }
 
-fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSummary {
-    let effective = inventory::effective(groups, record);
+fn identity_index(open: &Open) -> IdentityIndex<'_> {
+    open.identities.iter().map(|(id, s)| (validate::id_text(id), &s.record)).collect()
+}
+
+fn host_summary(groups: &GroupIndex<'_>, identities: &IdentityIndex<'_>, id: &Id, record: &HostRecord) -> HostSummary {
+    let effective = inventory::effective(groups, identities, record);
     HostSummary {
         id: validate::id_text(id),
         label: record.label.clone(),
@@ -193,11 +204,12 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
 /// Host summaries for which `keep` holds, sorted by label.
 fn sorted_hosts(open: &Open, mut keep: impl FnMut(&HostRecord) -> bool) -> Vec<HostSummary> {
     let groups = group_index(open);
+    let identities = identity_index(open);
     let mut hosts: Vec<_> = open
         .hosts
         .iter()
         .filter(|(_, s)| keep(&s.record))
-        .map(|(id, s)| host_summary(&groups, id, &s.record))
+        .map(|(id, s)| host_summary(&groups, &identities, id, &s.record))
         .collect();
     hosts.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
     hosts
@@ -211,6 +223,8 @@ fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
         username: record.username.clone(),
         port: record.port,
         key_id: record.key_id.clone(),
+        // identities (KEY-15..18)
+        identity_id: record.identity_id.clone(),
     }
 }
 
@@ -223,6 +237,8 @@ fn copy_host(record: &HostRecord) -> HostRecord {
             StoredAuth::Password { password: Zeroizing::new(password.as_str().to_owned()) }
         }
         StoredAuth::Key { key_id } => StoredAuth::Key { key_id: key_id.clone() },
+        // identities (KEY-15..18)
+        StoredAuth::Identity { identity_id } => StoredAuth::Identity { identity_id: identity_id.clone() },
     };
     HostRecord {
         label: record.label.clone(),
@@ -243,6 +259,8 @@ fn host_content_len(record: &HostRecord) -> usize {
     let secret_len = match &record.auth {
         StoredAuth::Password { password } => password.len(),
         StoredAuth::Key { key_id } => key_id.len(),
+        // identities (KEY-15..18)
+        StoredAuth::Identity { identity_id } => identity_id.len(),
         StoredAuth::AskPassword | StoredAuth::Inherit => 0,
     };
     record.label.len()
@@ -260,6 +278,8 @@ fn group_content_len(record: &GroupRecord) -> usize {
         + record.parent.as_ref().map_or(0, String::len)
         + record.username.as_ref().map_or(0, String::len)
         + record.key_id.as_ref().map_or(0, String::len)
+        // identities (KEY-15..18)
+        + record.identity_id.as_ref().map_or(0, String::len)
 }
 
 fn snippet_summary(id: &Id, record: &SnippetRecord) -> SnippetSummary {
@@ -505,6 +525,8 @@ impl VaultService {
                 KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
                 KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
                 KIND_EXECUTION_TARGET => load!(ExecutionTargetRecord, open.targets),
+                // identities (KEY-15..18)
+                KIND_IDENTITY => load!(IdentityRecord, open.identities),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -960,6 +982,13 @@ impl VaultService {
                 }
                 StoredAuth::Key { key_id }
             }
+            // identities (KEY-15..18)
+            HostAuthInput::Identity { identity_id } => {
+                if !open.identities.contains_key(&validate::id(&identity_id)?) {
+                    return Err(not_found("That identity no longer exists. Choose another identity."));
+                }
+                StoredAuth::Identity { identity_id }
+            }
             HostAuthInput::StoredPassword { password: Some(password) } => {
                 let password = Zeroizing::new(password);
                 validate::secret(&password)?;
@@ -1003,7 +1032,7 @@ impl VaultService {
             connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
-        let summary = host_summary(&group_index(open), &id, &record);
+        let summary = host_summary(&group_index(open), &identity_index(open), &id, &record);
         open.hosts.insert(id, Stored { revision, record });
         Ok(summary)
     }
@@ -1035,7 +1064,7 @@ impl VaultService {
         if let Some(record) = appearance {
             open.appearances.insert(appearance_id, Stored { revision: 1, record });
         }
-        let summary = host_summary(&group_index(open), &id, &record);
+        let summary = host_summary(&group_index(open), &identity_index(open), &id, &record);
         open.hosts.insert(id, Stored { revision: 1, record });
         Ok(summary)
     }
@@ -1241,6 +1270,7 @@ impl VaultService {
                                 username: None,
                                 port: None,
                                 key_id: None,
+                                identity_id: None,
                             },
                         ));
                         validate::id_text(&id)
@@ -1329,6 +1359,11 @@ impl VaultService {
         let existing_id = input.id.as_deref().map(validate::id).transpose()?;
         let parent = input.parent_id.as_deref().map(validate::id).transpose()?;
         let key_id = input.key_id.as_deref().map(validate::id).transpose()?;
+        // identities (KEY-15..18)
+        let identity_id = input.identity_id.as_deref().map(validate::id).transpose()?;
+        if key_id.is_some() && identity_id.is_some() {
+            return Err(invalid("A group gives its hosts either a key or an identity, not both."));
+        }
 
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
@@ -1336,6 +1371,11 @@ impl VaultService {
             && !open.ssh_keys.contains_key(key_id)
         {
             return Err(not_found("That key no longer exists. Choose another key."));
+        }
+        if let Some(identity_id) = &identity_id
+            && !open.identities.contains_key(identity_id)
+        {
+            return Err(not_found("That identity no longer exists. Choose another identity."));
         }
         let parent_text = parent.map(|p| validate::id_text(&p));
         let id_text = existing_id.map(|id| validate::id_text(&id));
@@ -1359,8 +1399,15 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1)
             }
         };
-        let record =
-            GroupRecord { name, parent: parent_text, username, port, key_id: key_id.map(|k| validate::id_text(&k)) };
+        let record = GroupRecord {
+            name,
+            parent: parent_text,
+            username,
+            port,
+            key_id: key_id.map(|k| validate::id_text(&k)),
+            // identities (KEY-15..18)
+            identity_id: identity_id.map(|i| validate::id_text(&i)),
+        };
         self.write(open, id, KIND_GROUP, revision, Some((&record, group_content_len(&record)))).await?;
         let summary = group_summary(&id, &record);
         open.groups.insert(id, Stored { revision, record });
@@ -1569,6 +1616,10 @@ impl VaultService {
         if open.groups.values().any(|g| g.record.key_id.as_deref() == Some(key_text.as_str())) {
             return Err(err(ErrorCode::InUse, "Groups still use this key. Change their default key first."));
         }
+        // identities (KEY-15..18)
+        if open.identities.values().any(|i| i.record.key_id.as_deref() == Some(key_text.as_str())) {
+            return Err(err(ErrorCode::InUse, "Identities still use this key. Choose another key for them first."));
+        }
         // agent D: the key's certificate goes in the same transaction.
         let certificate =
             open.certificates.iter().find(|(_, c)| c.record.key_id == key_text).map(|(id, c)| (*id, c.revision));
@@ -1719,7 +1770,8 @@ impl VaultService {
     fn hop_plan(open: &Open, id: &Id) -> Result<HopPlan, IpcError> {
         let host = &open.hosts.get(id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         let groups = group_index(open);
-        let effective = inventory::effective(&groups, host);
+        let identities = identity_index(open);
+        let effective = inventory::effective(&groups, &identities, host);
         if effective.username.is_empty() {
             return Err(invalid("Set a user name on this host or one of its groups."));
         }
@@ -1738,6 +1790,17 @@ impl VaultService {
             }
             EffectiveAuth::Own(StoredAuth::Key { key_id }) => key_plan(key_id)?,
             EffectiveAuth::GroupKey(key_id) => key_plan(key_id)?,
+            // identities (KEY-15..18): the identity as it is now; its key, else its password.
+            EffectiveAuth::Own(StoredAuth::Identity { identity_id }) | EffectiveAuth::GroupIdentity(identity_id) => {
+                let identity = open.identities.get(&validate::id(identity_id)?).ok_or_else(|| {
+                    not_found("The identity this host uses no longer exists. Edit the host or its group.")
+                })?;
+                match (&identity.record.key_id, &identity.record.password) {
+                    (Some(key_id), _) => key_plan(key_id)?,
+                    (None, Some(password)) => PlanAuth::Password(Zeroizing::new(password.as_str().to_owned())),
+                    (None, None) => PlanAuth::Ask,
+                }
+            }
             EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
         };
         Ok(HopPlan {
@@ -1833,7 +1896,7 @@ impl VaultService {
                     host_id: validate::id_text(hop),
                     label: record.label.clone(),
                     address: record.address.clone(),
-                    port: inventory::effective(&groups, record).port,
+                    port: inventory::effective(&groups, &identity_index(open), record).port,
                 })
             })
             .collect()
@@ -1981,10 +2044,11 @@ impl VaultService {
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let groups = group_index(open);
+        let identities = identity_index(open);
         let used: std::collections::HashSet<(String, u16)> = open
             .hosts
             .values()
-            .map(|h| (h.record.address.to_lowercase(), inventory::effective(&groups, &h.record).port))
+            .map(|h| (h.record.address.to_lowercase(), inventory::effective(&groups, &identities, &h.record).port))
             .collect();
         let labels: std::collections::HashSet<String> =
             open.hosts.values().map(|h| h.record.label.to_lowercase()).collect();
@@ -2497,6 +2561,174 @@ impl VaultService {
     }
 }
 
+// identities (KEY-15..18)
+/// Reusable identities. Hosts and groups hold only the identity's id; the identity's values are
+/// read when a summary is built or a session connects, so an edit applies everywhere at once.
+impl VaultService {
+    fn identity_summary(open: &Open, id: &Id, record: &IdentityRecord) -> IdentitySummary {
+        let id_text = validate::id_text(id);
+        let used_by_hosts = open
+            .hosts
+            .values()
+            .filter(|h| matches!(&h.record.auth, StoredAuth::Identity { identity_id } if *identity_id == id_text))
+            .count() as u32;
+        let used_by_groups =
+            open.groups.values().filter(|g| g.record.identity_id.as_deref() == Some(id_text.as_str())).count() as u32;
+        IdentitySummary {
+            id: id_text,
+            label: record.label.clone(),
+            username: record.username.clone(),
+            has_password: record.password.is_some(),
+            key_id: record.key_id.clone(),
+            used_by_hosts,
+            used_by_groups,
+        }
+    }
+
+    pub async fn list_identities(&self) -> Result<Vec<IdentitySummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> =
+            open.identities.iter().map(|(id, s)| Self::identity_summary(open, id, &s.record)).collect();
+        list.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+        Ok(list)
+    }
+
+    /// Creates or edits an identity. The key must exist now (no dangling references); the
+    /// password is kept, replaced or removed as `input.password` says and is never returned.
+    pub async fn save_identity(&self, input: IdentityInput) -> Result<IdentitySummary, IpcError> {
+        let label = validate::label(&input.label)?;
+        let username = if input.username.is_empty() { String::new() } else { validate::username(&input.username)? };
+        let key_id = input.key_id.as_deref().map(validate::id).transpose()?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let new_password = match input.password {
+            IdentityPasswordInput::Set { password } => {
+                let password = Zeroizing::new(password);
+                if password.is_empty() {
+                    return Err(invalid("Enter the password to store, or choose not to store one."));
+                }
+                validate::secret(&password)?;
+                Some(Some(password))
+            }
+            IdentityPasswordInput::Clear => Some(None),
+            IdentityPasswordInput::Keep => None,
+        };
+
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if let Some(key_id) = &key_id
+            && !open.ssh_keys.contains_key(key_id)
+        {
+            return Err(not_found("That key no longer exists. Choose another key."));
+        }
+        let (id, revision, kept_password) = match existing_id {
+            Some(id) => {
+                let current = open.identities.get(&id).ok_or_else(|| not_found("That identity no longer exists."))?;
+                let kept = current.record.password.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned()));
+                (id, current.revision + 1, kept)
+            }
+            None => {
+                if open.identities.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of identities."));
+                }
+                (random_id().map_err(from_vault)?, 1, None)
+            }
+        };
+        let record = IdentityRecord {
+            label,
+            username,
+            password: new_password.unwrap_or(kept_password),
+            key_id: key_id.map(|k| validate::id_text(&k)),
+        };
+        self.write(open, id, KIND_IDENTITY, revision, Some((&record, record.content_len()))).await?;
+        let summary = Self::identity_summary(open, &id, &record);
+        open.identities.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    /// Deletes an identity. Refused while a host or group uses it: nothing falls back to a
+    /// different credential silently (BUILD_SPEC §10.2); the user reassigns them first.
+    pub async fn delete_identity(&self, id: &str) -> Result<(), IpcError> {
+        let identity_id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.identities.get(&identity_id).ok_or_else(|| not_found("That identity no longer exists."))?;
+        let summary = Self::identity_summary(open, &identity_id, &current.record);
+        if summary.used_by_hosts > 0 || summary.used_by_groups > 0 {
+            return Err(err(
+                ErrorCode::InUse,
+                "Hosts or groups still use this identity. Choose another sign-in method for them first.",
+            ));
+        }
+        let revision = current.revision + 1;
+        self.write::<IdentityRecord>(open, identity_id, KIND_IDENTITY, revision, None).await?;
+        open.identities.remove(&identity_id);
+        Ok(())
+    }
+
+    /// The identity a host uses now (its own, else its nearest group's), with its record.
+    fn host_identity<'a>(open: &'a Open, host_id: &str) -> Result<Option<(Id, &'a IdentityRecord)>, IpcError> {
+        let host =
+            &open.hosts.get(&validate::id(host_id)?).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let groups = group_index(open);
+        let identities = identity_index(open);
+        let effective = inventory::effective(&groups, &identities, host);
+        let Some(identity_id) = effective.auth.identity_id() else { return Ok(None) };
+        let id = validate::id(identity_id)?;
+        Ok(open.identities.get(&id).map(|s| (id, &s.record)))
+    }
+
+    /// Which identity's password a session to `host_id` may insert, read under `generation`.
+    pub(crate) async fn session_identity(
+        &self,
+        generation: u32,
+        host_id: &str,
+    ) -> Result<Option<SessionIdentity>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(Self::host_identity(open, host_id)?.map(|(id, record)| SessionIdentity {
+            identity_id: validate::id_text(&id),
+            label: record.label.clone(),
+            has_password: record.password.is_some(),
+        }))
+    }
+
+    /// The password of the identity a session's host uses, for an explicit insert. Refused
+    /// unless that is still `expected_identity` (the one the user was shown when they chose to
+    /// insert it), so a change in between can never send a different identity's password.
+    pub(crate) async fn identity_password(
+        &self,
+        generation: u32,
+        host_id: &str,
+        expected_identity: &str,
+    ) -> Result<Zeroizing<String>, IpcError> {
+        let expected = validate::id(expected_identity)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        match Self::host_identity(open, host_id)? {
+            Some((id, record)) if id == expected => match &record.password {
+                // Typed into a terminal, a control character is a keystroke (Enter, Ctrl-C, an
+                // escape sequence), not part of the password. Refused rather than stripped.
+                Some(password) if password.chars().any(char::is_control) => {
+                    Err(invalid("This password contains control characters, so it cannot be typed into a terminal."))
+                }
+                Some(password) => Ok(Zeroizing::new(password.as_str().to_owned())),
+                None => Err(invalid("This identity has no stored password.")),
+            },
+            _ => Err(err(
+                ErrorCode::Conflict,
+                "The identity of this host changed. Check which identity it uses and try again.",
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod suspend_tests {
     use super::*;
@@ -2509,5 +2741,106 @@ mod suspend_tests {
         assert!(slept_between(s(35), s(5)));
         assert!(slept_between(s(7200), s(5)));
         assert!(!slept_between(Duration::ZERO, s(5)), "a clock set backwards is not sleep");
+    }
+}
+
+// identities (KEY-15..18)
+#[cfg(test)]
+mod identity_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use tyrminal_contracts::HostAuthInput;
+
+    fn host(label: &str, auth: HostAuthInput, group_id: Option<String>) -> HostInput {
+        HostInput {
+            id: None,
+            label: label.into(),
+            address: format!("{label}.example"),
+            port: None,
+            username: String::new(),
+            auth,
+            group_id,
+            tags: Vec::new(),
+        }
+    }
+
+    fn identity(label: &str, password: &str) -> IdentityInput {
+        IdentityInput {
+            id: None,
+            label: label.into(),
+            username: "ops".into(),
+            password: IdentityPasswordInput::Set { password: password.into() },
+            key_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn inserted_passwords_belong_to_the_identity_the_user_was_shown() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let core = crate::Core::open(&dir.path().join("vault.db")).unwrap();
+        let v = &core.vault;
+        v.create("correct horse battery staple".into()).await.unwrap();
+        let generation = v.generation();
+        let ops = v.save_identity(identity("Ops", "sudo-pass")).await.unwrap();
+        let other = v.save_identity(identity("Other", "other-pass")).await.unwrap();
+        let group = v
+            .save_group(GroupInput {
+                id: None,
+                name: "G".into(),
+                parent_id: None,
+                username: None,
+                port: None,
+                key_id: None,
+                identity_id: Some(ops.id.clone()),
+            })
+            .await
+            .unwrap();
+        let inheriting = v.save_host(host("a", HostAuthInput::Inherit, Some(group.id.clone()))).await.unwrap();
+        let plain = v.save_host(host("b", HostAuthInput::AskPassword, None)).await.unwrap();
+
+        // The group's identity reaches the inheriting host.
+        let shown = v.session_identity(generation, &inheriting.id).await.unwrap().unwrap();
+        assert_eq!(
+            (shown.identity_id.as_str(), shown.label.as_str(), shown.has_password),
+            (ops.id.as_str(), "Ops", true)
+        );
+        let password = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap();
+        assert_eq!(password.as_str(), "sudo-pass");
+
+        // A different identity than the host uses now is refused, never substituted.
+        let wrong = v.identity_password(generation, &inheriting.id, &other.id).await.unwrap_err();
+        assert_eq!(wrong.code, ErrorCode::Conflict);
+        assert!(v.session_identity(generation, &plain.id).await.unwrap().is_none());
+        assert_eq!(v.identity_password(generation, &plain.id, &ops.id).await.unwrap_err().code, ErrorCode::Conflict);
+
+        // A password with control characters would be keystrokes in a terminal: refused.
+        v.save_identity(IdentityInput { id: Some(ops.id.clone()), ..identity("Ops", "pw\rrm -rf ~\r") }).await.unwrap();
+        let refused = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput);
+        assert!(!refused.message.contains("rm -rf"), "the password never appears in an error");
+
+        // No password stored: nothing to insert.
+        v.save_identity(IdentityInput {
+            id: Some(ops.id.clone()),
+            password: IdentityPasswordInput::Clear,
+            ..identity("Ops", "x")
+        })
+        .await
+        .unwrap();
+        assert!(!v.session_identity(generation, &inheriting.id).await.unwrap().unwrap().has_password);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+
+        // After a lock, the old generation reads nothing, even once unlocked again.
+        v.lock().await;
+        v.unlock_with_passphrase("correct horse battery staple".into()).await.unwrap();
+        assert_eq!(v.session_identity(generation, &inheriting.id).await.unwrap_err().code, ErrorCode::VaultLocked);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::VaultLocked
+        );
     }
 }

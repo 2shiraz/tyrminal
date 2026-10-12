@@ -4,4 +4,9 @@ export type GroupInput = {
 /**
  * `None` creates a group; `Some` edits that group.
  */
-id: string | null, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, };
+id: string | null, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, 
+/**
+ * An identity the group gives its hosts (instead of a key). At most one of `key_id` and
+ * `identity_id` is set.
+ */
+identityId: string | null, };

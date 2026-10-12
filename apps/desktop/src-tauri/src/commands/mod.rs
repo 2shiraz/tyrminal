@@ -10,3 +10,5 @@ pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
 pub mod tunnels;
+// identities (KEY-15..18)
+pub mod identities;

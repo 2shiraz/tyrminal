@@ -90,6 +90,12 @@ pub enum HostAuth {
         #[serde(rename = "keyId")]
         key_id: String,
     },
+    // identities (KEY-15..18)
+    /// Use a saved identity (its key, else its password, else ask).
+    Identity {
+        #[serde(rename = "identityId")]
+        identity_id: String,
+    },
 }
 
 /// Which connection settings of a host come from its group chain rather than the host itself.
@@ -137,6 +143,11 @@ pub struct GroupSummary {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    // identities (KEY-15..18)
+    /// An identity the group gives its hosts (instead of a key). At most one of `key_id` and
+    /// `identity_id` is set.
+    #[serde(default)]
+    pub identity_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -150,6 +161,11 @@ pub struct GroupInput {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    // identities (KEY-15..18)
+    /// An identity the group gives its hosts (instead of a key). At most one of `key_id` and
+    /// `identity_id` is set.
+    #[serde(default)]
+    pub identity_id: Option<String>,
 }
 
 /// One change applied to several hosts at once, in a single transaction.
@@ -242,6 +258,11 @@ pub enum HostAuthInput {
         #[serde(rename = "keyId")]
         key_id: String,
     },
+    // identities (KEY-15..18)
+    Identity {
+        #[serde(rename = "identityId")]
+        identity_id: String,
+    },
 }
 
 impl core::fmt::Debug for HostAuthInput {
@@ -251,6 +272,8 @@ impl core::fmt::Debug for HostAuthInput {
             Self::AskPassword => f.write_str("AskPassword"),
             Self::StoredPassword { .. } => f.write_str("StoredPassword(<redacted>)"),
             Self::Key { key_id } => f.debug_struct("Key").field("key_id", key_id).finish(),
+            // identities (KEY-15..18)
+            Self::Identity { identity_id } => f.debug_struct("Identity").field("identity_id", identity_id).finish(),
         }
     }
 }
