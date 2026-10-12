@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
 import type { Destination } from "../../app/AppShell";
-import { type Workspace, tabTitle } from "../../app/workspace";
+import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { Shortcut } from "../ui/controls";
 import {
   IconFingerprint,
@@ -117,7 +118,7 @@ export function Sidebar({
           <div className="nav-group-label eyebrow">{msg.nav.sessionsGroup}</div>
           <ul aria-label={msg.nav.sessions}>
             {ws.tabs.map((tab) => {
-              const pane = ws.panes[tab.focused];
+              const status = tabStatus(ws, tab);
               return (
                 <li key={tab.id}>
                   <button
@@ -128,8 +129,9 @@ export function Sidebar({
                     data-tooltip-side="right"
                     onClick={() => onSelectTab(tab.id)}
                   >
-                    <span className="status-dot" data-tone={pane?.indicator ?? "idle"} aria-hidden="true" />
+                    <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
                     <span className="nav-label truncate">{tabTitle(ws, tab)}</span>
+                    <span className="visually-hidden">{msgC.status.describe(status)}</span>
                   </button>
                 </li>
               );

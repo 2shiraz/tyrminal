@@ -84,3 +84,8 @@ pub const MAX_ACTIVE_TUNNELS: usize = 32;
 pub const MAX_ENDED_TUNNELS: usize = 32;
 /// Hosts in one connection chain, the destination included.
 pub const MAX_CHAIN_HOPS: usize = 8;
+// agent C: workspaces
+/// Panes in one layout template (the same limit as open panes).
+pub const MAX_LAYOUT_PANES: usize = 16;
+/// A custom tab name in a layout template, in characters.
+pub const MAX_TAB_TITLE_LEN: usize = 80;

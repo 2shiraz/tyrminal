@@ -469,6 +469,10 @@ pub struct Preferences {
     pub local_shell: Option<String>,
     /// Applications chosen (in a native dialog) for editing remote files, by extension.
     pub editor_apps: Vec<EditorApp>,
+    // agent C: workspaces (highlighting, key bindings); validated in core `layouts::sanitize_workspace`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<crate::WorkspacePreferences>,
 }
 
 /// An application used to edit remote files with a given extension. Added only through the

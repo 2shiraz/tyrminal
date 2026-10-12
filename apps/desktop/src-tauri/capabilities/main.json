@@ -47,6 +47,8 @@
     "allow-session-close",
     "allow-session-trust-answer",
     "allow-session-auth-answer",
+    "allow-session-handoff-offer",
+    "allow-session-attach",
     "allow-files-pick-upload",
     "allow-files-pick-folder",
     "allow-files-pick-upload-folder",
@@ -88,6 +90,10 @@
     "allow-tunnel-clear-ended",
     "allow-host-connection-get",
     "allow-host-connection-set",
-    "allow-host-chain"
+    "allow-host-chain",
+    "allow-layout-list",
+    "allow-layout-save",
+    "allow-layout-delete",
+    "allow-window-detach"
   ]
 }

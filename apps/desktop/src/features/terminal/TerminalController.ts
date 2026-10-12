@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { SessionEvent, TerminalPreferences } from "@tyrminal/contracts";
+import type { HighlightTone, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -20,9 +20,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 
-import { sessions, toAppError } from "../../lib/ipc";
+import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import { SessionEncoding } from "./encoding";
+import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
 
@@ -44,6 +46,10 @@ export interface TerminalCallbacks {
   onSearchResults(index: number, total: number): void;
   /** Bytes the user typed or pasted here (never the terminal's own replies), for broadcast. */
   onUserInput?(bytes: Uint8Array): void;
+  /** Output arrived (no content: only that something was received). */
+  onOutput?(): void;
+  /** Typed characters the session's encoding cannot represent; they were not sent. */
+  onUnencodable?(chars: string[]): void;
 }
 
 const INPUT_CHUNK = 32 * 1024;
@@ -152,6 +158,8 @@ export class TerminalController {
   private fromUser = false;
   /** Whether user input can be told apart from terminal replies (see the data handler). */
   broadcastable = false;
+  private readonly highlighter: OutputHighlighter;
+  private encoding = new SessionEncoding("utf-8");
 
   private publishCounters(): void {
     const d = this.container.dataset;
@@ -185,6 +193,7 @@ export class TerminalController {
       allowNonHttpProtocols: false,
     };
     this.term.open(container);
+    this.highlighter = new OutputHighlighter(this.term, this.toneColors());
     this.applyRenderer();
     this.applyLigatures();
     this.fitNow();
@@ -199,11 +208,11 @@ export class TerminalController {
     this.broadcastable = userInput !== undefined;
     if (userInput) this.cleanups.push(() => userInput.dispose());
     this.term.onData((text) => {
-      const bytes = this.encoder.encode(text);
       const fromUser = this.fromUser;
       this.fromUser = false;
-      this.send(bytes);
-      if (fromUser) this.callbacks.onUserInput?.(bytes);
+      this.sendText(text);
+      // Broadcast relays the typed text (as UTF-8); each pane encodes it for its own session.
+      if (fromUser) this.callbacks.onUserInput?.(this.encoder.encode(text));
     });
     this.term.onBinary((binary) => this.send(Uint8Array.from(binary, (ch) => ch.charCodeAt(0) & 0xff)));
     // The remote side controls the title: treat it as untrusted text.
@@ -248,8 +257,11 @@ export class TerminalController {
     this.resizeObserver.observe(container);
   }
 
-  /** Opens the session. Events (state, prompts, close) arrive through the callbacks. */
-  async start(target: TerminalTarget): Promise<void> {
+  /**
+   * Opens the session, or with `attachToken` takes over one handed to this window (a detached
+   * tab). Events (state, prompts, close) arrive through the callbacks.
+   */
+  async start(target: TerminalTarget, attachToken?: string): Promise<void> {
     await fontsReady(this.prefs);
     if (this.disposed) return;
     this.fitNow();
@@ -261,8 +273,9 @@ export class TerminalController {
       if (!this.disposed) this.callbacks.onEvent(event);
     };
     try {
-      const opened =
-        target.kind === "ssh"
+      const opened = attachToken
+        ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
+        : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
           : await sessions.openLocal(cols, rows, onOutput, onEvent);
       if (this.disposed) {
@@ -271,6 +284,12 @@ export class TerminalController {
         return;
       }
       this.sessionId = opened.sessionId;
+      if (attachToken) {
+        // Only connected sessions are handed over, and the handoff sends no state event; a close
+        // that happened meanwhile still arrives as its own event. The size may differ here.
+        this.callbacks.onEvent({ type: "state", state: "connected" });
+        void sessions.resize(opened.sessionId, cols, rows).catch(() => undefined);
+      }
     } catch (error) {
       const appError = toAppError(error);
       this.callbacks.onEvent({ type: "closed", error: { code: appError.code, message: appError.message }, exitStatus: null });
@@ -324,6 +343,18 @@ export class TerminalController {
         this.scheduleResize();
       }
     });
+  }
+
+  private toneColors(): Record<HighlightTone, string> {
+    const s = schemeById(this.prefs.scheme);
+    return { danger: s.brightRed, warning: s.brightYellow, success: s.brightGreen, info: s.brightCyan };
+  }
+
+  /** Workspace preferences: output highlighting, Option as Meta, right click. Display only. */
+  setWorkspace(ws: WorkspacePreferences): void {
+    this.term.options.macOptionIsMeta = isMac && ws.optionAsMeta;
+    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord;
+    this.highlighter.update(ws.highlight, this.toneColors());
   }
 
   setZoom(step: "in" | "out" | "reset"): void {
@@ -478,7 +509,8 @@ export class TerminalController {
     if (this.disposed) return;
     this.counters.rx += bytes.length;
     this.publishCounters();
-    this.term.write(bytes, () => {
+    this.callbacks.onOutput?.();
+    this.term.write(this.encoding.decode(bytes), () => {
       this.counters.parsed += bytes.length;
       this.publishCounters();
       this.acknowledge(bytes.length);
@@ -504,8 +536,23 @@ export class TerminalController {
     }
   }
 
-  /** Input typed in another pane of a broadcasting tab; sent as if typed here. */
+  /** Input typed in another pane of a broadcasting tab (UTF-8 text); sent as if typed here. */
   receiveBroadcast(bytes: Uint8Array): void {
+    this.sendText(new TextDecoder().decode(bytes));
+  }
+
+  /** The session's character encoding (output decoding and input encoding). */
+  setEncoding(id: string): void {
+    this.encoding = new SessionEncoding(id);
+  }
+
+  get encodingId(): string {
+    return this.encoding.option.id;
+  }
+
+  private sendText(text: string): void {
+    const { bytes, unsupported } = this.encoding.encode(text);
+    if (unsupported.length > 0) this.callbacks.onUnencodable?.(unsupported);
     this.send(bytes);
   }
 
@@ -565,7 +612,14 @@ export class TerminalController {
     }, RESIZE_DEBOUNCE_MS);
   }
 
-  /** Releases everything exactly once and closes the session. */
+  private released = false;
+
+  /** The session is moving to another window: disposing this terminal must not close it. */
+  release(on: boolean): void {
+    this.released = on;
+  }
+
+  /** Releases everything exactly once and closes the session (unless it was handed over). */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -573,7 +627,8 @@ export class TerminalController {
     window.clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();
     for (const cleanup of this.cleanups) cleanup();
-    if (this.sessionId) void sessions.close(this.sessionId).catch(() => undefined);
+    this.highlighter.dispose();
+    if (this.sessionId && !this.released) void sessions.close(this.sessionId).catch(() => undefined);
     this.sessionId = null;
     this.disposeWebgl();
     this.term.dispose();

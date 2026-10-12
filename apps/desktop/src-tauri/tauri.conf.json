@@ -24,7 +24,8 @@
     ],
     "security": {
       "capabilities": [
-        "main"
+        "main",
+        "detached"
       ],
       "freezePrototype": false,
       "csp": {

@@ -19,3 +19,7 @@ pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
 pub use tunnels::*;
+
+// agent C: workspaces
+mod layouts;
+pub use layouts::*;

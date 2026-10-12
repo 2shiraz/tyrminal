@@ -42,6 +42,10 @@ use crate::validate;
 // agent B: tunnels and history
 use crate::records::{KIND_TUNNEL, TunnelRecord};
 use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
+// agent C: workspaces
+use crate::layouts::{self, LayoutRecord};
+use crate::records::KIND_LAYOUT;
+use tyrminal_contracts::{LayoutTemplateInput, LayoutTemplateSummary};
 
 struct Stored<T> {
     revision: u64,
@@ -59,6 +63,8 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent B: tunnels and history
     tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
+    // agent C: workspaces
+    layouts: BTreeMap<Id, Stored<LayoutRecord>>,
 }
 
 impl Open {
@@ -72,6 +78,8 @@ impl Open {
             groups: BTreeMap::new(),
             // agent B: tunnels and history
             tunnels: BTreeMap::new(),
+            // agent C: workspaces
+            layouts: BTreeMap::new(),
         }
     }
 }
@@ -484,6 +492,8 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
+                // agent C: workspaces
+                KIND_LAYOUT => load!(LayoutRecord, open.layouts),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1397,6 +1407,53 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let stored = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
         Ok(Zeroizing::new(stored.record.text.clone()))
+    }
+
+    // ---------- layout templates (agent C: workspaces) ----------
+
+    pub async fn list_layouts(&self) -> Result<Vec<LayoutTemplateSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.layouts.iter().map(|(id, l)| layouts::summary(id, &l.record)).collect();
+        list.sort_by(|a, b| (a.name.to_lowercase(), &a.id).cmp(&(b.name.to_lowercase(), &b.id)));
+        Ok(list)
+    }
+
+    /// Saves a template (explicitly, on the user's request; nothing saves layouts automatically).
+    pub async fn save_layout(&self, input: LayoutTemplateInput) -> Result<LayoutTemplateSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let tabs = layouts::validate_tabs(&input.tabs, |id| open.hosts.contains_key(id))?;
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.layouts.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of layouts."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = LayoutRecord { name, tabs, updated_at: now_unix() };
+        let content_len = record.content_len();
+        self.write(open, id, KIND_LAYOUT, revision, Some((&record, content_len))).await?;
+        let summary = layouts::summary(&id, &record);
+        open.layouts.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_layout(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?.revision + 1;
+        self.write::<LayoutRecord>(open, id, KIND_LAYOUT, revision, None).await?;
+        open.layouts.remove(&id);
+        Ok(())
     }
 
     // ---------- keys ----------

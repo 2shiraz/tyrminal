@@ -26,6 +26,9 @@ pub(crate) const KIND_KNOWN_HOST: u16 = 3;
 pub(crate) const KIND_TRUST_EVENT: u16 = 4;
 pub(crate) const KIND_SNIPPET: u16 = 5;
 pub(crate) const KIND_GROUP: u16 = 6;
+// agent C: workspaces (kinds 20-29)
+/// Named layout templates (`crate::layouts`).
+pub(crate) const KIND_LAYOUT: u16 = 20;
 
 const MARKER_TOMBSTONE: u8 = 0x00;
 const MARKER_LIVE_V1: u8 = 0x01;

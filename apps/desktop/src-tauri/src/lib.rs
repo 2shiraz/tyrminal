@@ -167,6 +167,8 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_trust_answer,
             commands::sessions::session_auth_answer,
+            commands::sessions::session_handoff_offer,
+            commands::sessions::session_attach,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
             commands::files::files_pick_upload_folder,
@@ -210,6 +212,12 @@ pub fn run() {
             commands::tunnels::host_connection_get,
             commands::tunnels::host_connection_set,
             commands::tunnels::host_chain,
+            // agent C: workspaces
+            commands::layouts::layout_list,
+            commands::layouts::layout_save,
+            commands::layouts::layout_delete,
+            commands::layouts::window_detach,
+            commands::layouts::window_detach_take,
         ])
         .build(tauri::generate_context!());
 

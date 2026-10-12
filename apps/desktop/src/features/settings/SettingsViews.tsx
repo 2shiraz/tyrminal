@@ -23,6 +23,7 @@ import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
+import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
 const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -350,6 +351,8 @@ export function SettingsView() {
                 </button>
               </div>
             </section>
+
+            <WorkspaceSettings />
 
             <section id="settings-security" className="settings-section" aria-labelledby="settings-security-title">
               <header>

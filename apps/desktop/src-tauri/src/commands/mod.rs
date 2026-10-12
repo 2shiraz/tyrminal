@@ -10,3 +10,5 @@ pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
 pub mod tunnels;
+// agent C: workspaces
+pub mod layouts;

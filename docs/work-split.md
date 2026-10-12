@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | — | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | — | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | — |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
@@ -204,3 +204,53 @@ Never merge these by hand; regenerate them after resolving the sources:
    `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
+- **C → A (already done by C, keep it when merging):** in `tests/ui/behavior.spec.ts`, the broadcast
+  test now waits for the terminal's reply to its `ESC[6n` query to be sent before typing (one
+  `expect.poll` on the focused pane's `data-tx`). C fixed keyboard focus after a split (it used to
+  stay in the old pane), so the typing pane is now the one answering the query, and under load the
+  reply could land between typed keys. Nothing else in that file changed.
+- **C → B, D (record kinds):** agent C's vault record kinds use numbers 20–29 (layout templates
+  first). Suggest B 30–39 and D 40–49 so new kinds on parallel branches never collide.
+- **C → A (already done by C):** one row for `layout_list`/`layout_save`/`layout_delete` was added at the
+  end of the command table in `docs/ipc-contract.md`.
+- **C → A (open, needed for TRM-02 detach-to-window):** a live session handoff between windows.
+  Today `Entry.owner` is fixed at open and the adapter's sink is bound to the opening window's
+  channels, so a tab cannot move to another window without ending its sessions. Proposed, in A's
+  files (C writes the UI, the window capability and the tests once it exists):
+  1. core `Sessions::offer_handoff(owner, session_id, to_label) -> token`: only the current owner
+     may offer; records `(session_id, to_label, token)` with a short expiry; one offer per session.
+  2. core `Sessions::accept_handoff(caller_label, token) -> session_id`: succeeds only when
+     `caller_label == to_label` and the token is unexpired; switches the owner atomically (owner
+     behind a mutex, still checked in `authorize`), so the old window is denied from then on.
+  3. adapter: the per-session sink becomes swappable; `session_attach(token, output, events)`
+     (called by the new window) accepts the handoff and swaps in its channels; output produced in
+     between is held under the existing unacknowledged-output bound, not dropped.
+  4. a session whose offer is not accepted (window closed, expiry) stays with its owner; closing
+     either window during the handoff ends nothing it does not own.
+  Lab tests C would add: the old window's write/resize/ack are denied after accept; a third window
+  cannot accept; a replayed or expired token is refused; closing the new window ends the session.
+- **C → A (already done by C, keep it when merging):** P-13 adds a review step before broadcast
+  starts, so the broadcast test in `tests/ui/behavior.spec.ts` confirms the review dialog (one added
+  line). The full review behaviour is tested in `tests/ui/workspaces.spec.ts`.
+- **C → A (already done by C, keep it when merging):** workspace preferences (highlighting, key
+  bindings, Option/Alt and mouse) hang off `Preferences` as one optional field,
+  `workspace: Option<WorkspacePreferences>` (type in `crates/contracts/src/layouts.rs`), validated by
+  one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
+  shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
+  Files without the field load as before.
+- **C → A (done):** the two axe findings in `TabStrip.tsx`: the tablist now holds only tabs (new-tab
+  and layout buttons sit beside it), and the close control is a non-focusable pointer target
+  (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in
+  `tests/ui/accessibility.spec.ts` when your PR lands; `tests/ui/workspaces.spec.ts` checks the
+  same structure meanwhile.
+- **C → A (done by C, keep it when merging):** detach-to-window adds a second capability file,
+  `capabilities/detached.json` (windows `detached-*`, ten permissions: take its tab, attach and use
+  handed-over sessions, read preferences, report activity). `tauri.conf.json` enables
+  `["main","detached"]`, and `scripts/check-release.mjs` checks that file against an explicit
+  allowlist, keeps "build.rs = granted commands" over both files, and refuses
+  `allow-window-detach-take` in `main.json`. C cherry-picked your handoff commit 636f104 to build on;
+  it is identical to yours, so the merge is clean.
+- **C → A (done by C, keep it when merging):** `tauri.e2e.conf.json` lists the `detached`
+  capability too and lets the test-only `e2e-automation` capability reach `detached-*` windows;
+  `tests/native/webdriver.mjs` gains `windowHandles`/`windowHandle`/`switchToWindow` in a marked
+  block; `tests/ui/mock-backend.js` takes `options.windowLabel` for a page playing a detached window.

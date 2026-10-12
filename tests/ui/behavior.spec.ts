@@ -430,6 +430,8 @@ test("broadcast: typed input reaches every pane of the tab, terminal replies do 
   await page.keyboard.press("Control+Shift+K");
   await page.getByRole("combobox").fill("every pane");
   await page.keyboard.press("Enter");
+  // P-13: the receiving panes are reviewed before broadcast starts.
+  await page.getByRole("alertdialog", { name: "Type into these 2 panes?" }).getByRole("button", { name: "Type into 2 panes" }).click();
   await expect(page.getByTestId("broadcast")).toHaveText("Typing into 2 panes");
   await expect(page.locator(".pane[data-broadcast]")).toHaveCount(2);
   // Choosing the action returns focus to the terminal.
@@ -439,6 +441,8 @@ test("broadcast: typed input reaches every pane of the tab, terminal replies do 
   await output(page, "\u001b[6n");
   // Wait for the terminal's reply to reach its session first, so it cannot land inside the typed text.
   await page.waitForFunction(() => /\u001b\[\d+;\d+R/.test((window as unknown as { __mockReceived?: string }).__mockReceived ?? ""));
+  // Wait until that reply has been sent, so it cannot land between the typed keys.
+  await expect.poll(() => page.locator(".pane[data-focused=true] .terminal-host").getAttribute("data-tx").then(Number)).toBeGreaterThan(0);
   await page.keyboard.type("hostname");
   await page.keyboard.press("Enter");
   await expect.poll(() => paneText(0)).toContain("hostname: synthetic output");

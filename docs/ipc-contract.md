@@ -61,11 +61,14 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `session_resize` / `session_ack` / `session_close` | session id, … | — | `ack` is output flow control |
 | `session_trust_answer` | prompt id, `TrustDecision` | — | `once`, `always`, `cancel` |
 | `session_auth_answer` | prompt id, secret or none | — | None cancels |
+| `session_handoff_offer` | session id, target window label | single-use token | Owner only; one offer per session; lapses after 30 s or when the target window closes, and held output returns to the owner |
+| `session_attach` | token, output and event channels | session id | Target window only; switches owner and sink atomically; the old window is denied from then on |
 | `snippet_list` | — | `SnippetSummary[]` | Name, folder, text, line count |
 | `snippet_save` / `snippet_delete` | `SnippetInput` / id | `SnippetSummary` / — | Text ≤ 64 KiB, no control characters except tab/newline |
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
+| `layout_list` / `layout_save` / `layout_delete` | — / `LayoutTemplateInput` / id | `LayoutTemplateSummary[]` / `LayoutTemplateSummary` / — | Agent C. Saved only on request. Each split tree names each pane once, ratios are 0.15–0.85, at most 16 panes, SSH targets must be saved hosts. No commands, output or secrets are stored. A restored pane connects only on Connect |
 
 ## Events
 
