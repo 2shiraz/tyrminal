@@ -6,7 +6,7 @@ import { SnippetLibrary } from "./SnippetLibrary";
 export function SnippetsView() {
   return (
     <div className="page">
-      <section className="page-inner" aria-labelledby="snippets-title" style={{ maxWidth: 860 }}>
+      <section className="page-inner" aria-labelledby="snippets-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="snippets-title">{msg.snippets.title}</h1>

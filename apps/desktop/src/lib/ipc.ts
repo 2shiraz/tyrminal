@@ -349,6 +349,11 @@ export const snippets = {
     call<void>("snippet_send", { snippetId, sessionId, mode, bracketed }),
 };
 
+/** The interface size of this window (native web view zoom, 0.5–2). */
+export const ui = {
+  setZoom: (scale: number) => call<void>("ui_zoom_set", { scale }),
+};
+
 export const preferences = {
   get: () => call<Preferences>("prefs_get"),
   /** Stores preferences; returns them as validated and clamped by the native side. */

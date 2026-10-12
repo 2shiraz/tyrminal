@@ -140,32 +140,22 @@ const DOUBLE_CLICK_MS = 300;
 
 /** Times a host is connected from Hosts by double-click or Enter before the hint stops showing. */
 const HINT_UNTIL = 3;
-const HINT_KEY = "tyrminal.hosts.doubleClickHint";
 
 /**
- * The "Double-click to connect" hint on host names, for the first few connections from Hosts. A
- * per-device convenience in local storage; without storage it simply keeps showing.
+ * Connections from Hosts in this run of the app. Kept in memory: the release policy allows no
+ * browser storage (scripts/check-release.mjs), so the hint shows again after a restart.
  */
+let hintUses = 0;
+
+/** The "Double-click to connect" hint on host names, for the first few connections from Hosts. */
 function useDoubleClickHint() {
-  const [count, setCount] = useState(() => {
-    try {
-      return Number(localStorage.getItem(HINT_KEY) ?? 0) || 0;
-    } catch {
-      return 0;
-    }
-  });
+  const [count, setCount] = useState(hintUses);
   return {
     show: count < HINT_UNTIL,
-    used: () =>
-      setCount((n) => {
-        const next = n + 1;
-        try {
-          localStorage.setItem(HINT_KEY, String(next));
-        } catch {
-          // Storage unavailable: the hint keeps showing, nothing else depends on it.
-        }
-        return next;
-      }),
+    used: () => {
+      hintUses += 1;
+      setCount(hintUses);
+    },
   };
 }
 

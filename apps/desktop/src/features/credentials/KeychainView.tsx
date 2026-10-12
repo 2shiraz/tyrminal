@@ -59,7 +59,7 @@ export function KeychainView() {
 
   return (
     <div className="page">
-      <section className="page-inner" aria-labelledby="keys-title" style={{ maxWidth: 900 }}>
+      <section className="page-inner" aria-labelledby="keys-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="keys-title">{msg.keys.title}</h1>

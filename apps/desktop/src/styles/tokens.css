@@ -70,6 +70,8 @@
   --icon-sm: 14px;
   --icon-stroke: 1.5;
   --sidebar-width: 224px;
+  /* Widest a page's content gets (lists, tables, settings); wider windows keep side margins. */
+  --page-max: 1400px;
   --sidebar-collapsed: 52px;
   --tabstrip-height: 38px;
   --statusbar-height: 26px;

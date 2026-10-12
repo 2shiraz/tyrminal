@@ -3,6 +3,7 @@ import { type ReactNode, createContext, useCallback, useContext, useEffect, useM
 
 import { schemeById } from "../features/terminal/schemes";
 import { diagnostics, preferences as prefsApi } from "../lib/ipc";
+import { useInterfaceScale } from "./interfaceScale";
 
 const DEFAULTS: Preferences = {
   theme: "system",
@@ -15,6 +16,7 @@ const DEFAULTS: Preferences = {
   passwordCheck: { enabled: false, endpoint: "" },
   productionTag: "prod",
   noPortSuggestions: false,
+  interfaceScale: null,
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",
@@ -76,6 +78,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const resolvedTheme = prefs.theme === "system" ? system : prefs.theme;
 
   useEffect(() => diagnostics.setEnabled(prefs.diagnostics), [prefs.diagnostics]);
+
+  useInterfaceScale(prefs.interfaceScale);
 
   useEffect(() => {
     const root = document.documentElement;

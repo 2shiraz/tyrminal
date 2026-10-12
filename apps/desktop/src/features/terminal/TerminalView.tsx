@@ -42,6 +42,7 @@ import type { ScrollbackMatch, ScrollbackResult, SearchSlice } from "./scrollbac
 
 const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { UI_SCALE_EVENT } from "../../app/interfaceScale";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -390,6 +391,13 @@ export function TerminalView(props: TerminalViewProps) {
     autoAttempts.current = 0;
     setAttempt((n) => n + 1);
   }
+
+  // A new interface size changes the cell size in CSS pixels: refit once to the new grid.
+  useEffect(() => {
+    const refit = () => controllerRef.current?.refit();
+    window.addEventListener(UI_SCALE_EVENT, refit);
+    return () => window.removeEventListener(UI_SCALE_EVENT, refit);
+  }, []);
 
   // Live preference changes keep the session and screen.
   useEffect(() => {

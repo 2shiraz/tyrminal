@@ -22,7 +22,7 @@ export function KnownHostsView() {
 
   return (
     <div className="page">
-      <section className="page-inner" aria-labelledby="known-title" style={{ maxWidth: 900 }}>
+      <section className="page-inner" aria-labelledby="known-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="known-title">{msg.knownHosts.title}</h1>
