@@ -41,6 +41,6 @@ export const msgConnect = {
   cancelled: "Connection cancelled",
   cancelledBody: "Nothing more was sent to the server.",
   // connection track
-  track: { resolve: "Address", connect: "Connect", verify: "Identity", auth: "Sign in", shell: "Shell" },
+  track: { resolve: "Address", connect: "Connect", verify: "Server identity", auth: "Sign in", shell: "Shell" },
   via: (identity: string) => `SSH ${identity}`,
 };
