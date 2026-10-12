@@ -3616,7 +3616,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   border-radius: inherit;
   background: var(--accent-soft);
   pointer-events: none;
-  animation: saved-flash 400ms var(--ease-out) forwards;
+  animation: saved-flash var(--duration-flash) var(--ease-out) forwards;
 }
 
 @keyframes saved-flash {

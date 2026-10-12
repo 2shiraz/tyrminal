@@ -167,6 +167,53 @@ dialog.m-dialog[open]::backdrop {
   animation: none !important;
 }
 
+/* ---------- moments (docs/design/motion.md, PR 4): rare, so they may be felt ---------- */
+
+/* The window after unlock: the shell fades in once per unlock. */
+.shell {
+  transition: opacity var(--duration-slow) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* Onboarding, step 1 to step 2: the recovery key card comes in from the side. */
+.auth-card-wide {
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateX(var(--distance-md));
+  }
+}
+
+/* A wrong passphrase: the card shakes once per failed attempt (VaultScreens plays it with WAAPI,
+   reading --duration-slow, so reduced motion keeps it still). */
+
+/* Status dots change colour gently. */
+.status-dot {
+  transition: background-color var(--duration-base) var(--ease-colour);
+}
+
+/* "This changed": one tint that fades (a finished transfer, a saved row). */
+@keyframes m-flash {
+  from {
+    background-color: var(--accent-soft);
+  }
+}
+
+.xfer-row[data-state="done"] {
+  animation: m-flash var(--duration-flash) var(--ease-out);
+}
+
+/* Its icon turns to the success colour (files.css) gently. */
+.xfer-row .xfer-icon {
+  transition: color var(--duration-base) var(--ease-colour);
+}
+
 /* ---------- nav glides (lib/useGlide.ts): a transient copy of the current marker slides ---------- */
 .sidebar,
 .settings-nav,
