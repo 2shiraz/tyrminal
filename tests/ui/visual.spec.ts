@@ -39,7 +39,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test(`home with data (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
-      await expect(page.getByRole("heading", { name: "Recent connections" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Hosts", exact: true })).toBeVisible();
       await shot(page, `${theme}-05-home.png`);
     });
 
