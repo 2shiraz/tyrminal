@@ -31,4 +31,8 @@ lastConnectedAt: number | null, protocol: HostProtocol, terminal: HostTerminal, 
  * Why the host is a production host (P-26), from its own flag or a group above it; `None`
  * when neither sets it. The production tag (a preference) is applied by the interface.
  */
-production: ProductionSource | null, };
+production: ProductionSource | null, 
+/**
+ * Starred by the user (shown in Home's favourites).
+ */
+favourite: boolean, };

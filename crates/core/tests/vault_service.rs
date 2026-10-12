@@ -815,3 +815,67 @@ async fn a_stale_quick_unlock_entry_opens_nothing_and_is_removed() {
     assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
     core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hosts_can_be_starred_and_editing_keeps_the_star() {
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    let saved = core.vault.save_host(host("web", HostAuthInput::AskPassword)).await.unwrap();
+    assert!(!saved.favourite, "not a favourite until starred");
+    assert!(core.vault.set_favourite(&saved.id, true).await.unwrap().favourite);
+    assert!(core.vault.list_hosts().await.unwrap()[0].favourite);
+
+    // Editing the host keeps the star; a duplicate starts unstarred.
+    let mut edit = host("web renamed", HostAuthInput::AskPassword);
+    edit.id = Some(saved.id.clone());
+    assert!(core.vault.save_host(edit).await.unwrap().favourite);
+    assert!(!core.vault.duplicate_host(&saved.id).await.unwrap().favourite);
+
+    // It survives a lock and unlock (it is part of the encrypted host record).
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.set_favourite(&saved.id, false).await), ErrorCode::VaultLocked);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let starred: Vec<_> = core.vault.list_hosts().await.unwrap().into_iter().filter(|h| h.favourite).collect();
+    assert_eq!(starred.len(), 1);
+    assert!(!core.vault.set_favourite(&saved.id, false).await.unwrap().favourite);
+    assert!(core.vault.list_hosts().await.unwrap().iter().all(|h| !h.favourite));
+
+    // Unknown or malformed ids are refused.
+    assert_eq!(code(core.vault.set_favourite("00000000000000000000000000000000", true).await), ErrorCode::NotFound);
+    assert_eq!(code(core.vault.set_favourite("not an id", true).await), ErrorCode::InvalidInput);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_backup_time_is_recorded_kept_and_never_carried_into_a_backup() {
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    assert_eq!(core.vault.backup_status().await.unwrap().last_export_at, None, "never backed up");
+    let backup = core.vault.export_backup().await.unwrap();
+    // Exporting the bytes alone does not count: the desktop records it once the file is written.
+    assert_eq!(core.vault.backup_status().await.unwrap().last_export_at, None);
+    let before = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    core.vault.record_backup_export().await.unwrap();
+    let at = core.vault.backup_status().await.unwrap().last_export_at.expect("recorded");
+    assert!(at >= before && at <= before + 5);
+
+    // Kept across a lock; unreadable while locked.
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.backup_status().await), ErrorCode::VaultLocked);
+    assert_eq!(code(core.vault.record_backup_export().await), ErrorCode::VaultLocked);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(core.vault.backup_status().await.unwrap().last_export_at, Some(at));
+
+    // A later backup (which would contain the record if it were not left out) restores to a
+    // vault that was never backed up itself.
+    let later = core.vault.export_backup().await.unwrap();
+    let fresh_dir = TempDir::new().unwrap();
+    let fresh = open(&fresh_dir);
+    fresh
+        .vault
+        .restore_backup(later, tyrminal_core::contracts::BackupCredentialKind::Passphrase, PASSPHRASE.into(), false)
+        .await
+        .unwrap();
+    fresh.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(fresh.vault.backup_status().await.unwrap().last_export_at, None);
+    drop(backup);
+}

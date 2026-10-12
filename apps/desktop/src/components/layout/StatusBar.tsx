@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
@@ -7,7 +8,7 @@ import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon
 import { msgG } from "../../lib/messages-glance";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
-export function StatusBar({
+function StatusBarImpl({
   pane,
   status,
   panelOpen,
@@ -40,6 +41,8 @@ export function StatusBar({
   /** P-30: the focused host's notes. */
   notesOpen?: boolean | undefined;
   onToggleNotes?: (() => void) | undefined;
+  /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
+  shortcuts?: unknown;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -178,3 +181,6 @@ export function StatusBar({
     </footer>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const StatusBar = memo(StatusBarImpl);

@@ -73,6 +73,7 @@ export function installMockBackend(options) {
       terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
       production: null,
+      favourite: false,
     });
     state.groups = [
       { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1), production: false },
@@ -1086,7 +1087,11 @@ export function installMockBackend(options) {
     "plugin:event|unlisten": (a) => {
       listeners.delete(a.eventId);
     },
-    backup_export: () => "tyrminal-backup-2026-10-11.tyrbackup",
+    backup_export: () => {
+      state.lastBackupAt = Math.floor(Date.now() / 1000);
+      return "tyrminal-backup-2026-10-11.tyrbackup";
+    },
+    backup_status: () => ({ lastExportAt: state.lastBackupAt ?? null }),
     backup_choose: () => ({ fileName: "tyrminal-backup-2026-10-11.tyrbackup", size: 48213 }),
     backup_preview: (a) => {
       if (a.secret !== "correct horse battery") throw { code: "WRONG_CREDENTIAL", message: "That did not open the backup. Nothing was restored." };
@@ -1186,6 +1191,8 @@ export function installMockBackend(options) {
         forwardAgent: a.host.forwardAgent ?? false,
         // The host's own flag is kept in ownProduction; the record carries what summaries show.
         production: null,
+        // Starring is its own command; editing keeps it.
+        favourite: existing?.favourite ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
       };
@@ -1213,9 +1220,15 @@ export function installMockBackend(options) {
         }),
       );
     },
+    host_favourite_set: (a) => {
+      const host = state.hosts.find((h) => h.id === a.id);
+      if (!host) throw { code: "NOT_FOUND", message: "That host no longer exists." };
+      host.favourite = a.favourite;
+      return hostView(host);
+    },
     host_duplicate: (a) => {
       const source = state.hosts.find((h) => h.id === a.id);
-      const copy = { ...structuredClone(source), id: id(450 + state.hosts.length), label: `${source.label} (copy)`, lastConnectedAt: null };
+      const copy = { ...structuredClone(source), id: id(450 + state.hosts.length), label: `${source.label} (copy)`, lastConnectedAt: null, favourite: false };
       state.hosts = [...state.hosts, copy];
       return copy;
     },
@@ -1298,6 +1311,7 @@ export function installMockBackend(options) {
           protocol: { type: "ssh" },
           terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
           forwardAgent: false,
+          favourite: false,
         });
       }
       return a.hosts.length;

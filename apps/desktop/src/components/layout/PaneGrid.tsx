@@ -1,5 +1,5 @@
 import type { TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useRef, useState, memo } from "react";
 
 import { useOptionalVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Tab, type Workspace, activeTab, panesOf, paneRects } from "../../app/workspace";
@@ -20,7 +20,7 @@ const pct = (v: number) => `${(v * 100).toFixed(4)}%`;
  * tree, so splitting, closing, resizing, rearranging or moving a pane to another tab never
  * remounts a terminal (its session survives). Panes of background tabs stay mounted but hidden.
  */
-export function PaneGrid({
+function PaneGridImpl({
   ws,
   prefs,
   workspace,
@@ -289,6 +289,9 @@ export function PaneGrid({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const PaneGrid = memo(PaneGridImpl);
 
 function Splitters({
   tabId,

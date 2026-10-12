@@ -154,6 +154,8 @@ export const hosts = {
   duplicate: (id: string) => call<HostSummary>("host_duplicate", { id }),
   /** One change to many hosts, all or nothing; resolves to how many changed. */
   bulk: (ids: string[], change: BulkHostChange) => call<number>("host_bulk", { ids, change }),
+  /** Stars or unstars a host (Home's favourites). */
+  setFavourite: (id: string, favourite: boolean) => call<HostSummary>("host_favourite_set", { id, favourite }),
 };
 
 export const groups = {
@@ -380,6 +382,8 @@ export const backup = {
   /** Replaces this device's vault with the chosen backup and locks it. */
   restore: (kind: BackupCredentialKind, secret: string, replaceExisting: boolean) =>
     call<BackupPreview>("backup_restore", { kind, secret, replaceExisting }),
+  /** When this vault was last backed up (`lastExportAt` null: never). */
+  status: () => call<import("@tyrminal/contracts").BackupStatus>("backup_status"),
 };
 
 

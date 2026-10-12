@@ -1,14 +1,16 @@
-import type { ChainPosition, IpcError, SessionEvent, SessionState } from "@tyrminal/contracts";
+import type { ChainPosition, HostOs, IpcError, SessionEvent, SessionState } from "@tyrminal/contracts";
 import { type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { useWindowFocused } from "../../components/ui/Wordmark";
 import { SecretField, TextField } from "../../components/ui/controls";
-import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconShieldAlert, IconX } from "../../components/ui/icons";
+import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconServer, IconShieldAlert, IconX } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgConnect } from "../../lib/messages-connect";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { OsIcon } from "../hosts/OsIcon";
 import { HopNotice } from "../tunnels/HopNotice";
+import { ConnectTrack, trackStates } from "./ConnectTrack";
 import { RECONNECT_MAX_ATTEMPTS, groupFingerprint } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
@@ -247,6 +249,10 @@ export function ConnectionSheet(props: {
   onInstallKey: (() => void) | null;
   /** False in a detached window: reconnecting happens from the main window. */
   canReconnect: boolean;
+  /** The host's OS, for the icon on the host tile (null: a generic server mark). */
+  os?: HostOs | null;
+  /** The session just opened: the track settles while the sheet fades over the live shell. */
+  settling?: boolean;
 }) {
   const { ssh, label, identity, timeline, startedAt, trust, auth, changed, closed, autoRetry, banner, interactive } = props;
   const [now, setNow] = useState(() => Date.now());
@@ -270,6 +276,7 @@ export function ConnectionSheet(props: {
   }, [connecting, startedAt]);
 
   const failedNow = closed !== null && closed.error !== null;
+  const settling = props.settling === true;
   const rows = buildRows({ timeline, startedAt, now, ssh, label, failed: failedNow || changed !== null, trust, auth });
   const retrying = failures.current.length > 0 && props.everConnected;
 
@@ -379,7 +386,6 @@ export function ConnectionSheet(props: {
     );
     actions = (
       <>
-        {log}
         <span className="grow" />
         <button type="button" className="btn" onClick={props.onCloseTab}>
           {msg.terminal.closeTab}
@@ -441,7 +447,8 @@ export function ConnectionSheet(props: {
       </>
     );
   } else {
-    title = retrying ? msgConnect.lost : msgConnect.connectingTo(label);
+    title = settling ? msgConnect.step.connecting.done : retrying ? msgConnect.lost : msgConnect.connectingTo(label);
+    if (ssh) subtitle = <span className="mono">{msgConnect.via(identity)}</span>;
     if (retrying) body = <AttemptList failures={failures.current} />;
     if (auth)
       body = (
@@ -452,7 +459,6 @@ export function ConnectionSheet(props: {
       );
     actions = (
       <>
-        {log}
         <span className="grow" />
         <button type="button" className="btn" onClick={cancel}>
           {msgConnect.cancel}
@@ -468,8 +474,18 @@ export function ConnectionSheet(props: {
 
   const mode = changed ? "changed" : closed && cancelled ? "cancelled" : closed?.error ? "failed" : closed ? "ended" : trust ? "trust" : auth ? "auth" : "connecting";
   const showSteps = ssh && !(closed && !closed.error) && !(closed && cancelled);
+  // The track follows the same events as the steps; a lost connection's retries are told by the list.
+  const showTrack = ssh && (settling || (showSteps && !retrying));
+  const states = trackStates({ timeline, failed: failedNow, hostKeyChanged: changed !== null, trust: trust !== null, auth: auth !== null, connected: settling });
   return (
-    <div className="connect-layer" data-dim={props.everConnected && closed !== null}>
+    <div
+      className="connect-layer"
+      data-dim={props.everConnected && closed !== null}
+      data-leaving={settling || undefined}
+      // Leaving: gone for input and assistive technology at once; the shell underneath is live.
+      inert={settling || undefined}
+      aria-hidden={settling || undefined}
+    >
       <Sheet
         // A trust decision is a real dialog, like the modal it replaces; everything else is a region
         // of this pane, so application shortcuts and other tabs keep working while it connects.
@@ -481,14 +497,19 @@ export function ConnectionSheet(props: {
         aria-describedby="connect-sub"
         onKeyDown={onKeyDown}
       >
-        <div className="connect-head">
-          <h2 id="connect-title">
-            {tone === "danger" && <IconShieldAlert size={17} />}
-            {role === "alert" && tone !== "danger" && <IconCircleAlert size={17} />}
-            {title}
-          </h2>
-          <p id="connect-sub">{subtitle}</p>
+        <div className="connect-head" data-tile={ssh || undefined}>
+          {ssh && (props.os ? <OsIcon os={props.os} /> : <span className="avatar connect-host-mark" aria-hidden="true"><IconServer size={16} /></span>)}
+          <div className="connect-head-text">
+            <h2 id={settling ? undefined : "connect-title"}>
+              {tone === "danger" && <IconShieldAlert size={17} />}
+              {role === "alert" && tone !== "danger" && <IconCircleAlert size={17} />}
+              {title}
+            </h2>
+            <p id={settling ? undefined : "connect-sub"}>{subtitle}</p>
+          </div>
+          {ssh && !settling && log}
         </div>
+        {showTrack && <ConnectTrack states={states} />}
         {retrying && !closed ? (
           <>
             {body}

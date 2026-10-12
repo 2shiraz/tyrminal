@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { chooseKey, HOST_PANEL, KEYS, saveAndCloseHostPanel } from "./flows.mjs";
+import { chooseKey, HOST_PANEL, KEYS, saveAndCloseHostPanel, waitUnlocked } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
@@ -56,6 +56,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   const hostText = () => s.until(() => s.execute(`return document.querySelector('[data-testid="host-list"] li')?.innerText ?? null`), { describe: "a host entry" });
   // Read in one step in the page, so a re-render cannot invalidate an element handle mid-read.
   const heading = () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" });
+  // Rows have no Connect button: Enter on the host connects (as a keyboard user would).
+  const connectHost = (label) => s.openHost('[data-testid="host-list"]', label);
   const listItemText = () => s.until(() => s.execute(`return document.querySelector("ul.list li")?.innerText ?? null`), { describe: "a list row" });
 
   before(async () => {
@@ -93,8 +95,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    await s.until(async () => (await heading()) === "Home", { describe: "main window" });
-    assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
+    await waitUnlocked(s, { describe: "main window" });
     await app.screenshot("03-home-empty");
     await nav("Hosts");
     assert.match(await s.execute("return document.body.innerText"), /No hosts yet/);
@@ -136,7 +137,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   });
 
   test("first connection asks to verify the server, then runs a fixture command", async () => {
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => (await s.find("dialog")) && /Verify this server/.test(await s.text(await s.find("dialog h2"))), {
       describe: "trust prompt",
     });
@@ -226,7 +227,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clickButton("Use recovery key instead");
     await s.fill("Recovery key", recoveryKey.toLowerCase().replaceAll("-", " "));
     await s.clickButton("Unlock");
-    await s.until(async () => (await heading()) === "Home", { describe: "main window after recovery unlock", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "main window after recovery unlock" });
     await nav("Hosts");
     assert.match(await hostText(), /Lab server/);
 
@@ -243,14 +244,15 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     const before = authLogLines("b");
 
     await nav("Hosts");
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => /identity has changed/.test(await s.execute("return document.body.innerText")), {
       describe: "changed-key warning",
     });
-    const overlay = await s.text(await s.waitFor(".terminal-overlay"));
+    // The pane's connection sheet says why it stopped; it is not a dialog (asserted below).
+    const overlay = await s.text(await s.waitFor(".connection-sheet"));
     assert.match(overlay, /no password or key was sent/);
     const shown = [];
-    for (const element of await s.findAll(".terminal-overlay .fingerprint")) shown.push(await s.attribute(element, "aria-label"));
+    for (const element of await s.findAll(".connection-sheet .fingerprint")) shown.push(await s.attribute(element, "aria-label"));
     assert.deepEqual(shown, [lab.servers.b.hostKeyEd25519Fingerprint, lab.servers.a.hostKeyEd25519Fingerprint]);
     assert.equal(await s.find("dialog"), null, "no trust prompt is offered for a changed key");
     await app.screenshot("10-host-key-changed");
@@ -283,7 +285,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     });
 
     await nav("Hosts");
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "new trust prompt" });
     assert.equal(await s.attribute(await s.find("dialog .fingerprint"), "aria-label"), lab.servers.b.hostKeyEd25519Fingerprint);
     await s.clickButton("Do not connect", { within: "dialog" });
@@ -342,7 +344,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.click(await s.waitFor('nav.sidebar [data-nav="lock"]'));
     await s.until(async () => (await heading()) === "Unlock your vault", { describe: "locked" });
     await s.clickButton("Unlock with this device");
-    await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "unlocked by the device" });
     // Turn it off again so the test leaves no keychain item behind.
     await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
     await s.clickButton("Vault and unlock", { within: "nav.settings-nav" });

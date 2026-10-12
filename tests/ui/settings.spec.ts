@@ -149,3 +149,12 @@ test("settings: search lists matching settings; Enter opens the section and focu
   await results.getByRole("button").first().click();
   await expect(page.getByRole("switch", { name: /Copy on select/ })).toBeFocused();
 });
+
+test("settings: Backup says when the vault was last exported, and an export updates it", async ({ page }) => {
+  await openApp(page);
+  await openSettings(page, "Backup");
+  const last = page.getByTestId("last-export");
+  await expect(last).toHaveText("Never exported");
+  await page.getByRole("button", { name: "Save a backup…" }).click();
+  await expect(last).toHaveText("Last exported just now");
+});
