@@ -60,6 +60,10 @@ pub(crate) struct HostRecord {
     /// Unix seconds of the last connection that reached the shell. Absent in older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected_at: Option<u64>,
+    // agent A: protocols
+    /// SSH, Telnet or a serial device. Absent (SSH) in older records.
+    #[serde(default, skip_serializing_if = "tyrminal_contracts::HostProtocol::is_ssh")]
+    pub protocol: tyrminal_contracts::HostProtocol,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -183,6 +187,7 @@ mod tests {
             group: None,
             tags: Vec::new(),
             last_connected_at: None,
+            protocol: tyrminal_contracts::HostProtocol::Ssh,
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);

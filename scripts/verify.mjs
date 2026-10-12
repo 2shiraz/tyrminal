@@ -27,6 +27,8 @@ const needsSecretStore = () => {
   return "no OS secret store adapter for this platform";
 };
 
+const needsSocat = () => (spawnSync("socat", ["-V"], { stdio: "ignore" }).status === 0 ? null : "socat is not installed (a pseudo-terminal pair plays the serial device)");
+
 const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
 const node = (...args) => ["node", args];
@@ -65,6 +67,10 @@ const SUITES = {
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
+    // Pseudo-terminals stand in for serial devices on Unix only; Windows serial is untested.
+    ...(process.platform === "win32"
+      ? []
+      : [{ name: "serial host over a pseudo-terminal pair", cmd: cargo("test", "-p", "tyrminal-core", "--test", "protocols", "--quiet", "--", "--ignored"), blockedBy: needsSocat }]),
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },

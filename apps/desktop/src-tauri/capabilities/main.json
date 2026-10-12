@@ -79,6 +79,7 @@
     "allow-terminal-choices",
     "allow-editor-pick-app",
     "allow-diagnostics-report",
+    "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
     "allow-backup-export",

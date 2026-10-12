@@ -302,6 +302,8 @@ export const preferences = {
   set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
   /** Installed shells that can be chosen for local terminals. */
   shells: () => call<string[]>("terminal_choices"),
+  /** Serial ports this computer reports (for serial hosts). */
+  serialPorts: () => call<string[]>("serial_ports"),
   /** Chooses (natively) the app that edits remote files with `extension`; null if cancelled. */
   pickEditor: (extension: string) => call<Preferences | null>("editor_pick_app", { extension }),
 };

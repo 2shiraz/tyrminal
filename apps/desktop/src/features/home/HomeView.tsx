@@ -80,6 +80,7 @@ export function HomeView({
         username: parsed.username,
         groupId: null,
         tags: [],
+        protocol: { type: "ssh" },
         auth: { kind: "ask_password" },
       });
       setQuery("");

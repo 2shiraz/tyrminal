@@ -121,3 +121,9 @@ pub async fn diagnostics_report(
         .map_err(|_| io())?;
     Ok(Some(crate::commands::backup::file_name(&path)))
 }
+
+/// Serial ports this computer reports, for choosing a serial host's device.
+#[tauri::command]
+pub async fn serial_ports() -> Result<Vec<String>, IpcError> {
+    Ok(tauri::async_runtime::spawn_blocking(tyrminal_core::serial_ports).await.unwrap_or_default())
+}

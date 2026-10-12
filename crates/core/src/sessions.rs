@@ -22,9 +22,9 @@ use tyrminal_contracts::limits::{
     TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ConflictChoice, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing,
-    SessionEvent, SessionOpened, SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision,
-    VaultStatus,
+    AuthPromptKind, ConflictChoice, ErrorCode, HostProtocol, IpcError, KeyDeployPreview, RemoteEntryKind,
+    RemoteListing, SessionEvent, SessionOpened, SessionState, SnippetSendMode, TransferDirection, TransferStarted,
+    TrustDecision, VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -220,6 +220,13 @@ impl Sessions {
         rows: u16,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        // Hosts reached over Telnet or a serial line open through their own transport.
+        let endpoint = self.vault.host_endpoint(host_id).await?;
+        match endpoint.protocol {
+            HostProtocol::Ssh => {}
+            HostProtocol::Telnet => return self.open_telnet(owner, endpoint, cols, rows, sink),
+            HostProtocol::Serial { settings } => return self.open_serial(owner, endpoint.generation, settings, sink),
+        }
         let plan = self.vault.connection_plan(host_id).await?;
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink)?;
         let sink: Arc<dyn SessionSink> = entry.relay.clone();
@@ -228,6 +235,57 @@ impl Sessions {
         tokio::spawn(async move {
             let ctx = TaskContext::new(&this, &entry, &sink);
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// A Telnet session: says first that nothing is encrypted, then connects (no host-key check
+    /// exists in Telnet, and no credential is sent by Tyrminal; the server's own prompts ask).
+    fn open_telnet(
+        self: &Arc<Self>,
+        owner: &str,
+        endpoint: crate::vault::HostEndpoint,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let (id, entry, input_rx) = self.register(owner, endpoint.generation, sink)?;
+        let relay = Arc::clone(&entry.relay);
+        let sink: Arc<dyn SessionSink> = relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let body = run_telnet(&sink, &relay, endpoint, cols, rows, input_rx);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// A terminal on a serial device of this computer.
+    fn open_serial(
+        self: &Arc<Self>,
+        owner: &str,
+        generation: u32,
+        settings: tyrminal_contracts::SerialSettings,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let (id, entry, input_rx) = self.register(owner, generation, sink)?;
+        let relay = Arc::clone(&entry.relay);
+        let sink: Arc<dyn SessionSink> = relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let body = async {
+                sink.event(SessionEvent::State { state: SessionState::Connecting });
+                match crate::serial::open(&settings) {
+                    Ok(link) => {
+                        sink.event(SessionEvent::State { state: SessionState::Connected });
+                        pump(Transport::Serial(link), &relay, input_rx).await
+                    }
+                    Err(error) => Outcome::failed(error),
+                }
+            };
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -1335,6 +1393,39 @@ async fn run_local(
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
+}
+
+/// Telnet connections that take longer than this to answer are given up.
+const TELNET_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+async fn run_telnet(
+    sink: &Arc<dyn SessionSink>,
+    relay: &Relay,
+    endpoint: crate::vault::HostEndpoint,
+    cols: u16,
+    rows: u16,
+    input: mpsc::Receiver<Input>,
+) -> Outcome {
+    sink.event(SessionEvent::Banner {
+        text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.\n".into(),
+    });
+    sink.event(SessionEvent::State { state: SessionState::Connecting });
+    let host = endpoint.address.trim_start_matches('[').trim_end_matches(']').to_owned();
+    let stream = match tokio::time::timeout(
+        TELNET_CONNECT_TIMEOUT,
+        tokio::net::TcpStream::connect((host.as_str(), endpoint.port)),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(_)) => return Outcome::failed(err(ErrorCode::Disconnected, "The Telnet server could not be reached.")),
+        Err(_) => return Outcome::failed(err(ErrorCode::Timeout, "The Telnet server did not answer in time.")),
+    };
+    let _ = stream.set_nodelay(true);
+    let (reader, writer) = stream.into_split();
+    sink.event(SessionEvent::State { state: SessionState::Connected });
+    let link = TelnetLink { reader, writer, codec: crate::telnet::Codec::new(cols, rows), replies: Vec::new() };
+    pump(Transport::Telnet(Box::new(link)), relay, input).await
 }
 
 enum Transport {

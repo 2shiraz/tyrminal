@@ -63,6 +63,7 @@ export function installMockBackend(options) {
       groupId,
       tags,
       lastConnectedAt: last,
+      protocol: { type: "ssh" },
     });
     state.groups = [
       { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
@@ -325,6 +326,7 @@ export function installMockBackend(options) {
       window.__mockReports.push(a.entries);
       return "tyrminal-diagnostics-2026-10-12.txt";
     },
+    serial_ports: () => ["/dev/ttyUSB0", "/dev/ttyACM0"],
     terminal_choices: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {
       const extension = a.extension.replace(/^\./, "").toLowerCase();
@@ -562,6 +564,9 @@ export function installMockBackend(options) {
         inherited,
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
+        protocol: a.host.protocol ?? { type: "ssh" },
+        // Serial hosts have no port; Telnet defaults to 23.
+        ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
       };
       state.hosts = existing ? state.hosts.map((h) => (h.id === saved.id ? saved : h)) : [...state.hosts, saved];
       return saved;
@@ -651,6 +656,7 @@ export function installMockBackend(options) {
           groupId: a.intoGroup,
           tags: h.tags,
           lastConnectedAt: null,
+          protocol: { type: "ssh" },
         });
       }
       return a.hosts.length;

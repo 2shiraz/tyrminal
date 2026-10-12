@@ -123,6 +123,7 @@ pub struct HostSummary {
     /// Unix seconds of the last connection that reached the shell, if any (recent connections).
     #[ts(type = "number | null")]
     pub last_connected_at: Option<u64>,
+    pub protocol: HostProtocol,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -265,6 +266,29 @@ pub struct HostInput {
     pub group_id: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// How the host is reached (SSH unless chosen otherwise).
+    #[serde(default)]
+    pub protocol: HostProtocol,
+}
+
+/// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a
+/// device on this computer (its address and port are not used).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[ts(export)]
+pub enum HostProtocol {
+    #[default]
+    Ssh,
+    Telnet,
+    Serial {
+        settings: SerialSettings,
+    },
+}
+
+impl HostProtocol {
+    pub fn is_ssh(&self) -> bool {
+        *self == Self::Ssh
+    }
 }
 
 // ---------- keys ----------

@@ -17,8 +17,8 @@ use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState,
-    TransferEvent, TrustDecision, VaultState,
+    AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, HostProtocol, KeyImportInput, SessionEvent,
+    SessionState, TransferEvent, TrustDecision, VaultState,
 };
 use tyrminal_core::{Core, SessionSink, TransferSink};
 
@@ -338,6 +338,7 @@ impl Fixture {
             auth,
             group_id: None,
             tags: Vec::new(),
+            protocol: HostProtocol::Ssh,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }

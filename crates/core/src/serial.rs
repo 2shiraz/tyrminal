@@ -16,8 +16,20 @@ use crate::error::{err, invalid};
 /// Highest line speed accepted (common USB adapters go to 4 Mbit/s).
 const MAX_BAUD: u32 = 4_000_000;
 
-/// Checks settings before anything is opened.
+/// Checks settings before anything is opened (the device must exist and be a port).
 pub(crate) fn validate(settings: &SerialSettings) -> Result<(), IpcError> {
+    validate_line(settings)?;
+    if !path_ok(&settings.path) {
+        return Err(invalid("That is not a serial port on this computer."));
+    }
+    Ok(())
+}
+
+/// Checks the stored shape of settings (a host can be saved while its adapter is unplugged).
+pub(crate) fn validate_line(settings: &SerialSettings) -> Result<(), IpcError> {
+    if settings.path.trim().is_empty() || settings.path.len() > 256 || settings.path.contains('\0') {
+        return Err(invalid("Choose the serial port."));
+    }
     if settings.baud == 0 || settings.baud > MAX_BAUD {
         return Err(invalid("Choose a speed between 1 and 4,000,000 baud."));
     }
@@ -26,9 +38,6 @@ pub(crate) fn validate(settings: &SerialSettings) -> Result<(), IpcError> {
     }
     if !matches!(settings.stop_bits, 1 | 2) {
         return Err(invalid("Stop bits must be 1 or 2."));
-    }
-    if !path_ok(&settings.path) {
-        return Err(invalid("That is not a serial port on this computer."));
     }
     Ok(())
 }
@@ -113,7 +122,8 @@ pub(crate) fn open(settings: &SerialSettings) -> Result<SerialLink, IpcError> {
                             return;
                         }
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(_) => {
                         let _ = tx.blocking_send(SerialEvent::Lost);
                         return;

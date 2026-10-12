@@ -19,14 +19,15 @@ mod records;
 mod remote_copy;
 mod serial;
 mod sessions;
-mod telnet;
 mod streams;
+mod telnet;
 mod validate;
 mod vault;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;
+pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
 pub use tyrminal_platform::{

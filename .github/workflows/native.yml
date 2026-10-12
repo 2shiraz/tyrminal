@@ -58,7 +58,7 @@ jobs:
 
       - name: Full-screen applications for the macOS lab server
         if: runner.os == 'macOS'
-        run: brew install tmux htop midnight-commander nano
+        run: brew install tmux htop midnight-commander nano socat
       # The app under test is a background process on an unattended desktop; App Nap then pauses
       # its WebView's rendering, so the screen stops updating while bytes still arrive. Disposable
       # runner only: turn App Nap off for every app.
@@ -67,7 +67,7 @@ jobs:
         run: defaults write -g NSAppSleepDisabled -bool YES
       - name: Full-screen applications for the Linux lab server
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc
+        run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc socat
       # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
       # the Windows loopback interface: the same server, PAM and full-screen applications as on
       # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.

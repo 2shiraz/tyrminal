@@ -2,6 +2,8 @@
 //! its contents. Fixtures hold synthetic data only and are copied before use, so the committed
 //! files are never modified. See tests/fixtures/upgrade/README.md for how they were made.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;

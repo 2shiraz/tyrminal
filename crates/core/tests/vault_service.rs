@@ -35,6 +35,7 @@ fn host(label: &str, auth: HostAuthInput) -> HostInput {
         auth,
         group_id: None,
         tags: Vec::new(),
+        protocol: Default::default(),
     }
 }
 
@@ -118,6 +119,7 @@ async fn no_plaintext_canary_reaches_any_file_on_disk() {
             auth: HostAuthInput::StoredPassword { password: Some(canaries[3].into()) },
             group_id: None,
             tags: Vec::new(),
+            protocol: Default::default(),
         })
         .await
         .unwrap();
@@ -448,6 +450,7 @@ async fn hosts_keys_and_references_keep_their_integrity() {
             auth: HostAuthInput::AskPassword,
             group_id: None,
             tags: Vec::new(),
+            protocol: Default::default(),
         };
         assert_eq!(
             code(v.save_host(input).await),

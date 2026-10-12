@@ -63,6 +63,16 @@ recovery key (the old one stops working at once).
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
 
+A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
+
+- **Telnet** is for old equipment only. It is not encrypted: anything you type, including the
+  password at the device's login prompt, can be read on the network. Tyrminal says so at the
+  start of every Telnet session and stores no credentials for Telnet hosts. The default port
+  is 23.
+- **Serial** connects to a device on this computer (a USB serial adapter or console port,
+  e.g. `/dev/ttyUSB0` or `COM3`) with the speed, data bits, parity, stop bits and flow control
+  you choose. Only real serial devices are opened.
+
 **Import** reads an OpenSSH `config` file or a CSV file. It shows a preview first and never runs
 anything from the file (`ProxyCommand`, `LocalCommand` and similar are reported, not executed).
 
