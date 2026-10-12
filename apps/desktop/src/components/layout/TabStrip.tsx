@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, memo } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { msgN } from "../../lib/messages-notify";
@@ -109,6 +109,45 @@ function TabStripImpl({
   // Tabs slide aside when one opens, closes or moves, and a new one fades in (lib/motion.ts).
   const tabsRef = useRef<HTMLDivElement>(null);
   useFlip(tabsRef);
+
+  // Overflow scrolls sideways only: the wheel scrolls the strip horizontally, the active tab is
+  // kept in view, and faded edges show that more tabs are hidden on that side.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const edges = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const start = el.scrollLeft > 1;
+      const end = el.scrollLeft < max - 1;
+      el.dataset.overflow = max <= 1 ? "none" : start && end ? "both" : start ? "start" : "end";
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      el.scrollLeft += event.deltaY;
+    };
+    const observer = new ResizeObserver(edges);
+    observer.observe(el);
+    if (tabsRef.current) observer.observe(tabsRef.current);
+    el.addEventListener("scroll", edges, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: false });
+    edges();
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", edges);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    tabRefs.current.get(ws.active ?? -1)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [ws.active, ws.tabs.length]);
+  // Width changes animate only when a tab was chosen with the pointer (docs/design/motion.md):
+  // switching from the keyboard is instant.
+  const markInput = (input: "pointer" | "keyboard") => {
+    if (stripRef.current) stripRef.current.dataset.input = input;
+  };
   /** A tab closed with the pointer shrinks out first; from the keyboard it closes at once. */
   const closeWithPointer = (id: number) => animateOut(tabRefs.current.get(id), () => onClose(id), "scale(0.94)");
 
@@ -167,7 +206,10 @@ function TabStripImpl({
   };
 
   return (
-    <div className="tabstrip">
+    <div className="tabstrip" ref={stripRef} onPointerDownCapture={() => markInput("pointer")} onKeyDownCapture={() => markInput("keyboard")}>
+      {/* "+" scrolls with the tabs, right after the last one; it stays pinned at the end only when
+          the tabs overflow. */}
+      <div className="tabstrip-scroll" ref={scrollRef}>
       {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
       <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions} ref={tabsRef}>
         <div
@@ -301,11 +343,16 @@ function TabStripImpl({
         className="tab-new"
         size="sm"
         label={msg.nav.newTab}
+        // A CSS tooltip would hang below the strip's scroll area (clipped, and scrollable
+        // vertically); the native one is drawn outside it.
+        data-tooltip={undefined}
+        title={msg.nav.newTab}
         aria-haspopup="menu"
         onClick={(event) => setNewMenu(event.currentTarget)}
       >
         <IconPlus size={16} />
       </IconButton>
+      </div>
       <span className="tab-spacer" />
       {layout && (
         <button

@@ -39,6 +39,8 @@ const COMMANDS: &[&str] = &[
     "import_hosts",
     // sessions
     "session_open_ssh",
+    // quick connect
+    "session_open_quick",
     "session_open_local",
     "session_open_files",
     "session_open_exec",

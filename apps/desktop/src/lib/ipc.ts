@@ -202,6 +202,9 @@ function channels(onOutput: OutputHandler, onEvent: EventHandler) {
 export const sessions = {
   openSsh: (hostId: string, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
+  // quick connect: an address that is not saved; a typed password is used for this session only.
+  openQuick: (input: import("@tyrminal/contracts").QuickConnectInput, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
+    call<SessionOpened>("session_open_quick", { input, cols, rows, ...channels(onOutput, onEvent) }),
   /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
   openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
     call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),

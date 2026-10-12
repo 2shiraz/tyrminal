@@ -155,7 +155,9 @@ export function installMockBackend(options) {
     const exec = kind === "exec";
     const files = kind === "files" || exec;
     if (files) kind = "ssh";
-    const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
+    // quick connect: an unsaved address stands in for a host (no id; nothing is stored).
+    const quickHost = args.input ? { id: null, label: args.input.address, username: args.input.username || "tyr", protocol: { type: args.input.protocol } } : null;
+    const host = kind === "ssh" ? (quickHost ?? state.hosts.find((h) => h.id === args.hostId)) : null;
     const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files, exec };
     if (files && !exec) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
@@ -1379,6 +1381,14 @@ export function installMockBackend(options) {
       write(a.sessionId, new TextEncoder().encode(a.mode === "run" ? `${text}\r` : text));
     },
     session_open_ssh: (a) => openSession(a, "ssh"),
+    // quick connect: validated like the core (address shape, port, user for SSH).
+    session_open_quick: (a) => {
+      const { input } = a;
+      if (!/^\[?[A-Za-z0-9._:-]+\]?$/.test(input.address) || input.address.includes("@")) throw { code: "INVALID_INPUT", message: "The address must be a host name or an IP address, without a scheme, user or path." };
+      if (!(input.port >= 1 && input.port <= 65535)) throw { code: "INVALID_INPUT", message: "The port must be between 1 and 65535." };
+      if (input.protocol === "ssh" && !input.username && input.auth.kind !== "identity") throw { code: "INVALID_INPUT", message: "Enter the user name." };
+      return openSession(a, "ssh");
+    },
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
     // Signs in with a typed password, whatever the host uses (to install a key).
@@ -1934,7 +1944,8 @@ export function installMockBackend(options) {
     return [...out.values()].map((v) => (withOrigin ? v : { name: v.name, value: v.value }));
   };
   /** Identities in the mock: the list (passwords kept here only) and which target uses which. */
-  const identityState = { list: [], uses: new Map() };
+  // quick connect: a test can seed identities (options.identities).
+  const identityState = { list: options.identities ?? [], uses: new Map() };
   function identityAssignment(target) {
     const own = identityState.uses.get(target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`) ?? null;
     if (target.kind === "group") return { target, identityId: own, effectiveIdentityId: own, origin: own ? { kind: "host" } : null };

@@ -164,6 +164,8 @@ pub fn run() {
             commands::inventory::import_preview,
             commands::inventory::import_hosts,
             commands::sessions::session_open_ssh,
+            // quick connect
+            commands::sessions::session_open_quick,
             commands::sessions::session_open_local,
             commands::sessions::session_open_files,
             commands::sessions::session_open_exec,
