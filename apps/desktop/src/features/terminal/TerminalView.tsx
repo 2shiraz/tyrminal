@@ -27,6 +27,7 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import type { CommandRecord } from "./commandOutput";
@@ -158,6 +159,9 @@ export function TerminalView(props: TerminalViewProps) {
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  // The Keychain key the destination refused in this attempt, to offer installing it.
+  const [rejectedKey, setRejectedKey] = useState<{ keyId: string; label: string } | null>(null);
+  const [installing, setInstalling] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
@@ -203,6 +207,7 @@ export function TerminalView(props: TerminalViewProps) {
     setChanged(null);
     setBanner(null);
     setClosed(null);
+    setRejectedKey(null);
     environment.current = null;
     clipboardAllowed.current = false;
     publish({ state: "connecting", clipboardAllowed: false });
@@ -271,6 +276,11 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "notice":
             notify("danger", event.text);
+            break;
+          case "key_rejected":
+            // Only the destination's key can be installed from here; a jump host's is named in
+            // the error.
+            if (!event.hop || event.hop.index === event.hop.total) setRejectedKey({ keyId: event.keyId, label: event.label });
             break;
           case "negotiated":
             // Sent for every hop of a jump chain; the status bar shows the destination's.
@@ -606,6 +616,11 @@ export function TerminalView(props: TerminalViewProps) {
                       {msg.terminal.cancelAutoReconnect}
                     </button>
                   )}
+                  {target.kind === "ssh" && rejectedKey && closed?.error?.code === "AUTH_FAILED" && (
+                    <button type="button" className="btn" onClick={() => setInstalling(true)}>
+                      {msgD.installKey.fromFailure}
+                    </button>
+                  )}
                   {target.kind === "ssh" && controllerRef.current?.id && (
                     <button type="button" className="btn" onClick={() => setLogOpen(true)}>
                       {msgD.connectionLog.open}
@@ -620,6 +635,10 @@ export function TerminalView(props: TerminalViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {installing && target.kind === "ssh" && rejectedKey && (
+        <InstallKeyDialog hostId={target.hostId} keyId={rejectedKey.keyId} onClose={() => setInstalling(false)} />
       )}
 
       {logOpen && controllerRef.current?.id && (

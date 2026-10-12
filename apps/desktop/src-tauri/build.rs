@@ -49,6 +49,7 @@ const COMMANDS: &[&str] = &[
     "session_handoff_offer",
     "session_attach",
     "session_diagnostics",
+    "session_open_key_install",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
