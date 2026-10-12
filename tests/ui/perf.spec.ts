@@ -184,12 +184,12 @@ test("perf: expanding a group in the hosts view is within budget", async ({ page
     "expand group",
     () =>
       clickToPaint(page, () => bar.getByRole("button", { name: "Production", exact: true }).click(), {
-        selector: "[data-testid='group-bar'] .chip[aria-pressed='true']",
+        selector: "[data-testid='breadcrumb'] [aria-current='page']",
         text: "Production",
       }),
     async () => {
-      await bar.getByRole("button", { name: "All hosts" }).click();
-      await expect(bar.getByRole("button", { name: "All hosts" })).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("breadcrumb").getByRole("button", { name: "Hosts" }).click();
+      await expect(page.getByTestId("breadcrumb")).toHaveCount(0);
     },
   );
 });

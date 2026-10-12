@@ -186,7 +186,7 @@ export function RecordingsView() {
   const current = local;
   return (
     <div className="page">
-      <section className="page-inner stack" aria-labelledby="recordings-title" style={{ maxWidth: 960 }}>
+      <section className="page-inner stack" aria-labelledby="recordings-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="recordings-title">{msgB.recordings.title}</h1>

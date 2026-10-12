@@ -33,12 +33,66 @@ export function clearQuick(): void {
   pending.clear();
 }
 
+export interface QuickTarget {
+  username: string;
+  address: string;
+  port: number | null;
+}
+
 /**
- * An address typed on Home, alone or as `user@address`, with an optional `:port` (IPv6 in
- * brackets when a port follows). Only the shape is checked here; the core validates it again.
+ * An address typed in the Hosts search: alone or as `user@address`, with an optional `:port`
+ * (IPv6 in brackets when a port follows), or as an ssh command line, `ssh [-l user] [-p port]
+ * [user@]address`. Only the shape is checked here; the core validates it again.
  */
-export function parseAddress(text: string): { username: string; address: string; port: number | null } | null {
+export function parseAddress(text: string): QuickTarget | null {
   const value = text.trim();
+  if (/^ssh\s/.test(value)) return parseSshCommand(value);
+  return parseDestination(value);
+}
+
+/**
+ * `ssh` with `-p port`, `-l user` (also written `-p2222`, `-luser`) and one destination. Any other
+ * option is refused rather than dropped: quick connect could not honour it (`-i key`, `-J jump`).
+ */
+function parseSshCommand(value: string): QuickTarget | null {
+  const words = value.split(/\s+/).slice(1);
+  let port: number | null = null;
+  let user: string | null = null;
+  let destination: string | null = null;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] as string;
+    const option = /^-([pl])(.*)$/.exec(word);
+    if (option) {
+      const arg = option[2] || words[++i];
+      if (!arg) return null;
+      if (option[1] === "p") {
+        if (port !== null || !/^\d{1,5}$/.test(arg)) return null;
+        port = Number(arg);
+        if (port < 1 || port > 65535) return null;
+      } else {
+        if (user !== null || !/^[^\s@:/]+$/.test(arg)) return null;
+        user = arg;
+      }
+    } else if (word.startsWith("-") || destination !== null) {
+      return null;
+    } else {
+      destination = word;
+    }
+  }
+  if (destination === null) return null;
+  const target = parseDestination(destination);
+  // ssh takes no `:port` in the destination, and a user given twice is ambiguous.
+  if (!target || target.port !== null || (user !== null && target.username)) return null;
+  return { username: user ?? target.username, address: target.address, port };
+}
+
+/** The target as it is shown: `user@address:port`, IPv6 in brackets when a port follows. */
+export function formatTarget(target: QuickTarget): string {
+  const host = target.port !== null && target.address.includes(":") ? `[${target.address}]` : target.address;
+  return `${target.username ? `${target.username}@` : ""}${host}${target.port !== null ? `:${target.port}` : ""}`;
+}
+
+function parseDestination(value: string): QuickTarget | null {
   const m = /^(?:([^\s@:/]+)@)?(\[[0-9a-fA-F:.]+\]|[0-9a-fA-F]*:[0-9a-fA-F:.]*:[0-9a-fA-F:.]*|[^\s:@/[\]]+)(?::(\d{1,5}))?$/.exec(value);
   if (!m) return null;
   const raw = m[2] as string;

@@ -4,6 +4,7 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
 import { TabStrip } from "../components/layout/TabStrip";
+import { ResizeHandle } from "../components/ui/ResizeHandle";
 import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
 import { HostsView } from "../features/hosts/HostsView";
@@ -63,6 +64,7 @@ import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts"
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
 import { type OpenLayout, openBeside, openMany } from "./multiOpen";
+import { stepScale } from "./interfaceScale";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -396,6 +398,9 @@ function Shell() {
   );
   const openSftpHost = useCallback((host: { id: string; label: string }, path: string | null = null) => openSftpHosts([host], path), [openSftpHosts]);
 
+  /** Keyboard focus is in a terminal (its zoom keys then belong to it). */
+  const inTerminal = () => document.activeElement?.closest(".terminal-pane") != null;
+
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
     return p ? (handles.current.get(p.id) ?? null) : null;
@@ -609,15 +614,20 @@ function Shell() {
         case "find":
           focusedHandle()?.openFind();
           break;
+        // In a terminal these zoom that terminal; anywhere else they change the interface size.
         case "zoomIn":
-          focusedHandle()?.zoom("in");
-          break;
         case "zoomOut":
-          focusedHandle()?.zoom("out");
+        case "zoomReset": {
+          if (inTerminal()) {
+            focusedHandle()?.zoom(action === "zoomIn" ? "in" : action === "zoomOut" ? "out" : "reset");
+          } else {
+            update((p) => ({
+              ...p,
+              interfaceScale: action === "zoomReset" ? null : stepScale(p.interfaceScale, action === "zoomIn" ? 1 : -1),
+            }));
+          }
           break;
-        case "zoomReset":
-          focusedHandle()?.zoom("reset");
-          break;
+        }
         case "nextTab":
           setWs((current) => cycleTab(current, 1));
           break;
@@ -984,6 +994,7 @@ function Shell() {
         hostCount={data.hosts.value?.length ?? 0}
         snippetCount={data.snippets.value?.length ?? 0}
       />
+      {!collapsed && <ResizeHandle panel="sidebar" />}
 
       <div className="main">
         <TabStrip
@@ -1014,7 +1025,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} onLocal={openLocal} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

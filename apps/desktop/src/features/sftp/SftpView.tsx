@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useVaultData } from "../../app/vaultData";
 import { IconButton, Notice } from "../../components/ui/controls";
 import { IconArrowLeftRight, IconX } from "../../components/ui/icons";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { files as filesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { droppedFileJob, droppedFiles } from "../files/dropUpload";
@@ -173,6 +174,7 @@ export function SftpView({
                 <IconButton size="sm" className="sftp-swap" label={msgFiles.swap} onClick={() => setOrder(([l, r]) => [r, l])}>
                   <IconArrowLeftRight size={14} />
                 </IconButton>
+                <ResizeHandle panel="sftpSplit" />
               </div>
             )}
             <SftpPane

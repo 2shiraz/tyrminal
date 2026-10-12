@@ -15,8 +15,8 @@ test("plain and secret fields keep the normal inset", async ({ page }) => {
 
 test("a search field leaves room for its icon", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
+  // Hosts has its own search bar (the icon sits beside the field); the snippet library uses the shared one.
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).click();
   const search = page.locator(".input-with-icon > svg + input").first();
   await expect(search).toBeVisible();
   expect(await inset(search)).toBe(34);

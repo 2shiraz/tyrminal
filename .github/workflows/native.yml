@@ -75,27 +75,30 @@ jobs:
         if: steps.changed.outputs.code == 'true' && (runner.os != 'Linux')
         run: pnpm run verify:fast
 
+      # One failing suite must not hide the others: the steps after verify:fast run unless the run
+      # is cancelled, each suite runs once the lab is up, and the native suite once its build is.
+      # Any failure still fails the job; the release steps below still need every step green.
       - name: Full-screen applications for the macOS lab server
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'macOS') }}
         run: brew install tmux htop midnight-commander nano socat
       # The app under test is a background process on an unattended desktop; App Nap then pauses
       # its WebView's rendering, so the screen stops updating while bytes still arrive. Disposable
       # runner only: turn App Nap off for every app.
       - name: No App Nap on the test desktop
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'macOS') }}
         run: defaults write -g NSAppSleepDisabled -bool YES
       - name: Full-screen applications for the Linux lab server
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Linux')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Linux') }}
         run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc socat
       # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
       # the Windows loopback interface: the same server, PAM and full-screen applications as on
       # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.
       - name: Windows node before WSL is installed
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         run: echo "WIN_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
       # Debian 12: Ubuntu 24.04's binaries fail to execute under WSL 1 (ENOEXEC on node).
       - name: WSL lab server (Debian 12, WSL 1)
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
         with:
           distribution: Debian-12
@@ -108,13 +111,13 @@ jobs:
       # Installing a distribution makes System32\bash.exe the WSL launcher; keep pnpm's script
       # shell on Git Bash so `pnpm run …` keeps running Windows node.
       - name: Script shell stays Git Bash
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         shell: pwsh
         run: |
           "npm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
           "pnpm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
       - name: Which node runs after WSL is installed (diagnostic)
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         run: |
           echo "WIN_NODE=$WIN_NODE"
           type -a node || true
@@ -125,7 +128,7 @@ jobs:
       # shell then reads the binary as a script). The official build, pinned by SHA-256, runs the
       # lab script inside the distribution instead.
       - name: Node for the lab inside WSL (official build, pinned)
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         shell: wsl-bash {0}
         run: |
           set -eu
@@ -140,16 +143,17 @@ jobs:
           for b in vim nano htop mc; do command -v "$b" >/dev/null && "$b" --version 2>&1 | head -1 || echo "$b: not runnable"; done
           tmux -V
       - name: Keep the WSL instance running for the whole job
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' && (runner.os == 'Windows') }}
         shell: pwsh
         run: Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d','Debian-12','-u','root','--','sleep','infinity'
       - name: Start SSH lab
-        if: steps.changed.outputs.code == 'true'
+        id: lab
+        if: ${{ !cancelled() && steps.changed.outputs.code == 'true' }}
         run: pnpm run lab:up
       # P-33's real-engine test: the Linux lab user may use the runner's Docker (disposable runner;
       # the group is read at each SSH login, so the running lab picks it up).
       - name: Container engine for the lab user (Linux)
-        if: steps.changed.outputs.code == 'true' && runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' && runner.os == 'Linux' }}
         run: |
           sudo usermod -aG docker tyrlab
           docker pull -q alpine:3.22
@@ -157,7 +161,7 @@ jobs:
       # SEC-08's end-to-end ML-KEM test needs OpenSSH 9.9 or later; the runner's sshd is 9.6. The
       # repository's container lab (Alpine 3.22, OpenSSH 10.0p1) runs beside the local lab for it.
       - name: Post-quantum lab (container, Linux)
-        if: steps.changed.outputs.code == 'true' && runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' && runner.os == 'Linux' }}
         env:
           TYRMINAL_LAB_MODE: docker
           TYRMINAL_LAB_RUN_DIR: tests/ssh-lab/.run-pq
@@ -166,7 +170,7 @@ jobs:
           echo "TYRMINAL_PQ_LAB=$PWD/tests/ssh-lab/.run-pq/lab.json" >> "$GITHUB_ENV"
 
       - name: Integration suite
-        if: steps.changed.outputs.code == 'true'
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' }}
         timeout-minutes: 25
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -175,18 +179,18 @@ jobs:
             pnpm run test:integration
           fi
       - name: Security suite
-        if: steps.changed.outputs.code == 'true'
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' }}
         timeout-minutes: 20
         run: pnpm run test:security
       # A tiny filesystem for the full-disk download test (disposable runner).
       - name: Tiny filesystem (Linux)
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'Linux')
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' && (runner.os == 'Linux') }}
         run: |
           sudo mkdir -p /mnt/tyr-small
           sudo mount -t tmpfs -o size=2m,mode=1777 tmpfs /mnt/tyr-small
           echo "TYRMINAL_SMALL_FS=/mnt/tyr-small" >> "$GITHUB_ENV"
       - name: Tiny filesystem (macOS)
-        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' && (runner.os == 'macOS') }}
         run: |
           hdiutil create -size 4m -fs HFS+ -volname TyrSmall "$RUNNER_TEMP/tyr-small.dmg"
           hdiutil attach "$RUNNER_TEMP/tyr-small.dmg" -mountpoint "$RUNNER_TEMP/tyr-small"
@@ -194,16 +198,17 @@ jobs:
       - name: Large transfer (2 GiB each way over SFTP) and full local disk
         timeout-minutes: 25
         # Windows runs the lab inside WSL 1, where 4 GiB of file I/O takes too long for every run.
-        if: steps.changed.outputs.code == 'true' && (runner.os != 'Windows')
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' && (runner.os != 'Windows') }}
         env:
           TYRMINAL_BIG_TRANSFER: "1"
         run: pnpm run test:transfer
 
       - name: Build test application (e2e feature)
-        if: steps.changed.outputs.code == 'true'
+        id: e2e_build
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' && steps.changed.outputs.code == 'true' }}
         run: pnpm run build:e2e
       - name: Native end-to-end suite
-        if: steps.changed.outputs.code == 'true'
+        if: ${{ !cancelled() && steps.e2e_build.outcome == 'success' && steps.changed.outputs.code == 'true' }}
         timeout-minutes: 15
         run: pnpm run test:native
 

@@ -7,7 +7,7 @@ import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { SecretField, Switch, TextField } from "../../components/ui/controls";
-import { IconKeyRound, IconPlus, IconServer, IconX } from "../../components/ui/icons";
+import { IconKeyRound, IconPlus, IconX } from "../../components/ui/icons";
 import { hosts as hostsApi, identities as identitiesApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
@@ -64,7 +64,7 @@ export function groupPath(groups: GroupSummary[], id: string): string {
 export interface HostFormOptions {
   host: HostSummary | null;
   /** Prefill for a new host (quick connect, duplicate). */
-  initial?: { label?: string; address: string; port: number; username: string; auth?: HostSummary["auth"] } | undefined;
+  initial?: { label?: string; address: string; port: number; username: string; auth?: HostSummary["auth"]; protocol?: ProtocolKind } | undefined;
   keys: KeySummary[];
   groups?: GroupSummary[];
   /** Group preselected for a new host (the group being viewed). */
@@ -98,7 +98,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
             (sourceAuth?.kind ?? (defaultGroupId ? "inherit" : "ask_password"))) as AuthKind,
       keyId: sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : "",
       identityId: identity?.current ?? "",
-      protocol: (host?.protocol.type ?? "ssh") as ProtocolKind,
+      protocol: (host?.protocol.type ?? initial?.protocol ?? "ssh") as ProtocolKind,
       serial: host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL,
       terminal: host?.terminal ?? DEFAULT_TERMINAL,
       forwardAgent: host?.forwardAgent ?? false,
@@ -344,13 +344,7 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | null; autoFocus: boolean }) {
   return (
     <section className="host-section host-address">
-      {os ? (
-        <OsIcon os={os} />
-      ) : (
-        <span className="avatar host-address-mark" aria-hidden="true">
-          <IconServer size={18} />
-        </span>
-      )}
+      <OsIcon os={os} />
       <TextField
         label={msg.hosts.address}
         value={form.fields.address}

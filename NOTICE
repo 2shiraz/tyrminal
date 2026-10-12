@@ -30,3 +30,10 @@ Symbols Nerd Font Mono (apps/desktop/public/fonts/SymbolsNerdFontMono-Regular.wo
   upstream licenses as listed at https://github.com/ryanoasis/nerd-fonts (Font Awesome: OFL-1.1;
   Material Design Icons: Apache-2.0; Octicons: MIT; Powerline symbols: MIT; Codicons: CC-BY-4.0;
   Weather Icons: OFL-1.1; Font Logos: Unlicense; Pomicons: OFL-1.1).
+
+OS logos (apps/desktop/src/features/hosts/OsIcon.tsx), path data from Simple Icons 16.35.0
+  (https://simpleicons.org), drawn unmodified. Simple Icons is CC0-1.0; per its data file these
+  icons carry their own terms: Debian logo, CC BY-SA 3.0, (c) Software in the Public Interest, Inc.
+  (https://www.debian.org/logos/); Rocky Linux logo, CC BY-SA 4.0, (c) Rocky Enterprise Software
+  Foundation. All logos are trademarks of their respective owners and are used only to identify
+  a host's operating system; no endorsement is implied.

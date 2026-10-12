@@ -4,9 +4,9 @@
 // an element about to be removed, and an element that moved.
 import { type RefObject, useLayoutEffect, useRef } from "react";
 
-export const ENTER_MS = 140;
+import { motionMs, openedBy } from "./inputModality";
+
 export const EXIT_MS = 100;
-export const MOVE_MS = 160;
 const MAX_FLIP_ITEMS = 300;
 const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
 
@@ -47,17 +47,28 @@ export function flashSaved(element: HTMLElement | null | undefined): void {
 }
 
 /**
- * FLIP for the children of `container` that carry `data-flip-key`: a child that moved since the
- * last render slides from its old place to the new one, a child that is new fades in. Nothing
- * animates on the first render (page load) or under reduced motion; removals are instant.
+ * FLIP for the children of `container` that carry `data-flip-key` (docs/design/motion.md, PR 3):
+ * - a child that moved slides from where it was on screen to its new place (--duration-glide);
+ *   a move that interrupts a slide starts from where the row is now, so nothing jumps;
+ * - a child that is new rises in (--duration-fast);
+ * - the first time the list shows rows after a click (arriving on the page), the first eight rise
+ *   in one after another, --stagger apart.
+ * Nothing moves after keyboard input (typing in a search field re-orders rows at once), under
+ * reduced motion, or for very long lists. Removals are instant (exits are lib/exitGhost.ts).
  */
-export function useFlip(container: RefObject<HTMLElement | null>): void {
+export function useFlip(container: RefObject<HTMLElement | null>, { stagger = true, enter = true, evenFromKeyboard = false }: { stagger?: boolean; enter?: boolean; evenFromKeyboard?: boolean } = {}): void {
   const previous = useRef<Map<string, { left: number; top: number }> | null>(null);
   const previousRoot = useRef<HTMLElement | null>(null);
+  const running = useRef(new WeakMap<HTMLElement, Animation>());
+  // The arrival stagger plays once per list element.
+  const staggered = useRef(false);
   useLayoutEffect(() => {
     const root = container.current;
     // A different list element (say, cards swapped for a table) starts over without animating.
-    if (root !== previousRoot.current) previous.current = null;
+    if (root !== previousRoot.current) {
+      previous.current = null;
+      staggered.current = false;
+    }
     previousRoot.current = root;
     if (!root) return;
     const items = [...root.querySelectorAll<HTMLElement>("[data-flip-key]")];
@@ -72,22 +83,54 @@ export function useFlip(container: RefObject<HTMLElement | null>): void {
       const r = el.getBoundingClientRect();
       return { left: r.left - box.left + root.scrollLeft, top: r.top - box.top + root.scrollTop };
     };
+    // Where each row is on screen now (a running slide included), then where layout puts it.
+    const seen = new Map<HTMLElement, { left: number; top: number }>();
+    for (const el of items) {
+      const animation = running.current.get(el);
+      if (animation && animation.playState === "running") {
+        seen.set(el, place(el));
+        animation.cancel();
+      }
+    }
     const now = new Map(items.map((el) => [el.dataset.flipKey as string, place(el)]));
     const before = previous.current;
     previous.current = now;
-    if (!before || !motionAllowed()) return;
+    const first = items.length > 0 && !staggered.current;
+    if (first) staggered.current = true;
+    if (!motionAllowed() || (!evenFromKeyboard && openedBy() === "keyboard")) return;
+    const ease = getComputedStyle(root).getPropertyValue("--ease-in-out").trim() || EASE_OUT;
+
+    if (first) {
+      // The list's first rows: a short stagger, only when a click brought the user here.
+      if (!stagger || openedBy() !== "pointer") return;
+      const step = motionMs("--stagger");
+      const enter = motionMs("--duration-fast");
+      items.slice(0, 8).forEach((el, i) => {
+        el.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], {
+          duration: enter,
+          delay: i * step,
+          easing: EASE_OUT,
+          fill: "backwards",
+        });
+      });
+      return;
+    }
+
+    if (!before) return;
+    const glide = motionMs("--duration-glide");
     for (const el of items) {
       const key = el.dataset.flipKey as string;
-      const was = before.get(key);
       const rect = now.get(key) as { left: number; top: number };
+      const was = seen.get(el) ?? before.get(key);
       if (!was) {
-        el.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: ENTER_MS, easing: EASE_OUT });
+        if (!enter) continue;
+        el.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: motionMs("--duration-fast"), easing: EASE_OUT });
         continue;
       }
       const dx = was.left - rect.left;
       const dy = was.top - rect.top;
       if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: MOVE_MS, easing: EASE_OUT });
+      running.current.set(el, el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: glide, easing: ease }));
     }
   });
 }

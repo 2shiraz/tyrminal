@@ -1,28 +1,36 @@
 import type { KnownHostSummary } from "@tyrminal/contracts";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
+import { useWindowedList } from "../../components/ui/useWindowedList";
 import { EmptyState, ErrorNotice, Notice, SkeletonRows, TextArea, relativeTime } from "../../components/ui/controls";
 import { IconFingerprint, IconPlus, IconShieldAlert, IconTrash2 } from "../../components/ui/icons";
 import { knownHosts as knownHostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { HostEditor } from "../hosts/HostEditor";
+import { useFlip } from "../../lib/motion";
 
 export function KnownHostsView() {
   const list = useLoaded(knownHostsApi.list);
   const [removing, setRemoving] = useState<KnownHostSummary | null>(null);
+  // Rows rise in on arrival and close up when one is removed (lib/motion.ts).
+  const listRef = useRef<HTMLUListElement>(null);
+  useFlip(listRef);
   // Creating a host from a trusted record (SEC-03): the key is already trusted, so the first
   // connection goes straight to sign-in.
   const { hosts: savedHosts, keys: keyList } = useVaultData();
   const [creating, setCreating] = useState<KnownHostSummary | null>(null);
   const hasHost = (entry: KnownHostSummary) =>
     (savedHosts.value ?? []).some((h) => h.address.toLowerCase() === entry.host.toLowerCase() && h.port === entry.port);
+  const entries = list.value ?? [];
+  // Long lists are windowed: only the rows near the visible part are in the DOM.
+  const rows = useWindowedList<HTMLUListElement>(entries.length, 72, listRef);
 
   return (
     <div className="page">
-      <section className="page-inner" aria-labelledby="known-title" style={{ maxWidth: 900 }}>
+      <section className="page-inner" aria-labelledby="known-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="known-title">{msg.knownHosts.title}</h1>
@@ -33,9 +41,10 @@ export function KnownHostsView() {
         {list.value === null && !list.error && <SkeletonRows count={2} />}
         {list.value?.length === 0 && <EmptyState icon={<IconFingerprint size={28} />} title={msg.knownHosts.emptyTitle} body={msg.knownHosts.emptyBody} />}
         {(list.value?.length ?? 0) > 0 && (
-          <ul className="list">
-            {(list.value ?? []).map((entry) => (
-              <li key={entry.id}>
+          <ul className="list" ref={listRef} style={rows.style} data-windowed={rows.windowed || undefined}>
+            {entries.slice(rows.start, rows.end).map((entry, i) => (
+              // A windowed list's rows come and go as it scrolls: no FLIP keys, so none of them animates in.
+              <li key={entry.id} data-window-item {...(rows.windowed ? { "aria-setsize": entries.length, "aria-posinset": rows.start + i + 1 } : { "data-flip-key": entry.id })}>
                 <span className="tile-icon" aria-hidden="true">
                   <IconFingerprint size={17} />
                 </span>

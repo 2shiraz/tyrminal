@@ -24,9 +24,19 @@
   background: var(--border);
 }
 
+/* The left pane takes the dragged width; the right one the rest. */
+.sftp-panes > .sftp-pane:first-child {
+  flex: 0 0 var(--w-sftp-left, calc(50% - 0.5px));
+}
+
+.sftp-divider > .resize-handle {
+  left: -3px;
+}
+
 /* Swap sits on the divider at header height, where it never covers a row. */
 .sftp-divider .sftp-swap {
   position: absolute;
+  z-index: 5;
   top: 10px;
   left: 50%;
   width: 24px;

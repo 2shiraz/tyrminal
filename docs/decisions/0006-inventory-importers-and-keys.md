@@ -201,3 +201,24 @@ sandbox. Nothing is stubbed in the UI.
   buffers while sending, which Tyrminal cannot zeroize.
 - **Lab:** the lab servers already allow `AcceptEnv TYR_*`; the lab test checks an accepted group
   variable, a host override, and a refused name.
+
+## OS logos on host tiles (HST-13, owner request)
+
+The host tile showed two-letter OS marks to stay clear of vendor logos. The owner asked for the
+real logos, so `OsIcon` now inlines path data from **Simple Icons 16.35.0** (CC0-1.0, the npm
+package `simple-icons`; no runtime fetch and no package dependency: the paths are copied into the
+component). Per-icon terms from its data file, recorded in NOTICE:
+
+- No separate licence listed (CC0 via Simple Icons): Linux, Ubuntu, Red Hat, CentOS, AlmaLinux,
+  Alpine Linux, Arch Linux, openSUSE, Raspberry Pi, FreeBSD, OpenBSD, Apple (for macOS; the
+  Simple Icons "macOS" mark is a wordmark too small for a tile).
+- Debian: CC BY-SA 3.0; Rocky Linux: CC BY-SA 4.0. Drawn unmodified with attribution in NOTICE.
+- Fedora: custom brand terms (https://docs.fedoraproject.org/en-US/project/brand/). Windows: not
+  in Simple Icons (Microsoft asked for its marks to be removed). Owner decision: both keep generic
+  glyphs (an "f" mark and a window), with no official logo.
+- Network devices and hosts without an OS: generic glyphs (a server for unknown).
+
+The logos are trademarks of their owners and identify the host's OS only. A mark is drawn in its
+brand colour where that colour keeps 3:1 against the tile in the theme, else in the text colour.
+`HostOs` gains `rocky` and `alma`. Detecting the OS at connection time is a follow-up; the tile
+uses the OS set on the host or its group.

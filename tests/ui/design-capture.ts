@@ -37,7 +37,7 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { theme });
     await shot(page, `${theme}-hosts-grid`);
     await t("hosts-list", () => page.locator(".segmented label", { hasText: "List" }).click());
-    await t("host-editor", async () => { await page.getByRole("button", { name: "Add host" }).click(); await expect(page.getByRole("dialog")).toBeVisible(); });
+    await t("host-editor", async () => { await page.getByRole("button", { name: "New host" }).click(); await expect(page.getByRole("dialog")).toBeVisible(); });
     await page.keyboard.press("Escape");
     await t("snippets", () => nav(page, /^Snippets/));
     await t("tunnels", () => page.locator('[data-nav="tunnels"]').click());

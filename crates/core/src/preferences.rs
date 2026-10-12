@@ -44,6 +44,9 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    if prefs.interface_scale.is_some_and(|s| !tyrminal_contracts::INTERFACE_SCALES.contains(&s)) {
+        return Err(invalid("That interface size is not one of the choices."));
+    }
     // terminal notifications (P-23): between one second and a day.
     if !(1..=86_400).contains(&prefs.command_notifications.min_seconds) {
         return Err(invalid("A command must run between 1 second and 24 hours to notify."));
@@ -78,7 +81,31 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     {
         crate::validate::id(id)?;
     }
+    if let Some(w) = &mut prefs.panel_widths {
+        clamp_panel_widths(w);
+    }
     Ok(prefs)
+}
+
+/// Width ranges of the resizable panels, in CSS pixels; the UI uses the same ranges
+/// (apps/desktop/src/components/ui/ResizeHandle.tsx) and clamps further to the window.
+pub const PANEL_WIDTH_RANGES: [(&str, u16, u16); 6] = [
+    ("sidebar", 180, 360),
+    ("sidePanel", 260, 640),
+    ("files", 320, 800),
+    ("filesTwoPane", 560, 1400),
+    ("hostPanel", 340, 720),
+    ("sftpSplit", 280, 4000),
+];
+
+fn clamp_panel_widths(w: &mut tyrminal_contracts::PanelWidths) {
+    let fields =
+        [&mut w.sidebar, &mut w.side_panel, &mut w.files, &mut w.files_two_pane, &mut w.host_panel, &mut w.sftp_split];
+    for (field, (_, min, max)) in fields.into_iter().zip(PANEL_WIDTH_RANGES) {
+        if let Some(v) = field {
+            *v = (*v).clamp(min, max);
+        }
+    }
 }
 
 /// Editor choices kept at most.
@@ -228,6 +255,18 @@ mod tests {
     }
 
     #[test]
+    fn the_interface_size_is_automatic_by_default_and_only_a_listed_choice() {
+        assert_eq!(Preferences::default().interface_scale, None, "automatic");
+        let with = |scale| sanitize(Preferences { interface_scale: Some(scale), ..Preferences::default() });
+        for scale in tyrminal_contracts::INTERFACE_SCALES {
+            assert_eq!(with(scale).unwrap().interface_scale, Some(scale));
+        }
+        for scale in [0, 50, 99, 120, 151, 1000] {
+            assert!(with(scale).is_err(), "{scale}");
+        }
+    }
+
+    #[test]
     fn the_production_tag_follows_host_tag_rules_and_can_be_off() {
         assert_eq!(Preferences::default().production_tag, "prod");
         let with = |tag: &str| sanitize(Preferences { production_tag: tag.into(), ..Preferences::default() });
@@ -300,6 +339,7 @@ mod tests {
             layout: HostsLayout::List,
             sort: HostsSort::Address,
             filter: HostsFilter::Group { id: "0123456789abcdef0123456789abcdef".into() },
+            connect_hint_uses: 2,
         };
         store.set(Preferences { hosts_view: Some(view.clone()), ..Preferences::default() }).unwrap();
         assert_eq!(PreferencesStore::open(&path).get().hosts_view, Some(view));
@@ -309,5 +349,49 @@ mod tests {
         // Files from before the setting existed read as the default view.
         std::fs::write(&path, br#"{"theme":"dark"}"#).unwrap();
         assert_eq!(PreferencesStore::open(&path).get().hosts_view, None);
+    }
+
+    #[test]
+    fn panel_widths_survive_a_restart_are_clamped_and_only_known_panels_are_kept() {
+        use tyrminal_contracts::PanelWidths;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let store = PreferencesStore::open(&path);
+        let widths = PanelWidths { side_panel: Some(400), host_panel: Some(500), ..PanelWidths::default() };
+        store.set(Preferences { panel_widths: Some(widths), ..Preferences::default() }).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().panel_widths, Some(widths));
+
+        // Out of range: clamped to each panel's own range.
+        let wild = PanelWidths {
+            sidebar: Some(0),
+            side_panel: Some(u16::MAX),
+            files: Some(1),
+            files_two_pane: Some(9000),
+            host_panel: Some(10),
+            sftp_split: Some(u16::MAX),
+        };
+        let stored = store.set(Preferences { panel_widths: Some(wild), ..Preferences::default() }).unwrap();
+        assert_eq!(
+            stored.panel_widths,
+            Some(PanelWidths {
+                sidebar: Some(180),
+                side_panel: Some(640),
+                files: Some(320),
+                files_two_pane: Some(1400),
+                host_panel: Some(340),
+                sftp_split: Some(4000),
+            })
+        );
+
+        // Unknown panel names are dropped; a width that is not a 16-bit number is rejected.
+        let read: Preferences = serde_json::from_str(r#"{"panelWidths":{"sidePanel":300,"evil":5}}"#).unwrap();
+        assert_eq!(read.panel_widths, Some(PanelWidths { side_panel: Some(300), ..PanelWidths::default() }));
+        assert!(serde_json::to_string(&read).unwrap().contains(r#""panelWidths":{"sidePanel":300}"#));
+        assert!(serde_json::from_str::<Preferences>(r#"{"panelWidths":{"sidePanel":-1}}"#).is_err());
+        assert!(serde_json::from_str::<Preferences>(r#"{"panelWidths":{"sidePanel":70000}}"#).is_err());
+
+        // Files from before the setting existed read as default widths.
+        std::fs::write(&path, br#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().panel_widths, None);
     }
 }

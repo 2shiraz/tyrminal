@@ -95,6 +95,7 @@
     "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
+    "allow-ui-zoom-set",
     "allow-app-info",
     "allow-backup-export",
     "allow-backup-status",
@@ -185,6 +186,8 @@
     "allow-glance-get",
     "allow-glance-host-get",
     "allow-glance-host-set",
-    "allow-multiplexer-list"
+    "allow-multiplexer-list",
+    "allow-os-detection-get",
+    "allow-os-detection-set"
   ]
 }

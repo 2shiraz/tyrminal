@@ -26,6 +26,9 @@ export const msgSettings = {
   },
   // Groups inside sections
   theme: "Theme",
+  interfaceSize: "Interface size",
+  interfaceSizeHint: "Auto grows the interface with the window. Outside a terminal, Cmd or Ctrl with + and − changes it, and 0 returns to Auto.",
+  interfaceSizeAuto: "Auto",
   motion: "Motion",
   colourScheme: "Color scheme",
   preview: "Preview",
