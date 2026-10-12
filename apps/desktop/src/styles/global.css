@@ -1665,12 +1665,12 @@ kbd,
   height: 26px;
   padding: 0 4px 0 var(--space-2);
   border-bottom: 1px solid rgb(127 127 127 / 0.14);
-  color: var(--pane-fg, var(--text-muted));
+  color: var(--pane-fg, var(--scheme-fg, var(--text-muted)));
   font-size: var(--text-xs);
 }
 
 .pane-header .btn {
-  --btn-fg: var(--pane-fg, var(--text-muted));
+  --btn-fg: var(--pane-fg, var(--scheme-fg, var(--text-muted)));
 }
 
 .splitter {
@@ -3505,7 +3505,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   padding: 0 var(--space-1);
   border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--term-bg, #000) 70%, transparent);
-  color: var(--pane-fg, var(--text-muted));
+  color: var(--pane-fg, var(--scheme-fg, var(--text-muted)));
   font-size: var(--text-xs);
   opacity: 0.8;
   pointer-events: none;
