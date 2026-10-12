@@ -20,14 +20,22 @@ mod defaults;
 mod inventory;
 // command history
 mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use discovery::*;
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
 pub use tunnels::*;
+
+// agent C: workspaces
+mod layouts;
+pub use layouts::*;
 // agent D: inventory and snippets
 pub use defaults::*;
 pub use inventory::*;
 // command history
 pub use command_history::*;
+// server at a glance
+pub use server_glance::*;

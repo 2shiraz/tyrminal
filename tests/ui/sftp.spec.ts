@@ -232,8 +232,8 @@ test("sftp: a password is asked for in a dialog and the session closes with the 
   expect(answer).toBeTruthy();
 
   const opened = (await page.evaluate(() => (window as unknown as { __mockFileSessions: { sessionId: string }[] }).__mockFileSessions)).at(-1);
-  await page.getByRole("tab", { name: /SFTP/ }).hover();
-  await page.getByRole("button", { name: "Close SFTP" }).click();
+  // The close control is a pointer target inside the tab (keyboard: Delete or the tab menu).
+  await page.getByRole("tab", { name: /SFTP/ }).locator(".tab-close").click();
   await expect(view(page)).toHaveCount(0);
   await expect.poll(async () => (await calls(page)).some((c) => c.cmd === "session_close" && c.args.sessionId === opened?.sessionId)).toBe(true);
 });

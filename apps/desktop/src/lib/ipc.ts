@@ -7,6 +7,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  AppInfo,
   BackupCredentialKind,
   BackupFile,
   BackupPreview,
@@ -330,6 +331,11 @@ export const links = {
   open: (url: string) => call<void>("link_open", { url }),
 };
 
+export const app = {
+  /** Static build and platform facts (commit, build date, OS, architecture, runtime versions). */
+  info: () => call<AppInfo>("app_info"),
+};
+
 /** Portable backups. Files are picked in native dialogs; paths and bytes never reach the page. */
 export const backup = {
   /** Saves a backup of the unlocked vault; resolves to the file name, or null if cancelled. */
@@ -382,6 +388,26 @@ export const tunnels = {
     call<ChainHopDto[]>("host_connection_set", { hostId, connection }),
   /** The hosts a connection goes through, first hop first, the host itself last. */
   chain: (hostId: string) => call<ChainHopDto[]>("host_chain", { hostId }),
+};
+
+// agent C: workspaces
+/** Named layout templates. Saving is explicit; a restored layout connects nothing by itself. */
+export const layouts = {
+  list: () => call<import("@tyrminal/contracts").LayoutTemplateSummary[]>("layout_list"),
+  save: (layout: import("@tyrminal/contracts").LayoutTemplateInput) =>
+    call<import("@tyrminal/contracts").LayoutTemplateSummary>("layout_save", { layout }),
+  remove: (id: string) => call<void>("layout_delete", { id }),
+};
+
+/** Moving a tab with its live sessions into a new window (TRM-02). */
+export const detach = {
+  /** Main window: opens the window and hands the tab's sessions to it; returns its label. */
+  open: (tab: import("@tyrminal/contracts").DetachTabInput) => call<string>("window_detach", { tab }),
+  /** Detached window: the tab it was opened for (once). */
+  take: () => call<import("@tyrminal/contracts").DetachedTab>("window_detach_take"),
+  /** Detached window: takes over one handed-over session with this window's own channels. */
+  attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
+    call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
 };
 
 // agent D: inventory and snippets
@@ -492,4 +518,12 @@ export const history = {
   list: () => call<HistoryEntryDto[]>("history_list"),
   remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
   clear: () => call<number>("history_clear"),
+};
+
+// server at a glance
+/** Server at a glance (P-32): values read with a fixed command; the server is asked at most every 5 s. */
+export const glance = {
+  get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
+  hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
+  setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
 };

@@ -149,7 +149,8 @@ export function installMockBackend(options) {
     let delay = 10;
     for (const step of steps) {
       if (step === "connected" && kind === "ssh") {
-        setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+        // Like the core: only an SSH connection reports what it negotiated (not Telnet or serial).
+        if (host?.protocol?.type !== "telnet" && host?.protocol?.type !== "serial") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
         // Startup snippets are typed once the shell is open (SNP-08).
         setTimeout(() => window.__mockRunStartup?.(s, host), delay + 40);
       }
@@ -326,6 +327,74 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // server at a glance
+    ...(() => {
+      // Values as the core would parse them; a test can replace them with window.__mockGlance.
+      const offHosts = new Set();
+      const sample = {
+        kind: "available",
+        stats: {
+          uptimeSeconds: 93_784,
+          load: [0.15, 0.3, 0.45],
+          memory: { totalKib: 2_048_000, availableKib: 512_000 },
+          disks: [
+            { mount: "/", totalKib: 61_202_244, usedKib: 21_893_584, availableKib: 36_167_700 },
+            { mount: "/srv/<b>data</b>", totalKib: 1_000_000, usedKib: 250_000, availableKib: 750_000 },
+          ],
+        },
+      };
+      return {
+        glance_get: (a) => {
+          const s = state.sessions.get(a.sessionId);
+          if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          const host = state.hosts.find((h) => h.label === s.host);
+          if (!host || host.protocol?.type === "telnet" || host.protocol?.type === "serial")
+            throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
+          if (offHosts.has(host.id)) return { kind: "off" };
+          return window.__mockGlance ?? sample;
+        },
+        glance_host_get: (a) => !offHosts.has(a.hostId),
+        glance_host_set: (a) => {
+          if (a.enabled) offHosts.delete(a.hostId);
+          else offHosts.add(a.hostId);
+          return a.enabled;
+        },
+      };
+    })(),
+    // agent C: workspaces
+    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+    layout_save: (a) => {
+      state.layouts ??= [];
+      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
+      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
+      for (const t of a.layout.tabs)
+        for (const p of t.panes)
+          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
+      const existing = state.layouts.find((l) => l.id === a.layout.id);
+      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
+      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
+      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
+      return saved;
+    },
+    layout_delete: (a) => {
+      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
+    },
+    // Detach: the main window hands sessions to a new window. The mock records the request; a
+    // page opened as a detached window (options.detached) receives that tab and attaches.
+    window_detach: (a) => {
+      window.__mockDetached = a.tab;
+      return "detached-0000000000000001";
+    },
+    window_detach_take: () => {
+      const tab = options.detached;
+      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
+      options.detached = null;
+      return tab;
+    },
+    session_attach: (a) => {
+      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return openSession({ ...a }, "local").sessionId;
+    },
     // command history
     ...(() => {
       // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).
@@ -998,6 +1067,14 @@ export function installMockBackend(options) {
         if (host && !s.files) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
+    app_info: () => ({
+      commit: "1a2b3c4",
+      buildDate: "2026-10-12",
+      os: "linux",
+      arch: "x86_64",
+      tauriVersion: "2.12.1",
+      webviewVersion: "2.50.1",
+    }),
     // LAN discovery: synthetic announcements (documentation addresses), never a real network.
     discovery_networks: () => options.discoveryNetworks ?? [{ id: "en0", addresses: ["192.0.2.20", "fe80::1"] }],
     discovery_start: (a) => {
@@ -1259,6 +1336,11 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
   };
+  // agent C: workspaces — raw output bytes (legacy encodings) to the most recent session.
+  window.__mockOutputBytes = (bytes) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
+  };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {
     if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
@@ -1380,7 +1462,11 @@ export function installMockBackend(options) {
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   window.__TAURI_INTERNALS__ = {
-    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    // agent C: workspaces — a page can play a detached window (options.windowLabel).
+    metadata: {
+      currentWindow: { label: options.windowLabel ?? "main" },
+      currentWebview: { windowLabel: options.windowLabel ?? "main", label: options.windowLabel ?? "main" },
+    },
     transformCallback(callback, once = false) {
       const cid = nextCallback++;
       callbacks.set(cid, (payload) => {

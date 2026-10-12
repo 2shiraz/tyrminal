@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "detached",
+  "description": "A tab moved out of the main window (agent C, TRM-02). It can take over the sessions handed to it and use them, read preferences and report activity; nothing else: no vault, inventory, files, settings, new connections or plugins.",
+  "windows": [
+    "detached-*"
+  ],
+  "permissions": [
+    "allow-window-detach-take",
+    "allow-session-attach",
+    "allow-session-write",
+    "allow-session-resize",
+    "allow-session-ack",
+    "allow-session-close",
+    "allow-session-trust-answer",
+    "allow-session-auth-answer",
+    "allow-prefs-get",
+    "allow-vault-activity"
+  ]
+}

@@ -42,9 +42,15 @@ use crate::validate;
 // agent B: tunnels and history
 use crate::records::{KIND_TUNNEL, TunnelRecord};
 use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
+// agent C: workspaces
+use crate::layouts::{self, LayoutRecord};
+use crate::records::KIND_LAYOUT;
+use tyrminal_contracts::{LayoutTemplateInput, LayoutTemplateSummary};
 // command history
 use crate::records::{HistoryRecord, HistorySettingsRecord, KIND_HISTORY, KIND_HISTORY_SETTINGS};
 use tyrminal_contracts::{HistoryEntry, HistorySettings};
+// server at a glance
+use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
 // agent D: inventory and snippets
 use crate::records::StoredProxy;
 use crate::records::{
@@ -74,6 +80,8 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent B: tunnels and history
     tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
+    // agent C: workspaces
+    layouts: BTreeMap<Id, Stored<LayoutRecord>>,
     // agent D: inventory and snippets
     appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
     certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
@@ -83,6 +91,8 @@ struct Open {
     // command history
     history: BTreeMap<Id, Stored<HistoryRecord>>,
     history_settings: BTreeMap<Id, Stored<HistorySettingsRecord>>,
+    // server at a glance
+    glance_settings: BTreeMap<Id, Stored<GlanceSettingsRecord>>,
 }
 
 impl Open {
@@ -96,6 +106,8 @@ impl Open {
             groups: BTreeMap::new(),
             // agent B: tunnels and history
             tunnels: BTreeMap::new(),
+            // agent C: workspaces
+            layouts: BTreeMap::new(),
             // agent D: inventory and snippets
             appearances: BTreeMap::new(),
             certificates: BTreeMap::new(),
@@ -105,6 +117,8 @@ impl Open {
             // command history
             history: BTreeMap::new(),
             history_settings: BTreeMap::new(),
+            // server at a glance
+            glance_settings: BTreeMap::new(),
         }
     }
 }
@@ -545,6 +559,8 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
+                // agent C: workspaces
+                KIND_LAYOUT => load!(LayoutRecord, open.layouts),
                 // agent D: inventory and snippets
                 KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
                 KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
@@ -554,6 +570,8 @@ impl VaultService {
                 // command history
                 KIND_HISTORY => load!(HistoryRecord, open.history),
                 KIND_HISTORY_SETTINGS => load!(HistorySettingsRecord, open.history_settings),
+                // server at a glance
+                KIND_GLANCE_SETTINGS => load!(GlanceSettingsRecord, open.glance_settings),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1564,6 +1582,53 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let stored = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
         Ok(Zeroizing::new(stored.record.text.clone()))
+    }
+
+    // ---------- layout templates (agent C: workspaces) ----------
+
+    pub async fn list_layouts(&self) -> Result<Vec<LayoutTemplateSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.layouts.iter().map(|(id, l)| layouts::summary(id, &l.record)).collect();
+        list.sort_by(|a, b| (a.name.to_lowercase(), &a.id).cmp(&(b.name.to_lowercase(), &b.id)));
+        Ok(list)
+    }
+
+    /// Saves a template (explicitly, on the user's request; nothing saves layouts automatically).
+    pub async fn save_layout(&self, input: LayoutTemplateInput) -> Result<LayoutTemplateSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let tabs = layouts::validate_tabs(&input.tabs, |id| open.hosts.contains_key(id))?;
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.layouts.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of layouts."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = LayoutRecord { name, tabs, updated_at: now_unix() };
+        let content_len = record.content_len();
+        self.write(open, id, KIND_LAYOUT, revision, Some((&record, content_len))).await?;
+        let summary = layouts::summary(&id, &record);
+        open.layouts.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_layout(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?.revision + 1;
+        self.write::<LayoutRecord>(open, id, KIND_LAYOUT, revision, None).await?;
+        open.layouts.remove(&id);
+        Ok(())
     }
 
     // ---------- keys ----------
@@ -3453,6 +3518,56 @@ impl VaultService {
             removed += count;
         }
         Ok(u32::try_from(removed).unwrap_or(u32::MAX))
+    }
+}
+
+// server at a glance
+/// Whether the server panel (P-32) reads a host's values. It is on unless turned off for the host.
+impl VaultService {
+    fn glance_off(open: &Open, host_id: &str) -> bool {
+        open.glance_settings.values().next().is_some_and(|s| s.record.off_hosts.iter().any(|h| h == host_id))
+    }
+
+    pub async fn glance_enabled(&self, host_id: &str) -> Result<bool, IpcError> {
+        let host_id = validate::id_text(&validate::id(host_id)?);
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::glance_off(open, &host_id))
+    }
+
+    /// Same as [`Self::glance_enabled`], under the generation of the session asking.
+    pub(crate) async fn glance_enabled_for(&self, generation: u32, host_id: &str) -> Result<bool, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::glance_off(open, host_id))
+    }
+
+    /// Turns the panel on or off for a saved host.
+    pub async fn set_glance_enabled(&self, host_id: &str, enabled: bool) -> Result<bool, IpcError> {
+        let id = validate::id(host_id)?;
+        let host_id = validate::id_text(&id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if !open.hosts.contains_key(&id) {
+            return Err(IpcError::new(ErrorCode::NotFound, "This host no longer exists."));
+        }
+        let (record_id, revision, mut record) = match open.glance_settings.iter().next() {
+            Some((rid, s)) => (*rid, s.revision + 1, s.record.clone()),
+            None => (random_id().map_err(from_vault)?, 1, GlanceSettingsRecord::default()),
+        };
+        // Hosts deleted since the last change are dropped here, which also bounds the list.
+        record.off_hosts.retain(|h| h != &host_id && validate::id(h).is_ok_and(|h| open.hosts.contains_key(&h)));
+        if !enabled {
+            record.off_hosts.push(host_id);
+        }
+        let len = record.content_len();
+        self.write(open, record_id, KIND_GLANCE_SETTINGS, revision, Some((&record, len))).await?;
+        open.glance_settings.clear();
+        open.glance_settings.insert(record_id, Stored { revision, record });
+        Ok(enabled)
     }
 }
 

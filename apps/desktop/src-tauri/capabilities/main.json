@@ -89,6 +89,7 @@
     "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
+    "allow-app-info",
     "allow-backup-export",
     "allow-backup-choose",
     "allow-backup-preview",
@@ -104,6 +105,10 @@
     "allow-host-connection-get",
     "allow-host-connection-set",
     "allow-host-chain",
+    "allow-layout-list",
+    "allow-layout-save",
+    "allow-layout-delete",
+    "allow-window-detach",
     "allow-host-appearance-list",
     "allow-host-set-os",
     "allow-import-known-hosts-preview",
@@ -148,6 +153,9 @@
     "allow-history-suggest",
     "allow-history-list",
     "allow-history-delete",
-    "allow-history-clear"
+    "allow-history-clear",
+    "allow-glance-get",
+    "allow-glance-host-get",
+    "allow-glance-host-set"
   ]
 }
