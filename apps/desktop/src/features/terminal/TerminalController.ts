@@ -357,7 +357,7 @@ export class TerminalController {
       if (attachToken) {
         // Only connected sessions are handed over, and the handoff sends no state event; a close
         // that happened meanwhile still arrives as its own event. The size may differ here.
-        this.callbacks.onEvent({ type: "state", state: "connected" });
+        this.callbacks.onEvent({ type: "state", state: "connected", hop: null });
         void sessions.resize(opened.sessionId, cols, rows).catch(() => undefined);
       }
     } catch (error) {
