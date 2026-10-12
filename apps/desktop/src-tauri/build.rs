@@ -70,6 +70,7 @@ const COMMANDS: &[&str] = &[
     // settings and shell
     "prefs_get",
     "prefs_set",
+    "shells_list",
     "host_recent",
     "link_open",
     // backup and restore

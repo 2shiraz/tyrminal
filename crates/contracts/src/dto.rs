@@ -465,6 +465,8 @@ pub struct Preferences {
     /// Reduce interface motion even if the OS does not ask for it.
     pub reduce_motion: bool,
     pub terminal: TerminalPreferences,
+    /// Program for local terminals; one of the shells the system lists. `None`: the login shell.
+    pub local_shell: Option<String>,
 }
 
 // ---------- sessions ----------

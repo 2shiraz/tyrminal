@@ -17,7 +17,7 @@ import {
   relativeTime,
 } from "../../components/ui/controls";
 import { IconFingerprint, IconMonitor, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
-import { knownHosts as knownHostsApi, vault } from "../../lib/ipc";
+import { knownHosts as knownHostsApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
@@ -122,6 +122,13 @@ export function SettingsView() {
   const [quickKey, setQuickKey] = useState(0);
   const setTerminal = (patch: Partial<TerminalPreferences>) => update((p: Preferences) => ({ ...p, terminal: { ...p.terminal, ...patch } }));
   const t = prefs.terminal;
+  const [shells, setShells] = useState<string[] | null>(null);
+  useEffect(() => {
+    preferencesApi
+      .shells()
+      .then(setShells)
+      .catch(() => setShells([]));
+  }, []);
 
   const sections: { id: Section; label: string }[] = [
     { id: "appearance", label: msg.settings.appearance },
@@ -230,6 +237,21 @@ export function SettingsView() {
                 </div>
               </div>
 
+              <SettingRow label={msg.settings.localShell} hint={msg.settings.localShellHint}>
+                <select
+                  className="select"
+                  aria-label={msg.settings.localShell}
+                  value={prefs.localShell ?? ""}
+                  onChange={(event) => update((p) => ({ ...p, localShell: event.target.value === "" ? null : event.target.value }))}
+                >
+                  <option value="">{msg.settings.localShellDefault}</option>
+                  {(shells ?? []).map((shell) => (
+                    <option key={shell} value={shell}>
+                      {shell}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
               <SettingRow label={msg.settings.font}>
                 <select
                   className="select"

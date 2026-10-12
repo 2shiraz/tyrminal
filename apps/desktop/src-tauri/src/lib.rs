@@ -187,6 +187,7 @@ pub fn run() {
             commands::snippets::snippet_send,
             commands::settings::prefs_get,
             commands::settings::prefs_set,
+            commands::settings::shells_list,
             commands::settings::host_recent,
             commands::settings::link_open,
             commands::backup::backup_export,

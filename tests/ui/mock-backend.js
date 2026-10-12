@@ -20,6 +20,7 @@ export function installMockBackend(options) {
     prefs: {
       theme: options.theme ?? "dark",
       reduceMotion: true,
+      localShell: null,
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -276,6 +277,7 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    shells_list: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     files_local_list: (a) => {
       if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
       if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");

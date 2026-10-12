@@ -6,4 +6,8 @@ export type Preferences = { theme: ThemePreference,
 /**
  * Reduce interface motion even if the OS does not ask for it.
  */
-reduceMotion: boolean, terminal: TerminalPreferences, };
+reduceMotion: boolean, terminal: TerminalPreferences, 
+/**
+ * Program for local terminals; one of the shells the system lists. `None`: the login shell.
+ */
+localShell: string | null, };

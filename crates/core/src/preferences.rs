@@ -44,6 +44,12 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    if let Some(shell) = &prefs.local_shell {
+        let listed = tyrminal_pty::available_shells();
+        if !listed.iter().any(|p| p.to_str() == Some(shell.as_str())) {
+            return Err(invalid("That shell is not one of the shells installed on this computer."));
+        }
+    }
     Ok(prefs)
 }
 
@@ -97,6 +103,17 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_local_shell_must_be_an_installed_one() {
+        let mut prefs = Preferences { local_shell: Some("/tmp/not-a-shell".into()), ..Preferences::default() };
+        assert!(sanitize(prefs.clone()).is_err());
+        if let Some(listed) = tyrminal_pty::available_shells().first() {
+            prefs.local_shell = Some(listed.to_string_lossy().into_owned());
+            assert!(sanitize(prefs).is_ok());
+        }
+        assert!(sanitize(Preferences::default()).is_ok(), "no choice means the login shell");
+    }
 
     #[test]
     fn values_are_clamped_and_unknown_choices_rejected() {

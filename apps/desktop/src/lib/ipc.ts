@@ -249,6 +249,8 @@ export const preferences = {
   get: () => call<Preferences>("prefs_get"),
   /** Stores preferences; returns them as validated and clamped by the native side. */
   set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
+  /** Installed shells that can be chosen for local terminals. */
+  shells: () => call<string[]>("shells_list"),
 };
 
 export const links = {

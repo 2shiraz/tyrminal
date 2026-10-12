@@ -1662,3 +1662,60 @@ async fn keep_both_uses_the_next_free_name_and_never_touches_the_existing_file()
     }
     s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_else() {
+    let f = fixture().await;
+    let shells = tyrminal_core::available_shells();
+    let Some(sh) = shells.iter().find(|p| p.file_name().is_some_and(|n| n == "sh")) else {
+        panic!("BLOCKED: no `sh` in /etc/shells on this machine: {shells:?}");
+    };
+    let (tx, inbox) = mpsc::unbounded_channel();
+    let opened = f
+        .core
+        .sessions
+        .open_local_with(WINDOW, 100, 30, Some(sh.to_string_lossy().into_owned()), Arc::new(ChannelSink(tx)))
+        .await
+        .unwrap();
+    let mut client = Client {
+        core: f.core.clone(),
+        session: opened.session_id,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+    };
+    client.until_connected().await;
+    client.send("echo \"SHELL-[$0]\"\n").await;
+    client.output_until("SHELL-[").await;
+    client.output_until("sh]").await;
+
+    // A path that is not an installed shell is never executed; the login shell runs instead.
+    let fake = f._dir.path().join("not-a-shell");
+    std::fs::write(&fake, "#!/bin/sh\necho PWNED\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (tx, inbox) = mpsc::unbounded_channel();
+    let opened = f
+        .core
+        .sessions
+        .open_local_with(WINDOW, 100, 30, Some(fake.to_string_lossy().into_owned()), Arc::new(ChannelSink(tx)))
+        .await
+        .unwrap();
+    let mut client = Client {
+        core: f.core.clone(),
+        session: opened.session_id,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+    };
+    client.until_connected().await;
+    client.send("echo LOGIN-$((40+2))\n").await;
+    client.output_until("LOGIN-42").await;
+    assert!(!client.text.contains("PWNED"));
+}

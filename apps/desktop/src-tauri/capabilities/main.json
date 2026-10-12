@@ -69,6 +69,7 @@
     "allow-snippet-send",
     "allow-prefs-get",
     "allow-prefs-set",
+    "allow-shells-list",
     "allow-host-recent",
     "allow-link-open",
     "allow-backup-export",

@@ -26,6 +26,7 @@ pub use tyrminal_platform::{
     MemorySecretStore, OsSecretStore, ScreenLockSupport, SecretStore, UnavailableSecretStore, restrict_to_owner,
     watch_screen_lock,
 };
+pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
 
 use std::path::Path;

@@ -13,6 +13,12 @@ pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> Result
     state.core()?.preferences.set(prefs)
 }
 
+/// Shells that can be chosen for local terminals (absolute paths of installed shells).
+#[tauri::command]
+pub async fn shells_list() -> Result<Vec<String>, IpcError> {
+    Ok(tyrminal_core::available_shells().into_iter().filter_map(|p| p.to_str().map(str::to_owned)).collect())
+}
+
 #[tauri::command]
 pub async fn host_recent(state: State<'_, AppState>) -> Result<Vec<HostSummary>, IpcError> {
     state.core()?.vault.recent_hosts().await
