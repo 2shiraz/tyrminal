@@ -43,7 +43,7 @@ fn too_big() -> IpcError {
     err(ErrorCode::LimitExceeded, "That folder has too many entries or is nested too deeply to copy at once.")
 }
 
-fn remote_path(root: &str, rel: &[String]) -> Result<String, IpcError> {
+pub(crate) fn remote_path(root: &str, rel: &[String]) -> Result<String, IpcError> {
     rel.iter().try_fold(root.to_owned(), |path, name| join(&path, name))
 }
 
@@ -51,8 +51,14 @@ fn local_path(root: &Path, rel: &[String]) -> PathBuf {
     rel.iter().fold(root.to_path_buf(), |path, name| path.join(name))
 }
 
-/// Lists a remote folder recursively without following links.
+/// Lists a remote folder recursively without following links; every name must be usable on this
+/// computer (for downloads).
 pub(crate) async fn walk_remote(sftp: &Sftp, root: &str) -> Result<Tree, IpcError> {
+    walk_remote_checked(sftp, root, true).await
+}
+
+/// Like `walk_remote`; `local_names` false accepts any name valid on a server (remote-to-remote).
+pub(crate) async fn walk_remote_checked(sftp: &Sftp, root: &str, local_names: bool) -> Result<Tree, IpcError> {
     let mut tree = Tree::default();
     let mut pending: Vec<Vec<String>> = vec![Vec::new()];
     while let Some(rel) = pending.pop() {
@@ -65,7 +71,7 @@ pub(crate) async fn walk_remote(sftp: &Sftp, root: &str) -> Result<Tree, IpcErro
             return Err(too_big());
         }
         for entry in entries {
-            if !local_name_ok(&entry.name) {
+            if local_names && !local_name_ok(&entry.name) {
                 return Err(err(
                     ErrorCode::InvalidInput,
                     "A name inside that folder cannot be used on this computer, so nothing was copied.",
@@ -131,7 +137,7 @@ pub(crate) async fn walk_local(root: &Path) -> Result<Tree, IpcError> {
     Ok(tree)
 }
 
-fn finish(sink: &dyn TransferSink, result: Result<(u64, u32), Stop>, skipped: u32) {
+pub(crate) fn finish(sink: &dyn TransferSink, result: Result<(u64, u32), Stop>, skipped: u32) {
     sink.event(match result {
         Ok((bytes, files)) => TransferEvent::Done { bytes, files, skipped },
         Err(Stop::Cancelled) => TransferEvent::Cancelled,

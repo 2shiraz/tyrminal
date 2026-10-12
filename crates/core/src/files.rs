@@ -256,7 +256,7 @@ impl<'a> Progress<'a> {
         Self { sink, last: Instant::now(), done: 0 }
     }
 
-    fn add(&mut self, n: usize) {
+    pub(crate) fn add(&mut self, n: usize) {
         self.done += n as u64;
         if self.last.elapsed() >= PROGRESS_EVERY {
             self.last = Instant::now();

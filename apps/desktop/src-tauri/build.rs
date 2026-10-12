@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "files_download",
     "files_cancel",
     "files_local_list",
+    "files_copy",
     "files_edit_open",
     "files_edit_status",
     "files_edit_save",
@@ -70,6 +71,8 @@ const COMMANDS: &[&str] = &[
     // settings and shell
     "prefs_get",
     "prefs_set",
+    "terminal_choices",
+    "editor_pick_app",
     "host_recent",
     "link_open",
     // backup and restore

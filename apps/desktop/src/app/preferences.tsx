@@ -6,6 +6,8 @@ import { preferences as prefsApi } from "../lib/ipc";
 const DEFAULTS: Preferences = {
   theme: "system",
   reduceMotion: false,
+  localShell: null,
+  editorApps: [],
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

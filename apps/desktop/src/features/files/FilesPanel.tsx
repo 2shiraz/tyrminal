@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, Notice, Shortcut, Switch, TextField } from "../../components/ui/controls";
 import {
+  IconCopy,
   IconDownload,
   IconEye,
   IconFile,
@@ -51,7 +52,8 @@ type Prompt =
   | { kind: "chmod"; entry: RemoteEntry }
   | { kind: "delete"; entry: RemoteEntry }
   | { kind: "replace"; name: string; remote: boolean; retry: (() => void) | null; keepBoth: () => void }
-  | { kind: "editConflict"; edit: EditStatus; overwrite: () => void };
+  | { kind: "editConflict"; edit: EditStatus; overwrite: () => void }
+  | { kind: "copy"; entry: RemoteEntry; others: FilesTarget[]; start: (dst: FilesTarget, dir: string) => void };
 
 export function formatSize(bytes: number | null | undefined): string {
   if (bytes == null) return "";
@@ -87,7 +89,16 @@ function EntryIcon({ entry }: { entry: RemoteEntry }) {
  * Remote file browser for the focused SSH session. Every action is explicit; transfers never
  * replace an existing file without asking, and show their progress until they end.
  */
-export function FilesPanel({ target, onClose }: { target: FilesTarget | null; onClose: () => void }) {
+export function FilesPanel({
+  target,
+  others = [],
+  onClose,
+}: {
+  target: FilesTarget | null;
+  /** Other connected SSH sessions in this window, for copying between servers. */
+  others?: FilesTarget[];
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLElement>(null);
   const [listing, setListing] = useState<RemoteListing | null>(null);
   const [pathText, setPathText] = useState("");
@@ -276,6 +287,28 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
     ]);
   }
 
+  async function startCopy(entry: RemoteEntry, dst: FilesTarget, dstDir: string, choice: ConflictChoice) {
+    if (!sessionId || !current) return;
+    const events = listener(dstDir, false);
+    const srcDir = current;
+    try {
+      events.bind(await filesApi.copy(sessionId, srcDir, entry.name, dst.sessionId, dstDir, choice, events.onEvent));
+    } catch (caught) {
+      const e = toAppError(caught);
+      if (e.code === "CONFLICT" && choice === "ask") {
+        setPrompt({
+          kind: "replace",
+          name: entry.name,
+          remote: true,
+          retry: entry.kind === "dir" ? null : () => void startCopy(entry, dst, dstDir, "replace"),
+          keepBoth: () => void startCopy(entry, dst, dstDir, "keep_both"),
+        });
+      } else {
+        failNow(entry.name, "copy", dstDir, e);
+      }
+    }
+  }
+
   /** Two-pane copy: local selection (or a dropped local name) to the server folder shown. */
   async function uploadFromLocal(name: string, kind: RemoteEntry["kind"]) {
     if (!current || !localLocation) return;
@@ -414,6 +447,15 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
                 {selection.kind === "file" && (
                   <button type="button" className="btn btn-sm" onClick={() => void editSelected()} disabled={pending}>
                     <IconPencil size={14} /> {msg.files.edit}
+                  </button>
+                )}
+                {(selection.kind === "file" || selection.kind === "dir") && others.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setPrompt({ kind: "copy", entry: selection, others, start: (dst, dir) => void startCopy(selection, dst, dir, "ask") })}
+                  >
+                    {msg.files.copyTo}
                   </button>
                 )}
                 <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "rename", entry: selection })}>
@@ -556,7 +598,9 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
               <ul>
                 {transfers.map((t) => (
                   <li key={t.id} className="files-transfer" data-state={t.state}>
-                    <span className="files-transfer-icon">{t.direction === "upload" ? <IconUpload size={13} /> : <IconDownload size={13} />}</span>
+                    <span className="files-transfer-icon">
+                      {t.direction === "upload" ? <IconUpload size={13} /> : t.direction === "copy" ? <IconCopy size={13} /> : <IconDownload size={13} />}
+                    </span>
                     <span className="files-name">{visibleName(t.name)}</span>
                     <span className="files-meta" data-testid="transfer-state">
                       {t.state === "running"
@@ -645,8 +689,14 @@ function FilesPrompt({
         prompt.overwrite();
         onDone(false);
         return;
+      case "copy":
+        return;
     }
     if (ok) onDone(true);
+  }
+
+  if (prompt.kind === "copy") {
+    return <CopyDialog prompt={prompt} onDone={() => onDone(false)} />;
   }
 
   if (prompt.kind === "delete" || prompt.kind === "replace" || prompt.kind === "editConflict") {
@@ -729,6 +779,59 @@ function FilesPrompt({
           </button>
           <button type="submit" className="btn btn-primary" disabled={pending || text.trim() === ""}>
             {prompt.kind === "mkdir" ? msg.files.create : msg.files.save}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function CopyDialog({
+  prompt,
+  onDone,
+}: {
+  prompt: { entry: RemoteEntry; others: FilesTarget[]; start: (dst: FilesTarget, dir: string) => void };
+  onDone: () => void;
+}) {
+  const [targetId, setTargetId] = useState(prompt.others[0]?.sessionId ?? "");
+  const [dir, setDir] = useState("");
+  const { error, run } = useAction();
+  // Start in the chosen server's login folder.
+  useEffect(() => {
+    if (!targetId) return;
+    void run(() => filesApi.list(targetId, null)).then((listing) => listing && setDir(listing.path));
+  }, [targetId, run]);
+  const target = prompt.others.find((o) => o.sessionId === targetId);
+  return (
+    <Dialog title={msg.files.copyTitle(prompt.entry.name)} icon={<IconCopy size={18} />} onDismiss={onDone}>
+      <form
+        className="stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (target && dir.startsWith("/")) {
+            prompt.start(target, dir);
+            onDone();
+          }
+        }}
+      >
+        <label className="field">
+          <span className="label">{msg.files.copyTarget}</span>
+          <select className="select" value={targetId} onChange={(event) => setTargetId(event.target.value)} data-autofocus>
+            {prompt.others.map((o) => (
+              <option key={o.sessionId} value={o.sessionId}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <TextField label={msg.files.copyFolder} value={dir} onChange={setDir} className="mono" />
+        <ErrorNotice error={error} />
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={onDone}>
+            {msg.common.cancel}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={!target || !dir.startsWith("/")}>
+            {msg.files.copyStart}
           </button>
         </div>
       </form>
