@@ -149,12 +149,7 @@ Safety features:
 - Links open only after you confirm the real destination (http and https only).
 - A server may write to your clipboard only if you allow it for that session; reads are never
   answered.
-- Pasting several lines, a lot of text, or a single line that ends in a newline (it would run at
-  once) shows the text first, with the session it goes to. Characters that do not show on screen
-  (control characters, escape sequences, text-direction overrides, zero-width characters) are
-  marked in the preview with a warning; this check cannot be turned off. Text containing the
-  bracketed-paste end marker (`ESC [201~`), which could make the rest run as typed input, is never
-  sent as it is: remove the marker in the review first.
+- Pasting several lines, or a lot of text, shows the text first.
 
 **Duplicate tab** (tab menu) opens the same destination again. When the shell integration
 (Suggestions → shell integration) reports the shell's current folder, the copy starts there:

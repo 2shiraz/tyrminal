@@ -252,7 +252,7 @@ test("multi-line paste is previewed; single-line paste goes straight through", a
   await waitForTerminalText(page, "echo one-line");
   await expect(page.locator("dialog[open]")).toHaveCount(0);
   await paste("echo first\necho second\n");
-  const dialog = page.getByRole("dialog", { name: /^Paste into api-gateway/ });
+  const dialog = page.getByRole("dialog", { name: "Paste several lines?" });
   await expect(dialog).toContainText("2 lines");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(await terminalText(page)).not.toContain("echo first");

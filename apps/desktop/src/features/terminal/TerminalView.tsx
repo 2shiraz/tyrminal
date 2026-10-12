@@ -7,6 +7,7 @@ import { IconButton, Notice, SecretField, TextField } from "../../components/ui/
 import {
   IconChevronDown,
   IconChevronLeft,
+  IconClipboardPaste,
   IconCopy,
   IconExternalLink,
   IconKeyRound,
@@ -24,8 +25,7 @@ import { msgD } from "../../lib/messages-d";
 import { HopNotice } from "../tunnels/HopNotice";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
-import { PasteReview } from "../paste/PasteReview";
-import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -119,7 +119,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [link, setLink] = useState<string | null>(null);
-  const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: (text: string) => void } | null>(null);
+  const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
   const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -528,16 +528,28 @@ export function TerminalView(props: TerminalViewProps) {
       )}
 
       {paste && (
-        <PasteReview
-          text={paste.text}
-          bracketed={paste.bracketed}
-          target={{ label, identity }}
-          onCancel={() => setPaste(null)}
-          onSend={(text) => {
-            paste.confirm(text);
-            setPaste(null);
-          }}
-        />
+        <Dialog title={msg.terminal.pasteTitle} icon={<IconClipboardPaste size={18} />} tone="warning" wide onDismiss={() => setPaste(null)}>
+          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+            {msg.terminal.pasteBody(lineCount(paste.text))}
+          </p>
+          <pre className="code-block">{paste.text}</pre>
+          {paste.bracketed && <Notice tone="info">{msg.terminal.pasteBracketed}</Notice>}
+          <div className="dialog-actions">
+            <button type="button" className="btn" onClick={() => setPaste(null)} autoFocus data-autofocus>
+              {msg.common.cancel}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                paste.confirm();
+                setPaste(null);
+              }}
+            >
+              {msg.terminal.pasteSend}
+            </button>
+          </div>
+        </Dialog>
       )}
     </div>
   );

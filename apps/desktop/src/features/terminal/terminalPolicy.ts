@@ -7,8 +7,6 @@ const MAX_TITLE_LENGTH = 80;
 /** Largest OSC 52 payload accepted for review (decoded bytes). */
 export const MAX_OSC52_BYTES = 64 * 1024;
 /** Pastes larger than this are reviewed even on one line. */
-import { needsPasteReview as pasteNeedsReview } from "../paste/pasteSafety";
-
 export const PASTE_REVIEW_BYTES = 4 * 1024;
 
 const DECEPTIVE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g;
@@ -59,9 +57,8 @@ export function lineCount(text: string): number {
 }
 
 /** A paste is reviewed when it spans several lines or is large. */
-/** See features/paste/pasteSafety.ts (P-25): hidden characters and end markers always need review. */
-export function needsPasteReview(text: string, reviewPlain = true): boolean {
-  return pasteNeedsReview(text, reviewPlain);
+export function needsPasteReview(text: string): boolean {
+  return lineCount(text) > 1 || text.length > PASTE_REVIEW_BYTES;
 }
 
 export interface LinkCheck {

@@ -3325,32 +3325,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--warning);
 }
 
-/* Paste safety (P-25): the target session, and characters that would not show, made visible. */
-.paste-target {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.paste-preview {
-  max-height: 40vh;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.paste-hidden {
-  display: inline-block;
-  margin: 0 1px;
-  padding: 0 3px;
-  border-radius: 3px;
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: 0.85em;
-  font-weight: var(--weight-medium);
-  outline: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
 /* A long command finished in this background tab (P-23). */
 .tab-finished {
   flex: none;

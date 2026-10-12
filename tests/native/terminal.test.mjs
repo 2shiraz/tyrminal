@@ -109,36 +109,6 @@ describe("terminal with real applications", { concurrency: false }, () => {
     assert.ok(Math.abs(xs[4] - xs[5]) <= 1, `combining mark: ${xs[4]} vs ${xs[5]}`);
   });
 
-  test("paste safety: a line that would run is reviewed first; an end marker never reaches the shell (P-25)", async () => {
-    // The paste is delivered as the WebView delivers it (a paste event with the clipboard text);
-    // everything after that (review, xterm, encoder, IPC, core, the lab's bash) is real.
-    const paste = (text) =>
-      s.execute(
-        `const data = new DataTransfer(); data.setData("text/plain", arguments[0]);
-         document.querySelector(".terminal-pane:not([hidden]) .xterm-helper-textarea, .pane:not([hidden]) .xterm-helper-textarea")
-           .dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));`,
-        [text],
-      );
-    const dialog = 'dialog[open]';
-    // A single line ending in a newline is shown first, naming the target, and runs once confirmed.
-    await paste("echo PASTED-$((40+2))\n");
-    await s.waitFor(dialog);
-    assert.match(await s.text(await s.waitFor(dialog)), /Lab/);
-    await s.clickButton("Paste", { within: dialog });
-    await s.waitGone(dialog);
-    await t.waitForText(/^PASTED-42$/m, "pasted command ran once confirmed");
-
-    // An end marker inside the text cannot be sent; cancelled, the shell receives nothing.
-    await paste("echo SAFE\u001b[201~echo INJECTED-$((1+1))\n");
-    await s.waitFor(dialog);
-    const disabled = await s.execute(`return [...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent.trim() === "Paste")?.disabled ?? null`);
-    assert.equal(disabled, true, "Paste is disabled while the end marker is in the text");
-    await s.clickButton("Cancel", { within: dialog });
-    await s.waitGone(dialog);
-    await run("echo AFTER-$((1+1))", /^AFTER-2$/m);
-    assert.doesNotMatch(await t.terminalText(), /^INJECTED-2$/m, "the text after the marker never ran");
-  });
-
   test("every terminal row is inside the visible terminal area", async () => {
     // A row pitch larger than the one the size was fitted with pushes the last rows under the
     // status bar, where a full-screen application's bottom line (htop's F10 Quit) is hidden.
