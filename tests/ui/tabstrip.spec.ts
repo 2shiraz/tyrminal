@@ -256,3 +256,20 @@ test("closing with the pointer narrows the tab to nothing, then removes it", asy
   for (let k = 1; k < widths.length; k += 1) expect(widths[k]!).toBeLessThanOrEqual(widths[k - 1]! + 0.5);
   await expect(terminalTabs(page)).toHaveCount(2);
 });
+
+test("status dots in tabs are plain 8 px dots, with no halo or ring", async ({ page }) => {
+  await openApp(page);
+  await openLocalTabs(page, 2);
+  const dots = await page.locator(".tabstrip-tabs .tab-lead .status-dot").evaluateAll((els) =>
+    els.map((e) => {
+      const s = getComputedStyle(e);
+      return { w: e.getBoundingClientRect().width, shadow: s.boxShadow, outline: s.outlineStyle };
+    }),
+  );
+  expect(dots.length).toBe(2);
+  for (const d of dots) {
+    expect(d.w).toBe(8);
+    expect(d.shadow).toBe("none");
+    expect(d.outline).toBe("none");
+  }
+});
