@@ -70,7 +70,6 @@ export const msg = {
     localTerminal: "Local terminal",
     primary: "Primary",
     sessions: "Open sessions",
-    sessionsGroup: "Sessions",
     library: "Library",
     search: "Search or run a command",
     collapse: "Collapse sidebar",
