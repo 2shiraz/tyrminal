@@ -65,7 +65,12 @@ export interface Workspace {
   nextId: number;
   /** The named layout this workspace was opened from or last saved as, with what was saved. */
   template: { id: string; name: string; saved: string } | null;
+  /** Recently closed tabs, newest last, as template tabs: destinations only, no session or output. */
+  closedTabs?: LayoutTab[];
 }
+
+/** Closed tabs remembered for "Reopen closed tab". */
+export const MAX_CLOSED_TABS = 10;
 
 export const emptyWorkspace: Workspace = { tabs: [], panes: {}, active: null, nextId: 1, template: null };
 
@@ -144,7 +149,7 @@ export function closePane(ws: Workspace, pane: number): Workspace {
   const panes = { ...ws.panes };
   delete panes[pane];
   const layout = removeLeaf(tab.layout, pane);
-  if (layout === null) return removeTab({ ...ws, panes }, tab.id);
+  if (layout === null) return removeTab({ ...remember(ws, tab), panes }, tab.id);
   const remaining = panesOf(layout);
   const focused = remaining.includes(tab.focused) ? tab.focused : (remaining[0] as number);
   const next = { ...ws, panes, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, layout, focused } : t)) };
@@ -164,9 +169,14 @@ function removeTab(ws: Workspace, tabId: number): Workspace {
   return { ...ws, tabs, active };
 }
 
-export function closeTab(ws: Workspace, tabId: number): Workspace {
+/**
+ * Closes a tab. It is remembered for "Reopen closed tab" unless `remember` is false (a tab moved to
+ * another window was not closed).
+ */
+export function closeTab(ws: Workspace, tabId: number, { remember: keep = true } = {}): Workspace {
   const tab = ws.tabs.find((t) => t.id === tabId);
   if (!tab) return ws;
+  if (keep) ws = remember(ws, tab);
   const panes = { ...ws.panes };
   for (const p of panesOf(tab.layout)) delete panes[p];
   return removeTab({ ...ws, panes }, tabId);
@@ -211,6 +221,16 @@ export function cycleTab(ws: Workspace, delta: 1 | -1): Workspace {
   const index = ws.tabs.findIndex((t) => t.id === ws.active);
   const next = index < 0 ? (delta > 0 ? 0 : ws.tabs.length - 1) : (index + delta + ws.tabs.length) % ws.tabs.length;
   return activate(ws, (ws.tabs[next] as Tab).id);
+}
+
+/** Focuses the next (or previous) pane of the tab in front, in layout order, wrapping around. */
+export function cyclePane(ws: Workspace, delta: 1 | -1): Workspace {
+  const tab = activeTab(ws);
+  if (!tab) return ws;
+  const ids = panesOf(tab.layout);
+  if (ids.length < 2) return ws;
+  const index = ids.indexOf(tab.focused);
+  return focusPane(ws, ids[(index + delta + ids.length) % ids.length] as number);
 }
 
 export function focusPane(ws: Workspace, pane: number): Workspace {
@@ -479,21 +499,45 @@ function toTarget(target: TerminalTarget): LayoutTarget {
  */
 export function templateTabs(ws: Workspace): LayoutTab[] {
   // SFTP tabs hold no terminal destination and are not part of a template.
-  const terminalOnly = (tab: Tab) => panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp");
-  return ws.tabs.filter(terminalOnly).map((tab) => {
-    const ids = panesOf(tab.layout);
-    const index = new Map(ids.map((id, i) => [id, i]));
-    const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
-    return {
-      title: tab.customTitle,
-      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target as TerminalTarget)),
-      layout: toNode(tab.layout, index),
-      focused: index.get(tab.focused) ?? 0,
-      focusMode: tab.focusMode,
-      // Only when a shell reported one; templates without directories stay as they were.
-      ...(directories.some((d) => d !== null) ? { directories } : {}),
-    };
-  });
+  return ws.tabs.filter((tab) => terminalOnly(ws, tab)).map((tab) => tabTemplate(ws, tab));
+}
+
+function terminalOnly(ws: Workspace, tab: Tab): boolean {
+  return panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp");
+}
+
+function tabTemplate(ws: Workspace, tab: Tab): LayoutTab {
+  const ids = panesOf(tab.layout);
+  const index = new Map(ids.map((id, i) => [id, i]));
+  const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
+  return {
+    title: tab.customTitle,
+    panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target as TerminalTarget)),
+    layout: toNode(tab.layout, index),
+    focused: index.get(tab.focused) ?? 0,
+    focusMode: tab.focusMode,
+    // Only when a shell reported one; templates without directories stay as they were.
+    ...(directories.some((d) => d !== null) ? { directories } : {}),
+  };
+}
+
+/** Remembers `tab` (still in `ws`) for "Reopen closed tab". SFTP tabs are not remembered. */
+function remember(ws: Workspace, tab: Tab): Workspace {
+  if (!terminalOnly(ws, tab)) return ws;
+  return { ...ws, closedTabs: [...(ws.closedTabs ?? []), tabTemplate(ws, tab)].slice(-MAX_CLOSED_TABS) };
+}
+
+/**
+ * Reopens the most recently closed tab with the same arrangement and destinations. Like a
+ * template, every pane starts pending: nothing connects until the user chooses Connect. Unchanged
+ * when nothing was closed or the pane limit would be passed.
+ */
+export function reopenClosedTab(ws: Workspace, seed: (target: LayoutTarget) => PaneSeed): Workspace {
+  const closed = ws.closedTabs ?? [];
+  const last = closed.at(-1);
+  if (!last) return ws;
+  const next = restoreTemplate(ws, [last], seed);
+  return next === ws ? ws : { ...next, closedTabs: closed.slice(0, -1) };
 }
 
 /** A canonical text form (sorted keys) for comparing what is open with what was saved. */

@@ -95,6 +95,9 @@ pub(crate) struct Entry {
     pub(crate) host_id: Option<String>,
     /// Startup snippets not yet typed (SNP-08); the supervisor notes them if the session ends first.
     startup_left: std::sync::atomic::AtomicUsize,
+    // server at a glance
+    /// The last server-panel answer and when it was read; also lets only one read run at a time.
+    glance: tokio::sync::Mutex<Option<(tokio::time::Instant, tyrminal_contracts::ServerGlance)>>,
 }
 
 impl Entry {
@@ -237,6 +240,8 @@ impl Sessions {
             ended: watch::channel(None).0,
             host_id,
             startup_left: std::sync::atomic::AtomicUsize::new(0),
+            // server at a glance
+            glance: tokio::sync::Mutex::new(None),
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -2279,6 +2284,47 @@ impl Sessions {
     ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
         let (_, conn) = self.connection(owner, session_id)?;
         crate::shell_integration::remote_remove(&conn).await
+    }
+}
+
+// server at a glance
+impl Sessions {
+    /// Uptime, load, memory and disk use of the server behind an SSH session the caller owns
+    /// (P-32). Telnet, serial and local sessions have no verified connection and are refused. The
+    /// server is asked at most once per [`GLANCE_MIN_INTERVAL_MS`](tyrminal_contracts::limits::GLANCE_MIN_INTERVAL_MS):
+    /// a sooner call gets the last answer. A read stops when the session closes or the vault locks.
+    pub async fn server_glance(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::ServerGlance, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        if let Some(host_id) = &entry.host_id
+            && !self.vault.glance_enabled_for(entry.generation, host_id).await?
+        {
+            return Ok(tyrminal_contracts::ServerGlance::Off);
+        }
+        let min = Duration::from_millis(tyrminal_contracts::limits::GLANCE_MIN_INTERVAL_MS);
+        // Calls that arrive during a read wait for it and get its answer.
+        let mut last = entry.glance.lock().await;
+        if let Some((at, glance)) = last.as_ref()
+            && at.elapsed() < min
+        {
+            return Ok(glance.clone());
+        }
+        let mut closed = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        let glance = tokio::select! {
+            glance = crate::server_glance::fetch(&conn) => glance,
+            _ = closed.wait_for(|closed| *closed) => {
+                return Err(err(ErrorCode::Cancelled, "The session was closed."));
+            }
+            () = locked_since(&mut vault, entry.generation) => {
+                return Err(err(ErrorCode::VaultLocked, "The vault was locked."));
+            }
+        };
+        *last = Some((tokio::time::Instant::now(), glance.clone()));
+        Ok(glance)
     }
 }
 

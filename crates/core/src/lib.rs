@@ -38,6 +38,8 @@ mod snippet_runs;
 pub mod password_check;
 // command history
 mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};

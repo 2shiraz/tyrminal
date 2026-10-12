@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// WCAG 2.2 AA contrast check for the design tokens (apps/desktop/src/styles/tokens.css) in both
-// themes, and for every terminal color scheme's foreground/background and ANSI colors.
+// WCAG 2.2 AA contrast check for the design tokens (apps/desktop/src/styles/tokens.css) in every
+// palette and mode, and for every terminal color scheme's foreground/background and ANSI colors.
 //
 //   node scripts/check-contrast.mjs
 //
@@ -20,8 +20,15 @@ function block(selector) {
   return Object.fromEntries([...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
 }
 
-const dark = block(":root");
-const light = { ...dark, ...block(':root[data-theme="light"]') };
+const base = block(":root");
+const themes = [
+  ["dark", base],
+  ["light", { ...base, ...block(':root[data-theme="light"]') }],
+  ["fjord dark", { ...base, ...block(':root[data-palette="fjord"]') }],
+  ["fjord light", { ...base, ...block(':root[data-palette="fjord"][data-theme="light"]') }],
+  ["contrast dark", { ...base, ...block(':root[data-palette="contrast"]') }],
+  ["contrast light", { ...base, ...block(':root[data-palette="contrast"][data-theme="light"]') }],
+];
 
 export function parseColor(value) {
   let m = /^#([0-9a-f]{6})$/i.exec(value);
@@ -69,23 +76,26 @@ const surfaces = ["bg-app", "bg-sidebar", "bg-surface", "bg-raised", "bg-overlay
 const translucent = [
   ["bg-hover", "bg-sidebar"],
   ["bg-active", "bg-sidebar"],
+  ["bg-hover", "bg-app"],
+  ["bg-selected", "bg-app"],
   ["bg-selected", "bg-surface"],
   ["bg-hover", "bg-raised"],
 ];
 
-for (const [theme, tokens] of [["dark", dark], ["light", light]]) {
+for (const [theme, tokens] of themes) {
   for (const surface of surfaces) {
     for (const text of ["text", "text-muted", "text-faint", "accent-text"]) check(theme, "text", tokens, text, surface, 4.5);
     for (const status of ["success", "warning", "danger"]) check(theme, "status text", tokens, status, surface, 4.5);
     check(theme, "control boundary", tokens, "border-control", surface, 3);
     check(theme, "focus ring", tokens, "focus", surface, 3);
     check(theme, "accent fill", tokens, "accent", surface, 3);
+    check(theme, "cursor marker", tokens, "cursor", surface, 3);
   }
   for (const [bg, under] of translucent) {
-    for (const text of ["text", "text-muted"]) check(theme, "text on state", tokens, text, bg, 4.5, under);
+    for (const text of ["text", "text-muted", "accent-text"]) check(theme, "text on state", tokens, text, bg, 4.5, under);
   }
   for (const [soft, text] of [["accent-soft", "accent-text"], ["success-soft", "success"], ["warning-soft", "warning"], ["danger-soft", "danger"]]) {
-    for (const under of ["bg-surface", "bg-raised", "bg-overlay"]) check(theme, "badge", tokens, text, soft, 4.5, under);
+    for (const under of ["bg-app", "bg-surface", "bg-raised", "bg-overlay"]) check(theme, "badge", tokens, text, soft, 4.5, under);
   }
   // Selected rows in file lists: accent text and icons on the selection tint.
   for (const under of ["bg-surface", "bg-raised", "bg-inset"]) check(theme, "selected row", tokens, "accent-text", "bg-selected", 4.5, under);
@@ -125,4 +135,4 @@ if (failures.length) {
   console.error(`\n${failures.length} of ${checked} contrast checks failed`);
   process.exit(1);
 }
-console.log(`contrast ok: ${checked} pairs across 2 themes and ${schemeBlocks.length} terminal schemes`);
+console.log(`contrast ok: ${checked} pairs across ${themes.length} themes and ${schemeBlocks.length} terminal schemes`);

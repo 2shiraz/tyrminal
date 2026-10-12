@@ -2,7 +2,9 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun } from "../ui/icons";
+// server at a glance
+import { msgG } from "../../lib/messages-glance";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 export function StatusBar({
@@ -16,6 +18,8 @@ export function StatusBar({
   onStopBroadcast,
   filesOpen,
   onToggleFiles,
+  serverOpen,
+  onToggleServer,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -28,6 +32,9 @@ export function StatusBar({
   onStopBroadcast?: (() => void) | undefined;
   filesOpen?: boolean | undefined;
   onToggleFiles?: (() => void) | undefined;
+  // server at a glance
+  serverOpen?: boolean | undefined;
+  onToggleServer?: (() => void) | undefined;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -97,6 +104,20 @@ export function StatusBar({
         </span>
       )}
       <span className="spacer" />
+      {onToggleServer && (
+        <button
+          type="button"
+          className="status-button"
+          aria-pressed={serverOpen ?? false}
+          data-panel="server"
+          onClick={onToggleServer}
+          data-tooltip={msgG.open}
+          data-tooltip-side="top"
+        >
+          <IconServer size={13} />
+          {msgG.panel}
+        </button>
+      )}
       {onToggleFiles && (
         <button
           type="button"

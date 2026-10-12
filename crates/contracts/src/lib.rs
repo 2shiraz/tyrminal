@@ -26,6 +26,8 @@ mod identity_removal;
 mod password_check;
 // command history
 mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use discovery::*;
 pub use dto::*;
@@ -47,3 +49,5 @@ pub use identity_removal::*;
 pub use password_check::*;
 // command history
 pub use command_history::*;
+// server at a glance
+pub use server_glance::*;

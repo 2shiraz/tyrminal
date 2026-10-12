@@ -20,3 +20,5 @@ pub mod password_check;
 pub mod layouts;
 // command history
 pub mod command_history;
+// server at a glance
+pub mod server_glance;

@@ -21,7 +21,17 @@ import {
 } from "../../lib/shortcuts";
 
 export const WORKSPACE_DEFAULTS: WorkspacePreferences = {
-  highlight: { enabled: false, ipAddresses: true, keywords: [] },
+  // On by default, matching the core's default: addresses and a few status words (display only).
+  highlight: {
+    enabled: true,
+    ipAddresses: true,
+    keywords: [
+      { text: "error", tone: "danger", caseSensitive: false },
+      { text: "failed", tone: "danger", caseSensitive: false },
+      { text: "warning", tone: "warning", caseSensitive: false },
+      { text: "success", tone: "success", caseSensitive: false },
+    ],
+  },
   bindings: [],
   optionAsMeta: isMac,
   rightClickSelectsWord: isMac,
@@ -112,6 +122,16 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
       "closePane",
       "nextTab",
       "prevTab",
+      "goToTab1",
+      "goToTab2",
+      "goToTab3",
+      "goToTab4",
+      "goToTab5",
+      "goToTab6",
+      "goToTab7",
+      "goToTab8",
+      "goToLastTab",
+      "reopenClosedTab",
       "renameTab",
       "splitRight",
       "splitDown",
@@ -119,6 +139,8 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
       "focusRight",
       "focusUp",
       "focusDown",
+      "nextPane",
+      "prevPane",
       "toggleFocusLayout",
       "movePaneLeft",
       "movePaneRight",
@@ -129,7 +151,7 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
   ["terminal", ["find", "copy", "paste", "zoomIn", "zoomOut", "zoomReset", "suggest", "insertPassword"]],
   ["files", ["toggleFiles"]],
   ["snippets", ["toggleSnippets"]],
-  ["navigation", ["palette", "toggleSidebar", "settings", "lock"]],
+  ["navigation", ["palette", "toggleSidebar", "focusTerminal", "focusSidebar", "settings", "lock"]],
 ];
 
 function grouped(actions: ActionId[]): [string, ActionId[]][] {
