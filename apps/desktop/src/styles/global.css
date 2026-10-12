@@ -3289,3 +3289,254 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .env-inherited li.env-overridden .mono {
   text-decoration: line-through;
 }
+
+/* ---------- host details panel (Hosts view) ---------- */
+
+.hosts-layout {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+}
+
+.hosts-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.host-panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 400px;
+  min-width: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+  animation: panel-in var(--motion-slow) var(--ease-out);
+}
+
+/* Too narrow for the list and the panel side by side: the panel covers the list (made inert). */
+.hosts-layout[data-narrow="true"] .host-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  width: auto;
+  border-left: 0;
+}
+
+.host-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.host-panel-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.host-panel-heading h2 {
+  font-size: var(--text-md);
+  border-radius: var(--radius-xs);
+}
+
+/* Focus lands on the heading only by script (after a save); no ring for a non-interactive target. */
+.host-panel-heading h2:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.host-panel-location {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.host-panel-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.host-panel-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.host-section {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
+}
+
+.host-section-title {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.host-address {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+}
+
+/* Line the mark up with the input, below the field's label. */
+.host-address > .avatar {
+  margin-top: 22px;
+}
+
+.host-address-mark {
+  color: var(--text-muted);
+}
+
+.protocol-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.protocol-name {
+  font-weight: var(--weight-semibold);
+}
+
+.protocol-port {
+  width: 6.5em;
+}
+
+.host-auth {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.host-auth > legend {
+  margin-bottom: 6px;
+}
+
+.host-pickers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.host-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.host-picker > .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.host-picker > .btn {
+  margin-top: 22px;
+}
+
+.host-more > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.host-more > summary:hover {
+  color: var(--text);
+}
+
+.host-more:not([open]) {
+  gap: 0;
+}
+
+.host-effective {
+  padding: 0 var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.host-panel-foot {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+}
+
+.host-panel-status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Empty: stays in the tree as a live region but takes no room. */
+.host-panel-status:empty {
+  margin-bottom: calc(-1 * var(--space-2));
+}
+
+/* TextField wraps every input for an optional icon; without one, keep the normal inset. */
+.host-section .input-with-icon > .input:first-child {
+  padding-left: var(--space-3);
+}
+
+.host-panel-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.host-panel-actions > .btn {
+  flex: 1;
+}
+
+/* The host's name opens its details; it reads as the title, not as a button. */
+.host-open {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.host-open:hover {
+  text-decoration: underline;
+}
+
+.host-card[data-active="true"] {
+  border-color: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+.list > li[data-active="true"] {
+  background: var(--bg-selected);
+}
+
+/* A hint inside the selected choice sits on the accent tint; muted text keeps AA contrast there. */
+.choice:has(input:checked) .hint {
+  color: var(--text-muted);
+}

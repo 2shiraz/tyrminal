@@ -101,6 +101,7 @@ export function useHostAdvanced(hostId: string | null) {
   return {
     ready,
     valid: proxyValid,
+    changed,
     jumpHostId,
     setJumpHostId,
     proxy: { kind: proxyKind, host: proxyHost, port: proxyPort, user: proxyUser, password: proxyPassword, passwordStored },
@@ -116,16 +117,23 @@ export function useHostAdvanced(hostId: string | null) {
 
 const PROXY_CHOICES: ProxyChoice[] = ["none", "http", "socks5"];
 
-export function HostAdvancedSection({ host, state }: { host: HostSummary | null; state: ReturnType<typeof useHostAdvanced> }) {
+/** `embedded`: the fields only, for a container that brings its own disclosure (the host panel's "Show more"). */
+export function HostAdvancedSection({
+  host,
+  state,
+  embedded = false,
+}: {
+  host: HostSummary | null;
+  state: ReturnType<typeof useHostAdvanced>;
+  embedded?: boolean;
+}) {
   const { hosts } = useVaultData();
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
   const jump = options.find((h) => h.id === state.jumpHostId);
   const p = state.proxy;
   const configured = state.jumpHostId !== null || p.kind !== "none";
-  return (
-    <details className="advanced" open={configured ? true : undefined}>
-      <summary>{msgB.advanced.title}</summary>
-      <div className="stack-sm" style={{ paddingTop: "var(--space-3)" }}>
+  const fields = (
+      <div className="stack-sm" style={embedded ? undefined : { paddingTop: "var(--space-3)" }}>
         <label className="field">
           <span className="label">{msgB.advanced.jumpHost}</span>
           <select
@@ -194,6 +202,12 @@ export function HostAdvancedSection({ host, state }: { host: HostSummary | null;
           </>
         )}
       </div>
+  );
+  if (embedded) return fields;
+  return (
+    <details className="advanced" open={configured ? true : undefined}>
+      <summary>{msgB.advanced.title}</summary>
+      {fields}
     </details>
   );
 }

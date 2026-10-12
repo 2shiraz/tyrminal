@@ -145,6 +145,24 @@ Never merge these by hand; regenerate them after resolving the sources:
 - Anything else: keep both behaviours, run the tests of both sides, and record what was done in
   the merge commit message.
 
+## Host details panel (branch `claude/host-panel`)
+
+The Hosts view edits hosts in a side panel instead of a dialog (`features/hosts/HostPanel.tsx`,
+form state and cards in `features/hosts/hostForm.tsx`; `HostEditor.tsx` stays as the dialog that
+Home's quick connect uses). Edits outside `features/hosts`:
+
+- `apps/desktop/src/features/tunnels/HostAdvanced.tsx`: `useHostAdvanced` also returns `changed`
+  (for the unsaved-changes guard), and `HostAdvancedSection` takes `embedded` (fields without
+  their own `<details>`, inside the panel's "Show more"). No behaviour change otherwise.
+- `apps/desktop/src/lib/messages-d.ts`: a `hostPanel` block at the end.
+- `apps/desktop/src/styles/global.css`: one block at the end for the panel, plus one rule that
+  gives a hint inside the selected `.choice` muted text (AA contrast on the accent tint).
+- Tests: `tests/ui/{inventory,tunnels,accessibility,visual}.spec.ts` drive the panel; new
+  `tests/ui/host-panel.spec.ts`; the two `08-host-editor` baselines re-recorded;
+  `tests/native/{app,backup}.test.mjs` and `flows.mjs` save through the panel.
+- With PR #8 (Telnet/serial, terminal type and encoding, agent forwarding in the host editor):
+  those fields move into the panel's Protocol card and "Show more" when it merges.
+
 ## Status (each agent edits only its own column)
 
 | | Agent A | Agent B | Agent C | Agent D |
