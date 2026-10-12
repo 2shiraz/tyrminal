@@ -30,9 +30,7 @@ export type ActionId =
   | "copy"
   | "paste"
   // agent D: inventory and snippets
-  | "suggest"
-  // identities (KEY-15..18)
-  | "insertPassword";
+  | "suggest";
 
 export interface Binding {
   key: string;
@@ -68,8 +66,6 @@ const mac: Record<ActionId, Binding> = {
   paste: { key: "v", mod: true },
   // agent D: inventory and snippets
   suggest: { key: "e", mod: true, shift: true },
-  // identities (KEY-15..18)
-  insertPassword: { key: "p", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -98,8 +94,6 @@ const other: Record<ActionId, Binding> = {
   paste: { key: "v", ctrl: true, shift: true },
   // agent D: inventory and snippets
   suggest: { key: "e", ctrl: true, shift: true },
-  // identities (KEY-15..18)
-  insertPassword: { key: "p", ctrl: true, shift: true },
 };
 
 export const bindings: Record<ActionId, Binding> = isMac ? mac : other;

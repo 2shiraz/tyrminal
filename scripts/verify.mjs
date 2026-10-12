@@ -66,15 +66,11 @@ const SUITES = {
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    // identities (KEY-15..18)
-    { name: "identities: sign-in and explicit password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "identities_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
     { name: "vault service: canary scan, tampering, lock races", cmd: cargo("test", "-p", "tyrminal-core", "--test", "vault_service", "--quiet") },
     { name: "storage: permissions, foreign/newer files, atomicity", cmd: cargo("test", "-p", "tyrminal-storage", "--quiet") },
-    // identities (KEY-15..18)
-    { name: "identities: references, refusals, persistence", cmd: cargo("test", "-p", "tyrminal-core", "--test", "identities", "--quiet") },
     { name: "host trust and credentials ordering (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored", "host_key", "credentials"), blockedBy: needsLab },
     { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
@@ -90,8 +86,6 @@ const SUITES = {
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    // identities (KEY-15..18)
-    { name: "identities and sudo password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/identities.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 

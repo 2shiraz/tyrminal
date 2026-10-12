@@ -9,38 +9,18 @@ import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
-// identities (KEY-15..18)
-import type { IdentitySummary } from "@tyrminal/contracts";
-import { useVaultData } from "../../app/vaultData";
-import { msgI } from "../../lib/messages-identities";
 
 type AuthKind = HostAuthInput["kind"];
 
-/**
- * What a host in `groupId` inherits: the nearest group in the chain that sets each value. A
- * group's identity gives the user name when the group sets none, and the nearest group with a
- * key or an identity decides the sign-in (the same rules as the core's `inventory::effective`).
- */
-export function groupDefaults(groups: GroupSummary[], groupId: string | null, identities: IdentitySummary[] = []) {
+/** What a host in `groupId` inherits: the nearest group in the chain that sets each value. */
+export function groupDefaults(groups: GroupSummary[], groupId: string | null) {
   const byId = new Map(groups.map((g) => [g.id, g]));
-  const identityById = new Map(identities.map((i) => [i.id, i]));
-  const out: { username: string | null; port: number | null; keyId: string | null; identityId: string | null } = {
-    username: null,
-    port: null,
-    keyId: null,
-    identityId: null,
-  };
-  let credentialFound = false;
+  const out: { username: string | null; port: number | null; keyId: string | null } = { username: null, port: null, keyId: null };
   let current = groupId ? byId.get(groupId) : undefined;
   for (let depth = 0; current && depth < 16; depth += 1) {
-    const identityUser = current.identityId ? identityById.get(current.identityId)?.username || null : null;
-    out.username ??= current.username ?? identityUser;
+    out.username ??= current.username;
     out.port ??= current.port;
-    if (!credentialFound && (current.keyId || current.identityId)) {
-      credentialFound = true;
-      out.keyId = current.keyId;
-      out.identityId = current.keyId ? null : current.identityId;
-    }
+    out.keyId ??= current.keyId;
     current = current.parentId ? byId.get(current.parentId) : undefined;
   }
   return out;
@@ -97,29 +77,20 @@ export function HostEditor({
   );
   const [password, setPassword] = useState("");
   const [keyId, setKeyId] = useState(sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : (keys[0]?.id ?? ""));
-  // identities (KEY-15..18)
-  const identities = useVaultData().identities.value ?? [];
-  const [identityId, setIdentityId] = useState(
-    sourceAuth?.kind === "identity" && !host?.inherited.auth ? sourceAuth.identityId : (identities[0]?.id ?? ""),
-  );
-  const chosenIdentity = authKind === "identity" ? identities.find((i) => i.id === identityId) : undefined;
   const { pending, error, run } = useAction();
 
-  const inherited = useMemo(() => groupDefaults(groups, groupId, identities), [groups, groupId, identities]);
+  const inherited = useMemo(() => groupDefaults(groups, groupId), [groups, groupId]);
   const inheritedKey = inherited.keyId ? keys.find((k) => k.id === inherited.keyId) : undefined;
-  const inheritedIdentity = inherited.identityId ? identities.find((i) => i.id === inherited.identityId) : undefined;
   const hadStoredPassword = host?.auth.kind === "stored_password" && !host.inherited.auth;
   const portNumber = port === "" ? null : Number(port);
   const portValid = portNumber === null ? groupId !== null : Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
-  const identityUser = chosenIdentity?.username || "";
-  const effectiveUser = username || identityUser || inherited.username || "";
+  const effectiveUser = username || inherited.username || "";
   const effectivePort = portNumber ?? inherited.port ?? 22;
   const authValid =
     authKind === "ask_password" ||
     (authKind === "inherit" && groupId !== null) ||
     (authKind === "stored_password" && (password.length > 0 || hadStoredPassword)) ||
-    (authKind === "key" && keyId !== "") ||
-    (authKind === "identity" && chosenIdentity !== undefined);
+    (authKind === "key" && keyId !== "");
   const ready = label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid;
 
   async function submit(event: FormEvent) {
@@ -128,13 +99,11 @@ export function HostEditor({
     const auth: HostAuthInput =
       authKind === "key"
         ? { kind: "key", keyId }
-        : authKind === "identity"
-          ? { kind: "identity", identityId }
-          : authKind === "stored_password"
-            ? { kind: "stored_password", password: password.length > 0 ? password : null }
-            : authKind === "inherit"
-              ? { kind: "inherit" }
-              : { kind: "ask_password" };
+        : authKind === "stored_password"
+          ? { kind: "stored_password", password: password.length > 0 ? password : null }
+          : authKind === "inherit"
+            ? { kind: "inherit" }
+            : { kind: "ask_password" };
     const tagList = tags
       .split(",")
       .map((t) => t.trim())
@@ -193,15 +162,13 @@ export function HostEditor({
           value={username}
           onChange={setUsername}
           maxLength={255}
-          placeholder={identityUser || (inherited.username ?? undefined)}
+          placeholder={inherited.username ?? undefined}
           hint={
-            username === "" && identityUser
-              ? msgI.hosts.identityUser(identityUser)
-              : groupId && username === ""
-                ? inherited.username
-                  ? msg.hosts.inherit(inherited.username)
-                  : msg.hosts.needsUser
-                : undefined
+            groupId && username === ""
+              ? inherited.username
+                ? msg.hosts.inherit(inherited.username)
+                : msg.hosts.needsUser
+              : undefined
           }
         />
         <TextField label={msg.hosts.tags} value={tags} onChange={setTags} hint={msg.hosts.tagsHint} maxLength={600} />
@@ -214,10 +181,8 @@ export function HostEditor({
             <label className="choice">
               <input type="radio" name="auth" checked={authKind === "inherit"} onChange={() => setAuthKind("inherit")} />
               <span className="choice-body">
-                <span className="choice-title">{inheritedIdentity ? msgI.hosts.inheritTitle : msg.hosts.authInherit}</span>
-                <span className="hint">
-                  {inheritedIdentity ? msgI.hosts.inheritHint(inheritedIdentity.label) : msg.hosts.authInheritHint(inheritedKey?.label ?? null)}
-                </span>
+                <span className="choice-title">{msg.hosts.authInherit}</span>
+                <span className="hint">{msg.hosts.authInheritHint(inheritedKey?.label ?? null)}</span>
               </span>
             </label>
           )}
@@ -237,30 +202,6 @@ export function HostEditor({
                   {keys.map((key) => (
                     <option key={key.id} value={key.id}>
                       {key.label} ({key.algorithm})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </span>
-          </label>
-          {/* identities (KEY-15..18) */}
-          <label className="choice">
-            <input type="radio" name="auth" checked={authKind === "identity"} onChange={() => setAuthKind("identity")} />
-            <span className="choice-body">
-              <span className="choice-title">{msgI.hosts.authIdentity}</span>
-              <span className="hint">{identities.length > 0 ? msgI.hosts.authIdentityHint : msgI.hosts.authIdentityNone}</span>
-              {authKind === "identity" && identities.length > 0 && (
-                <select
-                  className="select"
-                  style={{ marginTop: 6 }}
-                  aria-label={msgI.hosts.chooseIdentity}
-                  value={identityId}
-                  onChange={(event) => setIdentityId(event.target.value)}
-                >
-                  {identities.map((identity) => (
-                    <option key={identity.id} value={identity.id}>
-                      {identity.label}
-                      {identity.username ? ` (${identity.username})` : ""}
                     </option>
                   ))}
                 </select>

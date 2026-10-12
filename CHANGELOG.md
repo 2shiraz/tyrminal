@@ -28,6 +28,3 @@ pre-releases are not stable and have not been independently security reviewed.
 - Test layers: Rust unit/property/known-answer tests, OpenSSH lab (Docker or local sshd),
   native end-to-end tests driving the real application, browser UI and visual regression tests
   in a pinned container, contrast checks, fuzz targets, cargo-deny, secret scanning.
-- Reusable identities (user name, password, key) in the keychain, chosen by hosts and groups and
-  followed when they change; on request, an identity's password can be typed into an SSH session
-  at a sudo prompt (never automatically, never with Enter).

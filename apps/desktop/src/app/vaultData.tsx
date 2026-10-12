@@ -5,9 +5,6 @@ import type { GroupSummary, HostSummary, KeySummary, SnippetSummary } from "@tyr
 import { type ReactNode, createContext, useContext, useMemo } from "react";
 
 import { groups as groupsApi, hosts as hostsApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
-// identities (KEY-15..18)
-import type { IdentitySummary } from "@tyrminal/contracts";
-import { identities as identitiesApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 
 type Loaded<T> = ReturnType<typeof useLoaded<T>>;
@@ -18,8 +15,6 @@ interface VaultData {
   keys: Loaded<KeySummary[]>;
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
-  // identities (KEY-15..18)
-  identities: Loaded<IdentitySummary[]>;
 }
 
 const Context = createContext<VaultData | null>(null);
@@ -30,12 +25,7 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   const keys = useLoaded(keysApi.list);
   const snippets = useLoaded(snippetsApi.list);
   const groups = useLoaded(groupsApi.list);
-  // identities (KEY-15..18)
-  const identities = useLoaded(identitiesApi.list);
-  const value = useMemo(
-    () => ({ hosts, recent, keys, snippets, groups, identities }),
-    [hosts, recent, keys, snippets, groups, identities],
-  );
+  const value = useMemo(() => ({ hosts, recent, keys, snippets, groups }), [hosts, recent, keys, snippets, groups]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
