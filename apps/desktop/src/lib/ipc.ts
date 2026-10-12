@@ -207,6 +207,15 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_files", { hostId, events });
   },
+  /**
+   * A files-only connection that signs in with a password typed at the prompt, whatever the host
+   * uses, to install a key the server does not accept yet. Trust and prompts arrive as events.
+   */
+  openForKeyInstall(hostId: string, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_key_install", { hostId, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {

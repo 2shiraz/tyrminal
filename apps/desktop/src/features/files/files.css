@@ -1,0 +1,724 @@
+/* File browser parts shared by the Files panel and the SFTP tab: the table (.ft), the path bar
+   (.pathbar) and the transfer drawer (.xfer). Tokens only (styles/tokens.css), so every theme
+   follows. Nothing here animates except colour on hover. */
+
+/* ---------- table ---------- */
+
+.ft {
+  container-type: inline-size;
+  min-height: 100%;
+}
+
+.ft-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: var(--text-sm);
+}
+
+.ft-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 28px;
+  padding: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--ft-bg, var(--bg-surface));
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ft-col-name {
+  width: auto;
+}
+
+.ft-col-modified {
+  width: 152px;
+}
+
+.ft-col-size {
+  width: 78px;
+  text-align: right;
+}
+
+.ft-col-mode {
+  width: 104px;
+}
+
+.ft-table[data-mode="octal"] .ft-col-mode {
+  width: 58px;
+}
+
+/* A narrow list (the Files panel, a narrow pane) drops the date first. */
+@container (max-width: 480px) {
+  .ft-col-modified {
+    display: none;
+  }
+}
+
+.ft-sort,
+.ft-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ft-sort {
+  cursor: pointer;
+}
+
+th.ft-col-size .ft-sort,
+th.ft-col-size .ft-head {
+  justify-content: flex-end;
+}
+
+.ft-sort:hover {
+  color: var(--text);
+}
+
+.ft-sort:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.ft-sort-idle {
+  opacity: 0;
+}
+
+.ft-sort:hover .ft-sort-idle,
+.ft-sort:focus-visible .ft-sort-idle {
+  opacity: 1;
+}
+
+.ft-sort-desc {
+  transform: rotate(180deg);
+}
+
+.ft-table tbody tr {
+  height: 28px;
+  cursor: default;
+}
+
+.ft-table tbody td {
+  padding: 0 var(--space-3);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ft-table tbody td.ft-col-name {
+  padding: 0 var(--space-1) 0 var(--space-2);
+}
+
+.ft-table tbody td.ft-col-mode {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.ft-table tbody tr:hover td {
+  background: var(--bg-hover);
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.ft-table tbody tr.is-selected td {
+  background: var(--bg-selected);
+  color: var(--accent-text);
+}
+
+.ft-table tbody tr.is-selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ft-table tbody tr.is-selected .ft-name,
+.ft-table tbody tr.is-selected .ft-icon,
+.ft-table tbody tr.is-selected td.ft-col-mode {
+  color: var(--accent-text);
+}
+
+/* The pane without focus keeps its selection in grey, so the active one is unmistakable. */
+.ft[data-inactive] .ft-table tbody tr.is-selected td {
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
+
+.ft[data-inactive] .ft-table tbody tr.is-selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--border-strong);
+}
+
+.ft[data-inactive] .ft-table tbody tr.is-selected .ft-name,
+.ft[data-inactive] .ft-table tbody tr.is-selected .ft-icon {
+  color: var(--text);
+}
+
+/* Pressed: on pointer down at once, no transition (pressFeedback() holds it briefly). */
+.ft-table tbody tr[data-pressed] td {
+  background: var(--bg-active);
+  transition: none;
+}
+
+.ft-table tbody tr[data-loading] td {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+.ft-cell-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ft-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.ft-name:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.ft-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ft-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.ft-icon-dir {
+  color: var(--accent);
+}
+
+/* The row menu button: shown on hover and on the selected row, always reachable by pointer. */
+.ft-more {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ft-table tbody tr:hover .ft-more,
+.ft-table tbody tr.is-selected .ft-more {
+  opacity: 1;
+}
+
+.ft-more:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.ft-rename {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: 4px;
+}
+
+.ft-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--focus);
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.ft-rename-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.ft-table tbody tr:has(.ft-rename-error) td {
+  overflow: visible;
+}
+
+.ft-rename-error {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 24px;
+  z-index: 3;
+  max-width: 320px;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  white-space: normal;
+  box-shadow: var(--shadow-2);
+}
+
+/* Empty, filtered-out and failed states inside the table area. */
+.ft-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.ft-state svg {
+  color: var(--text-faint);
+}
+
+.ft-state strong {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.ft-state .btn {
+  margin-top: var(--space-2);
+}
+
+/* Still placeholder rows while the first listing loads (no shimmer). */
+.ft-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: var(--space-3);
+}
+
+.ft-skeleton span {
+  height: 12px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-hover);
+}
+
+.ft-skeleton span:nth-child(3n + 2) {
+  width: 72%;
+}
+
+.ft-skeleton span:nth-child(3n) {
+  width: 54%;
+}
+
+/* ---------- path bar ---------- */
+
+.pathbar {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  border-radius: var(--radius-control);
+}
+
+.pathbar-crumbs {
+  min-width: 0;
+}
+
+.pathbar-crumbs ol {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.pathbar-crumbs li {
+  display: flex;
+  flex: 0 100 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The folder shown keeps its room; earlier crumbs shrink (much) sooner. */
+.pathbar-crumbs li:last-child {
+  flex: 0 1 auto;
+  min-width: 3em;
+}
+
+.pathbar-crumbs li + li::before {
+  content: "/";
+  margin: 0 1px;
+  color: var(--text-faint);
+}
+
+/* The root crumb is "/" itself: no separator after it. */
+.pathbar-crumbs li:first-child:has(> [title="/"]) + li::before {
+  content: "";
+  margin: 0;
+}
+
+.pathbar-crumb {
+  overflow: hidden;
+  min-width: 24px;
+  min-height: 24px;
+  max-width: 14em;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+button.pathbar-crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.pathbar-crumb:focus-visible,
+.pathbar-edit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.pathbar-current {
+  max-width: 100%;
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  cursor: default;
+}
+
+.pathbar-pending .pathbar-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  cursor: progress;
+}
+
+.pathbar[data-loading] .pathbar-crumb {
+  opacity: 0.65;
+}
+
+/* The free space after the crumbs: a click there edits the path (text cursor says so). */
+.pathbar-edit {
+  flex: 1;
+  align-self: stretch;
+  min-width: 24px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  cursor: text;
+}
+
+.pathbar-edit:hover {
+  background: var(--bg-hover);
+}
+
+.pathbar-editing {
+  display: flex;
+}
+
+.pathbar-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--focus);
+  border-radius: var(--radius-control);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+/* ---------- transfer drawer ---------- */
+
+.xfer {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--ft-bg, var(--bg-surface));
+}
+
+.xfer-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-2) 4px var(--space-1);
+  background: inherit;
+}
+
+.xfer-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.xfer-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.xfer-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.xfer-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transform: rotate(-90deg);
+}
+
+.xfer[data-open] .xfer-chevron {
+  transform: none;
+}
+
+.xfer-title {
+  font-weight: var(--weight-semibold);
+}
+
+.xfer-sum {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xfer-pct {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.xfer > .xfer-bar {
+  display: block;
+  margin: 0 var(--space-3) var(--space-2);
+}
+
+.xfer-list {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  list-style: none;
+}
+
+.xfer-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 3px;
+  padding: 5px 0;
+  font-size: var(--text-sm);
+}
+
+.xfer-row + .xfer-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.xfer-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.xfer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xfer-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 22px;
+}
+
+.xfer-row .xfer-bar,
+.xfer-detail {
+  grid-column: 2 / 4;
+}
+
+.xfer-detail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.xfer-row[data-state="failed"] .xfer-detail {
+  color: var(--danger);
+}
+
+.xfer-row[data-state="failed"] .xfer-icon {
+  color: var(--danger);
+}
+
+.xfer-row[data-state="done"] .xfer-icon {
+  color: var(--success);
+}
+
+.xfer-bar {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--accent-soft);
+}
+
+.xfer-bar > span {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: left;
+}
+
+/* Without a known size: a still, faint fill, not a moving bar. */
+.xfer-bar[data-indeterminate] > span {
+  opacity: 0.45;
+}
+
+/* ---------- Files side panel ---------- */
+
+.fp {
+  --ft-bg: var(--bg-sidebar);
+}
+
+.fp-head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fp-target {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-weight: var(--weight-regular);
+  text-overflow: ellipsis;
+}
+
+.fp-head .btn-icon {
+  flex: none;
+}
+
+.fp-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 4px var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.fp-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.fp-body[data-drop] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.fp-body > .notice {
+  margin: var(--space-2);
+}
+
+.fp-footer {
+  flex: none;
+  padding: 4px var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-local-none {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-local-actions {
+  display: flex;
+  padding: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fp .files-local {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fp .files-local[data-drop] .fp-body {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.fp-edits {
+  max-height: 30%;
+}
+
+/* The table takes focus only as a fallback (an empty folder after keyboard navigation); the rows
+   show where the keyboard is. */
+.ft-table:focus {
+  outline: none;
+}

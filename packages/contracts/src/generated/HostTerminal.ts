@@ -2,4 +2,13 @@
 import type { TerminalEncoding } from "./TerminalEncoding";
 import type { TerminalType } from "./TerminalType";
 
-export type HostTerminal = { encoding: TerminalEncoding, term: TerminalType, };
+export type HostTerminal = { encoding: TerminalEncoding, term: TerminalType, 
+/**
+ * Paste safety (P-25): skip the review of pastes with several lines or a large size on this
+ * host. Control and invisible characters are reviewed regardless; there is no setting for that.
+ */
+pasteSkipMultiline: boolean, 
+/**
+ * Paste safety (P-25): skip the review of a one-line paste that ends in a newline on this host.
+ */
+pasteSkipTrailingNewline: boolean, };
