@@ -1,6 +1,10 @@
 // Task-owned SSH lab with two modes:
 //
 //   docker (default where a Docker daemon is reachable): pinned OpenSSH containers.
+//   wsl    (Windows, TYRMINAL_LAB_MODE=wsl): runs the local mode inside a WSL distribution
+//          (TYRMINAL_LAB_WSL_DISTRO, default Ubuntu-24.04), so Windows clients are tested against
+//          the same Linux OpenSSH server, PAM and full-screen applications as elsewhere. WSL 1
+//          shares the Windows loopback interface; lab.json records Windows paths.
 //   local  (TYRMINAL_LAB_MODE=local, or --local): the host's own OpenSSH sshd, one process per
 //          server, bound to loopback on random ports, with host keys, client keys, a password and
 //          an sshd_config generated for this run. Used on CI runners without Linux containers
@@ -149,8 +153,19 @@ function freePort() {
   });
 }
 
+/** Inside WSL for a Windows client: absolute lab paths are rewritten to Windows paths. */
+function forHost(value) {
+  if (process.env.TYRMINAL_LAB_WINDOWS_PATHS !== "1") return value;
+  if (typeof value === "string" && value.startsWith("/") && existsSync(value)) return run("wslpath", ["-w", value]);
+  if (Array.isArray(value)) return value.map(forHost);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, forHost(v)]));
+  return value;
+}
+
 function writeLab(lab) {
-  writeFileSync(join(runDir, "lab.json"), `${JSON.stringify(lab, null, 2)}\n`, { mode: 0o600 });
+  // Only files the client side opens are translated; server-side program paths stay as they are.
+  const out = { ...lab, keys: forHost(lab.keys), servers: forHost(lab.servers) };
+  writeFileSync(join(runDir, "lab.json"), `${JSON.stringify(out, null, 2)}\n`, { mode: 0o600 });
   for (const [name, s] of Object.entries(lab.servers)) {
     console.log(`lab server ${name}: 127.0.0.1:${s.port} ${s.hostKeyEd25519Fingerprint}`);
   }
@@ -207,6 +222,7 @@ async function dockerUp() {
     lab.servers[name] = describeServer(name, inDir, port, { container });
   }
   lab.apps = Object.fromEntries(TUI_APPS.map((a) => [a, true]));
+  lab.appPaths = Object.fromEntries(TUI_APPS.map((a) => [a, `/usr/bin/${a}`]));
   lab.colorsScript = "tyr-colors";
   lab.serverPackages = run("docker", ["exec", "tyrminal-lab-a", "apk", "info", "-v", ...TUI_APPS]).split("\n").filter(Boolean);
   writeLab(lab);
@@ -388,9 +404,10 @@ function startWindowsService(name, sshd, config, logFile) {
 }
 
 function restrictWindowsAcl(path) {
-  run("icacls", [path, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q"]);
-  // Win32-OpenSSH loads a host key only if SYSTEM or Administrators owns it.
+  // Win32-OpenSSH loads a host key only if SYSTEM or Administrators owns it. Change the owner
+  // first, while this (admin) process still has an entry on the files.
   run("icacls", [path, "/setowner", "*S-1-5-32-544", "/T", "/Q"]);
+  run("icacls", [path, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q"]);
 }
 
 /**
@@ -421,15 +438,29 @@ async function localUp() {
   writeFileSync(join(runDir, "users.json"), JSON.stringify(Object.values(LOCAL_USERS)));
   for (const name of Object.values(LOCAL_USERS)) ensureLocalUser(name, passwordFile);
   if (process.platform === "linux") privileged("mkdir", ["-p", "/run/sshd"]);
+  // WSL cannot set a login uid, and Ubuntu's sshd PAM stack requires it, which would end every
+  // PAM session (the keyboard-interactive server). Only inside WSL, make that one module optional.
+  if (process.platform === "linux" && /microsoft/i.test(readFileSync("/proc/version", "utf8"))) {
+    const pam = "/etc/pam.d/sshd";
+    if (existsSync(pam)) {
+      writeFileSync(pam, readFileSync(pam, "utf8").replace(/^session\s+required\s+pam_loginuid\.so/m, "session    optional     pam_loginuid.so"));
+    }
+  }
   // Directories on the path to the lab files must be traversable by sshd's per-user checks.
   if (!isWindows) chmodSync(runDir, 0o711);
 
   // The lab server is this machine: which full-screen applications it can offer.
-  const which = (app) => (isWindows ? spawnSync("bash", ["-lc", `command -v ${app}`]).status === 0 : spawnSync("sh", ["-c", `command -v ${app}`]).status === 0);
-  const apps = Object.fromEntries(TUI_APPS.map((a) => [a, which(a)]));
+  // Absolute paths are recorded and used by the tests: a login shell may build its own PATH
+  // (macOS path_helper puts /usr/bin first), which would run a different program than detected.
+  const which = (app) => {
+    const r = isWindows ? spawnSync("bash", ["-lc", `command -v ${app}`], { encoding: "utf8" }) : spawnSync("sh", ["-c", `command -v ${app}`], { encoding: "utf8" });
+    return r.status === 0 ? (r.stdout || "").trim() || null : null;
+  };
+  const appPaths = Object.fromEntries(TUI_APPS.map((a) => [a, which(a)]));
+  const apps = Object.fromEntries(TUI_APPS.map((a) => [a, appPaths[a] !== null]));
   const versions = TUI_APPS.filter((a) => apps[a]).map((a) => {
     const flag = a === "tmux" ? "-V" : "--version";
-    const r = spawnSync(isWindows ? "bash" : "sh", [isWindows ? "-lc" : "-c", `${a} ${flag} 2>&1 | head -n 1`], { encoding: "utf8" });
+    const r = spawnSync(isWindows ? "bash" : "sh", [isWindows ? "-lc" : "-c", `${appPaths[a]} ${flag} 2>&1 | head -n 1`], { encoding: "utf8" });
     return `${a}: ${(r.stdout || "").trim()}`;
   });
   // The colors fixture must be readable by the lab accounts, so it goes to a shared location.
@@ -440,6 +471,7 @@ async function localUp() {
     createdAt: new Date().toISOString(),
     mode: "local",
     apps,
+    appPaths,
     serverPackages: versions,
     colorsScript: colorsTarget ? "tyr-colors" : null,
     serverVersion: version,
@@ -534,6 +566,24 @@ function status() {
 }
 
 const command = process.argv[2];
+
+/** Windows host, WSL lab: run this same script inside the distribution, as root, in local mode. */
+function delegateToWsl() {
+  if (process.env.TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES !== "1") {
+    throw new Error("The WSL lab creates accounts and runs sshd in the WSL distribution. Set TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1 (CI runners only).");
+  }
+  const distro = process.env.TYRMINAL_LAB_WSL_DISTRO || "Ubuntu-24.04";
+  const self = run("wsl.exe", ["-d", distro, "-u", "root", "--", "wslpath", "-a", fileURLToPath(import.meta.url).replaceAll("\\", "/")]);
+  const r = spawnSync(
+    "wsl.exe",
+    ["-d", distro, "-u", "root", "--", "env", "TYRMINAL_LAB_MODE=local", "TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1", "TYRMINAL_LAB_WINDOWS_PATHS=1", "node", self, ...process.argv.slice(2)],
+    { stdio: "inherit" },
+  );
+  process.exit(r.status ?? 1);
+}
+
+if (isWindows && process.env.TYRMINAL_LAB_MODE === "wsl") delegateToWsl();
+
 try {
   if (command === "up") await up();
   else if (command === "down") down();

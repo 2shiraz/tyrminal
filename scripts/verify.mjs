@@ -93,7 +93,7 @@ for (const step of suite) {
   if (!ok) {
     const lines = `${run.stdout}${run.stderr}`.trim().split("\n");
     // The causes (panics, assertion output, failing test names) first, then the tail.
-    const cause = /panicked at|^---- .* (stdout|stderr) ----|assertion|^error(\[|:)|FAILED|^failures:/;
+    const cause = /panicked at|^---- .* (stdout|stderr) ----|assertion|^error(\[|:)|FAILED|^failures:|^\s*[✔✖﹣] /;
     const picked = new Set();
     lines.forEach((line, i) => {
       if (cause.test(line)) for (let j = i; j < Math.min(lines.length, i + 12); j++) picked.add(j);

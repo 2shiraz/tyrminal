@@ -10,13 +10,15 @@
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/terminal.test.mjs
 
 import assert from "node:assert/strict";
-import { after, before, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test } from "node:test";
 
 import { KEYS, ui } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
 const appAvailable = (name) => lab.apps?.[name] === true;
+/** The exact program the lab detected (a login shell's PATH may prefer another one). */
+const appCmd = (name) => lab.appPaths?.[name] ?? name;
 
 describe("terminal with real applications", { concurrency: false }, () => {
   /** @type {App} */ let app;
@@ -44,6 +46,16 @@ describe("terminal with real applications", { concurrency: false }, () => {
     await t.type(`${command}\n`);
     return t.waitForText(done, `output of ${command}`);
   }
+
+  // Every test starts at a responsive shell prompt, so an application left running fails the
+  // test that left it, not the next one.
+  let readiness = 0;
+  beforeEach(async () => {
+    if (!t) return;
+    readiness += 1;
+    const n = 1000 + readiness;
+    await run(`echo ready-$((${n - 1}+1))`, new RegExp(`^ready-${n}$`, "m"));
+  });
 
   test("16, 256 and 24-bit colors reach the renderer with the exact values", async () => {
     if (lab.colorsScript) {
@@ -97,7 +109,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
 
   test("vim: alternate screen, editing, save and exit restore the shell screen", { skip: !appAvailable("vim") && "BLOCKED: vim is not installed on the lab server" }, async () => {
     await run("echo before-vim", "before-vim");
-    await t.type("vim -u NONE -N -n /tmp/tyr-vim-$$.txt\n");
+    await t.type(`${appCmd("vim")} -u NONE -N -n /tmp/tyr-vim-$$.txt\n`);
     await t.waitForText(/^~\s*$/m, "vim empty buffer");
     assert.ok(!(await t.terminalText()).includes("before-vim"), "vim uses the alternate screen");
     await t.type("ihello from vim");
@@ -109,7 +121,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
   });
 
   test("nano: keyboard shortcuts with Ctrl write and exit", { skip: !appAvailable("nano") && "BLOCKED: nano is not installed on the lab server" }, async () => {
-    await t.type("nano --ignorercfile /tmp/tyr-nano-$$.txt\n");
+    await t.type(`${appCmd("nano")} --ignorercfile /tmp/tyr-nano-$$.txt\n`);
     await t.waitForText("GNU nano", "nano title bar");
     await t.type("hello from nano");
     await s.chord([KEYS.ctrl, "O"]);
@@ -123,7 +135,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
   });
 
   test("tmux: status line, split panes with box drawing, exit", { skip: !appAvailable("tmux") && "BLOCKED: tmux is not installed on the lab server" }, async () => {
-    await t.type("tmux -f /dev/null new-session -s tyrlab\n");
+    await t.type(`${appCmd("tmux")} -f /dev/null new-session -s tyrlab\n`);
     await t.waitForText("[tyrlab]", "tmux status line");
     await s.chord([KEYS.ctrl, "B"]);
     await t.type("%");
@@ -136,7 +148,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
   });
 
   test("htop: full-screen redraw and mouse reporting (click F10 Quit)", { skip: !appAvailable("htop") && "BLOCKED: htop is not installed on the lab server" }, async () => {
-    await t.type("htop\n");
+    await t.type(`${appCmd("htop")}\n`);
     await t.waitForText(/Load average|Tasks:/, "htop header");
     await app.screenshot("t04-htop");
     const box = await s.execute(`
@@ -149,7 +161,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
   });
 
   test("mc: panels with box drawing, function keys, quit dialog", { skip: !appAvailable("mc") && "BLOCKED: mc is not installed on the lab server" }, async () => {
-    await t.type("mc -u\n");
+    await t.type(`${appCmd("mc")} -u\n`);
     await t.waitForText(/Left\s+File\s+Command/, "mc menu bar");
     const text = await t.terminalText();
     assert.match(text, /[┌┐└┘─│]/, "panel borders are box-drawing characters");
