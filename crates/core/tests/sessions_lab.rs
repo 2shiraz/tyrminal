@@ -1092,13 +1092,17 @@ async fn deploying_a_public_key_appends_one_line_and_keeps_the_others() {
     assert!(client.text.contains("-rw-r-----"), "an existing file keeps its permissions: {:?}", client.text);
 
     // No file at all: deploying creates it owner-only.
-    client.send("rm -f ~/.ssh/authorized_keys && echo GONE-$((40+2))\n").await;
+    // A default ACL on the folder (as on some hosts) must not make the new file group-writable.
+    client
+        .send("rm -f ~/.ssh/authorized_keys; { command -v setfacl >/dev/null && setfacl -d -m g::rwx,o::rx ~/.ssh; true; } && echo GONE-$((40+2))\n")
+        .await;
     client.output_until("GONE-42").await;
     s.deploy_key(WINDOW, &client.session, &key.id).await.unwrap();
     client.text.clear();
     client.send("ls -l ~/.ssh/authorized_keys; echo LS-$((40+2))\n").await;
     client.output_until("LS-42").await;
     assert!(client.text.contains("-rw-------"), "a new file is owner-only: {:?}", client.text);
+    client.send("{ command -v setfacl >/dev/null && setfacl -k ~/.ssh; true; }\n").await;
     client.send("rm -f ~/.ssh/authorized_keys\n").await;
 
     // A local terminal has no SSH connection to install over.

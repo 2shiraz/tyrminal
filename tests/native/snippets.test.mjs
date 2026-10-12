@@ -45,7 +45,7 @@ describe("snippets in the real application", { concurrency: false }, () => {
     await t.connect("Lab");
     await t.type("export PS1='tyr$ '; clear\n");
     await t.waitForText("tyr$");
-    await s.click(await s.waitFor('.statusbar button[aria-pressed="false"]'));
+    await s.click(await s.waitFor('.statusbar button[data-panel="snippets"][aria-pressed="false"]'));
     await s.waitFor(".side-panel");
     const target = await s.text(await s.waitFor('.side-panel [aria-label="Target"]'));
     assert.match(target, /Sends to Lab/);

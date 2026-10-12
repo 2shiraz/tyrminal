@@ -5,8 +5,8 @@
 //! server is ever interpolated into them. The key line travels on the channel's standard input.
 //! Only `~/.ssh/authorized_keys` is touched, only by appending one line; every other line is
 //! kept. A file that does not end with a newline gets one first, so the last existing entry is
-//! not corrupted. New files and directories are created with the server's `umask 077`
-//! semantics (owner-only); existing ones keep their permissions.
+//! not corrupted. A new `~/.ssh` is made 0700 and a new `authorized_keys` 0600 (explicitly, since
+//! a default ACL would override the umask); existing ones keep their permissions.
 
 use std::time::Duration;
 
@@ -17,7 +17,12 @@ use crate::error::{err, from_ssh};
 
 pub(crate) const PATH: &str = "~/.ssh/authorized_keys";
 const READ: &str = "cat ~/.ssh/authorized_keys 2>/dev/null; exit 0";
-const APPEND: &str = "umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && \
+// A default ACL on the home folder overrides the umask, so what this creates is also chmod-ed
+// explicitly (sshd's StrictModes refuses a group-writable authorized_keys). Existing files and
+// folders keep their permissions.
+const APPEND: &str = "umask 077 && \
+     { [ -d ~/.ssh ] || { mkdir ~/.ssh && chmod 700 ~/.ssh; }; } && \
+     { [ -e ~/.ssh/authorized_keys ] || { touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys; }; } && \
      { [ -z \"$(tail -c 1 ~/.ssh/authorized_keys)\" ] || echo >> ~/.ssh/authorized_keys; } && \
      cat >> ~/.ssh/authorized_keys";
 /// Largest authorized_keys file read back (servers with more keys than this are unusual).
