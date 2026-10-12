@@ -158,17 +158,17 @@ mod tests {
 
     #[test]
     fn line_settings_and_paths_are_checked_before_opening() {
-        let mut s = settings("/definitely/not/a/port");
-        assert!(validate(&s).is_err());
+        assert!(validate(&settings("/definitely/not/a/port")).is_err());
         #[cfg(unix)]
         {
             // An ordinary file is never opened as a port, even if it exists.
             let file = tempfile::NamedTempFile::new().unwrap();
             assert!(validate(&settings(file.path().to_str().unwrap())).is_err());
             assert!(validate(&settings("/etc/passwd")).is_err());
-            s = settings("/dev/null"); // a character device
-            assert!(validate(&s).is_ok());
         }
+        // A real port name on each platform: a character device on Unix, a COM name on Windows.
+        let s = settings(if cfg!(unix) { "/dev/null" } else { "COM3" });
+        assert!(validate(&s).is_ok());
         for bad in [
             SerialSettings { baud: 0, ..s.clone() },
             SerialSettings { baud: MAX_BAUD + 1, ..s.clone() },
