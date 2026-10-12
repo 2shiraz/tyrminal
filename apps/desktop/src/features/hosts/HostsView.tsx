@@ -925,7 +925,7 @@ function HostsViewImpl({
                 <h2 id="hosts-fav-title">{msgBulk.favourites}</h2>
                 <span className="count">{favourites.length}</span>
               </div>
-              <ul className="fav-strip" aria-label={msgBulk.favourites}>
+              <ul className="fav-strip" data-layout={layout} aria-label={msgBulk.favourites}>
                 {favourites.map((h) => (
                   <li key={h.id}>
                     <button
@@ -948,8 +948,15 @@ function HostsViewImpl({
                         } else onConnect(h);
                       }}
                     >
-                      <OsIcon os={osOf.get(h.id) ?? null} size="sm" />
-                      <span className="truncate">{h.label}</span>
+                      <OsIcon os={osOf.get(h.id) ?? null} size={layout === "grid" ? "md" : "sm"} />
+                      {layout === "grid" ? (
+                        <span className="fav-text">
+                          <span className="truncate">{h.label}</span>
+                          <span className="fav-sub truncate">{msgHv.protocolUser(h.protocol.type, h.protocol.type === "serial" ? "" : h.username)}</span>
+                        </span>
+                      ) : (
+                        <span className="truncate">{h.label}</span>
+                      )}
                     </button>
                   </li>
                 ))}
