@@ -456,18 +456,20 @@ export function CommandPalette({
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
     if (query) {
-      // Keep each group together; groups are ordered by their best match, items by score. Text
-      // length only ranks items: groups that match equally well keep their listed order (open
-      // tabs first, then recent connections, hosts, ... actions), so a long tab detail never
-      // puts an action that names the same address above the tab itself.
+      // Keep each group together. Open tabs come first whenever one matches: switching to a session
+      // that is already open is safer than opening another connection. Other groups are ordered
+      // by their best match, items by score; text length only ranks items, so groups that match
+      // equally well keep their listed order (recent connections, hosts, ... actions).
       const best = new Map<string, number>();
       const order = new Map<string, number>();
       for (const r of scored) {
         best.set(r.item.group, Math.max(best.get(r.item.group) ?? -Infinity, r.quality));
         if (!order.has(r.item.group)) order.set(r.item.group, order.size);
       }
+      const tabsFirst = (r: (typeof scored)[number]) => (r.item.group === msgC.palette.groupTabs ? 0 : 1);
       scored.sort(
         (a, b) =>
+          tabsFirst(a) - tabsFirst(b) ||
           (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) ||
           (order.get(a.item.group) ?? 0) - (order.get(b.item.group) ?? 0) ||
           b.score - a.score,
