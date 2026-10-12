@@ -1,4 +1,5 @@
 @import "./tokens.css";
+@import "./motion.css";
 @import "./fonts.css";
 @import "./box.css";
 
@@ -211,9 +212,9 @@ textarea {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
-    transform var(--motion-fast) var(--ease-out);
+    background var(--duration-press) var(--ease-out),
+    border-color var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .btn:hover:not(:disabled) {
@@ -360,9 +361,9 @@ kbd,
   font-size: var(--text-sm);
   user-select: text;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out),
-    background var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    box-shadow var(--duration-press) var(--ease-out),
+    background var(--duration-press) var(--ease-out);
 }
 
 .input::placeholder,
@@ -447,8 +448,8 @@ kbd,
   background: var(--bg-raised);
   cursor: pointer;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    background var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    background var(--duration-press) var(--ease-out);
 }
 
 .choice:hover {
@@ -473,7 +474,7 @@ kbd,
   border: 1.5px solid var(--border-control);
   border-radius: 50%;
   background: var(--bg-inset);
-  transition: border var(--motion-fast) var(--ease-out);
+  transition: border var(--duration-press) var(--ease-out);
 }
 
 .choice input[type="radio"]:checked {
@@ -519,8 +520,8 @@ kbd,
   background: var(--bg-inset);
   cursor: pointer;
   transition:
-    background var(--motion-base) var(--ease-out),
-    border-color var(--motion-base) var(--ease-out);
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
 }
 
 .switch::after {
@@ -534,8 +535,8 @@ kbd,
   background: var(--text-muted);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   transition:
-    transform var(--motion-base) var(--ease-spring),
-    background var(--motion-base) var(--ease-out);
+    transform var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
 }
 
 .switch:checked {
@@ -571,8 +572,8 @@ kbd,
   font-weight: var(--weight-medium);
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    background var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out);
 }
 
 .segmented label:hover {
@@ -628,7 +629,7 @@ kbd,
   border-radius: 50%;
   background: var(--bg-raised);
   box-shadow: var(--shadow-1);
-  transition: transform var(--motion-fast) var(--ease-out);
+  transition: transform var(--duration-press) var(--ease-out);
 }
 
 .range:hover::-webkit-slider-thumb {
@@ -942,7 +943,7 @@ kbd,
   min-height: 56px;
   padding: var(--space-3) var(--space-4);
   background: var(--bg-raised);
-  transition: background var(--motion-fast) var(--ease-out);
+  transition: background var(--duration-press) var(--ease-out);
 }
 
 .list > li:hover {
@@ -1072,21 +1073,8 @@ kbd,
   width: min(680px, calc(100vw - 48px));
 }
 
-.dialog[open] {
-  animation: dialog-in var(--motion-slow) var(--ease-out);
-}
-
 .dialog::backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(3px);
-  animation: fade-in var(--motion-base) var(--ease-out);
-}
-
-@keyframes dialog-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
 }
 
 @keyframes fade-in {
@@ -1159,16 +1147,6 @@ kbd,
   border-radius: var(--radius-control);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
-  transform-origin: top left;
-  animation: menu-in var(--duration-pop) var(--ease-out);
-}
-
-/* Menus, the palette and tooltips: scale 0.98 to 1 with a fade, from their anchor. */
-@keyframes menu-in {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
 }
 
 .menu-item {
@@ -1238,7 +1216,15 @@ kbd,
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
-  animation: toast-in var(--duration-fast) var(--ease-out);
+  /* Rise from the status bar edge (as .m-toast). */
+  transition:
+    opacity var(--duration-slow) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(var(--distance-md));
+  }
 }
 
 .toast > svg {
@@ -1255,14 +1241,6 @@ kbd,
   color: var(--danger);
 }
 
-/* Toasts rise from the status bar edge. */
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-
 /* ===================================================================== app shell */
 
 .shell {
@@ -1271,7 +1249,16 @@ kbd,
   height: 100%;
   background: var(--bg-app);
   background-image: var(--app-backdrop);
-  transition: grid-template-columns var(--motion-slow) var(--ease-out);
+}
+
+/* The sidebar collapses and expands at once (a width animation would reflow the terminal on every
+   frame); expanding, the labels fade in. */
+.shell:not([data-sidebar="collapsed"]) .nav-label {
+  transition: opacity var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
 }
 
 .shell[data-sidebar="collapsed"] {
@@ -1322,7 +1309,7 @@ kbd,
   color: var(--text-faint);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: border-color var(--motion-fast) var(--ease-out);
+  transition: border-color var(--duration-press) var(--ease-out);
 }
 
 .sidebar-search:hover {
@@ -1355,8 +1342,9 @@ kbd,
   text-align: left;
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    background var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .nav-item:hover {
@@ -1478,8 +1466,9 @@ kbd,
   font-size: var(--text-sm);
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    background var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .tab:hover {
@@ -1569,8 +1558,8 @@ kbd,
   cursor: pointer;
   opacity: 0;
   transition:
-    opacity var(--motion-fast) var(--ease-out),
-    background var(--motion-fast) var(--ease-out);
+    opacity var(--duration-press) var(--ease-out),
+    background var(--duration-press) var(--ease-out);
 }
 
 .tab:hover .tab-close,
@@ -1663,7 +1652,7 @@ kbd,
   min-width: 0;
   min-height: 0;
   background: var(--term-bg, var(--scheme-bg, var(--bg-inset)));
-  transition: box-shadow var(--motion-fast) var(--ease-out);
+  transition: box-shadow var(--duration-press) var(--ease-out);
 }
 
 .panes[data-split="true"] .pane[data-focused="true"] {
@@ -1699,7 +1688,7 @@ kbd,
   content: "";
   position: absolute;
   background: rgb(127 127 127 / 0.22);
-  transition: background var(--motion-fast) var(--ease-out);
+  transition: background var(--duration-press) var(--ease-out);
 }
 
 .splitter[data-dir="row"] {
@@ -1756,14 +1745,18 @@ kbd,
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
-/* Side panels, the host panel and drawers slide 8 px in from their edge. */
-@keyframes panel-in {
-  from {
+/* Side panels and the host panel slide a short way in from their edge (as .m-panel). */
+.side-panel,
+.host-panel {
+  transition:
+    opacity var(--duration-base) var(--ease-drawer),
+    transform var(--duration-base) var(--ease-drawer);
+
+  @starting-style {
     opacity: 0;
-    transform: translateX(8px);
+    transform: translateX(var(--distance-md));
   }
 }
 
@@ -1831,7 +1824,7 @@ kbd,
 }
 
 .folder-head svg.chevron {
-  transition: transform var(--motion-fast) var(--ease-out);
+  transition: transform var(--duration-press) var(--ease-out);
 }
 
 .folder-head[aria-expanded="true"] svg.chevron {
@@ -1847,8 +1840,8 @@ kbd,
   border-radius: var(--radius-control);
   background: var(--bg-raised);
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    box-shadow var(--duration-press) var(--ease-out);
 }
 
 .snippet:hover,
@@ -1921,6 +1914,10 @@ kbd,
   color: var(--text-muted);
   font-size: var(--text-xs);
   cursor: pointer;
+  transition:
+    background var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .status-button:hover {
@@ -1946,9 +1943,17 @@ kbd,
   overflow: hidden;
 }
 
-.palette[open] {
-  transform-origin: top center;
-  animation: menu-in var(--duration-pop) var(--ease-out);
+/* Opened from the keyboard, the palette is simply there (the Raycast rule). From the pointer (the
+   sidebar search), it enters as a dialog, quicker. */
+.palette[open][data-opened-by="pointer"] {
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.98) translateY(var(--distance-sm));
+  }
 }
 
 .palette::backdrop {
@@ -2066,8 +2071,8 @@ mark {
   background: var(--bg-raised);
   box-shadow: var(--shadow-2);
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    box-shadow var(--duration-press) var(--ease-out);
 }
 
 .quick-connect:focus-within {
@@ -2144,15 +2149,14 @@ mark {
   box-shadow: var(--shadow-1);
   cursor: pointer;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-base) var(--ease-out),
-    transform var(--motion-base) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 }
 
+/* Colour only on hover: no lift and no shadow (tens of times an hour). */
 .host-card:hover {
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-2);
-  transform: translateY(-1px);
 }
 
 .host-card:focus-within {
@@ -2222,7 +2226,7 @@ mark {
   display: flex;
   gap: 2px;
   opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-out);
+  transition: opacity var(--duration-press) var(--ease-out);
 }
 
 .host-card:hover .host-card-actions,
@@ -2241,8 +2245,9 @@ mark {
   text-align: left;
   cursor: pointer;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    background var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    background var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .tile:hover {
@@ -2361,8 +2366,8 @@ mark {
   text-align: left;
   cursor: pointer;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    box-shadow var(--duration-press) var(--ease-out);
 }
 
 .scheme-card:hover {
@@ -2448,7 +2453,7 @@ mark {
   min-width: 0;
   padding: var(--term-padding, var(--terminal-padding));
   overflow: hidden;
-  transition: opacity var(--motion-base) var(--ease-out);
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 .terminal-host .xterm {
@@ -2667,7 +2672,15 @@ mark {
   border-radius: var(--radius-control);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
-  animation: menu-in var(--motion-base) var(--ease-out);
+  transform-origin: top right;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(var(--scale-enter));
+  }
 }
 
 .find-bar input {
@@ -2707,14 +2720,14 @@ mark {
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
   transform: translateX(-50%);
-  animation: banner-in var(--duration-fast) var(--ease-out);
-}
+  /* Rises as a toast does, keeping its centring transform. */
+  transition:
+    opacity var(--duration-slow) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out);
 
-/* Centred with translateX(-50%), so it rises with its own keyframes. */
-@keyframes banner-in {
-  from {
+  @starting-style {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translate(-50%, var(--distance-md));
   }
 }
 
@@ -2909,7 +2922,7 @@ mark {
   height: 4px;
   border-radius: 2px;
   background: var(--border);
-  transition: background var(--motion-base) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .strength[data-score="1"] span:nth-child(-n + 1) {
@@ -2958,16 +2971,15 @@ button[data-tooltip]::after {
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, -2px);
-  transition:
-    opacity var(--duration-pop) var(--ease-out) 0s,
-    transform var(--duration-pop) var(--ease-out) 0s;
+  /* Transforms only position it; it fades and never moves. */
+  transform: translate(-50%, 0);
+  transition: opacity var(--duration-fast) var(--ease-out) 0s;
 }
 
 button[data-tooltip][data-tooltip-side="right"]::after {
   left: calc(100% + 8px);
   top: 50%;
-  transform: translate(-2px, -50%);
+  transform: translate(0, -50%);
 }
 
 /* Under the button, ending at its right edge: for buttons at the right of a panel or the window,
@@ -2975,7 +2987,7 @@ button[data-tooltip][data-tooltip-side="right"]::after {
 button[data-tooltip][data-tooltip-side="bottom-end"]::after {
   left: auto;
   right: 0;
-  transform: translate(0, -2px);
+  transform: translate(0, 0);
 }
 
 button[data-tooltip][data-tooltip-side="top"]::after {
@@ -2983,7 +2995,7 @@ button[data-tooltip][data-tooltip-side="top"]::after {
   bottom: calc(100% + 6px);
   left: auto;
   right: 0;
-  transform: translate(0, 2px);
+  transform: translate(0, 0);
 }
 
 button[data-tooltip]:hover::after,
@@ -3006,6 +3018,13 @@ button[data-tooltip][data-tooltip-side="bottom-end"]:focus-visible::after {
 button[data-tooltip][data-tooltip-side="top"]:hover::after,
 button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   transform: translate(0, 0);
+}
+
+/* Once a tooltip has shown, the next ones open at once for a moment (lib/inputModality.ts sets
+   data-tips-warm), so moving along a toolbar reads its labels without waiting each time. */
+:root[data-tips-warm] button[data-tooltip]:hover::after {
+  transition-delay: 0s;
+  transition-duration: 0s;
 }
 
 /* ---------- host groups, tags, selection and import ---------- */
@@ -3040,8 +3059,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   text-overflow: ellipsis;
   cursor: pointer;
   transition:
-    border-color var(--motion-fast) var(--ease-out),
-    background var(--motion-fast) var(--ease-out);
+    border-color var(--duration-press) var(--ease-out),
+    background var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
 }
 
 .chip:hover {
@@ -3089,7 +3109,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   margin: 0;
   accent-color: var(--accent);
   opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-out);
+  transition: opacity var(--duration-press) var(--ease-out);
 }
 
 .host-card:hover .host-select,
@@ -3976,7 +3996,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
 /* Too narrow for the list and the panel side by side: the panel covers the list (made inert). */
@@ -4701,6 +4720,18 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 :root[data-reduce-motion="true"] :is(.btn[data-pressed], .btn:active):not(:disabled) {
   transform: none;
+}
+
+/* Pressed things give a little under the finger (docs/design/motion.md §3): 2 % for controls, 1 %
+   for cards and tiles. Pointer devices only; under reduced motion the scale tokens are 1. */
+@media (hover: hover) and (pointer: fine) {
+  :is(.tab, .nav-item, .chip, .status-button)[data-pressed]:not(:disabled, [aria-disabled="true"]) {
+    transform: scale(var(--scale-press));
+  }
+
+  :is(.host-card, .tile)[data-pressed]:not([aria-disabled="true"]) {
+    transform: scale(var(--scale-press-card));
+  }
 }
 
 /* Space held for a list that is still loading, before its skeleton shows (after 150 ms). */

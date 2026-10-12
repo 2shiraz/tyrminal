@@ -38,6 +38,7 @@ import { msgSR } from "../../lib/messages-security-review";
 import { AboutSection } from "./AboutSection";
 import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
 import { msgC } from "../../lib/messages-c";
+import { motionMs } from "../../lib/inputModality";
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
 const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -217,7 +218,7 @@ export function SettingsView({
                 aria-current={section === s.id ? "page" : undefined}
                 onClick={() => {
                   setSection(s.id);
-                  document.getElementById(`settings-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  document.getElementById(`settings-${s.id}`)?.scrollIntoView({ behavior: motionMs("--duration-base") > 0 ? "smooth" : "auto", block: "start" });
                 }}
               >
                 {s.label}
