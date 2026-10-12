@@ -29,7 +29,26 @@ export default defineConfig({
       args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--font-render-hinting=none"],
     },
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" }, testIgnore: /perf\.spec\.ts/ },
+    // Click-to-paint timings (perf.spec.ts) run last and alone, so other workers do not skew them.
+    // On its own: `npx playwright test -c playwright.config.ts --project=perf --no-deps`.
+    // Rasterization runs on the CPU here: GPU raster on SwiftShader (an emulated GPU) costs 100-250 ms
+    // per full repaint in this container, which times the emulator, not the application. A real
+    // WebView rasterizes on a GPU, or on the CPU when it has none.
+    {
+      name: "perf",
+      testMatch: /perf\.spec\.ts/,
+      dependencies: ["chromium"],
+      workers: 1,
+      use: {
+        browserName: "chromium",
+        launchOptions: {
+          args: ["--disable-gpu-rasterization", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--font-render-hinting=none"],
+        },
+      },
+    },
+  ],
   webServer: {
     // vite directly, not through pnpm: the pinned test container has no network for pnpm's self-install.
     command: `node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port ${port} --strictPort`,
