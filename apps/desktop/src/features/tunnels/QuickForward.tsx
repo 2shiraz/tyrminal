@@ -31,6 +31,9 @@ export function QuickForwardBar({
   const notify = useToast();
   const [forwards, setForwards] = useState<ActiveTunnel[]>([]);
   const [busy, setBusy] = useState(false);
+  // The address last opened in the browser, per forward: shown in its row, where a toast would
+  // cover the row's own buttons.
+  const [opened, setOpened] = useState<Record<string, string>>({});
 
   // Forwards end with the session.
   useEffect(() => {
@@ -90,7 +93,15 @@ export function QuickForwardBar({
       )}
       {forwards.map((run) => (
         <div key={run.runId} className="quick-forward-row" data-testid="quick-forward-active">
-          <span>{msgB.quick.active(run.destPort, run.boundPort)}</span>
+          <span>
+            {msgB.quick.active(run.destPort, run.boundPort)}
+            {opened[run.runId] && (
+              <span className="muted" role="status">
+                {" "}
+                {msgB.quick.opened(opened[run.runId] ?? "")}
+              </span>
+            )}
+          </span>
           <span className="quick-forward-actions">
             <button
               type="button"
@@ -98,7 +109,7 @@ export function QuickForwardBar({
               onClick={() =>
                 void quickForward
                   .open(run.runId)
-                  .then((url) => notify("info", msgB.quick.opened(url)))
+                  .then((url) => setOpened((all) => ({ ...all, [run.runId]: url })))
                   .catch(fail)
               }
             >

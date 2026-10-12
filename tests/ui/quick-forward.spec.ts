@@ -36,7 +36,8 @@ test("quick forward: a suggestion forwards nothing until accepted, then opens on
   const active = page.getByTestId("quick-forward-active");
   await expect(active).toContainText("Server port 5173 is forwarded to 127.0.0.1:5173");
   await active.getByRole("button", { name: "Open in browser" }).click();
-  await expect(page.getByText("Opened http://127.0.0.1:5173/")).toBeVisible();
+  // Said in the forward's own row, so nothing covers its buttons.
+  await expect(active).toContainText("Opened http://127.0.0.1:5173/");
   expect(await page.evaluate(() => (window as unknown as { __mockOpenedQuick: string[] }).__mockOpenedQuick)).toEqual(["http://127.0.0.1:5173/"]);
 
   const scan = await new AxeBuilder({ page }).include(".quick-forward").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
