@@ -207,8 +207,8 @@ test("perf: selecting a file in the files panel is within budget", async ({ page
     "select a file",
     (i) => {
       const name = names[Math.abs(i) % 2] as string;
-      return clickToPaint(page, () => list.getByRole("button", { name: `Select ${name}` }).click(), {
-        selector: `.files-list li.is-selected[data-name='${name}']`,
+      return clickToPaint(page, () => list.getByRole("row", { name: new RegExp(name.replace(".", "\\.")) }).click(), {
+        selector: `.ft-table tr.is-selected[data-name='${name}']`,
       });
     },
     async () => undefined,
