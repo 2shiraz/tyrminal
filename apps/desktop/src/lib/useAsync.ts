@@ -30,8 +30,12 @@ export function useAction() {
   return { pending, error, run, clearError: () => setError(null) };
 }
 
-/** Loads a value and exposes a reload function. A newer request always wins over an older one. */
-export function useLoaded<T>(load: () => Promise<T>) {
+/**
+ * Loads a value and exposes a reload function. A newer request always wins over an older one.
+ * With `start` false the first load waits until it turns true (a deferred load); `reload` works
+ * at any time.
+ */
+export function useLoaded<T>(load: () => Promise<T>, start = true) {
   const [value, setValue] = useState<T | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const sequence = useRef(0);
@@ -61,11 +65,12 @@ export function useLoaded<T>(load: () => Promise<T>) {
   }, []);
 
   useEffect(() => {
+    if (!start) return;
     void reload();
     return () => {
       sequence.current += 1;
     };
-  }, [reload]);
+  }, [reload, start]);
 
   return { value, error, reload, mutate };
 }

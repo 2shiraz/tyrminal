@@ -21,6 +21,8 @@ const UNLOCK_BUDGET_MS = 200;
 const SERIAL_IPC_MS = 10;
 const UNLOCK_SERIAL_BUDGET_MS = 250;
 /** Script bytes (uncompressed) loaded before the first interactive Hosts paint. */
+/** Loads that wait until the host list has painted (recents, keys, snippets, identities, layouts, OS icons, identity uses). */
+const DEFERRED_CALLS = ["host_recent", "key_list", "snippet_list", "identity_list", "layout_list", "host_appearance_list", "identity_assignments"];
 const STARTUP_SCRIPT_BUDGET_KB = 700;
 
 interface Ready {
@@ -112,6 +114,8 @@ test("perf: cold start to the first interactive Hosts paint is within budget", a
   report(`cold start to interactive Hosts: median ${m.toFixed(1)} ms (runs: ${fmt(times)}); ${kb.toFixed(0)} KB script; ${calls.length} IPC calls before it: ${calls.join(" ")}`);
   expect(m, "cold start median").toBeLessThanOrEqual(COLD_START_BUDGET_MS);
   expect(kb, "script loaded before the first Hosts paint (KB)").toBeLessThanOrEqual(STARTUP_SCRIPT_BUDGET_KB);
+  // Only what the first Hosts screen shows is loaded before it paints.
+  for (const deferred of DEFERRED_CALLS) expect(calls, `${deferred} before the first Hosts paint`).not.toContain(deferred);
 });
 
 async function unlockToHosts(browser: Browser, options: MockOptions) {
@@ -148,6 +152,7 @@ test("perf: unlock to the first interactive Hosts paint is within budget", async
   const { m, times, calls } = await unlockToHosts(browser, {});
   report(`unlock to interactive Hosts: median ${m.toFixed(1)} ms (runs: ${fmt(times)}); ${calls.length} IPC calls between: ${calls.join(" ")}`);
   expect(m, "unlock median").toBeLessThanOrEqual(UNLOCK_BUDGET_MS);
+  for (const deferred of DEFERRED_CALLS) expect(calls, `${deferred} before the first Hosts paint`).not.toContain(deferred);
 });
 
 // The core serves vault calls one at a time: every call queued before the Hosts list delays it.
