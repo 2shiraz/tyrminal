@@ -46,6 +46,8 @@ mod security_review;
 mod command_history;
 // server at a glance
 mod server_glance;
+// Quick port forwards (P-24)
+mod port_suggest;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};

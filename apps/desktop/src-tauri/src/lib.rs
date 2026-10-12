@@ -242,6 +242,9 @@ pub fn run() {
             commands::history::session_log_delete,
             commands::history::session_log_delete_all,
             commands::history::session_log_open,
+            commands::tunnels::quick_forward_start,
+            commands::tunnels::quick_forward_open,
+            commands::tunnels::host_port_suggestions_set,
             // agent C: workspaces
             commands::layouts::layout_list,
             commands::layouts::layout_save,

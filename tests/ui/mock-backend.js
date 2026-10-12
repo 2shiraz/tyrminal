@@ -562,6 +562,50 @@ export function installMockBackend(options) {
           runs.set(runId, run);
           return view(run);
         },
+        // Quick port forwards (P-24): only ports suggested to the session are accepted, as natively.
+        quick_forward_start: (a) => {
+          const session = state.sessions.get(a.sessionId);
+          if (!session) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          if (!(window.__mockSuggested.get(a.sessionId) ?? new Set()).has(a.port)) {
+            throw { code: "INVALID_INPUT", message: "That port was not offered for this session." };
+          }
+          const runId = `${nextRun++}`.padStart(32, "c");
+          const run = {
+            view: {
+              runId,
+              tunnelId: `port:${a.port}`,
+              sessionId: a.sessionId,
+              name: `Port ${a.port}`,
+              kind: "local",
+              bindHost: "127.0.0.1",
+              boundPort: a.port,
+              destHost: "127.0.0.1",
+              destPort: a.port,
+              state: "running",
+              activeConnections: 0,
+              totalConnections: 0,
+              refusedConnections: 0,
+              failedConnections: 0,
+              bytesOut: 0,
+              bytesIn: 0,
+              error: null,
+            },
+          };
+          runs.set(runId, run);
+          return view(run);
+        },
+        quick_forward_open: (a) => {
+          const run = runs.get(a.runId);
+          if (!run || run.view.state !== "running" || !run.view.tunnelId.startsWith("port:")) {
+            throw { code: "ACCESS_DENIED", message: "That tunnel is not available to this window." };
+          }
+          const url = `http://127.0.0.1:${run.view.boundPort}/`;
+          window.__mockOpenedQuick.push(url);
+          return url;
+        },
+        host_port_suggestions_set: (a) => {
+          window.__mockPortSuggestionsOff[a.enabled ? "delete" : "add"](a.hostId);
+        },
         tunnel_stop: (a) => {
           const run = runs.get(a.runId);
           if (!run || run.view.state !== "running") throw { code: "NOT_FOUND", message: "That tunnel is not running." };
@@ -588,6 +632,7 @@ export function installMockBackend(options) {
             own,
             inherited: window.__mockInheritedRoute(a.hostId),
             keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+            noPortSuggestions: window.__mockPortSuggestionsOff.has(a.hostId),
           };
         },
         host_connection_set: (a) => {
@@ -595,6 +640,7 @@ export function installMockBackend(options) {
             throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
           }
           keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
+          window.__mockPortSuggestionsOff[a.connection.noPortSuggestions ? "add" : "delete"](a.hostId);
           // HST-05: inheriting drops the host's own route.
           if (a.connection.inherit) {
             jumps.delete(a.hostId);
@@ -1677,6 +1723,17 @@ export function installMockBackend(options) {
   window.__mockOutputBytes = (bytes) => {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
+  };
+  /** Quick port forwards (P-24): the newest session's output named `port`, as the core reports it. */
+  window.__mockSuggested = new Map();
+  window.__mockOpenedQuick = [];
+  window.__mockPortSuggestionsOff = new Set();
+  window.__mockSuggestPort = (port) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (!last) return;
+    if (!window.__mockSuggested.has(last.id)) window.__mockSuggested.set(last.id, new Set());
+    window.__mockSuggested.get(last.id).add(port);
+    channelSend(last.events, { type: "port_suggestion", port });
   };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {

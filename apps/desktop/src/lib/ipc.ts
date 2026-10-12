@@ -394,6 +394,15 @@ export const groupDefaults = {
     call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
 };
 
+/** Quick forwards of ports a session's output names (P-24); only after the user accepts. */
+export const quickForward = {
+  start: (sessionId: string, port: number) => call<ActiveTunnelDto>("quick_forward_start", { sessionId, port }),
+  /** Opens http://127.0.0.1:<local port>/ (built natively from the forward); resolves to it. */
+  open: (runId: string) => call<string>("quick_forward_open", { runId }),
+  stop: (runId: string) => call<void>("tunnel_stop", { runId }),
+  setForHost: (hostId: string, enabled: boolean) => call<void>("host_port_suggestions_set", { hostId, enabled }),
+};
+
 export const tunnels = {
   list: () => call<TunnelSummaryDto[]>("tunnel_list"),
   save: (tunnel: TunnelInputDto) => call<TunnelSummaryDto>("tunnel_save", { tunnel }),

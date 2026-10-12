@@ -522,6 +522,9 @@ pub struct Preferences {
     // compromised-password check (SEC-11)
     /// Off by default; see `PasswordCheckPreferences`.
     pub password_check: crate::PasswordCheckPreferences,
+    /// Do not suggest quick forwards for ports that programs on a server say they listen on
+    /// (P-24). Suggestions are on unless this is set.
+    pub no_port_suggestions: bool,
 }
 
 /// Static facts about this build and the computer it runs on, for Settings → About and bug
@@ -612,6 +615,9 @@ pub enum AuthPromptKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum SessionEvent {
+    /// Something on the server says it listens on this port of its loopback (P-24). Only a
+    /// suggestion: the window offers a quick forward and nothing happens unless the user accepts.
+    PortSuggestion { port: u16 },
     State {
         state: SessionState,
         /// During a jump-host chain: which hop this step belongs to (`None` for a direct
