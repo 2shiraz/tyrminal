@@ -93,6 +93,6 @@ all passing.
   (`tests/fixtures/upgrade/`, synthetic data) and checks everything is still there; it runs
   with the normal Rust tests. Add a fixture whenever a release changes the schema, a record
   format or the preferences file.
-- `scripts/ci/installer-smoke.mjs` runs in the release workflow on each platform: install the
+- `scripts/ci/installer-smoke.mjs` runs in the native workflow on `main`, manual runs and releases, on each platform: install the
   package as a user would, start the app, uninstall, and check the user's data folder is kept.
   It refuses to run outside CI.

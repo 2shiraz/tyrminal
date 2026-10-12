@@ -170,6 +170,13 @@ jobs:
       - name: Release policy against the built binary
         if: github.event_name != 'pull_request'
         run: node scripts/check-release.mjs --require-binary
+      # Install the packages as a user would, start the app, uninstall, and check user data stays
+      # (the release workflow runs this workflow on the commit it releases).
+      - name: Installer smoke test
+        if: github.event_name != 'pull_request'
+        run: |
+          node scripts/ci/collect-artifacts.mjs "${{ matrix.platform }}" smoke dist-smoke
+          node scripts/ci/installer-smoke.mjs "${{ matrix.platform }}" dist-smoke
       - name: Release policy (static)
         if: github.event_name == 'pull_request'
         run: node scripts/check-release.mjs

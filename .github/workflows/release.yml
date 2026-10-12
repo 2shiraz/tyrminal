@@ -102,9 +102,6 @@ jobs:
         run: node scripts/check-release.mjs --require-binary
       - name: Collect artifacts
         run: node scripts/ci/collect-artifacts.mjs "${{ matrix.platform }}" "${{ inputs.tag }}" dist-release
-      # Install the packages as a user would, start the app, uninstall, and check user data stays.
-      - name: Installer smoke test
-        run: node scripts/ci/installer-smoke.mjs "${{ matrix.platform }}" dist-release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.platform }}
