@@ -123,7 +123,7 @@ for (const mode of ["system setting", "in-app switch"] as const) {
     await page.keyboard.press("Escape");
 
     await primary.getByRole("button", { name: /^Hosts/ }).click();
-    await page.getByRole("button", { name: "Add host" }).first().click();
+    await page.getByRole("button", { name: "New host" }).first().click();
     await expect(page.getByTestId("host-panel")).toBeVisible();
     await still();
 

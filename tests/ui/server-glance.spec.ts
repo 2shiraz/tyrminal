@@ -104,7 +104,7 @@ test("server panel: can be turned off for one host", async ({ page }) => {
 test("server panel: never offered for a Telnet session", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   // Renamed "Host details" once autosave creates the host.
   const dialog = page.getByTestId("host-panel");
   await dialog.getByLabel("Name", { exact: true }).fill("old-switch");

@@ -17,12 +17,13 @@ const list = (page: Page) => page.getByTestId("host-list");
 const card = (page: Page, name: string) => list(page).getByRole("article", { name });
 
 async function selectTwo(page: Page) {
-  await page.getByRole("checkbox", { name: "Select edge-cache" }).click();
-  await page.getByRole("checkbox", { name: "Select staging-web" }).click();
+  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: ["ControlOrMeta"] });
 }
 
 async function addTag(page: Page, tag: string) {
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Add tag" }).click();
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await page.getByRole("menuitem", { name: "Add tag…" }).click();
   const dialog = page.getByRole("dialog", { name: "Add tag" });
   await dialog.getByLabel("Tag").fill(tag);
   await dialog.getByRole("button", { name: "Save" }).click();
@@ -66,8 +67,9 @@ test("optimistic: a refused move rolls back exactly and says so inline", async (
   await expect(card(page, "edge-cache").locator(".tag-group")).toHaveCount(0);
   await expect(card(page, "staging-web").locator(".tag-group")).toHaveCount(0);
   await expect(card(page, "edge-cache")).not.toHaveAttribute("data-pending", /.*/);
-  await expect(page.getByRole("checkbox", { name: "Select edge-cache" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Select staging-web" })).toBeChecked();
+  // The selection comes back for a retry.
+  await expect(card(page, "edge-cache")).toHaveAttribute("data-selected", "true");
+  await expect(card(page, "staging-web")).toHaveAttribute("data-selected", "true");
   // Nothing changed in the vault.
   const stored = await page.evaluate(() =>
     (window as unknown as { __mockState: { hosts: { label: string; groupId: string | null }[] } }).__mockState.hosts.filter((h) => ["edge-cache", "staging-web"].includes(h.label)).map((h) => h.groupId),
@@ -80,12 +82,15 @@ test("optimistic: a refused tag removal puts the tag back", async ({ page }) => 
   await page.evaluate(() => {
     (window as unknown as MockWindow).__mockFailNext = { host_bulk: { code: "IO_ERROR", message: "The vault could not be written." } };
   });
-  await page.getByRole("checkbox", { name: "Select api-gateway" }).click();
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Remove tag" }).click();
+  // The strip shows from two hosts on: api-gateway (tagged web) and staging-web (no tags).
+  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: ["ControlOrMeta"] });
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await page.getByRole("menuitem", { name: "Remove tag…" }).click();
   const dialog = page.getByRole("dialog", { name: "Remove tag" });
   await dialog.getByLabel("Tag").fill("web");
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("alert")).toContainText("That change to 1 host was not saved, so the host is back as it was.");
+  await expect(page.getByRole("alert")).toContainText("That change to 2 hosts was not saved, so they are back as they were.");
   await expect(card(page, "api-gateway").locator(".tag")).toHaveText(["Production", "prod", "web"]);
 });
 

@@ -22,7 +22,7 @@ const keySaves = async (page: Page) => (await calls(page, "host_save")).filter((
 
 test("a new host never signs in with a key nobody chose", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   const panel = fresh(page);
   // Keys exist, but the default is to ask for the password.
   await expect(panel.getByRole("radio", { name: /Ask for the password each time/ })).toBeChecked();
@@ -53,7 +53,7 @@ test("a new host never signs in with a key nobody chose", async ({ page }) => {
 
 test("a new host saved as is asks for the password", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   const panel = fresh(page);
   await panel.getByLabel("Address").fill("10.0.0.10");
   await panel.getByLabel("Name", { exact: true }).fill("pw-box");

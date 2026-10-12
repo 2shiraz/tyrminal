@@ -3,4 +3,9 @@ import type { HostsFilter } from "./HostsFilter";
 import type { HostsLayout } from "./HostsLayout";
 import type { HostsSort } from "./HostsSort";
 
-export type HostsViewPreferences = { layout: HostsLayout, sort: HostsSort, filter: HostsFilter, };
+export type HostsViewPreferences = { layout: HostsLayout, sort: HostsSort, filter: HostsFilter, 
+/**
+ * Connections made by double-click or Enter on Hosts, counted up to the few that show the
+ * "Double-click to connect" hint.
+ */
+connectHintUses: number, };

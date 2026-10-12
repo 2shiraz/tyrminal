@@ -315,6 +315,7 @@ mod tests {
             layout: HostsLayout::List,
             sort: HostsSort::Address,
             filter: HostsFilter::Group { id: "0123456789abcdef0123456789abcdef".into() },
+            connect_hint_uses: 2,
         };
         store.set(Preferences { hosts_view: Some(view.clone()), ..Preferences::default() }).unwrap();
         assert_eq!(PreferencesStore::open(&path).get().hosts_view, Some(view));

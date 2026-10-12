@@ -13,7 +13,8 @@ const callsOf = (page: Page, cmd: string) =>
 async function openDiscovery(page: Page, options: MockOptions = {}) {
   await openApp(page, options);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Find on network…" }).click();
+  await page.getByRole("button", { name: "More ways to add" }).click();
+  await page.getByRole("menuitem", { name: "Find on network…" }).click();
   const dialog = page.getByRole("dialog", { name: "Find SSH servers on a network" });
   await expect(dialog).toBeVisible();
   return dialog;
