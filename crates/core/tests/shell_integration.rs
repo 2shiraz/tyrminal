@@ -64,7 +64,14 @@ fn check_marks(out: &str, home: &Path) {
     assert!(out.contains("\u{1b}]133;D;1\u{1b}\\"), "the failed command's status: {out:?}");
 }
 
-const SESSION: &str = "mkdir -p 'a b/ü' && cd 'a b/ü'\nfalse\nexit\n";
+/// What is typed into the shell: ASCII only, since a shell's line editor without a UTF-8 locale
+/// (macOS's Bash 3.2 with a cleared environment) mangles typed non-ASCII. The folder with a space
+/// and a non-ASCII name is made beforehand by [`prepare`], and the glob reaches it.
+const SESSION: &str = "cd a*/*\nfalse\nexit\n";
+
+fn prepare(home: &Path) {
+    std::fs::create_dir_all(home.join("a b").join("ü")).unwrap();
+}
 
 #[test]
 fn bash_integration_is_written_on_request_and_a_real_bash_reports_its_context() {
@@ -87,6 +94,7 @@ fn bash_integration_is_written_on_request_and_a_real_bash_reports_its_context() 
     assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
 
     if require("bash") {
+        prepare(home.path());
         let out = interactive("bash", home.path(), SESSION).unwrap();
         check_marks(&out, home.path());
         let version =
@@ -113,6 +121,7 @@ fn zsh_integration_creates_a_private_startup_file_and_a_real_zsh_reports_its_con
     assert!(!home.path().join(".zshrc.tyrminal-backup").exists(), "nothing to back up");
 
     if require("zsh") {
+        prepare(home.path());
         let out = interactive("zsh", home.path(), SESSION).unwrap();
         check_marks(&out, home.path());
         assert!(out.contains("\u{1b}]133;C\u{1b}\\"), "command start (preexec): {out:?}");
