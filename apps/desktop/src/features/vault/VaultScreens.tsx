@@ -1,8 +1,9 @@
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { Wordmark } from "../../components/ui/Wordmark";
 import { ErrorNotice, Notice, SecretField, TextField } from "../../components/ui/controls";
 import { IconCheck, IconCopy, IconFingerprint, IconLock } from "../../components/ui/icons";
+import { motionMs } from "../../lib/inputModality";
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
@@ -212,6 +213,26 @@ export function Unlock({ busy }: { busy: boolean }) {
   const [secret, setSecret] = useState("");
   const { pending, error, run, clearError } = useAction();
   const working = pending || busy;
+  // A failed attempt: the card shakes once (motion.md PR 4) and focus goes back to the field, so
+  // retyping is immediate. Under reduced motion it only refocuses.
+  const card = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = card.current;
+    if (!error || !form) return;
+    form.querySelector<HTMLInputElement>("input")?.focus();
+    const ms = motionMs("--duration-slow");
+    if (ms <= 0 || typeof form.animate !== "function") return;
+    form.animate(
+      [
+        { transform: "none" },
+        { transform: "translateX(-6px)", offset: 0.2 },
+        { transform: "translateX(5px)", offset: 0.45 },
+        { transform: "translateX(-3px)", offset: 0.7 },
+        { transform: "none" },
+      ],
+      { duration: ms, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+    );
+  }, [error]);
   const [quick, setQuick] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -247,7 +268,7 @@ export function Unlock({ busy }: { busy: boolean }) {
 
   return (
     <div className="auth-screen">
-      <form className="auth-card" onSubmit={submit} aria-busy={working}>
+      <form ref={card} className="auth-card" onSubmit={submit} aria-busy={working}>
         <div className="auth-head">
           <Wordmark />
           <h1>{msg.unlock.title}</h1>

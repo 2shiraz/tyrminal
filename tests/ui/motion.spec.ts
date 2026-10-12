@@ -153,3 +153,51 @@ test("the terminal canvas never animates", async ({ page }) => {
   expect(report.transitions).toBe(0);
   expect(report.duration.split(",").every((d) => d.trim() === "0s")).toBe(true);
 });
+
+// Moments (motion.md PR 4).
+test.describe("moments", () => {
+  test("a wrong passphrase shakes the card once and puts focus back in the field", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    await allowMotion(page);
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    const card = page.locator("form.auth-card");
+    const shakes = await card.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)));
+    expect(shakes).toEqual([220]);
+    // The right one still opens the vault, and the window fades in.
+    await field.fill("correct horse");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  });
+
+  test("under reduced motion a wrong passphrase only refocuses", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    expect(await page.locator("form.auth-card").evaluate((el) => el.getAnimations().length)).toBe(0);
+  });
+
+  test("a finished transfer flashes once, and status dots change colour gently", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    const style = await page.evaluate(() => {
+      const row = document.createElement("li");
+      row.className = "xfer-row";
+      row.dataset.state = "done";
+      const dot = document.createElement("span");
+      dot.className = "status-dot";
+      document.body.append(row, dot);
+      const result = { flash: getComputedStyle(row).animationName, dot: getComputedStyle(dot).transitionProperty };
+      row.remove();
+      dot.remove();
+      return result;
+    });
+    expect(style).toEqual({ flash: "m-flash", dot: "background-color" });
+  });
+});
