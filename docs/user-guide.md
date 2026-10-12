@@ -158,6 +158,10 @@ the session is open, that server (and anyone with administrator rights on it) ca
 host's key**, and only that key, to sign in to other servers as you. It is never forwarded to
 jump hosts, and the server cannot add or remove keys or see any other key.
 
+To see what happened while connecting, choose **Connection details…** in the command palette,
+or **Show connection details** on a failed connection. **Copy** puts the lines on the clipboard;
+they never contain passwords, passphrases or keys.
+
 ## Keys
 
 The **Keychain** page holds your keys. **Generate key** creates Ed25519 (recommended), ECDSA
@@ -205,6 +209,36 @@ Safety features:
   answered.
 - Pasting several lines, or a lot of text, shows the text first.
 
+**Highlighting.** Tyrminal colors addresses, numbers and sizes, links, dates and times, quoted
+text, paths, hashes and status words (error in red, warn in yellow, ok in green) in plain output,
+using your color scheme's colors. It never recolors text a program colored itself and never
+touches full-screen programs (vim, htop, tmux). Settings → Output highlighting turns each kind,
+or the whole feature, on or off, and adds your own words or patterns. A pattern is a regular
+expression; to keep matching fast, groups cannot be repeated and backreferences and lookaround
+are not available, and a pattern that takes too long is switched off with a notice.
+
+**Addresses and paths.** Point at an IP or MAC address in the output to underline it; click it
+to copy it, or to start a new host with that address (nothing connects until you save and
+connect). In a local terminal, file paths can be copied the same way.
+
+**Commands.** With shell integration on, a thin line separates commands, a red mark shows a
+command that failed, and Ctrl+Shift+↑/↓ (⌘↑/⌘↓ on macOS) jump between commands.
+
+**Side panel.** The panel beside the terminal (Ctrl+Shift+S, ⌘⇧S on macOS) has **Snippets**,
+**History** and **Appearance**. History lists the hosts you connected to and when; Tyrminal
+never records what you type. Appearance changes the scheme, font and cursor of every terminal,
+and zooms only the pane you are in.
+
+**Input methods.** Japanese, Chinese and Korean input methods work in the terminal. Text is sent
+when you commit it; keys the input method uses (Enter to choose, Escape to cancel) never reach
+the server, and shortcuts wait until the composition ends.
+
+**Mouse.** Settings → Keyboard shortcuts → **Right click** selects a word, pastes, or does
+nothing; **Middle click pastes** the clipboard when turned on. A paste from the mouse is reviewed
+like any paste. On Linux the system's middle-click paste of the selected text is never sent, so a
+middle click with the setting off sends nothing. Programs that use the mouse (vim, htop, mc) get
+the click; hold Shift to paste anyway.
+
 **Search all sessions** (command palette) finds text in the scrollback of every open terminal
 and lists the matches by tab; choosing one brings its tab to the front and selects the match.
 The search runs in memory only: nothing is saved or logged.
@@ -215,8 +249,9 @@ the prompt and the command line. Saving always asks where, in the system save di
 the shell integration the action is not offered, because Tyrminal does not guess where output
 starts and ends.
 
-**Duplicate tab** (tab menu) opens the same destination again. When the shell integration
-(Suggestions → shell integration) reports the shell's current folder, the copy starts there:
+**Duplicate tab** (tab menu) copies the tab's whole arrangement; each pane opens its destination
+again. When the shell integration (Suggestions → shell integration) reports the shell's current
+folder, each copy starts there:
 
 - A local terminal starts directly in that folder (if it still exists).
 - An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only
@@ -320,8 +355,13 @@ the group's list, nothing, or a list of your own, in order. They are typed into 
 after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
 deleted later is skipped.
 
-**Broadcast** sends what you type to several sessions at once. The sessions that receive input
-are marked while broadcast is on.
+**Broadcast** sends what you type to several sessions at once. Before it starts, Tyrminal lists
+every pane of the tab; clear the box next to a pane to leave it out (it keeps its own input and
+receives nothing). A pane opened later is never added; start broadcast again to include it. The
+sessions that receive input are marked while broadcast is on.
+
+Every action is also in the **command palette** (Ctrl+Shift+K, ⌘K on macOS): type part of its
+name. Tab and pane actions appear when a terminal is in front.
 
 ## Tunnels, jump hosts and proxies
 
@@ -405,6 +445,7 @@ open in your browser only when you click them.
 | Rename tab | Ctrl+Shift+R | ⌘⇧R |
 | Type the identity password (asks first) | Ctrl+Shift+P | ⌘⇧P |
 | Copy / paste in a terminal | Ctrl+Shift+C / Ctrl+Shift+V | ⌘C / ⌘V |
+| Previous / next command (shell integration) | Ctrl+Shift+↑ / Ctrl+Shift+↓ | ⌘↑ / ⌘↓ |
 
 ## Troubleshooting
 

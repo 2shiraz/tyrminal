@@ -238,6 +238,8 @@ export function installMockBackend(options) {
     const text = new TextDecoder().decode(bytes);
     // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
     window.__mockReceived = (window.__mockReceived ?? "") + text;
+    // terminal input: the same per session, in order (IME, broadcast exclusion tests).
+    (window.__mockInputBySession ??= {})[sessionId] = (window.__mockInputBySession[sessionId] ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -1045,7 +1047,11 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
-    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
+    session_diagnostics: () => {
+      // terminal input: tests can replace the lines or make the request fail.
+      if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
+      return window.__mockDiagnostics ?? ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"];
+    },
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {
@@ -1417,6 +1423,14 @@ export function installMockBackend(options) {
     state.sessions.delete(last.id);
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
+  };
+  // terminal input: drop the n-th open session (creation order), not only the newest.
+  window.__mockDropAt = (index) => {
+    const s = [...state.sessions.values()][index];
+    if (!s) return;
+    state.sessions.delete(s.id);
+    channelSend(s.events, { type: "state", state: "failed" });
+    channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);

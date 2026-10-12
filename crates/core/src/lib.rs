@@ -30,6 +30,8 @@ mod validate;
 mod vault;
 // agent B: tunnels and history
 mod tunnels;
+// terminal input: highlight patterns
+mod highlight;
 // agent D: inventory and snippets
 mod importers;
 pub mod shell_integration;
