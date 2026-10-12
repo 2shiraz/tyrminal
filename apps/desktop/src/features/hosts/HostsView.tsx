@@ -69,22 +69,17 @@ import { msgSelect } from "../../lib/messages-select";
 import { isMac } from "../../lib/platform";
 import { type OpenLayout } from "../../app/multiOpen";
 import { useAction } from "../../lib/useAsync";
-import { DiscoveryDialog } from "./DiscoveryDialog";
-import { GroupEditor, descendantsOf } from "./GroupEditor";
-import { HostPanel, type PanelTarget } from "./HostPanel";
-import { groupPath } from "./hostForm";
-import { ImportDialog } from "./ImportDialog";
-import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
-import { MultiRunDialog } from "../snippets/MultiRunDialog";
+import { descendantsOf, groupPath } from "./groupTree";
+import type { PanelTarget } from "./HostPanel";
 import { OsIcon } from "./OsIcon";
-import { MAX_LOCATIONS } from "../sftp/SftpPane";
+import { MAX_LOCATIONS } from "../sftp/limits";
 import { useIsProduction } from "./production";
-import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
-import { AssignIdentityDialog } from "./AssignIdentityDialog";
-import { EnvironmentDialog } from "./EnvironmentDialog";
+import { identityEvents } from "../credentials/identityEvents";
+import { useIdentities } from "../credentials/useIdentities";
 // quick connect
 import { msgQuick } from "../../lib/messages-quick";
 import { type QuickTarget, formatTarget, parseAddress } from "../../lib/quickConnect";
+import { lazyComponent } from "../../lib/lazyComponent";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -113,6 +108,17 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 }
 
 /** How Hosts is shown until the user changes it; the choice is kept in preferences. */
+// The details panel, editors and dialogs load on first use: the list paints without them.
+const HostPanel = lazyComponent(() => import("./HostPanel").then((m) => m.HostPanel));
+const GroupEditor = lazyComponent(() => import("./GroupEditor").then((m) => m.GroupEditor));
+const DiscoveryDialog = lazyComponent(() => import("./DiscoveryDialog").then((m) => m.DiscoveryDialog));
+const ImportDialog = lazyComponent(() => import("./ImportDialog").then((m) => m.ImportDialog));
+const ConnectAllDialog = lazyComponent(() => import("./InventoryDialogs").then((m) => m.ConnectAllDialog));
+const SetOsDialog = lazyComponent(() => import("./InventoryDialogs").then((m) => m.SetOsDialog));
+const MultiRunDialog = lazyComponent(() => import("../snippets/MultiRunDialog").then((m) => m.MultiRunDialog));
+const AssignIdentityDialog = lazyComponent(() => import("./AssignIdentityDialog").then((m) => m.AssignIdentityDialog));
+const EnvironmentDialog = lazyComponent(() => import("./EnvironmentDialog").then((m) => m.EnvironmentDialog));
+
 const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "none" }, connectHintUses: 0 };
 
 /** What an optimistic bulk change looks like before the vault answers (the reload brings the exact result). */

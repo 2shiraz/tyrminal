@@ -1,7 +1,6 @@
 import type { IdentitySummary, KeySummary, SecretChange } from "@tyrminal/contracts";
 import { type FormEvent, useState } from "react";
 
-import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { BoxEmpty, ErrorNotice, IconButton, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconPencil, IconPlus, IconTrash2, IconUser } from "../../components/ui/icons";
@@ -14,12 +13,9 @@ import { identityEvents } from "./identityEvents";
 import { DeleteIdentityDialog } from "../identities/DeleteIdentityDialog";
 
 export { identityEvents } from "./identityEvents";
+import { useIdentities } from "./useIdentities";
 
-/** The identity list from the per-unlock cache (reloaded whenever identities or their uses change). */
-export function useIdentities(): IdentitySummary[] | null {
-  const { identities } = useVaultData();
-  return identities.value ?? (identities.error ? [] : null);
-}
+export { useIdentities };
 
 /** Reusable identities on the Keychain page (KEY-15/16). */
 export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {

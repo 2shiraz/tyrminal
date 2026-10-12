@@ -18,7 +18,7 @@ import { files as filesApi, sessions, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { FILE_DRAG, type FileDrag, FilePane, type PaneBackend, type PaneView, emptyView, localBackend, remoteBackend } from "../files/FilePane";
-import { AuthDialog, Fingerprint } from "../terminal/TerminalView";
+import { AuthDialog, Fingerprint } from "../terminal/AuthDialog";
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgFiles } from "../files/messages";
 import { OsIcon } from "../hosts/OsIcon";
