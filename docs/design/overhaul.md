@@ -15,9 +15,9 @@ What is in this change:
 | `docs/design/before/` | The current UI, every main screen in dark and light, plus PR #5 (`pr5-*`) and PR #7 (`pr7-*`) where they differ from main |
 | `docs/design/after/` | Screenshots of the prototype, same viewport (1360×860) |
 | `docs/design/prototype/` | The static prototype (`index.html?screen=hosts&theme=dark&palette=fjord`), its sketch CSS, icon sprite and screenshot script |
-| `apps/desktop/src/styles/next/theme.css` | New tokens and the six themes. **Not imported by the app yet** |
+| `apps/desktop/src/styles/tokens.css` | The new tokens and the six themes, applied to the existing components (foundations, step 1 below) |
 | `apps/desktop/src/styles/next/motion.css` | Motion tokens and utilities. **Not imported yet** |
-| `scripts/check-theme-contrast.mjs` | WCAG AA check for all six themes (678 pairs, passing) |
+| `scripts/check-contrast.mjs` | WCAG AA check now covers all six themes (746 pairs with the terminal schemes, passing) |
 | `tests/ui/design-capture.ts`, `design-capture-first.ts` + `design-capture.config.ts` | Re-take the before screenshots from the real UI build: the main screens, and the first-impression flows (onboarding, unlock, every connecting step, trust and auth prompts, failures, empty states). Not part of the suite (it matches `*.spec.ts` only) |
 
 No new dependencies. No bundled font (system UI face, so no ADR is needed). The terminal colour
@@ -165,9 +165,10 @@ acid accent, not hairline broadsheet, not the card kit, no eyebrows, no middle-d
 
 ## 3. Tokens
 
-All values live in `apps/desktop/src/styles/next/theme.css`. Names that already exist in
-`tokens.css` keep their meaning, so Stage B swaps the file and then fixes components. Run
-`node scripts/check-theme-contrast.mjs --report` to see the lowest ratio per theme.
+All values live in `apps/desktop/src/styles/tokens.css`. Older token names keep their meaning
+with the new values (`--text-md` is the 13 px body size, `--shadow-1` is flat, `--ease-spring` no
+longer overshoots), so the swap changes the look without touching components; the component layer
+moves to the final names screen by screen. `node scripts/check-contrast.mjs` checks every theme.
 
 ### 3.1 Themes
 
@@ -183,7 +184,7 @@ mode as a segmented control (`after/dark-settings.png`).
 | `--bg-surface` | `#1a1c20` | `#f6f7f8` | `#1d222c` | `#f2f4f7` | `#0a0a0a` | `#ffffff` |
 | `--bg-raised` | `#1f2226` | `#ffffff` | `#222833` | `#ffffff` | `#101010` | `#ffffff` |
 | `--bg-overlay` | `#222529` | `#ffffff` | `#262c37` | `#ffffff` | `#101010` | `#ffffff` |
-| `--bg-inset` | `#121416` | `#eff0f2` | `#151920` | `#e9edf2` | `#000000` | `#f2f2f2` |
+| `--bg-inset` | `#121416` | `#f6f7f8` | `#151920` | `#f3f5f8` | `#000000` | `#f2f2f2` |
 | `--text` | `#e7e9ec` | `#16191d` | `#e5e9f0` | `#1b2230` | `#ffffff` | `#000000` |
 | `--text-muted` | `#a5aab2` | `#4d535b` | `#a9b2c1` | `#4a5466` | `#dadada` | `#262626` |
 | `--text-faint` | `#8e949d` | `#5d636c` | `#939cac` | `#5a6476` | `#c4c4c4` | `#3b3b3b` |
@@ -241,7 +242,7 @@ it is 13 or 12.
   | `--radius-round` | full | Switches and status dots only |
 
 - **Elevation**: level 0 is flat with a 1 px border (lists, panels, cards that earn a container).
-  `--shadow-1` for menus, popovers and toasts; `--shadow-2` for dialogs and the palette. Shadows are
+  `--elevation-1` for tooltips and popovers; `--elevation-2` for dialogs, menus, the palette and toasts. Shadows are
   tinted with the neutral hue and carry a 1 px ring so they read in dark mode. No blur behind modals;
   the scrim is a flat tint.
 - **Focus**: one ring everywhere, `outline: 2px solid var(--focus)` at 2 px offset, never a glow.
@@ -536,8 +537,8 @@ Starts after the feature PRs merge. One area per PR so each merges quickly. Ever
 contrast check, axe and all UI tests green and re-records the visual baselines it changes in the
 pinned container (`pnpm test:ui:update:container`), saying why in the PR.
 
-1. **Foundations**: replace `tokens.css` with `next/theme.css`, import `next/motion.css`, fold
-   `check-theme-contrast.mjs` into `check-contrast.mjs` (CI already runs it), add the palette setting
+1. **Foundations**: the new values in `tokens.css` under the existing names, the six themes, and
+   `check-contrast.mjs` covering them (CI already runs it); then import `next/motion.css`, add the palette setting
    (`data-palette`) next to Mode, remove the app backdrop, page-in, shimmer, sidebar width transition
    and modal blur. Map old token names that go away (`--text-2xs`, `--text-2xl`, `--radius-dialog` 16)
    to the new scale. Expect most baselines to move; this is the one large baseline update.

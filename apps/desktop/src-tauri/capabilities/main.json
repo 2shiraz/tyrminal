@@ -153,6 +153,9 @@
     "allow-history-suggest",
     "allow-history-list",
     "allow-history-delete",
-    "allow-history-clear"
+    "allow-history-clear",
+    "allow-glance-get",
+    "allow-glance-host-get",
+    "allow-glance-host-set"
   ]
 }

@@ -519,3 +519,11 @@ export const history = {
   remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
   clear: () => call<number>("history_clear"),
 };
+
+// server at a glance
+/** Server at a glance (P-32): values read with a fixed command; the server is asked at most every 5 s. */
+export const glance = {
+  get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
+  hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
+  setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};

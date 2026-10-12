@@ -280,6 +280,10 @@ pub fn run() {
             commands::command_history::history_list,
             commands::command_history::history_delete,
             commands::command_history::history_clear,
+            // server at a glance
+            commands::server_glance::glance_get,
+            commands::server_glance::glance_host_get,
+            commands::server_glance::glance_host_set,
         ])
         .build(tauri::generate_context!());
 
