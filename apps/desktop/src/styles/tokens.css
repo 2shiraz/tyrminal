@@ -70,6 +70,8 @@
   --panel-width: 320px;
   --page-max: 1080px;
   --page-gutter: 32px;
+  /* Inner space around the terminal grid, painted in the scheme background (Settings can change it). */
+  --terminal-padding: 12px;
 
   /* ---------- focus: one ring everywhere ---------- */
   --focus-width: 2px;

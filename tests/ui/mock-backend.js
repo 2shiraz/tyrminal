@@ -32,7 +32,7 @@ export function installMockBackend(options) {
         letterSpacing: 0,
         cursorStyle: "block",
         cursorBlink: false,
-        padding: 10,
+        padding: 12,
         scrollback: 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
