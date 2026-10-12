@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-container-session-open"
+description = "Enables the container_session_open command without any pre-configured scope."
+commands.allow = ["container_session_open"]
+
+[[permission]]
+identifier = "deny-container-session-open"
+description = "Denies the container_session_open command without any pre-configured scope."
+commands.deny = ["container_session_open"]

@@ -45,12 +45,15 @@ export async function chooseKey(s, label) {
   );
 }
 
-/** Saves the Host details panel, waits for the save to land, and closes the panel. */
+/**
+ * Waits until the Host details panel has autosaved every change (the host exists and nothing is
+ * waiting or failed), then closes it.
+ */
 export async function saveAndCloseHostPanel(s) {
-  await s.clickButton("Save", { within: HOST_PANEL });
-  await s.until(async () => (await s.text(await s.waitFor(`${HOST_PANEL} [data-testid="host-panel-status"]`))).trim() === "Saved", {
-    describe: "host saved",
-  });
+  await s.until(
+    () => s.execute(`const p = document.querySelector('${HOST_PANEL}'); return (p?.dataset.created === "true" && p.dataset.autosave === "clean") || null`),
+    { describe: "host saved" },
+  );
   await s.click(await s.waitFor(`${HOST_PANEL} button[aria-label="Close host details"]`));
   await s.waitGone(HOST_PANEL);
 }
@@ -111,7 +114,10 @@ export function ui(s) {
       await s.clickButton("Import key", { within: "dialog" });
       await s.waitGone("dialog");
     },
-    /** Adds a host that signs in with the key labelled `key` (the first key when omitted). */
+    /**
+     * Adds a host that signs in with the key labelled `key` (the first key when omitted). With
+     * `key: null` no key is chosen: the host asks for the password (or an identity signs it in).
+     */
     async addHost({ label, port, user, key }) {
       await api.nav("Hosts");
       await s.clickButton("Add host");
@@ -121,7 +127,7 @@ export function ui(s) {
       await s.clear(portField);
       await s.type(portField, String(port));
       await s.fill("User name", user, { within: HOST_PANEL });
-      await chooseKey(s, key);
+      if (key !== null) await chooseKey(s, key);
       await saveAndCloseHostPanel(s);
     },
     /** Connects to the host card labelled `label`, trusting the server once. */

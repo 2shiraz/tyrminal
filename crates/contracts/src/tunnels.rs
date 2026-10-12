@@ -137,6 +137,9 @@ pub struct HostConnection {
     /// Post-quantum key exchange for this host (each hop of a chain uses its own setting).
     #[serde(default)]
     pub key_exchange: KeyExchangeMode,
+    /// Ports this host's output names are not offered for a quick forward (P-24).
+    #[serde(default)]
+    pub no_port_suggestions: bool,
 }
 
 /// How a host's connection treats hybrid post-quantum key exchange (ML-KEM-768 with X25519).
@@ -189,6 +192,8 @@ pub struct HostConnectionInput {
     pub inherit: bool,
     #[serde(default)]
     pub key_exchange: KeyExchangeMode,
+    #[serde(default)]
+    pub no_port_suggestions: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]
@@ -211,6 +216,7 @@ impl core::fmt::Debug for HostConnectionInput {
             .field("proxy", &self.proxy)
             .field("inherit", &self.inherit)
             .field("key_exchange", &self.key_exchange)
+            .field("no_port_suggestions", &self.no_port_suggestions)
             .finish()
     }
 }
@@ -259,6 +265,7 @@ mod tests {
         let input = HostConnectionInput {
             jump_host_id: None,
             key_exchange: KeyExchangeMode::default(),
+            no_port_suggestions: false,
             proxy: Some(ProxyInput {
                 kind: ProxyType::Http,
                 host: "proxy.lab".into(),

@@ -33,7 +33,7 @@ export function installMockBackend(options) {
         cursorStyle: "block",
         cursorBlink: false,
         padding: 12,
-        scrollback: 5000,
+        scrollback: options.scrollback ?? 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
         confirmMultilinePaste: true,
@@ -45,6 +45,7 @@ export function installMockBackend(options) {
     groups: [],
     snippets: [],
     knownHosts: [],
+    notes: {},
     sessions: new Map(),
     nextSession: 1,
   };
@@ -94,6 +95,21 @@ export function installMockBackend(options) {
       { id: id(300), host: "10.20.0.11", port: 22, algorithm: "ssh-ed25519", fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8", addedAt: now - 86400 * 30 },
       { id: id(301), host: "ci3.lab.example", port: 2222, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Z0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4", addedAt: now - 86400 * 4 },
     ];
+    // P-30: notes by host label or group name ("host:api-gateway", "group:Production").
+    for (const [key, note] of Object.entries(options.notes ?? {})) {
+      const [kind, name] = key.split(":");
+      const target = kind === "host" ? state.hosts.find((h) => h.label === name) : state.groups.find((g) => g.name === name);
+      if (target) state.notes[`${kind}:${target.id}`] = { format: "markdown", updatedAt: 1760184000, ...note };
+    }
+    // security review (P-27): an old DSA key, a 2048-bit RSA key and an RSA-only trusted key for
+    // a host that is no longer in the inventory.
+    if (options.reviewFixtures) {
+      state.keys.push(
+        { id: id(3), label: "Old DSA", algorithm: "ssh-dss", fingerprint: "SHA256:dsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-dss AAAAB3NzaC1kc3MFakeSynthetic old-dsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 1024 },
+        { id: id(4), label: "Laptop RSA", algorithm: "ssh-rsa", fingerprint: "SHA256:rsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-rsa AAAAB3NzaC1yc2EFakeSynthetic laptop-rsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 2048 },
+      );
+      state.knownHosts.push({ id: id(303), host: "retired.example", port: 22, algorithm: "ssh-rsa", fingerprint: "SHA256:retiredRsaSyntheticFingerprint000000000000", addedAt: now - 86400 * 90 });
+    }
     if (options.orphanKnownHost) {
       state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });
     }
@@ -130,11 +146,13 @@ export function installMockBackend(options) {
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
     // "files": a files-only connection (SFTP tab): SSH trust and sign-in, no terminal output.
-    const files = kind === "files";
+    // "exec": a run-only connection for snippet runs (SNP-05): the same, with exec channels only.
+    const exec = kind === "exec";
+    const files = kind === "files" || exec;
     if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
-    if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files, exec };
+    if (files && !exec) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
     if (host?.protocol?.type === "telnet")
@@ -216,6 +234,19 @@ export function installMockBackend(options) {
           }),
         30,
       );
+      return { sessionId };
+    }
+    if (passwordPrompt && exec && args.interactive === false) {
+      // Like the core: nothing is asked; the host is skipped as needing sign-in.
+      setTimeout(() => {
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "NEEDS_SIGN_IN", message: "This host needs a sign-in answer (no saved password or key), so it was skipped." },
+          exitStatus: null,
+        });
+      }, 30);
       return { sessionId };
     }
     if (passwordPrompt) {
@@ -546,6 +577,50 @@ export function installMockBackend(options) {
           runs.set(runId, run);
           return view(run);
         },
+        // Quick port forwards (P-24): only ports suggested to the session are accepted, as natively.
+        quick_forward_start: (a) => {
+          const session = state.sessions.get(a.sessionId);
+          if (!session) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          if (!(window.__mockSuggested.get(a.sessionId) ?? new Set()).has(a.port)) {
+            throw { code: "INVALID_INPUT", message: "That port was not offered for this session." };
+          }
+          const runId = `${nextRun++}`.padStart(32, "c");
+          const run = {
+            view: {
+              runId,
+              tunnelId: `port:${a.port}`,
+              sessionId: a.sessionId,
+              name: `Port ${a.port}`,
+              kind: "local",
+              bindHost: "127.0.0.1",
+              boundPort: a.port,
+              destHost: "127.0.0.1",
+              destPort: a.port,
+              state: "running",
+              activeConnections: 0,
+              totalConnections: 0,
+              refusedConnections: 0,
+              failedConnections: 0,
+              bytesOut: 0,
+              bytesIn: 0,
+              error: null,
+            },
+          };
+          runs.set(runId, run);
+          return view(run);
+        },
+        quick_forward_open: (a) => {
+          const run = runs.get(a.runId);
+          if (!run || run.view.state !== "running" || !run.view.tunnelId.startsWith("port:")) {
+            throw { code: "ACCESS_DENIED", message: "That tunnel is not available to this window." };
+          }
+          const url = `http://127.0.0.1:${run.view.boundPort}/`;
+          window.__mockOpenedQuick.push(url);
+          return url;
+        },
+        host_port_suggestions_set: (a) => {
+          window.__mockPortSuggestionsOff[a.enabled ? "delete" : "add"](a.hostId);
+        },
         tunnel_stop: (a) => {
           const run = runs.get(a.runId);
           if (!run || run.view.state !== "running") throw { code: "NOT_FOUND", message: "That tunnel is not running." };
@@ -572,6 +647,7 @@ export function installMockBackend(options) {
             own,
             inherited: window.__mockInheritedRoute(a.hostId),
             keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+            noPortSuggestions: window.__mockPortSuggestionsOff.has(a.hostId),
           };
         },
         host_connection_set: (a) => {
@@ -579,6 +655,7 @@ export function installMockBackend(options) {
             throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
           }
           keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
+          window.__mockPortSuggestionsOff[a.connection.noPortSuggestions ? "add" : "delete"](a.hostId);
           // HST-05: inheriting drops the host's own route.
           if (a.connection.inherit) {
             jumps.delete(a.hostId);
@@ -725,9 +802,13 @@ export function installMockBackend(options) {
       const transferId = id(9000 + nextTransfer++);
       channelSend(a.events, { type: "progress", done: Math.floor((node.size ?? 0) / 2) });
       window.__mockTransfers.set(transferId, {
-        finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
+        finish: () => {
+          if (!fs.has(childPath(a.dstDir, finalName))) addNode(childPath(a.dstDir, finalName), node.kind, node.size ?? null);
+          channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 });
+        },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -919,6 +1000,7 @@ export function installMockBackend(options) {
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -946,6 +1028,7 @@ export function installMockBackend(options) {
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },
@@ -1159,6 +1242,51 @@ export function installMockBackend(options) {
     },
     key_list: () => structuredClone(state.keys),
     known_host_list: () => structuredClone(state.knownHosts),
+    known_host_remove: (a) => {
+      if (String(a.reason ?? "").trim().length < 3) throw { code: "INVALID_INPUT", message: "Say why you are removing this key." };
+      state.knownHosts = state.knownHosts.filter((k) => k.id !== a.id);
+    },
+    // security review (P-27): the same rules as crates/core/src/security_review.rs, over mock state.
+    security_review: () => {
+      const reviewedAt = Math.floor(Date.now() / 1000);
+      const ssh = state.hosts.filter((h) => (h.protocol?.type ?? "ssh") === "ssh");
+      const usedBy = (keyId) => ssh.filter((h) => h.auth.kind === "key" && h.auth.keyId === keyId).length;
+      const findings = [];
+      for (const k of state.keys) {
+        if (k.algorithm === "ssh-dss") findings.push({ kind: "dsa_key", keyId: k.id, label: k.label, usedBy: usedBy(k.id) });
+        else if (k.algorithm === "ssh-rsa" && (k.bits ?? 3072) < 3072) findings.push({ kind: "short_rsa_key", keyId: k.id, label: k.label, bits: k.bits, usedBy: usedBy(k.id) });
+        if (!k.passphraseProtected || k.passphraseStored)
+          findings.push({ kind: "key_without_passphrase", keyId: k.id, label: k.label, passphraseStored: k.passphraseProtected, usedBy: usedBy(k.id) });
+      }
+      for (const h of ssh) {
+        if (h.auth.kind !== "key") findings.push({ kind: "password_sign_in", hostId: h.id, label: h.label, stored: h.auth.kind === "stored_password" });
+      }
+      for (const c of Object.values(state.certificates ?? {})) {
+        const label = state.keys.find((k) => k.id === c.keyId)?.label ?? "";
+        if (c.validBefore !== null && c.validBefore <= reviewedAt) findings.push({ kind: "certificate_expired", keyId: c.keyId, label, validBefore: c.validBefore });
+        else if (c.validBefore !== null && c.validBefore - reviewedAt <= 30 * 86400)
+          findings.push({ kind: "certificate_expiring", keyId: c.keyId, label, validBefore: c.validBefore });
+      }
+      const used = new Set(ssh.map((h) => `${h.address.toLowerCase()}:${h.port}`));
+      const stronger = new Set(state.knownHosts.filter((k) => k.algorithm !== "ssh-rsa").map((k) => `${k.host}:${k.port}`));
+      for (const k of state.knownHosts) {
+        const endpoint = `${k.host}:${k.port}`;
+        if (!used.has(endpoint))
+          findings.push({ kind: "unused_known_host", knownHostId: k.id, host: k.host, port: k.port, algorithm: k.algorithm, fingerprint: k.fingerprint });
+        if (k.algorithm === "ssh-rsa" && !stronger.has(endpoint))
+          findings.push({ kind: "ssh_rsa_only_known_host", knownHostId: k.id, host: k.host, port: k.port, fingerprint: k.fingerprint });
+      }
+      const rank = ["dsa_key", "short_rsa_key", "certificate_expired", "certificate_expiring", "password_sign_in", "key_without_passphrase", "unused_known_host", "ssh_rsa_only_known_host"];
+      const severity = (f) =>
+        f.kind === "dsa_key" || f.kind === "certificate_expired" || (f.kind === "short_rsa_key" && f.bits < 2048)
+          ? 0
+          : ["short_rsa_key", "password_sign_in", "certificate_expiring"].includes(f.kind)
+            ? 1
+            : 2;
+      const name = (f) => (f.label ?? f.host).toLowerCase();
+      findings.sort((a, b) => severity(a) - severity(b) || rank.indexOf(a.kind) - rank.indexOf(b.kind) || name(a).localeCompare(name(b)));
+      return { findings, keys: state.keys.length, hosts: ssh.length, certificates: Object.keys(state.certificates ?? {}).length, knownHosts: state.knownHosts.length, reviewedAt };
+    },
     snippet_list: () => structuredClone(state.snippets),
     snippet_save: (a) => {
       const existing = state.snippets.find((s) => s.id === a.snippet.id);
@@ -1188,6 +1316,7 @@ export function installMockBackend(options) {
       }, 20);
       return { sessionId };
     },
+    session_open_exec: (a) => openSession(a, "exec"),
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
@@ -1202,6 +1331,27 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
+    // P-33: containers on the host of an SSH session. Tests replace the list via __mockContainers.
+    containers_list: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return (
+        window.__mockContainers ?? {
+          engine: "docker",
+          containers: [
+            { id: "4f1c2b3a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a", name: "web", image: "nginx:1.27", status: "Up 3 hours" },
+            { id: "0a1b2c3d4e5f", name: "<img src=x onerror=window.__pwned=1>", image: "evil/<b>bold</b>", status: "Up 5 minutes" },
+          ],
+          problem: null,
+          skipped: 1,
+        }
+      );
+    },
+    container_session_open: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      // Like the core: anything that is not a container ID is refused before a session exists.
+      if (!/^[0-9a-f]{12,64}$/.test(a.containerId)) throw { code: "INVALID_INPUT", message: "That is not a container ID." };
+      return openSession(a, "local");
+    },
     session_diagnostics: () => {
       // terminal input: tests can replace the lines or make the request fail.
       if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
@@ -1211,6 +1361,8 @@ export function installMockBackend(options) {
     session_ack: () => null,
     session_close: (a) => {
       state.sessions.delete(a.sessionId);
+      // Runs on a closed connection stop, as in the core.
+      for (const [runId, run] of state.runs ?? []) if (run.sessionId === a.sessionId) run.stop("The session was closed, so the run stopped.");
     },
     session_trust_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
@@ -1293,6 +1445,29 @@ export function installMockBackend(options) {
     discovery_stop: () => {
       if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
       return { ...(state.discovery ?? { running: false, secondsLeft: 0, found: [], truncated: false }) };
+    },
+    // P-30: notes, keyed "host:<id>" / "group:<id>"; seeded only by a test (options.notes).
+    note_get: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      return state.notes[key] ? { ...state.notes[key] } : null;
+    },
+    note_set: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (!a.note || !a.note.text.trim()) {
+        delete state.notes[key];
+        return null;
+      }
+      state.notes[key] = { text: a.note.text.replace(/\r\n?/g, "\n"), format: a.note.format, updatedAt: 1760184000 };
+      return { ...state.notes[key] };
+    },
+    note_for_host: (a) => {
+      const h = state.hosts.find((x) => x.id === a.hostId);
+      if (!h) throw { code: "NOT_FOUND", message: "That host no longer exists." };
+      const out = state.notes[`host:${h.id}`] ? [{ note: { ...state.notes[`host:${h.id}`] }, origin: { kind: "host" } }] : [];
+      for (let g = state.groups.find((x) => x.id === h.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+        if (state.notes[`group:${g.id}`]) out.push({ note: { ...state.notes[`group:${g.id}`] }, origin: { kind: "group", groupId: g.id, name: g.name } });
+      }
+      return out;
     },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
@@ -1386,7 +1561,13 @@ export function installMockBackend(options) {
           if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false, envRejected: ["LEGACY_MODE"] });
           else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false, envRejected: [] });
         };
-        if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
+        if (session.host === "build-runner-03") {
+          const stop = (message = "The run was cancelled.") => {
+            state.runs.delete(a.runId);
+            reject({ code: "CANCELLED", message });
+          };
+          state.runs.set(a.runId, Object.assign(stop, { sessionId: a.sessionId, stop }));
+        }
         else setTimeout(finish, 50);
       }),
     snippet_exec_cancel: (a) => {
@@ -1396,7 +1577,7 @@ export function installMockBackend(options) {
     execution_target_list: () => structuredClone(state.targets ?? []),
     execution_target_save: (a) => {
       state.targets ??= [];
-      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], missing: 0 };
+      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], groupIds: [...new Set(a.target.groupIds ?? [])], missing: 0 };
       state.targets.push(saved);
       return saved;
     },
@@ -1567,6 +1748,17 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
   };
+  /** Quick port forwards (P-24): the newest session's output named `port`, as the core reports it. */
+  window.__mockSuggested = new Map();
+  window.__mockOpenedQuick = [];
+  window.__mockPortSuggestionsOff = new Set();
+  window.__mockSuggestPort = (port) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (!last) return;
+    if (!window.__mockSuggested.has(last.id)) window.__mockSuggested.set(last.id, new Set());
+    window.__mockSuggested.get(last.id).add(port);
+    channelSend(last.events, { type: "port_suggestion", port });
+  };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {
     if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
@@ -1718,6 +1910,11 @@ export function installMockBackend(options) {
     callbacks,
     async invoke(cmd, args = {}, opts = {}) {
       calls.push({ cmd, args: cmd === "session_write" ? "<bytes>" : args });
+      // Tests can make the next N calls of a command fail (autosave's "Couldn't save – Retry").
+      if (window.__mockFailNext?.[cmd] > 0) {
+        window.__mockFailNext[cmd] -= 1;
+        throw { code: "INTERNAL", message: "The vault could not be written." };
+      }
       const handler = handlers[cmd];
       if (!handler) throw { code: "INTERNAL", message: `mock: unhandled ${cmd}` };
       return handler(args, opts);

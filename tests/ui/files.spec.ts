@@ -29,11 +29,14 @@ async function rowAction(page: Page, name: string, item: string) {
   await menu(page).getByRole("menuitem", { name: item }).click();
 }
 
-/** Toolbar menus: Upload and View options. */
-async function toolbar(page: Page, button: "Upload" | "View options", item: string) {
-  await panel(page).getByRole("button", { name: button, exact: true }).click();
+/** Toolbar menus: Upload and "…" (More). */
+async function toolbar(page: Page, button: "Upload" | "More", item: string) {
+  await panel(page).getByRole("button", { name: button, exact: true }).first().click();
   await menu(page).getByRole(button === "Upload" ? "menuitem" : "menuitemcheckbox", { name: item }).click();
 }
+
+/** The server pane's scrolling body (drops land here). */
+const body = (page: Page) => panel(page).getByRole("region", { name: /^Files on / }).locator(".fpane-body");
 
 async function goTo(page: Page, path: string) {
   await panel(page).getByRole("button", { name: "Edit path" }).click();
@@ -47,29 +50,31 @@ test("files: browse the login folder, hidden files on request, folders open and 
   await page.keyboard.press("Control+Shift+O");
   await expect(panel(page)).toBeVisible();
   await expect(panel(page).getByRole("status", { name: "Target" })).toHaveText("on api-gateway");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
   await expect(panel(page).getByRole("navigation", { name: "Folder path" }).locator("[aria-current=location]")).toHaveText("deploy");
   // Folders first; dotfiles hidden until asked for. Sizes and octal modes in their columns.
   await expect(names(page)).toHaveText([/app/, /logs/, /backup\.tar\.gz/, /deploy\.sh/, /README\.md/]);
-  // The panel is narrow: the date column gives way first.
-  await expect(list(page).getByRole("columnheader")).toHaveText(["Name", "Size", "Mode"]);
+  // The panel is narrow: permissions give way first and stay in the name's tooltip, with the
+  // exact date; the date column says how long ago.
+  await expect(list(page).getByRole("columnheader")).toHaveText(["Name", "Size", "Date Modified"]);
   await expect(list(page).getByRole("row", { name: /backup\.tar\.gz/ })).toContainText("700 MB");
-  await expect(list(page).getByRole("row", { name: /deploy\.sh/ })).toContainText("755");
-  await toolbar(page, "View options", "Show hidden files");
+  await expect(list(page).getByRole("row", { name: /deploy\.sh/ })).toContainText("1 h ago");
+  await expect(list(page).getByRole("row", { name: /deploy\.sh/ }).locator(".ft-name-text")).toHaveAttribute("title", /^deploy\.sh\n-rwxr-xr-x\n2026-10-11 \d\d:00$/);
+  await toolbar(page, "More", "Show hidden files");
   await expect(list(page).getByRole("button", { name: "Select .bashrc" })).toBeVisible();
 
   await list(page).getByRole("button", { name: "Open app" }).dblclick();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app on api-gateway");
   await expect(names(page)).toHaveText([/config\.yml/]);
   await panel(page).getByRole("button", { name: "Up one folder" }).click();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
   // Going up selects the folder that was left.
   await expect(list(page).getByRole("row", { name: /Open app/ })).toHaveAttribute("aria-selected", "true");
   // A crumb goes there; typing a path goes there.
   await panel(page).getByRole("navigation", { name: "Folder path" }).getByRole("button", { name: "home" }).click();
   await expect(names(page)).toHaveText([/deploy/]);
   await goTo(page, "/home/deploy/logs");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
 
   // Server-supplied names are shown as text, control characters made visible.
   await page.evaluate(() => {
@@ -108,7 +113,7 @@ test("files: the path can be typed, and Escape puts the breadcrumbs back", async
   await expect(field).toHaveCount(0);
   await expect(crumbs).toBeVisible();
   await expect(panel(page)).toBeVisible();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
 
   // Ctrl+L from the list edits the path too; a folder that is not there says so and stays put.
   await names(page).first().click();
@@ -117,7 +122,7 @@ test("files: the path can be typed, and Escape puts the breadcrumbs back", async
   await field.fill("/nowhere");
   await page.keyboard.press("Enter");
   await expect(panel(page).getByRole("alert")).toContainText("does not exist");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
 });
 
 test("files: uploads and downloads show progress, never replace without asking, and can be cancelled", async ({ page }) => {
@@ -247,7 +252,7 @@ test("files: new folder, inline rename, permissions and delete, with errors expl
   await expect(perms).toContainText("Use three or four octal digits");
   await perms.getByRole("textbox", { name: "Mode (octal)" }).fill("600");
   await perms.getByRole("button", { name: "Save" }).click();
-  await expect(list(page).getByRole("row", { name: /NOTES\.md/ })).toContainText("600");
+  await expect(list(page).getByRole("row", { name: /NOTES\.md/ }).locator(".ft-name-text")).toHaveAttribute("title", /-rw-------/);
 
   // Delete asks first (Cancel focused); Delete key works on the selection.
   await list(page).getByRole("button", { name: "Select NOTES.md" }).click();
@@ -329,34 +334,34 @@ test("files: a file opened in an editor is saved only on request, and server cha
   await expect(editing).toHaveCount(0);
 });
 
-test("files: two panes copy between this computer and the server by button or menu and by drag and drop", async ({ page }) => {
+test("files: two panes copy between this computer and the server by F5 or the menu and by drag and drop", async ({ page }) => {
   await openApp(page);
   await connect(page, "api-gateway");
   await page.keyboard.press("Control+Shift+O");
   await expect(list(page)).toBeVisible();
-  await toolbar(page, "View options", "Show this computer");
+  await toolbar(page, "More", "Show this computer");
   const local = panel(page).getByRole("region", { name: "This computer" });
   await expect(local).toContainText("Choose a folder on this computer");
-  await local.getByRole("button", { name: "Choose folder…" }).first().click();
+  await local.getByRole("button", { name: "Choose folder…" }).click();
   const localList = local.getByRole("grid", { name: /on this computer/ });
   await expect(localList.getByRole("button", { name: /^(Open|Select) / })).toHaveText([/photos/, /deploy\.tar\.gz/, /notes\.md/]);
   await expect(localList.getByRole("row", { name: /deploy\.tar\.gz/ })).toContainText("40 KB");
   const transfers = panel(page).getByRole("region", { name: "Transfers" });
 
-  // Button: local file to the server folder shown.
+  // F5: the local selection to the server folder shown.
   await localList.getByRole("button", { name: "Select notes.md" }).click();
-  await panel(page).getByRole("button", { name: "Upload to the server folder" }).click();
+  await page.keyboard.press("F5");
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
   await expect(list(page).getByRole("button", { name: "Select notes.md" })).toBeVisible();
 
-  // Row menu: remote file to the local folder shown; the local pane refreshes.
-  await rowAction(page, "README.md", "Download to this computer");
+  // Row menu: a server file to the local folder shown; the local pane lists it.
+  await rowAction(page, "README.md", "Copy to This computer");
   await finishLatest(page);
   await expect(localList.getByRole("button", { name: "Select README.md" })).toBeVisible();
 
-  // Drag and drop: a local folder onto the server pane.
-  await localList.getByRole("button", { name: "Open photos" }).dragTo(panel(page).locator(".files-body"));
+  // Drag and drop: a local folder onto the server pane, which is marked as the drop target.
+  await localList.getByRole("button", { name: "Open photos" }).dragTo(body(page));
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
   await expect(list(page).getByRole("button", { name: "Open photos" })).toBeVisible();
@@ -364,8 +369,8 @@ test("files: two panes copy between this computer and the server by button or me
   // Local navigation stays inside the chosen folder.
   await localList.getByRole("button", { name: "Open photos" }).dblclick();
   await expect(local.getByRole("navigation", { name: "Folder path" })).toHaveText(/Projects\s*\/?\s*photos/);
-  await local.getByRole("button", { name: "Up one local folder" }).click();
-  await expect(local.getByRole("button", { name: "Up one local folder" })).toBeDisabled();
+  await local.getByRole("button", { name: "Up one folder" }).click();
+  await expect(local.getByRole("button", { name: "Up one folder" })).toBeDisabled();
 });
 
 test("files: copy to another server is offered with two SSH sessions and runs as a transfer", async ({ page }) => {
@@ -398,7 +403,7 @@ test("files: files dropped from the desktop upload in pieces and ask before repl
   await page.keyboard.press("Control+Shift+O");
   await expect(list(page).getByRole("button", { name: "Select README.md" })).toBeVisible();
   const drop = (files: { name: string; size: number }[]) =>
-    page.locator(".files-body").evaluate((el, specs) => {
+    body(page).evaluate((el, specs) => {
       const transfer = new DataTransfer();
       for (const s of specs) transfer.items.add(new File([new Uint8Array(s.size)], s.name));
       el.dispatchEvent(new DragEvent("dragover", { dataTransfer: transfer, bubbles: true, cancelable: true }));
@@ -430,18 +435,18 @@ test("files: switching tabs keeps each session's folder, selection, options and 
   await connect(page, "api-gateway");
   await page.keyboard.press("Control+Shift+O");
   await list(page).getByRole("button", { name: "Open app" }).dblclick();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app");
-  await toolbar(page, "View options", "Show hidden files");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app on api-gateway");
+  await toolbar(page, "More", "Show hidden files");
   await panel(page).getByRole("button", { name: "Sort by Size" }).click();
   await list(page).getByRole("button", { name: "Select log-40.txt" }).click();
-  await page.locator(".files-body").evaluate((el) => {
+  await body(page).evaluate((el) => {
     el.scrollTop = 600;
     el.dispatchEvent(new Event("scroll"));
   });
-  const scrolled = await page.locator(".files-body").evaluate((el) => el.scrollTop);
+  const scrolled = await body(page).evaluate((el) => el.scrollTop);
   expect(scrolled).toBeGreaterThan(0);
   const hiddenOn = async () => {
-    await panel(page).getByRole("button", { name: "View options" }).click();
+    await panel(page).getByRole("button", { name: "More", exact: true }).click();
     const checked = await menu(page).getByRole("menuitemcheckbox", { name: "Show hidden files" }).getAttribute("aria-checked");
     await page.keyboard.press("Escape");
     return checked;
@@ -449,7 +454,7 @@ test("files: switching tabs keeps each session's folder, selection, options and 
 
   // Tab B: another session starts at its own login folder with its own options.
   await connect(page, "db-primary");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on db-primary");
   expect(await hiddenOn()).toBe("false");
   await expect(panel(page).getByRole("columnheader", { name: /Size/ })).toHaveAttribute("aria-sort", "none");
 
@@ -460,14 +465,14 @@ test("files: switching tabs keeps each session's folder, selection, options and 
   // Back to tab A: same folder, selection, options and scroll, and nothing is listed again.
   await page.getByRole("tab", { name: /api-gateway/ }).click();
   await expect(panel(page).getByRole("status", { name: "Target" })).toHaveText("on api-gateway");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app on api-gateway");
   expect(await hiddenOn()).toBe("true");
   await expect(panel(page).getByRole("columnheader", { name: /Size/ })).toHaveAttribute("aria-sort", "ascending");
   await expect(list(page).getByRole("row", { name: /log-40\.txt/ })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => page.locator(".files-body").evaluate((el) => el.scrollTop)).toBe(scrolled);
+  await expect.poll(() => body(page).evaluate((el) => el.scrollTop)).toBe(scrolled);
   // And back to B, which also kept its place.
   await page.getByRole("tab", { name: /db-primary/ }).click();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on db-primary");
   expect(await listCalls()).toBe(before);
 
   // Refresh is the way to list again.
@@ -523,7 +528,7 @@ test("files: a click visibly selects, Shift/Ctrl extend it, keys move it, and op
   await expect(footer).toHaveText(/^5 selected/);
 
   // A click on the free space below the rows clears the selection.
-  await page.locator(".fp .ft").click({ position: { x: 100, y: 300 } });
+  await body(page).locator(".ft").click({ position: { x: 100, y: 300 } });
   await expect(footer).toHaveText("5 items");
 
   // A folder that is slow to list: the row and the path show it at once, a bar after 300 ms.
@@ -535,7 +540,7 @@ test("files: a click visibly selects, Shift/Ctrl extend it, keys move it, and op
   await expect(row(/Open logs/)).toHaveAttribute("data-loading", "true");
   await expect(path).toHaveAttribute("aria-busy", "true");
   await expect(panel(page).getByRole("progressbar", { name: "Opening folder" })).toBeVisible();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
   await expect(panel(page).getByRole("progressbar")).toHaveCount(0);
   await expect(path).not.toHaveAttribute("aria-busy", "true");
 });
@@ -578,23 +583,23 @@ test("files: type-ahead finds a name, Enter opens, Backspace goes up, and the me
 
   // Enter opens the folder; Backspace goes back up and selects it.
   await page.keyboard.press("Enter");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
   await page.keyboard.press("Backspace");
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
   await expect(row(/Open logs/)).toHaveAttribute("aria-selected", "true");
 
   // Shift+F10 opens the row menu for the selection; it lists the shortcuts it answers to.
   await list(page).getByRole("button", { name: "Open logs" }).focus();
   await page.keyboard.press("Shift+F10");
   const rowMenu = page.getByRole("menu", { name: "More actions for logs" });
-  await expect(rowMenu.getByRole("menuitem")).toHaveText(["Open", "Download…", "RenameF2", "Permissions…", "Copy path", "Delete…Del"]);
+  await expect(rowMenu.getByRole("menuitem")).toHaveText(["Open", "Download…", "RenameF2", "Duplicate", "Copy path", "Permissions…", "Delete…Del"]);
   await expect(rowMenu.getByRole("menuitem", { name: "Open" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(rowMenu).toHaveCount(0);
   await expect(list(page).getByRole("button", { name: "Open logs" })).toBeFocused();
 
   // Right-click on the free space: the folder's own menu.
-  await page.locator(".fp .ft").click({ button: "right", position: { x: 100, y: 300 } });
+  await body(page).locator(".ft").click({ button: "right", position: { x: 100, y: 300 } });
   await expect(page.getByRole("menu", { name: "Folder actions" }).getByRole("menuitem").first()).toHaveText("New folder");
 });
 
@@ -630,16 +635,79 @@ test("files: sorting by a column keeps folders first, and empty, hidden-only and
   await expect(list(page).getByRole("button", { name: "Select .env" })).toBeVisible();
 });
 
-test("files: a folder that cannot be listed at first shows the reason and a retry", async ({ page }) => {
+test("files: a folder the server will not list says so in place, first or later, with what to do", async ({ page }) => {
   await openApp(page);
   await connect(page, "api-gateway");
   await page.evaluate(() => {
     (window as unknown as { __mockListFail: number }).__mockListFail = 1;
   });
   await page.keyboard.press("Control+Shift+O");
+  // Nothing listed yet: the reason in place of the list, and Try again.
   const failure = panel(page).getByRole("alert");
-  await expect(failure).toContainText("Could not open this folder");
+  await expect(failure).toContainText("No permission to open this folder");
   await expect(failure).toContainText("refused to list");
   await failure.getByRole("button", { name: "Try again" }).click();
-  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
+
+  // From a folder already shown: an inline notice above the list, which stays.
+  await page.evaluate(() => {
+    (window as unknown as { __mockListFail: number }).__mockListFail = 1;
+  });
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
+  await expect(panel(page).getByRole("alert")).toContainText("No permission to open this folder");
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
+  await panel(page).getByRole("alert").getByRole("button", { name: "Close" }).click();
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+});
+
+test("files: the date says how long ago, several items get a selection bar, and Duplicate keeps both", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  // Relative date, exact time on hover.
+  const modified = list(page).getByRole("row", { name: /README\.md/ }).locator("td.ft-col-modified");
+  await expect(modified).toHaveText("1 h ago");
+  await expect(modified).toHaveAttribute("title", /^2026-10-11 \d\d:00$/);
+
+  // Two selected: a bar with what can be done to both at once.
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await list(page).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  const bulk = panel(page).getByRole("toolbar", { name: "2 selected items" });
+  await expect(bulk).toContainText("2 selected");
+  await expect(bulk.getByRole("button", { name: "Download" })).toBeVisible();
+  await bulk.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Delete 2 items?" })).toBeVisible();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+  await bulk.getByRole("button", { name: "Clear selection" }).click();
+  await expect(bulk).toHaveCount(0);
+
+  // Duplicate copies on the same server under the next free name, through the transfer queue.
+  await rowAction(page, "README.md", "Duplicate");
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+  await expect(transfers.getByRole("listitem").first()).toContainText("README (1).md");
+  const copy = (await page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls)).filter((c) => c.cmd === "files_copy").at(-1);
+  expect(copy?.args).toMatchObject({ srcDir: "/home/deploy", dstDir: "/home/deploy", choice: "keep_both" });
+  expect(copy?.args.srcSession).toBe(copy?.args.dstSession);
+  await finishLatest(page);
+  await expect(list(page).getByRole("button", { name: "Select README (1).md" })).toBeVisible();
+});
+
+test("files: a failed transfer says why and can be retried in place", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+  await toolbar(page, "Upload", "Upload files…");
+  await page.evaluate(() => {
+    const w = window as unknown as { __mockTransfers: Map<string, { fail(m: string): void }> };
+    [...w.__mockTransfers.values()].at(-1)?.fail("The connection dropped.");
+  });
+  await expect(transfers.getByTestId("transfer-state")).toHaveText("Failed: The connection dropped.");
+  await expect(transfers.getByRole("button", { name: "Hide transfers" })).toContainText("1 failed");
+  await transfers.getByRole("button", { name: "Retry notes.txt" }).click();
+  // The same row starts again (the earlier upload had not finished, so nothing asks to replace).
+  await expect(transfers.getByRole("listitem")).toHaveCount(1);
+  await expect(transfers.getByTestId("transfer-state")).toHaveText("1.0 KB of 2.0 KB");
 });

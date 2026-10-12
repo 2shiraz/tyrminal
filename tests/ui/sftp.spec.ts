@@ -14,8 +14,10 @@ const finishLatest = (page: Page) =>
   });
 
 const view = (page: Page) => page.getByRole("region", { name: "SFTP file manager" });
-const left = (page: Page) => view(page).getByRole("region", { name: "Left pane" });
-const right = (page: Page) => view(page).getByRole("region", { name: "Right pane" });
+const left = (page: Page) => view(page).getByRole("region", { name: "Left pane", exact: true });
+const right = (page: Page) => view(page).getByRole("region", { name: "Right pane", exact: true });
+/** A pane's scrolling list area (drops land here). */
+const body = (pane: ReturnType<typeof left>) => pane.locator(".fpane-body");
 const table = (pane: ReturnType<typeof left>) => pane.getByRole("grid", { name: /^Contents of / });
 
 async function openSftp(page: Page) {
@@ -55,7 +57,7 @@ test("sftp: opens from the palette with this computer on the left and a host pic
   expect(all.filter((c) => c.cmd === "session_open_files")).toHaveLength(1);
   expect(all.filter((c) => c.cmd === "session_open_ssh" || c.cmd === "session_write" || c.cmd === "session_resize")).toHaveLength(0);
   // Columns, folders first, permissions in their own column.
-  await expect(remote.getByRole("columnheader")).toHaveText(["Name", "Date Modified", "Size", "Permissions"]);
+  await expect(remote.getByRole("columnheader")).toHaveText(["Name", "Size", "Date Modified", "Permissions"]);
   await expect(remote.getByRole("button", { name: /^(Open|Select) / })).toHaveText([/app/, /logs/, /backup\.tar\.gz/, /deploy\.sh/, /README\.md/]);
   await expect(remote.getByRole("row", { name: /deploy\.sh/ })).toContainText("-rwxr-xr-x");
   await expect(remote.getByRole("row", { name: /backup\.tar\.gz/ })).toContainText("700 MB");
@@ -100,14 +102,13 @@ test("sftp: the pane and row menus create, rename in place, change permissions a
   await connectRight(page, "api-gateway");
   const pane = right(page);
   const remote = table(pane);
-  const actions = () => pane.getByRole("button", { name: "Actions for the right pane" }).click();
+  const actions = () => pane.getByRole("button", { name: "More", exact: true }).click();
 
   await actions();
   await page.getByRole("menuitemcheckbox", { name: "Show hidden files" }).click();
   await expect(remote.getByRole("button", { name: "Select .bashrc" })).toBeVisible();
 
-  await actions();
-  await page.getByRole("menuitem", { name: "New folder" }).click();
+  await pane.getByRole("button", { name: "New folder" }).click();
   await page.getByRole("dialog", { name: "New folder" }).getByRole("textbox", { name: "Name" }).fill("releases");
   await page.getByRole("dialog", { name: "New folder" }).getByRole("button", { name: "Create" }).click();
   await expect(remote.getByRole("button", { name: "Open releases" })).toBeVisible();
@@ -154,13 +155,13 @@ test("sftp: dragging between panes transfers through the queue and asks before r
   const transfers = view(page).getByRole("region", { name: "Transfers" });
 
   // This computer → server.
-  await local.getByRole("button", { name: "Select notes.md" }).dragTo(right(page).locator(".sftp-body"));
+  await local.getByRole("button", { name: "Select notes.md" }).dragTo(body(right(page)));
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
   await expect(remote.getByRole("button", { name: "Select notes.md" })).toBeVisible();
 
   // Again: the name exists, so it asks. Keep both.
-  await local.getByRole("button", { name: "Select notes.md" }).dragTo(right(page).locator(".sftp-body"));
+  await local.getByRole("button", { name: "Select notes.md" }).dragTo(body(right(page)));
   const replace = page.getByRole("alertdialog", { name: "Replace “notes.md”?" });
   await expect(replace).toContainText("already in this folder on the server");
   await expect(replace.getByRole("button", { name: "Cancel" })).toBeFocused();
@@ -192,7 +193,7 @@ test("sftp: both panes can be hosts, and a copy between them runs server to serv
   await expect(table(left(page))).toBeVisible();
   await expect(table(right(page))).toBeVisible();
 
-  await table(left(page)).getByRole("button", { name: "Select deploy.sh" }).dragTo(right(page).locator(".sftp-body"));
+  await table(left(page)).getByRole("button", { name: "Select deploy.sh" }).dragTo(body(right(page)));
   await page.getByRole("alertdialog", { name: "Replace “deploy.sh”?" }).getByRole("button", { name: "Replace" }).click();
   const copy = (await calls(page)).filter((c) => c.cmd === "files_copy").at(-1);
   expect(copy?.args.choice).toBe("replace");
@@ -265,8 +266,7 @@ test("sftp: the local pane changes only inside the chosen folder", async ({ page
   const pane = left(page);
   const local = table(pane);
   await expect(local).toHaveAccessibleName("Contents of Projects on this computer");
-  await pane.getByRole("button", { name: "Actions for the left pane" }).click();
-  await page.getByRole("menuitem", { name: "New folder" }).click();
+  await pane.getByRole("button", { name: "New folder" }).click();
   await page.getByRole("dialog", { name: "New folder" }).getByRole("textbox", { name: "Name" }).fill("drafts");
   await page.getByRole("dialog", { name: "New folder" }).getByRole("button", { name: "Create" }).click();
   await expect(local.getByRole("button", { name: "Open drafts" })).toBeVisible();
@@ -287,7 +287,7 @@ test("sftp: the local pane changes only inside the chosen folder", async ({ page
   // Both panes on this computer: copying is left to the file manager.
   await right(page).getByRole("group", { name: "Select host" }).getByRole("button", { name: /^This computer/ }).click();
   await right(page).getByRole("button", { name: "Choose folder…" }).click();
-  await local.getByRole("button", { name: "Select notes.md" }).dragTo(right(page).locator(".sftp-body"));
+  await local.getByRole("button", { name: "Select notes.md" }).dragTo(body(right(page)));
   await expect(view(page)).toContainText("Copying within this computer is done in your file manager.");
 });
 
@@ -410,4 +410,52 @@ test("sftp: the filter, an empty folder and a folder of hidden files each say wh
   await pane.getByRole("button", { name: "Up one folder" }).click();
   await table(pane).getByRole("button", { name: "Open none" }).dblclick();
   await expect(pane).toContainText("This folder is empty");
+});
+
+test("the Files panel and an SFTP pane are the same pane: toolbar, columns, row menu", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await connectRight(page, "api-gateway");
+  const pane = right(page);
+  await expect(table(pane)).toBeVisible();
+  const toolbar = (scope: ReturnType<typeof left>) => scope.getByRole("toolbar", { name: "Folder" }).getByRole("button").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+  const sftpTools = await toolbar(pane);
+  await expect(pane.getByRole("searchbox", { name: "Filter" })).toBeVisible();
+  await table(pane).getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });
+  const sftpMenu = await page.getByRole("menu").getByRole("menuitem").allTextContents();
+  await page.keyboard.press("Escape");
+
+  // The same host's Files panel, next to its terminal.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("api-gateway");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await page.keyboard.press("Control+Shift+O");
+  const panel = page.getByRole("complementary", { name: "Files" });
+  await expect(panel.getByRole("grid")).toBeVisible();
+  const panelTools = await toolbar(panel.getByRole("region", { name: "Files on api-gateway" }));
+  // The narrow panel keeps every tool; Forward moves into "…" and the filter field behind a button.
+  expect(panelTools.filter((t) => t !== "Filter")).toEqual(sftpTools.filter((t) => t !== "Forward"));
+  expect(panelTools).toContain("Filter");
+  await panel.getByRole("grid").getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });
+  const panelMenu = await page.getByRole("menu").getByRole("menuitem").allTextContents();
+  // The panel adds its own Edit; the SFTP tab adds Copy to the other pane (only when it shows something).
+  expect(panelMenu.filter((i) => i !== "Edit…")).toEqual(sftpMenu.filter((i) => !i.startsWith("Copy to ")));
+  await page.keyboard.press("Escape");
+  await expect(panel.getByRole("grid").getByRole("columnheader")).toHaveText(["Name", "Size", "Date Modified"]);
+});
+
+test("sftp: files dropped from the desktop on a server pane upload into its folder", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await connectRight(page, "api-gateway");
+  await expect(table(right(page))).toBeVisible();
+  await body(right(page)).evaluate((el) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(1000)], "dropped.txt"));
+    el.dispatchEvent(new DragEvent("dragover", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  });
+  await expect(view(page).getByRole("region", { name: "Transfers" }).getByTestId("transfer-state")).toHaveText("Done");
+  await expect(table(right(page)).getByRole("button", { name: "Select dropped.txt" })).toBeVisible();
 });

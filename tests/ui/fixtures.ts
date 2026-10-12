@@ -22,13 +22,22 @@ export interface MockOptions {
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
+  /** Terminal scrollback lines (default 5000). */
+  scrollback?: number;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */
+  notes?: Record<string, { text: string; format?: "plain" | "markdown" }>;
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;
+  // security review (P-27)
+  /** Adds a DSA key, a 2048-bit RSA key and an RSA-only trusted key for a retired host. */
+  reviewFixtures?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
+  /** Keep the browser's real clock (perf.spec.ts: the fixed clock replaces performance.now and requestAnimationFrame). */
+  realClock?: boolean;
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {
@@ -44,7 +53,7 @@ export async function openApp(page: Page, options: MockOptions = {}) {
     });
   }
   // A fixed clock so relative times ("2 h ago") are stable in screenshots; timers still run.
-  await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
+  if (!options.realClock) await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
   await page.addInitScript(installMockBackend, options);
   await page.goto("/");
   await page.evaluate(() => document.fonts.ready);

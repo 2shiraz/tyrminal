@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-note-for-host"
+description = "Enables the note_for_host command without any pre-configured scope."
+commands.allow = ["note_for_host"]
+
+[[permission]]
+identifier = "deny-note-for-host"
+description = "Denies the note_for_host command without any pre-configured scope."
+commands.deny = ["note_for_host"]

@@ -148,6 +148,9 @@ pub(crate) struct StoredConnection {
     /// Post-quantum key exchange; the default (prefer) is not stored.
     #[serde(default, skip_serializing_if = "is_default_key_exchange")]
     pub key_exchange: tyrminal_contracts::KeyExchangeMode,
+    /// Quick port forward suggestions are off for this host (P-24).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_port_suggestions: bool,
 }
 
 fn is_default_key_exchange(mode: &tyrminal_contracts::KeyExchangeMode) -> bool {
@@ -224,6 +227,9 @@ pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
 pub(crate) struct ExecutionTargetRecord {
     pub name: String,
     pub host_ids: Vec<String>,
+    /// Groups, resolved to their hosts when a run starts. Absent in older records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_ids: Vec<String>,
 }
 
 /// An OpenSSH user certificate for a key in the keychain (public data), checked against the key
@@ -282,6 +288,16 @@ pub(crate) struct WorkflowRecord {
     pub proxy: Option<StoredProxy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os: Option<tyrminal_contracts::HostOs>,
+    /// The host's or group's note (P-30). Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<StoredNote>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct StoredNote {
+    pub text: String,
+    pub format: tyrminal_contracts::NoteFormat,
+    pub updated_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -298,6 +314,7 @@ impl WorkflowRecord {
             && self.jump_host.is_none()
             && self.proxy.is_none()
             && self.os.is_none()
+            && self.note.is_none()
     }
 
     pub fn content_len(&self) -> usize {
@@ -313,6 +330,7 @@ impl WorkflowRecord {
                 ..Default::default()
             }
             .content_len()
+            + self.note.as_ref().map_or(0, |n| n.text.len() + 32)
             + 16
     }
 }

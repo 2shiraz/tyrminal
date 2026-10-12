@@ -139,6 +139,8 @@ pub struct Sessions {
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
     pub(crate) recordings: crate::recording::Recordings,
+    /// Ports suggested for a quick forward, per session (P-24).
+    pub(crate) suggested: Arc<crate::port_suggest::Suggested>,
     // agent D: inventory and snippets
     /// Snippet runs on exec channels, with their cancel switches.
     snippet_runs: crate::snippet_runs::Runs,
@@ -180,6 +182,7 @@ impl Sessions {
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
             recordings: crate::recording::Recordings::new(logs_dir),
+            suggested: Arc::default(),
             // agent D: inventory and snippets
             snippet_runs: crate::snippet_runs::Runs::default(),
         })
@@ -287,6 +290,8 @@ impl Sessions {
         let sink = (self.recordings)
             .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
             .await;
+        // Quick port forwards (P-24): ports the output names are offered, never forwarded on their own.
+        let sink = if plan.port_suggestions { crate::port_suggest::wrap(sink, &id, &self.suggested) } else { sink };
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -348,6 +353,39 @@ impl Sessions {
         tokio::spawn(async move {
             let ctx = TaskContext::new(&this, &session_id, &entry, &sink);
             let body = run_files(&ctx, plan);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// Opens a run-only connection to a saved SSH host, for running snippets on a host without an
+    /// open session (SNP-05): host-key trust and sign-in exactly as for a terminal (the same
+    /// prompts, the same refusal of a changed key), then nothing but the exec channels that
+    /// [`Sessions::exec_snippet`] opens. No shell, PTY or SFTP. With `interactive` false, a host
+    /// that would need a sign-in answer fails with `NEEDS_SIGN_IN` instead of asking; the trust
+    /// prompt for an unknown key is always asked. The session belongs to the calling window and
+    /// ends with `close`, a vault lock, or a dropped link.
+    pub async fn open_exec(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        interactive: bool,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let endpoint = self.vault.host_endpoint(host_id).await?;
+        if !matches!(endpoint.protocol, HostProtocol::Ssh) {
+            return Err(invalid("Snippets run on hosts without an open session over SSH only."));
+        }
+        let plan = self.vault.connection_plan(host_id).await?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
+        // No terminal: input, resize and terminal snippets are refused before reaching a channel.
+        drop(input_rx);
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let ctx = TaskContext { interactive, ..TaskContext::new(&this, &session_id, &entry, &sink) };
+            let body = run_exec_only(&ctx, plan);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -547,6 +585,7 @@ impl Sessions {
             crate::records::LogEnd::Locked
         };
         self.recordings.session_ended(&self.vault, session_id, reason).await;
+        self.suggested.session_ended(session_id);
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
@@ -1384,6 +1423,10 @@ struct TaskContext {
     session_id: String,
     /// The jump-chain hop being connected, for prompts (`None` for a direct connection).
     hop: Mutex<Option<tyrminal_contracts::ChainPosition>>,
+    /// Sign-in prompts are shown to the user; when false, a needed answer fails the connection.
+    interactive: bool,
+    /// A sign-in answer was needed but not asked for (`interactive` is false).
+    needed_input: std::sync::atomic::AtomicBool,
 }
 
 impl TaskContext {
@@ -1398,6 +1441,8 @@ impl TaskContext {
             sessions: Arc::clone(sessions),
             session_id: session_id.to_owned(),
             hop: Mutex::new(None),
+            interactive: true,
+            needed_input: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -1421,6 +1466,11 @@ impl TaskContext {
         message: Option<String>,
         echo: bool,
     ) -> Option<Zeroizing<String>> {
+        if !self.interactive {
+            // Nothing is asked and nothing is sent: the connection fails as "needs sign-in".
+            self.needed_input.store(true, std::sync::atomic::Ordering::SeqCst);
+            return None;
+        }
         let prompt_id = random_token().ok()?;
         let (reply, answer) = oneshot::channel();
         self.entry.prompts().auth = Some((prompt_id.clone(), reply));
@@ -1909,6 +1959,36 @@ async fn until_ended(entry: &Entry) -> IpcError {
     }
 }
 
+/// A run-only session: the same verified, signed-in connection as a terminal session, kept open
+/// for exec channels only. It lasts until the caller closes it, the vault locks, or the link drops.
+async fn run_exec_only(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
+    let Linked { conn, hops } = match connect_chain(ctx, plan).await {
+        Ok(linked) => linked,
+        Err(_) if ctx.needed_input.load(std::sync::atomic::Ordering::SeqCst) => {
+            return Outcome::failed(err(
+                ErrorCode::NeedsSignIn,
+                "This host needs a sign-in answer (no saved password or key), so it was skipped.",
+            ));
+        }
+        Err(error) => return Outcome::failed(error),
+    };
+    // `Negotiated` was reported per hop during the handshake, as for a terminal session.
+    ctx.entry.log.note("run-only connection opened (exec channels, no shell)");
+    let conn = Arc::new(conn);
+    *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
+    // `Connected` belongs to the session, not to a hop.
+    *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    ctx.state(SessionState::Connected);
+    while !conn.is_closed() {
+        tokio::time::sleep(FILES_LINK_CHECK).await;
+    }
+    ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
+    for hop in hops.into_iter().rev() {
+        hop.disconnect().await;
+    }
+    Outcome::failed(err(ErrorCode::Disconnected, "The connection to the server was lost."))
+}
+
 /// How often a files-only connection checks that its link is still up (it has no shell whose
 /// end would tell).
 const FILES_LINK_CHECK: Duration = Duration::from_secs(1);
@@ -2060,6 +2140,9 @@ async fn run_local(
 
 /// Ended sessions whose connection logs are kept.
 const MAX_ENDED_LOGS: usize = 16;
+
+/// P-33: how long listing containers may take.
+const CONTAINER_LIST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Telnet connections that take longer than this to answer are given up.
 const TELNET_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -2359,6 +2442,99 @@ impl Sessions {
 
     pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
         self.snippet_runs.cancel(owner, run_id);
+    }
+
+    /// P-33: the running Docker or Podman containers on the host of a connected SSH session,
+    /// listed by a fixed command on an exec channel of its verified connection. Stops when the
+    /// session ends, is closed or the vault locks.
+    pub async fn list_containers(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::ContainerList, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let listing =
+            conn.exec(crate::containers::LIST_COMMAND, crate::containers::MAX_LIST_OUTPUT, CONTAINER_LIST_TIMEOUT);
+        let out = tokio::select! {
+            out = listing => out.map_err(|e| match e {
+                SshError::LimitExceeded => err(ErrorCode::LimitExceeded, "The container listing was too long to show."),
+                other => from_ssh(&other),
+            })?,
+            why = until_ended(&entry) => return Err(why),
+        };
+        let list = crate::containers::parse_listing(&out.stdout, &out.stderr, out.exit_status)?;
+        entry.log.note(&match (list.engine, &list.problem) {
+            (None, _) => "containers: neither Docker nor Podman was found".to_owned(),
+            (Some(engine), None) => format!("containers: {engine:?} listed {}", list.containers.len()),
+            (Some(engine), Some(_)) => format!("containers: {engine:?} reported an error"),
+        });
+        Ok(list)
+    }
+
+    /// P-33: opens a shell in a container as a new session (its own tab), on a new PTY channel of
+    /// the verified connection of `session_id`. The command is built only from the engine and a
+    /// checked container ID. The shell ends with that session, and like every session when it is
+    /// closed or the vault locks.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_container_shell(
+        self: &Arc<Self>,
+        owner: &str,
+        session_id: &str,
+        engine: tyrminal_contracts::ContainerEngine,
+        container_id: &str,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        // The ID is checked first: a value that is not a container ID never reaches the server.
+        let command = crate::containers::shell_command(engine, container_id, &random_token()?)?;
+        let (parent, conn) = self.connection(owner, session_id)?;
+        let (id, entry, input_rx) = self.register(owner, parent.generation, sink, parent.host_id.clone(), false)?;
+        entry.log.note(&format!(
+            "container shell: {engine:?} container {} over the connection of an open session",
+            &container_id[..12]
+        ));
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let child_id = id.clone();
+        tokio::spawn(async move {
+            let body = async {
+                sink.event(SessionEvent::State { state: SessionState::OpeningChannel, hop: None });
+                let pty = PtyRequest {
+                    term: tyrminal_contracts::HostTerminal::default().term.term().into(),
+                    cols: u32::from(cols),
+                    rows: u32::from(rows),
+                };
+                // The parent's own reason when the vault locked; otherwise that it has ended.
+                let ended = |why: IpcError| {
+                    if why.code == ErrorCode::VaultLocked {
+                        why
+                    } else {
+                        err(ErrorCode::Disconnected, "The SSH session this container shell ran in has ended.")
+                    }
+                };
+                let opened = tokio::select! {
+                    opened = conn.open_command_pty(&pty, &command) => opened,
+                    why = until_ended(&parent) => return Outcome::failed(ended(why)),
+                };
+                let (reader, writer) = match opened {
+                    Ok(channel) => channel,
+                    Err(e) => return Outcome::failed(from_ssh(&e)),
+                };
+                entry.log.note("container shell opened");
+                sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
+                // The engine's own errors (no such container, permission denied) arrive as
+                // terminal output and the exit status, as they are.
+                tokio::select! {
+                    outcome = pump(Transport::Ssh { reader, writer }, &entry.relay, &*sink, input_rx, None) => outcome,
+                    why = until_ended(&parent) => Outcome::failed(ended(why)),
+                }
+            };
+            this.supervise(&child_id, &entry, &sink, body).await;
+            // The channel and this handle to the connection are gone with the body.
+            drop(conn);
+        });
+        Ok(SessionOpened { session_id: id })
     }
 
     /// Shell integration on the server of a session the caller owns: what `~/.bashrc` holds.

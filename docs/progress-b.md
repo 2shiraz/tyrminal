@@ -18,14 +18,14 @@ and the merge protocol are in `docs/work-split.md`. Branch `claude/agent-b-tunne
 | Recording in core: output-only tee on the session sink (typed input cannot reach it), per-vault switch (off by default; off stops running recordings and keeps them; delete one/all separate), per-host retention plus bookmarks, comments, lock ends and later completes the record, owner-only files | `crates/core/tests/history.rs` 7/7, 3 runs (hidden `stty -echo` answer never recorded, mutation that records input fails it; no plaintext output/title/answer anywhere on disk; 0700/0600; cut/damaged/missing files; size limit; lock); `tunnels_lab` 12/12 incl. SSH recording without the hidden answer | LOG-01/02/03/04/10, P-16 |
 | Recordings page: switch and limits, storage indicator, newest-first list, search, bookmark filter, comment dialog, delete/delete all with confirmation, read-only player (replay at 1–8×, find, OSC 8/52/title/input inert) | `tests/ui/history.spec.ts` 6/6 incl. axe WCAG 2.2 AA in both themes; mutation (default link handler) fails the read-only test; full UI suite 78/78 | LOG-05/06/07 |
 | Post-quantum key exchange per host: prefer (default, `mlkem768x25519-sha256` first, X25519 fallback), require (refused during key exchange, before trust or sign-in), off (compatibility) | `algorithms` unit test; `crates/ssh/tests/kex_lab.rs` 3/3 ×3 against OpenSSH 9.6 (fallback, off, require refused with no authentication in the server log); the ML-KEM end-to-end test is BLOCKED here (needs OpenSSH ≥ 9.9; container image pull rate-limited); `tunnels_lab` 13/13 ×3, a mutant that ignores the setting fails; UI (mock) | SEC-08, SEC-10 |
+| Quick port forward from a detected listening port: output only suggests (loopback/any-address hosts, ports 1–65535, shown text only); accepting forwards 127.0.0.1 to the server's loopback at that port, same port when free; Open in browser opens only the built local address; off globally or per host | `port_suggest` unit tests 5/5 (other hosts, invalid ports, escapes, split reads); `tunnels_lab` 4 new: hostile output yields no suggestion and no forward, the forward reaches a service on the lab server and ends with the session, same port when free and ended by a lock, per-host off; mutants without the "suggested ports only" check or the host boundary fail; UI 2/2 (mock), a mutant ignoring the global setting fails | P-24 |
 
 Design decisions: `docs/decisions/0004-tunnels-and-connection-path.md`.
 
 ## Next tasks, in order
 
-1. Tunnel runs follow their session when it moves to another window (after the handoff change lands).
-2. Sign-in with a user certificate (KEY-07, lab CA), OpenSSH `ProxyJump` import as jump hosts
-   (IMP-02), jump host and proxy inherited from groups (HST-05).
+1. Host sign-in with a stored user certificate (KEY-07 part 2; the SSH layer and lab CA are done).
+2. QA of tunnels, jump hosts and proxies on main.
 
 ## Known limits
 
