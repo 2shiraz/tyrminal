@@ -11,6 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Native screen-lock hooks for macOS and Windows; the only crate allowed `unsafe` (ADR 0007).
+tyrminal-os-hooks = { path = "../os-hooks" }
 keyring-core = "1.0.0"
 thiserror = "2.0.21"
 zeroize = "1.9.1"

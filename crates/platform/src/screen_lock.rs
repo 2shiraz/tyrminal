@@ -4,9 +4,9 @@
 //!
 //! Linux: the screensaver's `ActiveChanged(true)` on the session bus (freedesktop and GNOME
 //! names) and logind's `Lock` signal for sessions on the system bus. Each bus is watched on its own
-//! thread with zbus's blocking API. macOS and Windows: not implemented yet (they need native
-//! notification APIs); `watch` reports that so the UI can say the vault does not lock with the
-//! screen on this platform.
+//! thread with zbus's blocking API. macOS (`com.apple.screenIsLocked`) and Windows
+//! (`WM_WTSSESSION_CHANGE` / `WTS_SESSION_LOCK`) use native APIs in `tyrminal-os-hooks`, the one
+//! crate allowed `unsafe` (ADR 0007). On macOS `watch` must run on the main thread.
 
 use std::sync::Arc;
 
@@ -78,8 +78,12 @@ mod imp {
 mod imp {
     use super::{OnLock, ScreenLockSupport};
 
-    pub(super) fn watch(_on_lock: OnLock) -> ScreenLockSupport {
-        ScreenLockSupport::Unavailable
+    pub(super) fn watch(on_lock: OnLock) -> ScreenLockSupport {
+        if tyrminal_os_hooks::watch_screen_lock(on_lock) {
+            ScreenLockSupport::Watching
+        } else {
+            ScreenLockSupport::Unavailable
+        }
     }
 }
 
