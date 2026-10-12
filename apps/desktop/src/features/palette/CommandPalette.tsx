@@ -2,14 +2,20 @@ import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
+import type { Arrangement, Direction } from "../../app/workspace";
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
 import {
   IconColumns2,
   IconCornerDownLeft,
   IconFingerprint,
+  IconArrowUpRight,
+  IconCopy,
   IconHouse,
   IconHardDrive,
+  IconLayoutGrid,
+  IconMaximize2,
+  IconMinimize2,
   IconKeyRound,
   IconLock,
   IconPlay,
@@ -27,6 +33,7 @@ import {
   IconZoomOut,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 
@@ -88,6 +95,8 @@ export function CommandPalette({
   onDeployKey,
   broadcast,
   onToggleBroadcast,
+  workspace,
+  pick,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -103,6 +112,19 @@ export function CommandPalette({
   /** Whether the active tab broadcasts input; toggle offered only for split, connected tabs. */
   broadcast?: boolean | undefined;
   onToggleBroadcast?: (() => void) | undefined;
+  /** Tab and pane actions for the tab in front (absent on a page). */
+  workspace?:
+    | {
+        split: boolean;
+        focusLayout: boolean;
+        onDuplicate: () => void;
+        onArrange: (arrangement: Arrangement) => void;
+        onPaneToNewTab: () => void;
+        onSplitWith: (dir: Direction) => void;
+      }
+    | undefined;
+  /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
+  pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -120,6 +142,21 @@ export function CommandPalette({
 
   const items = useMemo<Item[]>(() => {
     const list: Item[] = [];
+    if (pick) {
+      for (const host of hosts.value ?? []) {
+        list.push({
+          id: `host-${host.id}`,
+          group: msg.palette.groupHosts,
+          label: host.label,
+          detail: msg.hosts.destination(host.username, host.address, host.port),
+          keywords: `${host.address} ${host.username}`,
+          icon: <Avatar label={host.label} size="sm" />,
+          run: () => pick.onPick(host),
+        });
+      }
+      list.push({ id: "local", group: msg.palette.groupActions, label: msg.nav.localTerminal, icon: <IconSquareTerminal size={16} />, run: () => pick.onPick("local") });
+      return list;
+    }
     for (const host of hosts.value ?? []) {
       list.push({
         id: `host-${host.id}`,
@@ -164,6 +201,27 @@ export function CommandPalette({
       list.push(action("zoom-reset", msg.palette.zoomReset, <IconZoomIn size={16} />, () => onAction("zoomReset"), "zoomReset"));
       list.push(action("close-pane", msg.palette.closePane, <IconX size={16} />, () => onAction("closePane"), "closePane"));
     }
+    // agent C: workspaces
+    if (workspace) {
+      list.push(action("split-right-with", msgC.panes.splitRightWith, <IconColumns2 size={16} />, () => workspace.onSplitWith("row")));
+      list.push(action("split-down-with", msgC.panes.splitDownWith, <IconRows2 size={16} />, () => workspace.onSplitWith("column")));
+      list.push(action("duplicate-tab", msgC.tabs.duplicate, <IconCopy size={16} />, workspace.onDuplicate));
+      if (workspace.split) {
+        list.push(
+          action(
+            "focus-layout",
+            workspace.focusLayout ? msgC.panes.leaveFocus : msgC.panes.focusLayout,
+            workspace.focusLayout ? <IconMinimize2 size={16} /> : <IconMaximize2 size={16} />,
+            () => onAction("toggleFocusLayout"),
+            "toggleFocusLayout",
+          ),
+        );
+        list.push(action("arrange-grid", msgC.panes.arrangeGrid, <IconLayoutGrid size={16} />, () => workspace.onArrange("grid")));
+        list.push(action("arrange-columns", msgC.panes.arrangeColumns, <IconColumns2 size={16} />, () => workspace.onArrange("columns")));
+        list.push(action("arrange-rows", msgC.panes.arrangeRows, <IconRows2 size={16} />, () => workspace.onArrange("rows")));
+        list.push(action("pane-new-tab", msgC.panes.toNewTab, <IconArrowUpRight size={16} />, workspace.onPaneToNewTab));
+      }
+    }
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -185,7 +243,7 @@ export function CommandPalette({
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate, workspace, pick, broadcast, onToggleBroadcast, onDeployKey]);
 
   const results = useMemo(() => {
     const scored = items
@@ -228,7 +286,7 @@ export function CommandPalette({
     <dialog
       ref={ref}
       className="palette"
-      aria-label={msg.palette.label}
+      aria-label={pick?.title ?? msg.palette.label}
       onCancel={(event) => {
         event.preventDefault();
         dismiss();
@@ -244,8 +302,8 @@ export function CommandPalette({
           aria-expanded="true"
           aria-controls={listId}
           aria-activedescendant={results[selected] ? `${listId}-${results[selected].item.id}` : undefined}
-          aria-label={msg.palette.placeholder}
-          placeholder={msg.palette.placeholder}
+          aria-label={pick?.title ?? msg.palette.placeholder}
+          placeholder={pick?.title ?? msg.palette.placeholder}
           value={query}
           autoFocus
           spellCheck={false}

@@ -336,8 +336,8 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
        return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
     );
-  /** Clicks a terminal tab with a real pointer (button 2 opens its menu). */
-  const clickTab = async (name, button = 0) => {
+  /** Clicks a terminal tab with a real pointer. */
+  const clickTab = async (name) => {
     const rect = await s.until(
       () =>
         s.execute(
@@ -346,7 +346,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
         ),
       { describe: `tab ${name}` },
     );
-    await s.clickAt(rect.x, rect.y, button);
+    await s.clickAt(rect.x, rect.y);
   };
   const selectTab = (name) => clickTab(name);
 
@@ -366,8 +366,19 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     await selectTab("Lab");
     await t.type("echo ORIGINAL-$((1+1))\n");
     await t.waitForText("ORIGINAL-2");
-    await clickTab("Lab", 2);
-    await s.clickButton("Duplicate tab", { within: "[role='menu']" });
+    // Keyboard route: the command palette's "Duplicate tab" acts on the tab in front.
+    await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+    const palette = await s.waitFor("dialog.palette input");
+    await s.type(palette, "Duplicate tab");
+    await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Duplicate tab") || null`), {
+      describe: "palette match",
+    });
+    await s.chord([KEYS.enter]);
+    const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+    await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ tabs: [...document.querySelectorAll(".tabstrip .tab")].map((e) => e.textContent), dialogs: [...document.querySelectorAll("dialog[open]")].map((d) => d.className + ":" + d.textContent.slice(0, 80)) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
     // A new session is a new server connection: the host key is confirmed again ("Trust once").
     await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the copy" });
     await s.clickButton("Trust once", { within: "dialog" });
@@ -376,10 +387,57 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     const tabs = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].map((e) => e.textContent)`);
     assert.equal(tabs.filter((x) => x.includes("Lab")).length, 2, JSON.stringify(tabs));
     // Its screen starts fresh: nothing from the original tab is replayed into it.
-    await t.waitForText(/\$ ?$/m, "a prompt in the copy");
+    await t.waitForText(/^\$/m, "a prompt in the copy");
     assert.doesNotMatch(await t.terminalText(), /ORIGINAL-2/);
     await t.type("echo COPY-$((2+2))\n");
     await t.waitForText("COPY-4");
     await app.screenshot("w02-duplicate");
+  });
+
+  test("16 panes of real local shells: the limit holds, a grid tiles them, input reaches only the focused one", async () => {
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    const visibleCount = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    const total = () => s.execute(`return document.querySelectorAll(".pane").length`);
+    // Other tabs already hold panes; split until 16 are open in all (the grid below re-tiles them).
+    const runCommand = async (name) => {
+      await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; (await total()) < 16 && i < 16; i += 1) {
+      const before = await total();
+      // The palette first, then the focused pane's own header button.
+      const button = i === 0 ? null : await s.find('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]');
+      if (button) await s.click(button);
+      else await runCommand("Split pane right");
+      await s.until(async () => (await total()) === before + 1, { describe: `pane ${before + 1}` });
+    }
+    assert.equal(await total(), 16);
+    // Repeated halving leaves the newest panes very narrow; tile them before using their headers.
+    await runCommand("Arrange panes in a grid");
+    await s.click(await s.waitFor('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]'));
+    await s.until(() => s.execute(`return document.body.textContent.includes("At most 16 panes can be open")`), { describe: "limit message" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ panes: document.querySelectorAll(".pane").length, focused: document.querySelector('.pane:not([hidden])[data-focused="true"]')?.getBoundingClientRect(), toasts: document.querySelector(".toasts, [role=region]")?.outerHTML?.slice(0, 300) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
+    assert.equal(await total(), 16);
+    const mine = await visibleCount();
+    // Every local pane reaches a connected shell.
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .status-dot")].filter((d) => d.dataset.tone === "ok").length`).then((n) => (n === mine ? n : null)),
+      { describe: "all panes connected", timeout: 30_000 },
+    );
+    await t.type("echo ONLY-HERE-$((6*7))\n");
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .xterm-rows")].filter((e) => e.textContent.includes("ONLY-HERE-42")).length`).then((n) => (n > 0 ? n : null)),
+      { describe: "echo in the focused pane" },
+    );
+    const panesWithText = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden])")].filter((p) => p.querySelector(".xterm-rows")?.textContent.includes("ONLY-HERE-42")).map((p) => p.dataset.focused)`);
+    assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
+    await app.screenshot("w03-sixteen-panes");
   });
 });

@@ -133,3 +133,6 @@ export const IconLink = svg(["path|d=M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07
 export const IconSave = svg(["path|d=M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "path|d=M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7", "path|d=M7 3v4a1 1 0 0 0 1 1h7"]);
 export const IconLayoutTemplate = svg(["rect|width=18|height=7|x=3|y=3|rx=1", "rect|width=9|height=7|x=3|y=14|rx=1", "rect|width=5|height=7|x=16|y=14|rx=1"]);
 export const IconFolderUp = svg(["path|d=M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z", "path|d=M12 10v6", "path|d=m9 13 3-3 3 3"]);
+export const IconMaximize2 = svg(["path|d=M15 3h6v6", "path|d=m21 3-7 7", "path|d=m3 21 7-7", "path|d=M9 21H3v-6"]);
+export const IconMinimize2 = svg(["path|d=m14 10 7-7", "path|d=M20 10h-6V4", "path|d=m3 21 7-7", "path|d=M4 14h6v6"]);
+export const IconAppWindow = svg(["rect|x=2|y=4|width=20|height=16|rx=2", "path|d=M10 4v4", "path|d=M2 8h20", "path|d=M6 4v4"]);

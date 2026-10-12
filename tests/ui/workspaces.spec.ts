@@ -81,7 +81,7 @@ test("duplicate: copies the arrangement after the source with new sessions, with
   await page.keyboard.press("Control+Shift+T");
   await page.getByRole("tab", { name: /api-gateway/ }).click();
   await page.keyboard.press("Alt+Shift+Equal");
-  await expect(page.locator(".workspace:not([hidden]) .pane")).toHaveCount(2);
+  await expect(page.locator(".pane:not([hidden])")).toHaveCount(2);
   await page.keyboard.press("Control+Shift+R");
   await page.getByRole("textbox", { name: "Rename tab" }).fill("gateway pair");
   await page.keyboard.press("Enter");
@@ -95,7 +95,7 @@ test("duplicate: copies the arrangement after the source with new sessions, with
   await expect(terminalTabs(page).nth(1)).toHaveText(/gateway pair/);
   await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(terminalTabs(page).nth(2)).toHaveText(/Local terminal/);
-  await expect(page.locator(".workspace:not([hidden]) .pane")).toHaveCount(2);
+  await expect(page.locator(".pane:not([hidden])")).toHaveCount(2);
   // Each copied pane opens a session of its own; nothing typed in the original is replayed.
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(4);
 
@@ -117,4 +117,138 @@ test("reorder: tabs move by drag and drop", async ({ page }) => {
   await page.getByRole("tab", { name: /Local terminal/ }).dragTo(page.getByRole("tab", { name: /api-gateway/ }), { targetPosition: { x: 4, y: 8 } });
   await expect(terminalTabs(page).nth(0)).toHaveText(/Local terminal/);
   await expect(terminalTabs(page).nth(1)).toHaveText(/api-gateway/);
+});
+
+const visiblePanes = (page: Page) => page.locator(".pane:not([hidden])");
+const paneBox = async (page: Page, label: string) => page.locator(`.pane:not([hidden])[aria-label="${label}"]`).boundingBox();
+
+test("multi-host workspace: a split can open a different host or a local shell", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("Split right with");
+  await page.keyboard.press("Enter");
+  const picker = page.getByRole("combobox", { name: /Open in a new pane to the right/ });
+  await expect(picker).toBeFocused();
+  // Only destinations are offered while picking.
+  await picker.fill("Lock");
+  await expect(page.getByRole("option")).toHaveCount(0);
+  await picker.fill("db-primary");
+  await page.keyboard.press("Enter");
+  await expect(visiblePanes(page)).toHaveCount(2);
+  await expect(page.locator('.pane[data-focused="true"]')).toHaveAttribute("aria-label", "db-primary");
+  const left = await paneBox(page, "api-gateway");
+  const right = await paneBox(page, "db-primary");
+  expect(left!.x).toBeLessThan(right!.x);
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(2);
+  const opened = await calls(page, "session_open_ssh");
+  expect(new Set(opened.map((c) => (c.args as { hostId: string }).hostId)).size).toBe(2);
+
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("Split down with");
+  await page.keyboard.press("Enter");
+  await page.getByRole("combobox", { name: /Open in a new pane below/ }).fill("Local terminal");
+  await page.keyboard.press("Enter");
+  await expect(visiblePanes(page)).toHaveCount(3);
+  await expect(page.locator('.pane[data-focused="true"]')).toHaveAttribute("aria-label", "Local terminal");
+  await expect.poll(async () => (await calls(page, "session_open_local")).length).toBe(1);
+});
+
+test("16 panes: the limit holds, a grid arrangement tiles them evenly, sessions survive", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  for (let i = 1; i < 16; i += 1) await page.keyboard.press(i % 2 ? "Alt+Shift+Equal" : "Alt+Shift+Minus");
+  await expect(page.locator(".pane")).toHaveCount(16);
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.getByText("At most 16 panes can be open. Close one first.")).toBeVisible();
+  await expect(page.locator(".pane")).toHaveCount(16);
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(16);
+
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("Arrange panes in a grid");
+  await page.keyboard.press("Enter");
+  const boxes = await page.locator(".pane").evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })));
+  const xs = new Set(boxes.map((b) => Math.round(b.x)));
+  const ys = new Set(boxes.map((b) => Math.round(b.y)));
+  expect(xs.size).toBe(4);
+  expect(ys.size).toBe(4);
+  const widths = boxes.map((b) => b.w);
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(2);
+  // Every pane still runs its own session: nothing was closed or reopened by rearranging.
+  expect(await calls(page, "session_close")).toHaveLength(0);
+  expect(await calls(page, "session_open_ssh")).toHaveLength(16);
+  // Each pane's terminal is sized to its tile.
+  await expect(page.locator(".pane .xterm")).toHaveCount(16);
+});
+
+test("focus layout: one pane fills the tab, the others are listed with their state", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await page.keyboard.press("Alt+Shift+Minus");
+  await expect(visiblePanes(page)).toHaveCount(3);
+  await page.keyboard.press("Control+Shift+Enter");
+  await expect(visiblePanes(page)).toHaveCount(1);
+  const list = page.getByRole("navigation", { name: "Panes in this tab" });
+  const items = list.locator(".focus-item");
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(2)).toHaveAttribute("aria-current", "true");
+  // The focused pane fills the whole pane area.
+  const area = await page.locator(".panes").boundingBox();
+  const shown = await visiblePanes(page).boundingBox();
+  expect(Math.abs(shown!.width - area!.width)).toBeLessThan(2);
+
+  // Output in a listed (hidden) pane is marked there. The newest session is the third pane (shown),
+  // so show the first and write to the third.
+  await items.nth(0).click();
+  await expect(items.nth(0)).toHaveAttribute("aria-current", "true");
+  await output(page, "hidden pane output\r\n");
+  await expect(items.nth(2)).toHaveAccessibleName(/new output/);
+  await items.nth(2).click();
+  await expect(items.nth(2)).not.toHaveAccessibleName(/new output/);
+
+  await page.keyboard.press("Control+Shift+Enter");
+  await expect(visiblePanes(page)).toHaveCount(3);
+  await expect(list).toHaveCount(0);
+  expect(await calls(page, "session_close")).toHaveLength(0);
+});
+
+test("reorder panes: swap with a neighbour by keyboard or by dragging the header", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("Split right with");
+  await page.keyboard.press("Enter");
+  await page.getByRole("combobox", { name: /Open in a new pane/ }).fill("db-primary");
+  await page.keyboard.press("Enter");
+  await expect(visiblePanes(page)).toHaveCount(2);
+  // db-primary (focused) is on the right; move it left.
+  await page.keyboard.press("Alt+Shift+ArrowLeft");
+  await expect.poll(async () => (await paneBox(page, "db-primary"))!.x < (await paneBox(page, "api-gateway"))!.x).toBe(true);
+  await expect(page.locator('.pane[data-focused="true"]')).toHaveAttribute("aria-label", "db-primary");
+  // Drag api-gateway's header grip onto db-primary: they swap back.
+  await page.locator('.pane[aria-label="api-gateway"] .pane-grip').dragTo(page.locator('.pane[aria-label="db-primary"] .terminal-host'));
+  await expect.poll(async () => (await paneBox(page, "api-gateway"))!.x < (await paneBox(page, "db-primary"))!.x).toBe(true);
+  expect(await calls(page, "session_close")).toHaveLength(0);
+});
+
+test("move a pane to its own tab: the session keeps running", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(visiblePanes(page)).toHaveCount(2);
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(2);
+  await expect(page.locator(".pane:not([hidden])").nth(1).locator(".xterm-rows")).toContainText("deploy@api-gateway");
+  await page.keyboard.type("echo moved");
+  await expect(page.locator('.pane[data-focused="true"] .xterm-rows')).toContainText("echo moved");
+  await page.locator('.pane[data-focused="true"]').getByRole("button", { name: "Move pane to a new tab" }).click();
+  await expect(terminalTabs(page)).toHaveCount(2);
+  await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(visiblePanes(page)).toHaveCount(1);
+  // Same session: the typed line is still on its screen, and nothing was reopened or closed.
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("echo moved");
+  expect(await calls(page, "session_open_ssh")).toHaveLength(2);
+  expect(await calls(page, "session_close")).toHaveLength(0);
+  await terminalTabs(page).nth(0).click();
+  await expect(visiblePanes(page)).toHaveCount(1);
 });

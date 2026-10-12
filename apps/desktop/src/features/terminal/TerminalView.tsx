@@ -755,5 +755,7 @@ function userIsElsewhere(pane: HTMLElement | null): boolean {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || active === document.body) return false;
   if (pane?.contains(active)) return false;
+  // Another terminal's input is not "elsewhere": the pane that became focused takes over.
+  if (active.classList.contains("xterm-helper-textarea")) return false;
   return active.matches("input, textarea, select, [contenteditable='true']") || active.closest("dialog, [role='menu']") !== null;
 }

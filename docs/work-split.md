@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Slice 2: layouts (multi-host splits, grid/focus, pane reorder) | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slice 1: tab duplicate (whole arrangement), session status indicators (unread, input needed, disconnected) | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Slice 3: named layout templates in the vault | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slices 1–2: tab duplicate, status indicators, multi-host splits, grid/focus layouts, pane reorder, 16 panes | — |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
@@ -160,3 +160,10 @@ Never merge these by hand; regenerate them after resolving the sources:
   (it used to be stored after), so a file or key-install call made right after "connected" no
   longer fails with "works in a connected SSH session only". Three lines moved; nothing else in the
   connection path changed. If B restructures `run_ssh`, keep this ordering.
+- **C → A (already done by C, keep it when merging):** in `tests/ui/behavior.spec.ts`, the broadcast
+  test now waits for the terminal's reply to its `ESC[6n` query to be sent before typing (one
+  `expect.poll` on the focused pane's `data-tx`). C fixed keyboard focus after a split (it used to
+  stay in the old pane), so the typing pane is now the one answering the query, and under load the
+  reply could land between typed keys. Nothing else in that file changed.
+- **C → B, D (record kinds):** agent C's vault record kinds use numbers 20–29 (layout templates
+  first). Suggest B 30–39 and D 40–49 so new kinds on parallel branches never collide.

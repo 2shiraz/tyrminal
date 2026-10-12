@@ -24,10 +24,13 @@ import { actionFor, tabIndexFor } from "../lib/shortcuts";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
+  type Arrangement,
   type Direction,
+  MAX_PANES,
   type Workspace,
   activePane,
   activeTab,
+  arrangeTab,
   closeOtherTabs,
   closePane,
   closeTab,
@@ -37,15 +40,20 @@ import {
   focusPane,
   focusPaneInActiveTab,
   markUnread,
+  movePane,
   moveTab,
   neighbour,
   openTab,
+  paneCount,
+  paneToNewTab,
   panesOf,
   patchPane,
   renameTab,
   selectTab,
+  setFocusMode,
   setRatio,
   splitPane,
+  swapPanes,
   tabTitle,
 } from "./workspace";
 
@@ -78,6 +86,8 @@ function Shell() {
   const panelOpen = sidePanel === "snippets";
   const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The palette can instead pick the destination of a new pane (a split with another host).
+  const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
@@ -158,9 +168,39 @@ function Shell() {
     return p ? (handles.current.get(p.id) ?? null) : null;
   }, []);
 
-  const split = useCallback((dir: Direction) => {
+  /** Splits `paneId` (the focused pane by default); at the pane limit, says so instead. */
+  const split = useCallback(
+    (dir: Direction, seed?: { target: TerminalTarget; label: string; identity: string }, paneId?: number) => {
+      const id = paneId ?? activePane(wsRef.current)?.id;
+      if (id === undefined) return;
+      if (paneCount(wsRef.current) >= MAX_PANES) {
+        notify("danger", msgC.panes.full);
+        return;
+      }
+      setWs((current) => splitPane(current, id, dir, seed));
+    },
+    [notify],
+  );
+
+  const duplicate = useCallback(
+    (id: number) => {
+      const current = wsRef.current;
+      const next = duplicateTab(current, id);
+      const t = current.tabs.find((x) => x.id === id);
+      if (next === current && t) notify("danger", msgC.tabs.duplicateFull(panesOf(t.layout).length));
+      else setWs(next);
+    },
+    [notify],
+  );
+
+  const arrange = useCallback((arrangement: Arrangement) => {
+    const t = activeTab(wsRef.current);
+    if (t) setWs((current) => arrangeTab(current, t.id, arrangement));
+  }, []);
+
+  const moveFocused = useCallback((towards: "left" | "right" | "up" | "down") => {
     const p = activePane(wsRef.current);
-    if (p) setWs((current) => splitPane(current, p.id, dir));
+    if (p) setWs((current) => movePane(current, p.id, towards));
   }, []);
 
   const closeFocused = useCallback(() => {
@@ -275,11 +315,29 @@ function Shell() {
           if (t) setRenaming(t.id);
           break;
         }
+        // agent C: workspaces
+        case "toggleFocusLayout": {
+          const t = activeTab(wsRef.current);
+          if (t && panesOf(t.layout).length > 1) setWs((current) => setFocusMode(current, t.id, !t.focusMode));
+          break;
+        }
+        case "movePaneLeft":
+          moveFocused("left");
+          break;
+        case "movePaneRight":
+          moveFocused("right");
+          break;
+        case "movePaneUp":
+          moveFocused("up");
+          break;
+        case "movePaneDown":
+          moveFocused("down");
+          break;
         default:
           break;
       }
     },
-    [openLocal, closeFocused, split, focusedHandle, moveFocus, navigate],
+    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate],
   );
 
   // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys
@@ -342,15 +400,11 @@ function Shell() {
           onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
           onSplit={(id, dir) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
-            if (t) setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
+            if (!t) return;
+            setWs((current) => selectTab(current, id));
+            split(dir, undefined, t.focused);
           }}
-          onDuplicate={(id) => {
-            const current = wsRef.current;
-            const next = duplicateTab(current, id);
-            const t = current.tabs.find((x) => x.id === id);
-            if (next === current && t) notify("danger", msgC.tabs.duplicateFull(panesOf(t.layout).length));
-            else setWs(next);
-          }}
+          onDuplicate={duplicate}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}
         />
@@ -395,6 +449,10 @@ function Shell() {
                 onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
                 onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
                 onUnread={(paneId) => setWs((current) => markUnread(current, paneId))}
+                onSelectPane={(paneId) => setWs((current) => focusPane(current, paneId))}
+                onSwap={(a, b) => setWs((current) => swapPanes(current, a, b))}
+                onFocusMode={(tabId, on) => setWs((current) => setFocusMode(current, tabId, on))}
+                onToNewTab={(paneId) => setWs((current) => paneToNewTab(current, paneId))}
                 onClose={(paneId) => {
                   setWs((current) => closePane(current, paneId));
                   setStatuses((current) => {
@@ -403,7 +461,7 @@ function Shell() {
                     return next;
                   });
                 }}
-                onSplit={(paneId, dir) => setWs((current) => splitPane(current, paneId, dir))}
+                onSplit={(paneId, dir) => split(dir, undefined, paneId)}
                 onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
                 onOpenKnownHosts={() => navigate("knownHosts")}
                 register={(paneId, handle) => {
@@ -435,6 +493,31 @@ function Shell() {
         />
       </div>
 
+      {pickingSplit && (
+        <CommandPalette
+          hasTerminal={false}
+          terminalConnected={false}
+          pick={{
+            title: msgC.panes.pickTitle(pickingSplit === "row" ? msgC.panes.right : msgC.panes.below),
+            onPick: (choice) => {
+              const dir = pickingSplit;
+              if (choice === "local") split(dir, { target: { kind: "local" }, label: msg.nav.localTerminal, identity: msg.terminal.local });
+              else split(dir, { target: { kind: "ssh", hostId: choice.id }, label: choice.label, identity: hostIdentity(choice) });
+            },
+          }}
+          onClose={() => {
+            setPickingSplit(null);
+            focusedHandle()?.focus();
+          }}
+          onConnect={() => undefined}
+          onNavigate={() => undefined}
+          onAction={() => undefined}
+          onToggleTheme={() => undefined}
+          onLocal={() => undefined}
+          onSnippet={() => undefined}
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette
           hasTerminal={terminalVisible && pane !== null}
@@ -449,6 +532,21 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          workspace={
+            terminalVisible && tab
+              ? {
+                  split: panesOf(tab.layout).length > 1,
+                  focusLayout: tab.focusMode,
+                  onDuplicate: () => duplicate(tab.id),
+                  onArrange: arrange,
+                  onPaneToNewTab: () => {
+                    const p = activePane(wsRef.current);
+                    if (p) setWs((current) => paneToNewTab(current, p.id));
+                  },
+                  onSplitWith: (dir) => setPickingSplit(dir),
+                }
+              : undefined
+          }
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={
             terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)

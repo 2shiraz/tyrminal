@@ -38,6 +38,8 @@ export interface Tab {
   customTitle: string | null;
   layout: Layout;
   focused: number;
+  /** Focus layout: the focused pane fills the tab and the others are listed beside it. */
+  focusMode: boolean;
 }
 
 export interface Workspace {
@@ -83,7 +85,7 @@ export function openTab(ws: Workspace, seed: PaneSeed): Workspace {
   if (paneCount(ws) >= MAX_PANES) return ws;
   const [next, paneId] = newPane(ws, seed);
   const tabId = next.nextId;
-  const tab: Tab = { id: tabId, customTitle: null, layout: { kind: "leaf", pane: paneId }, focused: paneId };
+  const tab: Tab = { id: tabId, customTitle: null, layout: { kind: "leaf", pane: paneId }, focused: paneId, focusMode: false };
   return { ...next, tabs: [...next.tabs, tab], active: tabId, nextId: tabId + 1 };
 }
 
@@ -96,12 +98,15 @@ function tabOfPane(ws: Workspace, pane: number): Tab | undefined {
   return ws.tabs.find((t) => panesOf(t.layout).includes(pane));
 }
 
-/** Splits `pane` and opens a new pane beside it with the same destination. */
-export function splitPane(ws: Workspace, pane: number, dir: Direction): Workspace {
+/**
+ * Splits `pane` and opens a new pane beside it: with the same destination, or with `seed` (a
+ * different host or a local shell, for a workspace of several sessions).
+ */
+export function splitPane(ws: Workspace, pane: number, dir: Direction, seed?: PaneSeed): Workspace {
   const tab = tabOfPane(ws, pane);
   const source = ws.panes[pane];
   if (!tab || !source || paneCount(ws) >= MAX_PANES) return ws;
-  const [next, created] = newPane(ws, { target: source.target, label: source.label, identity: source.identity });
+  const [next, created] = newPane(ws, seed ?? { target: source.target, label: source.label, identity: source.identity });
   const layout = replaceLeaf(tab.layout, pane, (leaf) => ({ kind: "split", dir, ratio: 0.5, a: leaf, b: { kind: "leaf", pane: created } }));
   return { ...next, tabs: next.tabs.map((t) => (t.id === tab.id ? { ...t, layout, focused: created } : t)) };
 }
@@ -125,7 +130,9 @@ export function closePane(ws: Workspace, pane: number): Workspace {
   if (layout === null) return removeTab({ ...ws, panes }, tab.id);
   const remaining = panesOf(layout);
   const focused = remaining.includes(tab.focused) ? tab.focused : (remaining[0] as number);
-  return { ...ws, panes, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, layout, focused } : t)) };
+  const next = { ...ws, panes, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, layout, focused } : t)) };
+  // In focus layout another pane comes on screen: its output is now seen.
+  return next.active === tab.id ? activate(next, tab.id) : next;
 }
 
 function removeTab(ws: Workspace, tabId: number): Workspace {
@@ -170,7 +177,7 @@ export function moveTab(ws: Workspace, from: number, to: number): Workspace {
 function activate(ws: Workspace, tabId: number | null): Workspace {
   const tab = ws.tabs.find((t) => t.id === tabId);
   if (!tab) return { ...ws, active: null };
-  const ids = panesOf(tab.layout).filter((id) => ws.panes[id]?.unread);
+  const ids = (tab.focusMode ? [tab.focused] : panesOf(tab.layout)).filter((id) => ws.panes[id]?.unread);
   if (ids.length === 0) return { ...ws, active: tab.id };
   const panes = { ...ws.panes };
   for (const id of ids) panes[id] = { ...(panes[id] as Pane), unread: false };
@@ -206,10 +213,10 @@ export function focusPaneInActiveTab(ws: Workspace, pane: number): Workspace {
   return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) };
 }
 
-/** Output arrived in `pane`: marked unread unless its tab is the one in front. */
+/** Output arrived in `pane`: marked unread unless it is on screen. */
 export function markUnread(ws: Workspace, pane: number): Workspace {
   const current = ws.panes[pane];
-  if (!current || current.unread || tabOfPane(ws, pane)?.id === ws.active) return ws;
+  if (!current || current.unread || paneVisible(ws, pane)) return ws;
   return { ...ws, panes: { ...ws.panes, [pane]: { ...current, unread: true } } };
 }
 
@@ -258,10 +265,95 @@ export function duplicateTab(ws: Workspace, tabId: number): Workspace {
     next = after;
     map.set(id, created);
   }
-  const copy: Tab = { id: next.nextId, customTitle: tab.customTitle, layout: remapLayout(tab.layout, map), focused: map.get(tab.focused) as number };
+  const copy: Tab = {
+    id: next.nextId,
+    customTitle: tab.customTitle,
+    layout: remapLayout(tab.layout, map),
+    focused: map.get(tab.focused) as number,
+    focusMode: tab.focusMode,
+  };
   const tabs = [...next.tabs];
   tabs.splice(index + 1, 0, copy);
   return { ...next, tabs, active: copy.id, nextId: copy.id + 1 };
+}
+
+// ---------- arrangement ----------
+
+export type Arrangement = "grid" | "columns" | "rows";
+
+/** Panes side by side (or stacked) in equal shares, as a balanced tree. */
+function line(ids: number[], dir: Direction): Layout {
+  if (ids.length === 1) return { kind: "leaf", pane: ids[0] as number };
+  const mid = Math.floor(ids.length / 2);
+  return { kind: "split", dir, ratio: mid / ids.length, a: line(ids.slice(0, mid), dir), b: line(ids.slice(mid), dir) };
+}
+
+/** An even layout of `ids` in reading order: a near-square grid, one row, or one column. */
+export function evenLayout(ids: number[], arrangement: Arrangement): Layout {
+  if (arrangement === "columns") return line(ids, "row");
+  if (arrangement === "rows") return line(ids, "column");
+  const cols = Math.ceil(Math.sqrt(ids.length));
+  const rows: Layout[] = [];
+  for (let i = 0; i < ids.length; i += cols) rows.push(line(ids.slice(i, i + cols), "row"));
+  const stack = (items: Layout[]): Layout => {
+    if (items.length === 1) return items[0] as Layout;
+    const mid = Math.floor(items.length / 2);
+    return { kind: "split", dir: "column", ratio: mid / items.length, a: stack(items.slice(0, mid)), b: stack(items.slice(mid)) };
+  };
+  return stack(rows);
+}
+
+/** Rearranges a tab's panes evenly; sessions are untouched (panes are never remounted). */
+export function arrangeTab(ws: Workspace, tabId: number, arrangement: Arrangement): Workspace {
+  return {
+    ...ws,
+    tabs: ws.tabs.map((t) => (t.id === tabId ? { ...t, layout: evenLayout(panesOf(t.layout), arrangement), focusMode: false } : t)),
+  };
+}
+
+export function setFocusMode(ws: Workspace, tabId: number, on: boolean): Workspace {
+  return { ...ws, tabs: ws.tabs.map((t) => (t.id === tabId && t.focusMode !== on ? { ...t, focusMode: on } : t)) };
+}
+
+function swapLeaves(layout: Layout, a: number, b: number): Layout {
+  if (layout.kind === "leaf") return layout.pane === a ? { kind: "leaf", pane: b } : layout.pane === b ? { kind: "leaf", pane: a } : layout;
+  return { ...layout, a: swapLeaves(layout.a, a, b), b: swapLeaves(layout.b, a, b) };
+}
+
+/** Exchanges the positions of two panes of the same tab. Focus stays with the moved pane. */
+export function swapPanes(ws: Workspace, a: number, b: number): Workspace {
+  const tab = tabOfPane(ws, a);
+  if (!tab || a === b || !panesOf(tab.layout).includes(b)) return ws;
+  return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, layout: swapLeaves(t.layout, a, b) } : t)) };
+}
+
+/** Moves `pane` one place towards a side by exchanging it with its neighbour there. */
+export function movePane(ws: Workspace, pane: number, towards: "left" | "right" | "up" | "down"): Workspace {
+  const tab = tabOfPane(ws, pane);
+  if (!tab) return ws;
+  const other = neighbour(tab.layout, pane, towards);
+  return other === null ? ws : swapPanes(ws, pane, other);
+}
+
+/** Takes `pane` out of its tab into a new tab right after it (its session keeps running). */
+export function paneToNewTab(ws: Workspace, pane: number): Workspace {
+  const index = ws.tabs.findIndex((t) => panesOf(t.layout).includes(pane));
+  const tab = ws.tabs[index];
+  if (!tab || panesOf(tab.layout).length < 2) return ws;
+  const layout = removeLeaf(tab.layout, pane) as Layout;
+  const remaining = panesOf(layout);
+  const rest: Tab = { ...tab, layout, focused: remaining.includes(tab.focused) ? tab.focused : (remaining[0] as number) };
+  const created: Tab = { id: ws.nextId, customTitle: null, layout: { kind: "leaf", pane }, focused: pane, focusMode: false };
+  const tabs = [...ws.tabs];
+  tabs.splice(index, 1, rest, created);
+  return activate({ ...ws, tabs, nextId: ws.nextId + 1 }, created.id);
+}
+
+/** Panes that are on screen: all panes of the tab in front, or only its focused one in focus layout. */
+export function paneVisible(ws: Workspace, pane: number): boolean {
+  const tab = tabOfPane(ws, pane);
+  if (!tab || tab.id !== ws.active) return false;
+  return !tab.focusMode || tab.focused === pane;
 }
 
 export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>): Workspace {

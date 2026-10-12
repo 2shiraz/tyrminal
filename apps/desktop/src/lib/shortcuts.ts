@@ -28,7 +28,13 @@ export type ActionId =
   | "lock"
   | "renameTab"
   | "copy"
-  | "paste";
+  | "paste"
+  // agent C: workspaces
+  | "toggleFocusLayout"
+  | "movePaneLeft"
+  | "movePaneRight"
+  | "movePaneUp"
+  | "movePaneDown";
 
 export interface Binding {
   key: string;
@@ -62,6 +68,12 @@ const mac: Record<ActionId, Binding> = {
   renameTab: { key: "r", mod: true, shift: true },
   copy: { key: "c", mod: true },
   paste: { key: "v", mod: true },
+  // agent C: workspaces
+  toggleFocusLayout: { key: "Enter", mod: true, shift: true },
+  movePaneLeft: { key: "ArrowLeft", mod: true, alt: true, shift: true },
+  movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
+  movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
+  movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -88,6 +100,12 @@ const other: Record<ActionId, Binding> = {
   renameTab: { key: "r", ctrl: true, shift: true },
   copy: { key: "c", ctrl: true, shift: true },
   paste: { key: "v", ctrl: true, shift: true },
+  // agent C: workspaces
+  toggleFocusLayout: { key: "Enter", ctrl: true, shift: true },
+  movePaneLeft: { key: "ArrowLeft", alt: true, shift: true },
+  movePaneRight: { key: "ArrowRight", alt: true, shift: true },
+  movePaneUp: { key: "ArrowUp", alt: true, shift: true },
+  movePaneDown: { key: "ArrowDown", alt: true, shift: true },
 };
 
 export const bindings: Record<ActionId, Binding> = isMac ? mac : other;
@@ -138,8 +156,8 @@ export function tabIndexFor(event: KeyboardEvent): number | null {
 }
 
 const KEY_NAMES: Record<string, string> = isMac
-  ? { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓", Tab: "⇥", "=": "=", "-": "−" }
-  : { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓", Tab: "Tab", "=": "+", "-": "−" };
+  ? { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓", Tab: "⇥", "=": "=", "-": "−", Enter: "↩" }
+  : { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓", Tab: "Tab", "=": "+", "-": "−", Enter: "Enter" };
 
 /** Key caps for display, e.g. ["⌘", "K"] or ["Ctrl", "Shift", "K"]. */
 export function keyCaps(binding: Binding): string[] {

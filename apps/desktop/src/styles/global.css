@@ -3065,3 +3065,85 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* All panes share one container; those of background tabs (and, in focus layout, the others of
+   the tab in front) stay mounted but are not shown. */
+.pane[hidden] {
+  display: none;
+}
+
+.pane[data-drop="swap"] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.pane-grip {
+  display: inline-flex;
+  margin-left: -4px;
+  cursor: grab;
+  opacity: 0.7;
+}
+
+.pane-grip:active {
+  cursor: grabbing;
+}
+
+.focus-list {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 220px;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow-y: auto;
+}
+
+.focus-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+}
+
+.focus-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  list-style: none;
+}
+
+.focus-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.focus-item .row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.focus-item .row-main > span:last-child {
+  font-size: var(--text-xs);
+}
+
+.focus-item:hover {
+  background: var(--bg-hover);
+}
+
+.focus-item[aria-current="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
