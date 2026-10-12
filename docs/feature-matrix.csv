@@ -306,3 +306,7 @@ P-24,Quick port forward from detected listening ports,product-addition,,in_scope
 P-25,Paste safety: hidden control characters and named target,product-addition,,in_scope,05,,,,NOT_STARTED,,,
 P-26,Production host guardrails,product-addition,,in_scope,04/05,,,,NOT_STARTED,,,
 P-27,"Security review of keys, sign-in methods, certificates and known hosts",product-addition,,in_scope,04,,,,NOT_STARTED,,,
+P-28,Search across all open sessions,product-addition,,in_scope,05,,,,NOT_STARTED,,,
+P-29,Save or copy one command's output,product-addition,,in_scope,05,,,,NOT_STARTED,,,
+P-30,Encrypted host and group notes,product-addition,,in_scope,04,,,,NOT_STARTED,,,
+P-31,tmux and screen session awareness,product-addition,,in_scope,05,,,,NOT_STARTED,,,

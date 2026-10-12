@@ -1,11 +1,12 @@
-# ADR 0011: Owner-requested features P-23 to P-27
+# ADR 0011: Owner-requested features P-23 to P-31
 
 Status: accepted (owner request), 2026-10-12
 
 ## Context
 
-The owner asked for five features that are not in the reference matrix. They are recorded as
-product additions P-23 to P-27 in BUILD_SPEC §12.4 so they are tracked like every other row.
+The owner asked for these features, which are not in the reference matrix; P-28 to P-31 were
+chosen by the coordinator under the owner's standing request to add useful features. They are
+recorded as product additions P-23 to P-31 in BUILD_SPEC §12.4 so they are tracked like every other row.
 This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC §0.1 still apply.
 
 ## Decision
@@ -77,6 +78,41 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
 - The review never shows secret values.
 - Each finding links to the existing flow that fixes it: generate key, deploy key, edit host,
   remove known host. The review never changes anything automatically.
+
+### P-28: search across all open sessions
+
+- One search box covers the scrollback of every open session and lists the matches by tab.
+  Choosing a match focuses that tab and scrolls to it.
+- The search runs only in memory over scrollback the app already holds. Nothing is indexed to
+  disk, and search terms are never logged.
+- Recordings (P-16) are not searched here.
+
+### P-29: save or copy one command's output
+
+- From a command mark (AUT-06), the user can copy that command's output or save it to a file.
+  The copy or file holds the output only, without the prompt and the command line.
+- Saving uses the system save dialog every time. There is no default folder and no automatic save.
+- Without shell integration, the action is not offered. The app does not guess where output
+  begins and ends.
+
+### P-30: encrypted host and group notes
+
+- Plain-text or Markdown notes on a host or group, stored as encrypted vault records like every
+  other record. They are included in encrypted backups.
+- Notes are shown in the host details panel and the connection side panel.
+- Markdown is rendered without HTML, scripts or remote images. Links open only after a click and
+  only for `http`, `https` and `ssh` links.
+- A code block in a note can be pasted into a session through the paste review (P-14/P-25).
+  It can never be run directly.
+
+### P-31: tmux and screen session awareness
+
+- On request, or when the session panel opens, the app lists the server's tmux and screen sessions
+  over a separate exec channel on the verified connection. It never types into the user's shell.
+- Session names from the server are untrusted. They are shown as plain text, and an attach command
+  is built only from a name that matches a strict pattern; anything else is not offered.
+- After an automatic reconnect (CON-13), the app may offer to reattach the session the user was
+  in. It never reattaches without that choice.
 
 ## Consequences
 
