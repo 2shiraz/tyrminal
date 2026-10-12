@@ -5,12 +5,15 @@ import { useVaultData } from "../../app/vaultData";
 import { Notice, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { groupDefaults as groupDefaultsApi, tunnels as tunnelsApi } from "../../lib/ipc";
 import { msgB } from "../../lib/messages-b";
+import { msgAutosave } from "../../lib/messages-autosave";
 import { msgDefaults } from "../../lib/messages-defaults";
+import { validAddress } from "../hosts/fieldRules";
+import { DropSecretNotice, type LiveProxySecret, LiveSecretField } from "../hosts/LiveSecret";
 import { parsePort } from "./rules";
 
 type ProxyChoice = "none" | ProxyType;
 
-interface Loaded {
+export interface Loaded {
   jumpHostId: string | null;
   proxy: ProxySummary | null;
   /** HST-05: the host uses its group's route instead of its own. */
@@ -90,7 +93,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
 
   const port = parsePort(proxyPort, false);
   const usesGroup = inherit && groupRoute !== null;
-  const proxyValid = usesGroup || proxyKind === "none" || (proxyHost.trim() !== "" && port !== null);
+  const proxyValid = usesGroup || proxyKind === "none" || (validAddress(proxyHost) && port !== null);
   const passwordStored = loaded.proxy?.passwordStored === true && loaded.proxy.username === proxyUser.trim();
 
   const input = useCallback(
@@ -113,19 +116,58 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     [jumpHostId, keyExchange, noPortSuggestions, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
   );
 
-  const changed =
+  /** The route (and key exchange) differs from the stored one, a typed proxy password aside. */
+  const routeChanged =
     keyExchange !== loaded.keyExchange ||
     noPortSuggestions !== loaded.noPortSuggestions ||
     usesGroup !== (loaded.inherit && groupRoute !== null) ||
     (!usesGroup &&
       (jumpHostId !== loaded.jumpHostId ||
-    proxyPassword.length > 0 ||
-    (proxyKind === "none") !== (loaded.proxy === null) ||
-    (loaded.proxy !== null &&
-      (proxyKind !== loaded.proxy.kind ||
-        proxyHost !== loaded.proxy.host ||
-        port !== loaded.proxy.port ||
-        proxyUser.trim() !== loaded.proxy.username))));
+        (proxyKind === "none") !== (loaded.proxy === null) ||
+        (loaded.proxy !== null &&
+          (proxyKind !== loaded.proxy.kind || proxyHost !== loaded.proxy.host || port !== loaded.proxy.port || proxyUser.trim() !== loaded.proxy.username))));
+  const changed = routeChanged || (!usesGroup && proxyPassword.length > 0);
+  /** Saving the route as it stands would drop the stored proxy password (the core keeps it only for the same proxy user). */
+  const dropsPassword =
+    loaded.proxy?.passwordStored === true &&
+    (usesGroup || proxyKind === "none" || proxyUser.trim() !== loaded.proxy.username);
+
+  /** Autosave: the route was written as `written` (with a proxy password when `withPassword`). */
+  const markStored = useCallback(
+    (written: HostConnectionInput, withPassword: boolean) => {
+      setLoaded((before) => {
+        const keep = before.proxy?.passwordStored === true && written.proxy !== null && !written.inherit && before.proxy.username === written.proxy.username.trim();
+        return {
+          jumpHostId: written.inherit ? null : written.jumpHostId,
+          inherit: written.inherit,
+          keyExchange: written.keyExchange,
+          noPortSuggestions: written.noPortSuggestions,
+          proxy:
+            written.inherit || written.proxy === null
+              ? null
+              : {
+                  kind: written.proxy.kind,
+                  host: written.proxy.host,
+                  port: written.proxy.port,
+                  username: written.proxy.username.trim(),
+                  passwordStored: written.proxy.username.trim() !== "" && (withPassword || keep),
+                },
+        };
+      });
+      if (withPassword) setProxyPassword("");
+    },
+    [],
+  );
+  /** Undo: puts the fields back to a stored route (the next autosave writes it). */
+  const restore = useCallback((route: Loaded) => {
+    setInherit(route.inherit);
+    setKeyExchange(route.keyExchange);
+    setJumpHostId(route.jumpHostId);
+    setProxyKind(route.proxy?.kind ?? "none");
+    setProxyHost(route.proxy?.host ?? "");
+    setProxyPort(route.proxy ? String(route.proxy.port) : "");
+    setProxyUser(route.proxy?.username ?? "");
+  }, []);
 
   /** Saves the settings for an existing host (before its basics). */
   const saveBefore = useCallback(async () => {
@@ -145,6 +187,13 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     ready,
     valid: proxyValid,
     changed,
+    routeChanged,
+    dropsPassword,
+    loaded,
+    input,
+    markStored,
+    restore,
+    proxyHostInvalid: !usesGroup && proxyKind !== "none" && !validAddress(proxyHost),
     inherit: usesGroup,
     setInherit,
     groupRoute,
@@ -181,10 +230,13 @@ export function HostAdvancedSection({
   host,
   state,
   embedded = false,
+  live,
 }: {
   host: HostSummary | null;
   state: ReturnType<typeof useHostAdvanced>;
   embedded?: boolean;
+  /** Autosaving editors: the proxy password is set on its own, and a change that drops it waits for a decision. */
+  live?: LiveProxySecret | undefined;
 }) {
   const { hosts } = useVaultData();
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
@@ -259,28 +311,46 @@ export function HostAdvancedSection({
         {p.kind !== "none" && (
           <>
             <div className="split" style={{ gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)" }}>
-              <TextField label={msgB.advanced.proxyHost} value={p.host} onChange={state.setProxyHost} maxLength={253} />
+              <TextField
+                label={msgB.advanced.proxyHost}
+                value={p.host}
+                onChange={state.setProxyHost}
+                maxLength={253}
+                error={live && state.proxyHostInvalid && state.routeChanged ? msgAutosave.proxyHost : undefined}
+              />
               <TextField
                 label={msgB.advanced.proxyPort}
                 value={p.port}
                 onChange={state.setProxyPort}
                 inputMode="numeric"
                 placeholder={p.kind === "http" ? "3128" : "1080"}
-                error={p.port.trim() !== "" && parsePort(p.port, false) === null ? msgB.tunnels.invalidPort : undefined}
+                error={(p.port.trim() !== "" || (live && state.routeChanged)) && parsePort(p.port, false) === null ? msgB.tunnels.invalidPort : undefined}
                 maxLength={5}
               />
             </div>
             <div className="split" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
               <TextField label={msgB.advanced.proxyUser} value={p.user} onChange={state.setProxyUser} hint={msgB.advanced.proxyUserHint} maxLength={255} />
-              {p.user.trim() !== "" && (
-                <SecretField
-                  label={msgB.advanced.proxyPassword}
-                  value={p.password}
-                  onChange={state.setProxyPassword}
-                  hint={p.passwordStored ? msgB.advanced.proxyPasswordKeep : undefined}
-                  maxLength={255}
-                />
-              )}
+              {p.user.trim() !== "" &&
+                (live ? (
+                  <LiveSecretField
+                    label={msgB.advanced.proxyPassword}
+                    value={p.password}
+                    onChange={state.setProxyPassword}
+                    stored={p.passwordStored}
+                    maxLength={255}
+                    canSet={live.canSet}
+                    onSet={live.set}
+                    setLabel={msgAutosave.setProxyPassword}
+                  />
+                ) : (
+                  <SecretField
+                    label={msgB.advanced.proxyPassword}
+                    value={p.password}
+                    onChange={state.setProxyPassword}
+                    hint={p.passwordStored ? msgB.advanced.proxyPasswordKeep : undefined}
+                    maxLength={255}
+                  />
+                ))}
             </div>
             {p.kind === "http" && p.user.trim() !== "" && <Notice tone="warning">{msgB.advanced.httpCleartext}</Notice>}
           </>
@@ -305,6 +375,10 @@ export function HostAdvancedSection({
           </select>
           <span className="hint">{msgB.advanced.keyExchangeHints[state.keyExchange]}</span>
         </label>
+        {live && state.routeChanged && !state.valid && <p className="hint">{msgAutosave.routeHeld}</p>}
+        {live && state.routeChanged && state.valid && state.dropsPassword && (
+          <DropSecretNotice text={msgAutosave.removesProxyPassword} action={msgAutosave.removeProxyPassword} onRemove={live.remove} />
+        )}
 
         <Switch
           label={msgB.quick.hostSetting}

@@ -1910,6 +1910,11 @@ export function installMockBackend(options) {
     callbacks,
     async invoke(cmd, args = {}, opts = {}) {
       calls.push({ cmd, args: cmd === "session_write" ? "<bytes>" : args });
+      // Tests can make the next N calls of a command fail (autosave's "Couldn't save – Retry").
+      if (window.__mockFailNext?.[cmd] > 0) {
+        window.__mockFailNext[cmd] -= 1;
+        throw { code: "INTERNAL", message: "The vault could not be written." };
+      }
       const handler = handlers[cmd];
       if (!handler) throw { code: "INTERNAL", message: `mock: unhandled ${cmd}` };
       return handler(args, opts);
