@@ -65,3 +65,15 @@ test("protocols: a serial host picks a device and line settings", async ({ page 
     },
   });
 });
+
+test("protocols: notices from Tyrminal show in the session, not only inside a password prompt", async ({ page }) => {
+  // Regression: the Telnet warning and "the server used your forwarded key" arrived as server
+  // banners, which the terminal shows only inside a password dialog, so nobody saw them.
+  const dialog = await addHost(page);
+  await dialog.getByLabel("Name", { exact: true }).fill("old switch");
+  await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("telnet");
+  await dialog.getByLabel("Address").fill("192.0.2.40");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Connect to old switch" }).first().click();
+  await expect(page.getByText("Telnet is not encrypted: anything you type here")).toBeVisible();
+});

@@ -130,6 +130,9 @@ export function installMockBackend(options) {
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
     const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
     state.sessions.set(sessionId, s);
+    // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
+    if (host?.protocol?.type === "telnet")
+      setTimeout(() => channelSend(args.events, { type: "notice", text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network." }), 5);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const steps =
