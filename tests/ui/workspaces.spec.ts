@@ -382,3 +382,152 @@ test("templates: Connect all, and a restore that would pass 16 panes is refused"
   await expect(page.getByText("Not enough room: this layout has 2 panes and at most 16 can be open.")).toBeVisible();
   await expect(page.locator(".pane")).toHaveCount(15);
 });
+
+test("broadcast target review: the exact receiving panes are listed and confirmed first", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await paletteRun(page, "Split right with");
+  await page.getByRole("combobox", { name: /Open in a new pane/ }).fill("db-primary");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
+
+  await paletteRun(page, "Type into every pane");
+  const review = page.getByRole("alertdialog", { name: "Type into these 2 panes?" });
+  const list = review.getByRole("list", { name: "Panes that will receive typed input" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  await expect(list).toContainText("api-gateway");
+  await expect(list).toContainText("db-primary");
+  await expect(list).toContainText("deploy@");
+  // The safe choice has focus; Escape cancels and nothing is enabled.
+  await expect(review.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(review).toHaveCount(0);
+  await expect(page.getByTestId("broadcast")).toHaveCount(0);
+  await expect(page.locator(".pane[data-broadcast]")).toHaveCount(0);
+
+  await paletteRun(page, "Type into every pane");
+  await review.getByRole("button", { name: "Type into 2 panes" }).click();
+  await expect(page.getByTestId("broadcast")).toHaveText("Typing into 2 panes");
+  await expect(page.locator(".pane[data-broadcast]")).toHaveCount(2);
+});
+
+test("broadcast target review: a pane that changes during the review blocks the start", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
+  await paletteRun(page, "Type into every pane");
+  const review = page.getByRole("alertdialog", { name: "Type into these 2 panes?" });
+  await expect(review).toBeVisible();
+  // The newest session drops while the list is on screen.
+  await drop(page);
+  await expect(page.locator('.pane .status-dot[data-tone="bad"]')).toHaveCount(1);
+  await review.getByRole("button", { name: "Type into 2 panes" }).click();
+  await expect(page.getByText("The panes changed while you were reviewing them. Review the list again.")).toBeVisible();
+  await expect(page.getByTestId("broadcast")).toHaveCount(0);
+  await expect(page.locator(".pane[data-broadcast]")).toHaveCount(0);
+});
+
+async function openSettings(page: Page) {
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Shortcuts and input" })).toBeVisible();
+}
+
+test("keyboard customization: rebinding, terminal keys refused, conflicts refused, reset", async ({ page }) => {
+  await openApp(page);
+  await openSettings(page);
+  const list = page.getByRole("list", { name: "Application shortcuts" });
+  const row = (action: string) => list.locator(`li[data-action="${action}"]`);
+
+  // Ctrl with a single key belongs to the terminal.
+  await page.getByRole("button", { name: "Change shortcut for Command palette" }).click();
+  await expect(row("palette")).toContainText("Press the new shortcut");
+  await page.keyboard.press("Control+KeyC");
+  await expect(row("palette").getByRole("alert")).toHaveText(/belongs to the terminal/);
+  // A plain key is refused too.
+  await page.keyboard.press("KeyP");
+  await expect(row("palette").getByRole("alert")).toHaveText(/belongs to the terminal/);
+  // A shortcut another action uses is refused.
+  await page.keyboard.press("Control+Shift+KeyF");
+  await expect(row("palette").getByRole("alert")).toHaveText("That shortcut is already used for Find in terminal.");
+  // While recording, shortcuts do not run (Ctrl+Shift+K did not open the palette).
+  await expect(page.getByRole("dialog", { name: /Command palette|Type a command/ })).toHaveCount(0);
+  await page.keyboard.press("Alt+KeyP");
+  await expect(row("palette")).toContainText("Alt");
+  await expect(row("palette")).toContainText("P");
+  // Stored with the preferences (validated again natively).
+  await expect
+    .poll(async () => JSON.stringify((await calls(page, "prefs_set")).at(-1)?.args ?? null))
+    .toContain('"action":"palette","key":"p","ctrl":false,"alt":true,"shift":false,"meta":false');
+
+  // The new shortcut works, the old one no longer does.
+  await page.keyboard.press("Alt+KeyP");
+  await expect(page.getByRole("combobox", { name: /Type a command/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Shift+KeyK");
+  await expect(page.getByRole("combobox", { name: /Type a command/ })).toHaveCount(0);
+
+  // Removing a shortcut leaves the action without one; reset restores the default.
+  await page.getByRole("button", { name: "Remove shortcut for Rename tab" }).click();
+  await expect(row("renameTab")).toContainText("No shortcut");
+  await page.getByRole("button", { name: "Reset all shortcuts" }).click();
+  await expect(row("palette")).toContainText("Ctrl");
+  await page.keyboard.press("Control+Shift+KeyK");
+  await expect(page.getByRole("combobox", { name: /Type a command/ })).toBeFocused();
+});
+
+test("highlighting: words and IP addresses are colored on screen; the text and input are unchanged", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await openSettings(page);
+  await page.getByRole("switch", { name: "Highlight output" }).or(page.getByLabel("Highlight output")).first().check();
+  await page.getByLabel("Word to highlight").fill("error");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator(".highlight-words")).toContainText("error");
+
+  await connectFromPalette(page, "api-gateway");
+  const writesBefore = (await calls(page, "session_write")).length;
+  const line = "build ERROR at 10.0.0.12 from fe80::1 at 12:30:45, mac aa:bb:cc:dd:ee:ff, errors=0";
+  await output(page, `\r\n${line}\r\n`);
+  const marks = page.locator(".term-highlight");
+  await expect(marks).toHaveCount(3);
+  await expect(page.locator('.term-highlight[data-tone="danger"]')).toHaveCount(1);
+  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(2);
+  // The screen text is exactly what arrived, and highlighting sent nothing.
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
+  expect(await calls(page, "session_write")).toHaveLength(writesBefore);
+
+  // Turned off: the decorations go away.
+  await openSettings(page);
+  await page.getByLabel("Highlight output").first().uncheck();
+  await page.getByRole("tab", { name: /api-gateway/ }).click();
+  await expect(marks).toHaveCount(0);
+});
+
+test("character encoding: a legacy encoding decodes output and encodes input; what it cannot write is not sent", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  const rows = page.locator(".pane:not([hidden]) .xterm-rows");
+  const bytes = (b: number[]) => page.evaluate((x) => (window as unknown as { __mockOutputBytes: (b: number[]) => void }).__mockOutputBytes(x), b);
+  // UTF-8 (the default): a lone Latin-1 byte is not valid UTF-8 and xterm drops it.
+  await bytes([0x0d, 0x0a, 0x63, 0x61, 0x66, 0xe9, 0x31, 0x0d, 0x0a]);
+  await expect(rows).toContainText("caf1");
+
+  await paletteRun(page, "Change character encoding");
+  const dialog = page.getByRole("dialog", { name: "Character encoding for this session" });
+  await dialog.getByLabel("Encoding").selectOption("windows-1252");
+  await dialog.getByRole("button", { name: "Use this encoding" }).click();
+  await expect(page.locator(".term-encoding")).toHaveText("Western (Windows-1252 / ISO-8859-1)");
+  await bytes([0x63, 0x61, 0x66, 0xe9, 0x32, 0x0d, 0x0a]);
+  await expect(rows).toContainText("café2");
+
+  // Typed text is encoded as Windows-1252: the mock decodes input as UTF-8, so the single byte 0xE9
+  // comes back as U+FFFD, which (UTF-8 EF BF BD) reads as "ï¿½" in Windows-1252.
+  await expect(page.locator('.pane[data-focused="true"] .xterm-helper-textarea')).toBeFocused();
+  await page.keyboard.type("xé");
+  await expect(rows).toContainText("xï¿½");
+  // A character Windows-1252 does not have is not sent, and the user is told.
+  const before = (await calls(page, "session_write")).length;
+  await page.keyboard.type("日");
+  await expect(page.getByText("Not sent: 日 cannot be written in Western (Windows-1252 / ISO-8859-1).")).toBeVisible();
+  expect(await calls(page, "session_write")).toHaveLength(before);
+});

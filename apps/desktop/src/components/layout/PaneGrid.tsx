@@ -1,4 +1,4 @@
-import type { TerminalPreferences } from "@tyrminal/contracts";
+import type { TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState } from "react";
 
 import { type Direction, type Pane, type Tab, type Workspace, activeTab, panesOf, paneRects } from "../../app/workspace";
@@ -18,6 +18,7 @@ const pct = (v: number) => `${(v * 100).toFixed(4)}%`;
 export function PaneGrid({
   ws,
   prefs,
+  workspace,
   panel,
   onPatch,
   onStatus,
@@ -38,6 +39,7 @@ export function PaneGrid({
 }: {
   ws: Workspace;
   prefs: TerminalPreferences;
+  workspace?: WorkspacePreferences | undefined;
   panel: ReactNode;
   onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>) => void;
   onStatus: (pane: number, status: PaneStatus) => void;
@@ -160,6 +162,7 @@ export function PaneGrid({
                   visible={visible}
                   focused={focused}
                   prefs={prefs}
+                  workspace={workspace}
                   onIndicator={(indicator) => onPatch(id, { indicator })}
                   onTitle={(remoteTitle) => onPatch(id, { remoteTitle })}
                   onStatus={(status) => onStatus(id, status)}

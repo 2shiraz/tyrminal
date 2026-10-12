@@ -21,9 +21,12 @@ import { snippets as snippetsApi, vault } from "../lib/ipc";
 import { layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
+import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
 import { msgC } from "../lib/messages-c";
-import { actionFor, tabIndexFor } from "../lib/shortcuts";
+import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
+import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -84,6 +87,8 @@ function hostIdentity(host: HostSummary): string {
 
 function Shell() {
   const { prefs, resolvedTheme, update } = usePreferences();
+  // The user's shortcuts replace the defaults before anything below reads them.
+  applyBindingOverrides(workspacePrefs(prefs.workspace).bindings);
   const data = useVaultData();
   const notify = useToast();
   const [destination, setDestination] = useState<Destination>("home");
@@ -99,6 +104,9 @@ function Shell() {
   // Named layout templates: listed from the vault, saved only on an explicit request.
   const savedLayouts = useLoaded(layoutsApi.list);
   const [savingAs, setSavingAs] = useState(false);
+  const [choosingEncoding, setChoosingEncoding] = useState<{ paneId: number; current: string; target: string } | null>(null);
+  // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
+  const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
@@ -143,6 +151,17 @@ function Shell() {
       return next ?? current;
     });
   }, [ws, statuses]);
+
+  /** The panes (and their current sessions) that broadcast in `tabId` would send to. */
+  const broadcastTargets = useCallback(
+    (tabId: number): BroadcastTarget[] =>
+      broadcastPanes(tabId).flatMap((id) => {
+        const p = wsRef.current.panes[id];
+        const sessionId = handles.current.get(id)?.sessionId();
+        return p && sessionId ? [{ paneId: id, sessionId, label: p.label, identity: p.identity }] : [];
+      }),
+    [broadcastPanes],
+  );
 
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
@@ -506,6 +525,7 @@ function Shell() {
               <PaneGrid
                 ws={ws}
                 prefs={prefs.terminal}
+                workspace={workspacePrefs(prefs.workspace)}
                 panel={
                   showPanel && sidePanel === "files" ? (
                     <FilesPanel
@@ -635,6 +655,11 @@ function Shell() {
                     if (p) setWs((current) => paneToNewTab(current, p.id));
                   },
                   onSplitWith: (dir) => setPickingSplit(dir),
+                  onEncoding: () => {
+                    const p = activePane(wsRef.current);
+                    const h = p ? handles.current.get(p.id) : undefined;
+                    if (p && h) setChoosingEncoding({ paneId: p.id, current: h.encoding(), target: `${p.label} · ${p.identity}` });
+                  },
                 }
               : undefined
           }
@@ -643,12 +668,11 @@ function Shell() {
             terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)
               ? () => {
                   const id = tab.id;
-                  setBroadcasting((current) => {
-                    const next = new Set(current);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  });
+                  if (broadcasting.has(id)) {
+                    setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+                    return;
+                  }
+                  setReviewing({ tabId: id, targets: broadcastTargets(id) });
                 }
               : undefined
           }
@@ -660,6 +684,49 @@ function Shell() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {choosingEncoding && (
+        <EncodingDialog
+          current={choosingEncoding.current}
+          target={choosingEncoding.target}
+          onCancel={() => {
+            setChoosingEncoding(null);
+            focusedHandle()?.focus();
+          }}
+          onApply={(id) => {
+            handles.current.get(choosingEncoding.paneId)?.setEncoding(id);
+            setChoosingEncoding(null);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {reviewing && (
+        <BroadcastReview
+          targets={reviewing.targets}
+          onCancel={() => {
+            setReviewing(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const { tabId, targets } = reviewing;
+            setReviewing(null);
+            const t = wsRef.current.tabs.find((x) => x.id === tabId);
+            const now = broadcastTargets(tabId);
+            const same =
+              t !== undefined &&
+              now.length === panesOf(t.layout).length &&
+              now.length === targets.length &&
+              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            if (!same) {
+              notify("danger", msgC.broadcast.changed);
+            } else {
+              setBroadcasting((current) => new Set([...current, tabId]));
+            }
+            focusedHandle()?.focus();
+          }}
         />
       )}
 

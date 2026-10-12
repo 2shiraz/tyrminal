@@ -31,6 +31,7 @@ import {
   IconSidebar,
   IconSquareTerminal,
   IconSun,
+  IconType,
   IconX,
   IconZoomIn,
   IconZoomOut,
@@ -125,6 +126,7 @@ export function CommandPalette({
         onArrange: (arrangement: Arrangement) => void;
         onPaneToNewTab: () => void;
         onSplitWith: (dir: Direction) => void;
+        onEncoding: () => void;
       }
     | undefined;
   /** Saved layout templates and the actions on them. */
@@ -222,6 +224,7 @@ export function CommandPalette({
       list.push(action("split-right-with", msgC.panes.splitRightWith, <IconColumns2 size={16} />, () => workspace.onSplitWith("row")));
       list.push(action("split-down-with", msgC.panes.splitDownWith, <IconRows2 size={16} />, () => workspace.onSplitWith("column")));
       list.push(action("duplicate-tab", msgC.tabs.duplicate, <IconCopy size={16} />, workspace.onDuplicate));
+      list.push(action("encoding", msgC.encoding.action, <IconType size={16} />, workspace.onEncoding));
       if (workspace.split) {
         list.push(
           action(

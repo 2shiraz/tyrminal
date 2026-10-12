@@ -659,6 +659,11 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
   };
+  // agent C: workspaces — raw output bytes (legacy encodings) to the most recent session.
+  window.__mockOutputBytes = (bytes) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
+  };
   /** Ends the newest session as a network drop (or with another error code). */
   window.__mockDrop = (code = "DISCONNECTED") => {
     const last = [...state.sessions.values()].at(-1);

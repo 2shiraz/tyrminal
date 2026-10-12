@@ -465,6 +465,10 @@ pub struct Preferences {
     /// Reduce interface motion even if the OS does not ask for it.
     pub reduce_motion: bool,
     pub terminal: TerminalPreferences,
+    // agent C: workspaces (highlighting, key bindings); validated in core `layouts::sanitize_workspace`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<crate::WorkspacePreferences>,
 }
 
 // ---------- sessions ----------

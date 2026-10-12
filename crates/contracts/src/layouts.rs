@@ -77,3 +77,64 @@ pub struct LayoutTemplateSummary {
     #[ts(type = "number")]
     pub updated_at: u64,
 }
+
+// ---------- workspace preferences (highlighting, key bindings, Option/Alt and mouse) ----------
+
+/// Agent C's preferences, stored with the other non-secret preferences (plain JSON next to the
+/// vault). Absent in files written before they existed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct WorkspacePreferences {
+    pub highlight: HighlightPreferences,
+    /// Replacements for default shortcuts, one per action at most.
+    pub bindings: Vec<KeyBindingPreference>,
+    /// macOS: the Option key sends Meta (Esc prefix) instead of composing characters.
+    pub option_as_meta: bool,
+    /// Right click selects the word under the pointer (the platform default on macOS).
+    pub right_click_selects_word: bool,
+}
+
+/// Output highlighting: colors drawn over the screen only. The bytes received, shown as text,
+/// copied or sent are never changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct HighlightPreferences {
+    pub enabled: bool,
+    pub ip_addresses: bool,
+    pub keywords: Vec<HighlightKeyword>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HighlightKeyword {
+    pub text: String,
+    pub tone: HighlightTone,
+    pub case_sensitive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HighlightTone {
+    Danger,
+    Warning,
+    Success,
+    Info,
+}
+
+/// A user's shortcut for an application action. `key: None` leaves the action without one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KeyBindingPreference {
+    pub action: String,
+    pub key: Option<String>,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    /// Cmd on macOS.
+    pub meta: bool,
+}

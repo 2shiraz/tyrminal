@@ -1,4 +1,4 @@
-import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
+import type { IpcError, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
@@ -24,7 +24,10 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import { encodingById } from "./encoding";
 import { schemeById } from "./schemes";
+
+const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
@@ -56,6 +59,9 @@ export interface PaneHandle {
   broadcastable(): boolean;
   /** Input typed in another pane of a broadcasting tab. */
   receiveBroadcast(bytes: Uint8Array): void;
+  /** The session's character encoding (kept across reconnects of this pane). */
+  encoding(): string;
+  setEncoding(id: string): void;
 }
 
 interface TerminalViewProps {
@@ -69,6 +75,8 @@ interface TerminalViewProps {
   /** This pane has keyboard focus within its tab. */
   focused: boolean;
   prefs: TerminalPreferences;
+  /** Highlighting, Option/Alt and mouse preferences. */
+  workspace?: WorkspacePreferences | undefined;
   onIndicator: (indicator: TabIndicator) => void;
   onTitle: (title: string) => void;
   onStatus: (status: PaneStatus) => void;
@@ -127,6 +135,9 @@ export function TerminalView(props: TerminalViewProps) {
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const unreadReported = useRef(false);
+  const [encodingId, setEncodingId] = useState("utf-8");
+  const encodingRef = useRef("utf-8");
+  const lastUnencodable = useRef(0);
   if (visible) unreadReported.current = false;
   const status = useRef<PaneStatus>({ state: "connecting", renderer: "dom", cols: 0, rows: 0, clipboardAllowed: false });
 
@@ -180,6 +191,12 @@ export function TerminalView(props: TerminalViewProps) {
       onResize: (cols, rows) => publish({ cols, rows }),
       onSearchResults: (index, total) => setFindCount({ index, total }),
       onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
+      onUnencodable: (chars) => {
+        // At most one notice every few seconds while typing.
+        if (Date.now() - lastUnencodable.current < 4000) return;
+        lastUnencodable.current = Date.now();
+        notify("danger", msgC.encoding.unencodable(chars.slice(0, 3).join(" "), encodingLabel(encodingRef.current)));
+      },
       onOutput: () => {
         if (handlers.current.visible || unreadReported.current) return;
         unreadReported.current = true;
@@ -225,6 +242,8 @@ export function TerminalView(props: TerminalViewProps) {
       },
     });
     controllerRef.current = controller;
+    if (handlers.current.workspace) controller.setWorkspace(handlers.current.workspace);
+    controller.setEncoding(encodingRef.current);
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
     const timer = window.setTimeout(() => void controller.start(target), 0);
     return () => {
@@ -260,7 +279,8 @@ export function TerminalView(props: TerminalViewProps) {
   // Live preference changes keep the session and screen.
   useEffect(() => {
     controllerRef.current?.updatePreferences(prefs);
-  }, [prefs]);
+    if (props.workspace) controllerRef.current?.setWorkspace(props.workspace);
+  }, [prefs, props.workspace]);
 
   useEffect(() => {
     const handle: PaneHandle = {
@@ -273,6 +293,12 @@ export function TerminalView(props: TerminalViewProps) {
       broadcastable: () => controllerRef.current?.broadcastable ?? false,
       receiveBroadcast: (bytes) => {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
+      },
+      encoding: () => encodingRef.current,
+      setEncoding: (id) => {
+        encodingRef.current = encodingById(id).id;
+        setEncodingId(encodingRef.current);
+        controllerRef.current?.setEncoding(encodingRef.current);
       },
     };
     handlers.current.register(handle);
@@ -330,7 +356,12 @@ export function TerminalView(props: TerminalViewProps) {
       onMouseDown={() => handlers.current.onFocus()}
       onFocusCapture={() => handlers.current.onFocus()}
     >
-      <div className="terminal-host" ref={hostRef} data-pane={props.paneId} />
+      <div className="terminal-host" ref={hostRef} data-pane={props.paneId} data-encoding={encodingId} />
+      {encodingId !== "utf-8" && (
+        <span className="term-encoding" title={msgC.encoding.badge(encodingLabel(encodingId))}>
+          {encodingLabel(encodingId)}
+        </span>
+      )}
 
       {pending && (
         <div className="terminal-overlay">

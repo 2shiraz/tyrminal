@@ -12,7 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 use tyrminal_contracts::limits::{MAX_LAYOUT_PANES, MAX_TAB_TITLE_LEN};
-use tyrminal_contracts::{IpcError, LayoutDirection, LayoutNode, LayoutTab, LayoutTarget, LayoutTemplateSummary};
+use tyrminal_contracts::{
+    IpcError, LayoutDirection, LayoutNode, LayoutTab, LayoutTarget, LayoutTemplateSummary, WorkspacePreferences,
+};
 use tyrminal_vault::Id;
 
 use crate::error::{invalid, not_found};
@@ -205,6 +207,89 @@ pub(crate) fn summary(id: &Id, record: &LayoutRecord) -> LayoutTemplateSummary {
     }
 }
 
+// ---------- workspace preferences ----------
+
+pub(crate) const MAX_HIGHLIGHT_KEYWORDS: usize = 32;
+pub(crate) const MAX_KEYWORD_LEN: usize = 64;
+pub(crate) const MAX_BINDINGS: usize = 64;
+
+/// Key names a binding may use: single printable characters and the named keys the shortcut
+/// layer understands. Anything else is refused rather than stored.
+fn key_ok(key: &str) -> bool {
+    const NAMED: &[&str] = &[
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Tab",
+        "Enter",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+        "F7",
+        "F8",
+        "F9",
+        "F10",
+        "F11",
+        "F12",
+    ];
+    let mut chars = key.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => c.is_ascii_graphic() && !c.is_ascii_uppercase(),
+        _ => NAMED.contains(&key),
+    }
+}
+
+/// Validates workspace preferences. Bindings must keep the terminal's own keys: a binding needs a
+/// modifier other than Shift, and outside macOS a plain Ctrl+key (interrupt, kill line, ...) is
+/// never taken by the application.
+pub(crate) fn sanitize_workspace(mut prefs: WorkspacePreferences) -> Result<WorkspacePreferences, IpcError> {
+    let h = &mut prefs.highlight;
+    if h.keywords.len() > MAX_HIGHLIGHT_KEYWORDS {
+        return Err(invalid("At most 32 highlight words can be set."));
+    }
+    for keyword in &mut h.keywords {
+        let text = keyword.text.trim();
+        if text.is_empty() || text.chars().count() > MAX_KEYWORD_LEN {
+            return Err(invalid("A highlight word must be 1 to 64 characters."));
+        }
+        keyword.text = validate::label(text)?;
+    }
+    if prefs.bindings.len() > MAX_BINDINGS {
+        return Err(invalid("Too many shortcuts are set."));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for binding in &prefs.bindings {
+        let action_ok = !binding.action.is_empty()
+            && binding.action.len() <= 32
+            && binding.action.bytes().all(|b| b.is_ascii_alphanumeric());
+        if !action_ok || !seen.insert(binding.action.clone()) {
+            return Err(invalid("A shortcut names an unknown or repeated action."));
+        }
+        if let Some(key) = &binding.key {
+            if !key_ok(key) {
+                return Err(invalid("A shortcut uses a key that cannot be bound."));
+            }
+            if !(binding.ctrl || binding.alt || binding.meta) {
+                return Err(invalid("A shortcut needs Ctrl, Alt or Cmd, so typing is never taken from the terminal."));
+            }
+            if binding.ctrl && !binding.alt && !binding.shift && !binding.meta {
+                return Err(invalid(
+                    "Ctrl with a single key belongs to the terminal (for example Ctrl+C). Add Shift or Alt.",
+                ));
+            }
+        }
+    }
+    Ok(prefs)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -318,5 +403,90 @@ mod tests {
     fn the_focused_pane_must_exist() {
         let t = LayoutTab { focused: 2, ..tab(vec![ssh(), ssh()], split(0.5, leaf(0), leaf(1))) };
         assert!(message(validate_tabs(&[t], known)).contains("focused pane"));
+    }
+
+    fn binding(
+        action: &str,
+        key: Option<&str>,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+        meta: bool,
+    ) -> tyrminal_contracts::KeyBindingPreference {
+        tyrminal_contracts::KeyBindingPreference {
+            action: action.into(),
+            key: key.map(Into::into),
+            ctrl,
+            alt,
+            shift,
+            meta,
+        }
+    }
+
+    #[test]
+    fn workspace_bindings_never_take_terminal_keys() {
+        let with = |b| WorkspacePreferences { bindings: vec![b], ..Default::default() };
+        // Accepted: Ctrl+Shift, Alt, Cmd, and an action left without a shortcut.
+        for ok in [
+            binding("palette", Some("p"), true, false, true, false),
+            binding("splitRight", Some("ArrowRight"), false, true, false, false),
+            binding("find", Some("f"), false, false, false, true),
+            binding("lock", None, false, false, false, false),
+        ] {
+            assert!(sanitize_workspace(with(ok.clone())).is_ok(), "{ok:?}");
+        }
+        // Refused: plain keys, Shift alone, Ctrl+letter (interrupt, EOF, ...), unknown keys and actions.
+        for bad in [
+            binding("palette", Some("p"), false, false, false, false),
+            binding("palette", Some("p"), false, false, true, false),
+            binding("palette", Some("c"), true, false, false, false),
+            binding("palette", Some("d"), true, false, false, false),
+            binding("palette", Some("Escape"), true, true, false, false),
+            binding("palette", Some("P"), true, false, true, false),
+            binding("palette", Some("\u{1b}"), true, true, false, false),
+            binding("pal ette", Some("p"), true, false, true, false),
+            binding("", Some("p"), true, false, true, false),
+        ] {
+            assert!(sanitize_workspace(with(bad.clone())).is_err(), "{bad:?}");
+        }
+        let twice = WorkspacePreferences {
+            bindings: vec![
+                binding("find", Some("f"), false, true, false, false),
+                binding("find", Some("g"), false, true, false, false),
+            ],
+            ..Default::default()
+        };
+        assert!(sanitize_workspace(twice).is_err());
+    }
+
+    #[test]
+    fn highlight_words_are_bounded_and_display_safe() {
+        use tyrminal_contracts::{HighlightKeyword, HighlightTone};
+        let word =
+            |text: &str| HighlightKeyword { text: text.into(), tone: HighlightTone::Danger, case_sensitive: false };
+        let with = |words: Vec<HighlightKeyword>| {
+            let mut p = WorkspacePreferences::default();
+            p.highlight.keywords = words;
+            p
+        };
+        assert_eq!(sanitize_workspace(with(vec![word("  error ")])).unwrap().highlight.keywords[0].text, "error");
+        for bad in ["", "   ", "a\u{1b}[31m", "x\u{202e}y", &"w".repeat(65)] {
+            assert!(sanitize_workspace(with(vec![word(bad)])).is_err(), "{bad:?}");
+        }
+        assert!(sanitize_workspace(with((0..33).map(|i| word(&format!("w{i}"))).collect())).is_err());
+    }
+
+    #[test]
+    fn preferences_sanitize_applies_the_workspace_rules() {
+        use tyrminal_contracts::Preferences;
+        let bad = WorkspacePreferences {
+            bindings: vec![binding("find", Some("c"), true, false, false, false)],
+            ..Default::default()
+        };
+        assert!(crate::preferences::sanitize(Preferences { workspace: Some(bad), ..Preferences::default() }).is_err());
+        // Files written before workspace preferences existed still load.
+        let old: Preferences = serde_json::from_str(r#"{"theme":"dark","reduceMotion":false}"#).unwrap();
+        assert_eq!(old.workspace, None);
+        assert!(crate::preferences::sanitize(old).is_ok());
     }
 }

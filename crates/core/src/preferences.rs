@@ -44,6 +44,8 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    // agent C: workspaces
+    prefs.workspace = prefs.workspace.map(crate::layouts::sanitize_workspace).transpose()?;
     Ok(prefs)
 }
 

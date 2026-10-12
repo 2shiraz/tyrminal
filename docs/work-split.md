@@ -185,3 +185,12 @@ Never merge these by hand; regenerate them after resolving the sources:
      either window during the handoff ends nothing it does not own.
   Lab tests C would add: the old window's write/resize/ack are denied after accept; a third window
   cannot accept; a replayed or expired token is refused; closing the new window ends the session.
+- **C → A (already done by C, keep it when merging):** P-13 adds a review step before broadcast
+  starts, so the broadcast test in `tests/ui/behavior.spec.ts` confirms the review dialog (one added
+  line). The full review behaviour is tested in `tests/ui/workspaces.spec.ts`.
+- **C → A (already done by C, keep it when merging):** workspace preferences (highlighting, key
+  bindings, Option/Alt and mouse) hang off `Preferences` as one optional field,
+  `workspace: Option<WorkspacePreferences>` (type in `crates/contracts/src/layouts.rs`), validated by
+  one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
+  shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
+  Files without the field load as before.
