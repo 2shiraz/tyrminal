@@ -1,0 +1,274 @@
+/* Afterglow, page by page (M0, CSS only): the parts of a screen the shared component skin does not
+   reach. Later milestones swap these screens for their own components. */
+
+:root[data-ui="afterglow"] {
+  /* ------------------------------------------------------------ brand mark: amber, not blue */
+
+  & .brand-mark stop:first-child {
+    stop-color: #ffbe6b;
+  }
+
+  & .brand-mark stop:last-child {
+    stop-color: #e2832a;
+  }
+
+  & .brand-mark path {
+    stroke: #1c1305;
+  }
+
+  & .brand-mark rect:last-child {
+    fill: #1c1305;
+  }
+
+  /* ------------------------------------------------------------ chips and tags */
+
+  & .chip {
+    height: 28px;
+    border-color: var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-control);
+  }
+
+  & .chip[aria-pressed="true"] {
+    border-color: transparent;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  & .tag {
+    border-radius: var(--r-xs);
+    background: var(--bg-active);
+  }
+
+  & .tag-group {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  & .bulk-bar {
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    border-radius: var(--r-md);
+  }
+
+  /* ------------------------------------------------------------ Hosts: a rounded search field */
+
+  & .hosts-main .hosts-search {
+    top: var(--space-4);
+    height: 48px;
+    margin: var(--space-4) var(--page-gutter) 0;
+    padding: 0 6px 0 var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-control);
+    box-shadow: var(--shadow-card), 0 8px 24px -12px rgb(6 4 14 / 0.5);
+  }
+
+  & .hosts-main .hosts-search:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    box-shadow: var(--glow-accent);
+  }
+
+  & .hosts-main .hosts-search .hosts-search-input {
+    background: transparent;
+    font-size: var(--text-row);
+  }
+
+  & .hosts-main .hosts-search .btn {
+    height: 36px;
+  }
+
+  & .hosts-main .page-inner {
+    padding: var(--space-5) var(--page-gutter) var(--space-7);
+  }
+
+  & .hosts-main .list > li {
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  & .hosts-main .list > li:hover {
+    background: var(--bg-hover);
+  }
+
+  & .hosts-main .host-rows > li {
+    grid-template-columns: 40px minmax(160px, 1.2fr) minmax(120px, 1fr) minmax(0, 1fr) auto;
+  }
+
+  & .hosts-main .host-open,
+  & .hosts-main .group-open {
+    font-size: var(--text-row);
+  }
+
+  & .hosts-main .host-col-address {
+    font-size: var(--text-xs);
+  }
+
+  & .hosts-main .group-tile {
+    width: 40px;
+    height: 40px;
+    border-color: transparent;
+    border-radius: var(--r-md);
+    background: var(--accent-soft);
+  }
+
+  & .hosts-main .group-grid > .group-row {
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-card);
+  }
+
+  & .hosts-main .hosts-section:has(> .tile-grid) > .hosts-section-head {
+    border-radius: var(--r-lg);
+  }
+
+  & .hosts-main .fav-strip {
+    border-color: var(--border);
+  }
+
+  & .hosts-main .fav-tile {
+    border-radius: var(--r-md);
+    background: var(--bg-control);
+  }
+
+  & .hosts-main .fav-tile[aria-current="true"] {
+    background: var(--accent-soft);
+  }
+
+  & .hosts-main .crumb {
+    border-radius: var(--r-xs);
+  }
+
+  & .hosts-main .split-button > .split-button-more {
+    --btn-fg: var(--on-accent);
+    border-inline-start-color: color-mix(in srgb, var(--on-accent) 25%, transparent);
+    color: var(--on-accent);
+  }
+
+  & .hosts-main .hosts-toolbar .btn-icon[data-active] {
+    background: var(--accent-soft);
+  }
+}
+
+/* ------------------------------------------------------------ vault screens (plan §7.11) */
+
+:root[data-ui="afterglow"] {
+  /* The window background with one soft, static amber glow behind the card (no loop). */
+  & .auth-screen {
+    background:
+      radial-gradient(560px 420px at 50% 42%, rgb(247 164 64 / 0.06), transparent 70%),
+      var(--bg-window);
+  }
+
+  &[data-theme="light"] .auth-screen {
+    background:
+      radial-gradient(560px 420px at 50% 42%, rgb(179 94 0 / 0.06), transparent 70%),
+      var(--bg-window);
+  }
+
+  & .auth-card {
+    width: min(400px, 100%);
+    padding: var(--space-6);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-pop);
+  }
+
+  & .auth-card-wide {
+    width: min(520px, 100%);
+  }
+
+  & .auth-head .wordmark {
+    margin-bottom: var(--space-3);
+  }
+}
+
+/* ------------------------------------------------------------ settings (plan §7.10) */
+
+:root[data-ui="afterglow"] {
+  & .settings-nav {
+    padding: var(--space-2);
+    border-right: 1px solid var(--border-subtle);
+    background: var(--bg-canvas);
+  }
+
+  & .settings-search {
+    height: 32px;
+    margin-bottom: var(--space-2);
+    padding: 0 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--bg-control);
+  }
+
+  & .settings-search:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    box-shadow: var(--glow-accent);
+  }
+
+  & .settings-nav-label {
+    margin-top: var(--space-2);
+    padding: 0 var(--space-2);
+    border: 0;
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-caption);
+  }
+
+  & .settings-nav-item {
+    height: 32px;
+    padding: 0 var(--space-2);
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+  }
+
+  & .settings-nav-item:hover {
+    color: var(--text);
+  }
+
+  & .settings-nav-item[aria-current="page"] {
+    background: var(--accent-soft);
+    box-shadow: none;
+    color: var(--text);
+  }
+
+  & .settings-section {
+    background: var(--bg-canvas);
+  }
+
+  & .settings-section > .settings-section-strip {
+    min-height: 0;
+    padding: var(--space-6) var(--space-6) var(--space-2);
+    box-shadow: none;
+  }
+
+  & .settings-section > .settings-section-strip h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-title);
+  }
+
+  & .settings-section > .settings-section-strip p {
+    font-size: var(--text-sm);
+  }
+
+  & .settings-section-body {
+    gap: var(--space-5);
+    padding: var(--space-4) var(--space-6) var(--space-7);
+  }
+
+  & .settings-group .setting-row,
+  & .settings-group .setting-row[data-variant="switch"] {
+    min-height: var(--row-setting);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  & .settings-group .setting-row + .setting-row,
+  & .settings-group-rows > * + * {
+    border-top-color: var(--border-subtle);
+  }
+
+  & .scheme-row {
+    border-radius: var(--r-sm);
+  }
+}

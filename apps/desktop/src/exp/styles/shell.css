@@ -1,0 +1,324 @@
+/* Afterglow shell (plan §7.1): the window is a dark, heavy material (sidebar and the band above the
+   content); the content is a lifted, rounded card inset from the window edge, with the status bar
+   as its bottom strip. Tabs are pills in the window band.
+
+   Selectors are main's class names under :root[data-ui="afterglow"] (one attribute of extra
+   specificity), so they win over styles/global.css without !important and keep every hook the
+   tests use (.statusbar, .tab, nav.sidebar [data-nav], ...). */
+
+:root[data-ui="afterglow"] {
+  & body {
+    font-feature-settings: "ss01" off, "cv11" off, "tnum" off;
+    font-optical-sizing: auto;
+  }
+
+  & h1 {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-title);
+    line-height: 1.2;
+  }
+
+  & h2 {
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-section);
+  }
+
+  & h3 {
+    font-weight: var(--weight-medium);
+  }
+
+  & ::selection {
+    background: rgb(247 164 64 / 0.28);
+  }
+
+  /* ------------------------------------------------------------ the window */
+
+  & .shell {
+    background: var(--bg-window);
+  }
+
+  /* ------------------------------------------------------------ sidebar */
+
+  /* The content card overlaps the sidebar's last 8 px (see .main), so the right padding is that
+     overlap plus the 8 px gap to the card. */
+  & .sidebar {
+    padding: var(--space-3) calc(var(--card-overlap) + var(--space-2)) var(--space-2) var(--space-2);
+    background: var(--bg-window);
+    border-right: 0;
+  }
+
+  & .brand {
+    height: 32px;
+    margin-bottom: var(--space-3);
+    padding: 0 var(--space-2);
+  }
+
+  & .brand-name {
+    font-size: 15px;
+    font-weight: var(--weight-semibold);
+    letter-spacing: -0.02em;
+  }
+
+  & .sidebar-search {
+    width: 100%;
+    height: 32px;
+    margin: 0 0 var(--space-3);
+    padding: 0 var(--space-2) 0 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--bg-control);
+    box-shadow: var(--shadow-card);
+    color: var(--text-faint);
+  }
+
+  & .sidebar-search:hover {
+    border-color: var(--border);
+    background: var(--bg-control-hover);
+    color: var(--text-muted);
+  }
+
+  & .nav-group-label {
+    height: 28px;
+    margin-top: var(--space-3);
+    padding: 0 var(--space-2);
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-caption);
+  }
+
+  /* Nav pills: 32 px, 8 px corners, a soft amber fill for the current page. */
+  & .nav-item {
+    height: 32px;
+    padding: 0 var(--space-2);
+    gap: 10px;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+  }
+
+  & .nav-item + .nav-item {
+    margin-top: 1px;
+  }
+
+  & .nav-item[aria-current="page"] {
+    background: var(--accent-soft);
+    box-shadow: none;
+    color: var(--text);
+  }
+
+  & .nav-item[aria-current="page"] svg {
+    color: var(--accent-text);
+  }
+
+  & .nav-item[aria-current="page"] .nav-count {
+    color: var(--accent-text);
+  }
+
+  & .nav-session {
+    height: 30px;
+  }
+
+  & .sidebar-footer {
+    gap: 1px;
+    padding-top: var(--space-2);
+    border-top: 0;
+  }
+
+  /* 24 px tall at least: the WCAG 2.2 target size (axe target-size). */
+  & .sidebar-version {
+    min-height: 24px;
+    margin-left: 0;
+  }
+
+  /* ------------------------------------------------------------ the content card */
+
+  /* The card sits 6 px in from the window's right and bottom edges. So that the content keeps
+     exactly main's width (every panel clamp and breakpoint depends on it), the card does not take
+     that inset and its two 1 px borders from the content: it reaches 8 px into the sidebar's
+     column instead, over the sidebar's own right padding. */
+  & .main {
+    margin-left: calc(-1 * var(--card-overlap));
+    padding: 0 var(--card-inset) var(--card-inset) 0;
+  }
+
+  /* The sidebar's resize edge sits on the card's left edge. */
+  & .shell > .resize-handle {
+    left: calc(var(--w-sidebar, var(--sidebar-width)) - var(--card-overlap) - 3px);
+  }
+
+  & .shell[data-sidebar="collapsed"] .sidebar {
+    padding-right: calc(var(--card-overlap) + var(--space-1));
+    padding-left: var(--space-1);
+  }
+
+  & .content {
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    background: var(--bg-canvas);
+  }
+
+  & .statusbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2) 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 0 0 var(--r-md) var(--r-md);
+    background: var(--bg-canvas);
+  }
+
+  & .status-sep {
+    align-self: center;
+    height: 12px;
+    background: var(--border);
+  }
+
+  & .status-button {
+    height: 22px;
+    padding: 0 var(--space-2);
+    border-radius: var(--r-xs);
+  }
+
+  & .status-button[aria-pressed="true"] {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  /* ------------------------------------------------------------ tabs: pills in the window band */
+
+  & .tabstrip {
+    --tab-h: 30px;
+    --tab-radius: var(--r-sm);
+    align-items: center;
+    padding: 0 0 0 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  & .tabstrip-scroll,
+  & .tabstrip-tabs {
+    align-items: center;
+    gap: 2px;
+  }
+
+  & .tab {
+    --tab-fill: var(--bg-control);
+    height: var(--tab-h);
+    padding: 0 6px 0 10px;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+  }
+
+  & .tab[aria-selected="true"] {
+    background: var(--tab-fill);
+    box-shadow: var(--shadow-card), 0 0 0 1px var(--border-subtle);
+    color: var(--text);
+  }
+
+  /* A terminal's tab takes its scheme's background, as main's (the label uses the scheme's text). */
+  & .tab:not(.tab-page)[aria-selected="true"] {
+    --tab-fill: var(--scheme-bg);
+  }
+
+  /* No inverted feet and no separators: a pill stands on its own. */
+  & .tab[aria-selected="true"]::before,
+  & .tab[aria-selected="true"]::after,
+  & .tab:not([aria-selected="true"])::after {
+    display: none;
+  }
+
+  & .tab-close {
+    border-radius: var(--r-xs);
+  }
+
+  & .tab-new {
+    align-self: center;
+    margin: 0 4px;
+    border-radius: var(--r-sm);
+    background-color: var(--bg-window);
+  }
+
+  & .tab[data-drop="before"] {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  & .tab[data-drop="after"] {
+    box-shadow: inset -2px 0 0 var(--accent);
+  }
+
+  /* While a terminal is in front, the status bar and its tab take the scheme's colours (as main). */
+  & .main:has(.workspace:not([hidden])) .statusbar {
+    border-color: var(--border);
+    background: var(--scheme-bg);
+  }
+
+  & .main:has(.workspace:not([hidden])) .content {
+    background: var(--scheme-bg);
+  }
+
+  & .main:has(.workspace:not([hidden])) .status-button[aria-pressed="true"] {
+    background: var(--bg-active);
+    color: var(--text);
+  }
+
+  /* ------------------------------------------------------------ pages */
+
+  & .page-inner {
+    gap: var(--space-5);
+    padding: var(--space-6) var(--page-gutter) var(--space-7);
+  }
+
+  & .page-title p {
+    font-size: var(--text-sm);
+  }
+
+  /* ------------------------------------------------------------ side panels */
+
+  & .side-panel {
+    border-left: 1px solid var(--border-subtle);
+    background: var(--bg-canvas);
+  }
+
+  & .panel-head {
+    border-bottom-color: var(--border-subtle);
+  }
+
+  & .panel-head h2 {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+
+  & .panel-target {
+    border-color: var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--bg-surface-2);
+  }
+
+  & .snippet {
+    border-color: var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-card);
+  }
+
+  & .snippet:hover,
+  & .snippet:focus-within {
+    border-color: var(--border);
+    box-shadow: var(--shadow-card);
+  }
+
+  & .folder-head {
+    border-radius: var(--r-sm);
+    font-weight: var(--weight-medium);
+  }
+
+  /* ------------------------------------------------------------ terminal */
+
+  /* The canvas is sacred (plan §5.3 rule 5): nothing transitions on it. */
+  & .terminal-host {
+    transition: none;
+  }
+
+  & .pane-header {
+    border-bottom-color: rgb(127 127 127 / 0.12);
+  }
+}

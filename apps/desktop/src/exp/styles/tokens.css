@@ -1,0 +1,240 @@
+/* Afterglow tokens (docs/experimental/afterglow-plan.md §4).
+
+   Every value is scoped under :root[data-ui="afterglow"], which only the experimental build sets,
+   so main's build never sees these. Afterglow replaces the Graphite/Paper pair and Fjord; the
+   High contrast palette stays as it is (an accessibility setting, not a look), hence the
+   :not([data-palette="contrast"]) on the colour blocks.
+
+   Two vocabularies live here:
+   - main's token names (--bg-app, --radius-control, ...) with Afterglow values, so every existing
+     component picks up the new look without a fork;
+   - Afterglow's own names (--bg-window, --r-md, ...) for the swapped components under src/exp/.
+
+   Contrast: scripts/exp/check-contrast.mjs checks every text/surface pair below at WCAG AA, and
+   the hue distance between the accent and the warning colour. */
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("../fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("../fonts/geist-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ===================================================================== shape, type, size */
+
+:root[data-ui="afterglow"] {
+  /* ---------- type: Geist for the interface, JetBrains Mono for machine text ---------- */
+  --font-ui: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+
+  /* 11 caption, 12 meta, 13 body, 14 row title, 16 section, 22 page title. */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 13px;
+  --text-row: 14px;
+  --text-lg: 16px;
+  --text-xl: 22px;
+  --text-2xl: 22px;
+  --tracking-title: -0.02em;
+  --tracking-section: -0.011em;
+  --tracking-caption: 0.01em;
+
+  /* ---------- radii: one concentric rule (child = parent - padding) ---------- */
+  --r-xs: 6px; /* kbd hints, badges, checkboxes */
+  --r-sm: 8px; /* buttons, inputs, menu items, nav and tab pills */
+  --r-md: 12px; /* 40 px tiles, list rows, chips, toasts, menus, the content card */
+  --r-lg: 16px; /* cards, popovers, sheets, dialogs */
+  --r-full: 999px; /* switches, status dots, segmented thumbs */
+
+  --radius-inner: var(--r-xs);
+  --radius-xs: 4px;
+  --radius-sm: var(--r-xs);
+  --radius-control: var(--r-sm);
+  --radius-panel: var(--r-md);
+  --radius-dialog: var(--r-lg);
+  --radius-box: var(--r-lg);
+  --radius-pill: var(--r-full);
+  --radius-round: var(--r-full);
+  /* Panes attached to an edge of the card keep square corners; the card clips them. */
+  --radius-edge: 0;
+
+  /* ---------- sizes (4 px grid) ---------- */
+  --control-height: 32px;
+  --control-height-sm: 26px;
+  --row-height: 40px;
+  --row-height-2: 56px;
+  --row-dense: 30px;
+  --row-setting: 48px;
+  --strip-height: 40px;
+  --strip-height-pane: 44px;
+  /* Main's 224 px (also the resizable default); the card overlaps its last 8 px, see shell.css. */
+  --sidebar-width: 224px;
+  --sidebar-collapsed: 60px; /* 52 px of rail beside the card's 8 px overlap */
+  --tabstrip-height: 40px;
+  --statusbar-height: 28px;
+  --page-gutter: 24px;
+  /* The content card sits this far in from the window edge. */
+  --card-inset: 6px;
+  /* How far the card reaches into the sidebar's column: the inset plus the card's two borders. */
+  --card-overlap: 8px;
+
+  /* ---------- state: a soft fill, never an edge line ---------- */
+  /* Selected rows and cards: the soft fill plus a thin inner amber ring (whole shapes only). */
+  --edge-select: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  --edge-live: 0 0 0 0 transparent;
+  --edge-danger: inset 3px 0 0 var(--danger);
+
+  /* ---------- motion: main's tokens, plus the Afterglow springs (CSS linear(), M1) ---------- */
+  --duration-press: 90ms;
+  --scale-press: 0.97;
+  --scale-press-card: 0.98;
+  --ease-press: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ===================================================================== dark (default) */
+
+:root[data-ui="afterglow"]:not([data-palette="contrast"]) {
+  color-scheme: dark;
+
+  /* Afterglow names */
+  --bg-window: #0e0d12; /* sidebar and title bar: the heavy material */
+  --bg-canvas: #141319; /* the content card */
+  --bg-surface-2: #1a1920; /* panels, sheets, cards on the canvas */
+  --bg-control: #211f28; /* tiles, inputs */
+  --bg-control-hover: #27252f;
+  --highlight: rgb(255 255 255 / 0.05); /* 1 px top inner edge on raised surfaces */
+  --accent-glow: rgb(247 164 64 / 0.22);
+  --on-accent: #1c1305;
+  --shadow-pop: 0 1px 0 var(--highlight) inset, 0 12px 32px -8px rgb(6 4 14 / 0.55), 0 2px 6px rgb(6 4 14 / 0.35);
+  --shadow-card: 0 1px 0 var(--highlight) inset, 0 1px 2px rgb(6 4 14 / 0.3);
+
+  /* main names */
+  --bg-app: var(--bg-window);
+  --bg-sidebar: var(--bg-window);
+  --bg-surface: var(--bg-canvas);
+  --bg-raised: var(--bg-surface-2);
+  --bg-raised-hover: #201f27;
+  --bg-overlay: #24222c;
+  --bg-inset: #100f15;
+  --bg-hover: rgb(238 234 255 / 0.05);
+  --bg-active: rgb(238 234 255 / 0.085);
+  --bg-selected: rgb(247 164 64 / 0.14);
+  --bg-strip: transparent;
+  --bg-box: var(--bg-surface-2);
+
+  --border-subtle: rgb(238 234 255 / 0.06);
+  --border: #2c2a34;
+  --border-strong: #3d3a47;
+  --border-control: #726e7e;
+
+  --text: #eeedf3;
+  --text-muted: #aba8b6;
+  --text-faint: #8d8a98;
+  --text-on-accent: var(--on-accent);
+
+  --accent: #f7a440;
+  --accent-hover: #ffb65e;
+  --accent-soft: rgb(247 164 64 / 0.14);
+  --accent-text: #ffc27a;
+  --focus: #f7a440;
+  --cursor: #f7a440;
+
+  --success: #4cc38a;
+  --success-soft: rgb(76 195 138 / 0.13);
+  --warning: #e8d35a;
+  --warning-soft: rgb(232 211 90 / 0.12);
+  --danger: #f6727a;
+  --danger-soft: rgb(246 114 122 / 0.13);
+  --info: #8db4ff;
+
+  --scrim: rgb(8 7 12 / 0.55);
+  --elevation-1: 0 1px 0 var(--highlight) inset, 0 6px 16px -4px rgb(6 4 14 / 0.5), 0 0 0 1px rgb(238 234 255 / 0.07);
+  --elevation-2: 0 1px 0 var(--highlight) inset, 0 16px 40px -10px rgb(6 4 14 / 0.6), 0 2px 6px rgb(6 4 14 / 0.35), 0 0 0 1px rgb(238 234 255 / 0.08);
+  --glow-accent: 0 0 0 3px var(--accent-soft);
+}
+
+/* ===================================================================== light */
+
+:root[data-ui="afterglow"][data-theme="light"]:not([data-palette="contrast"]) {
+  color-scheme: light;
+
+  --bg-window: #ecebf0;
+  --bg-canvas: #f6f6f9;
+  --bg-surface-2: #ffffff;
+  --bg-control: #ffffff;
+  --bg-control-hover: #fafafc;
+  --highlight: rgb(255 255 255 / 0.9);
+  --accent-glow: rgb(179 94 0 / 0.16);
+  --on-accent: #ffffff;
+  --shadow-pop: 0 12px 32px -10px rgb(30 24 52 / 0.22), 0 2px 6px rgb(30 24 52 / 0.08);
+  --shadow-card: 0 1px 2px rgb(30 24 52 / 0.06);
+
+  --bg-app: var(--bg-window);
+  --bg-sidebar: var(--bg-window);
+  --bg-surface: var(--bg-canvas);
+  --bg-raised: var(--bg-surface-2);
+  --bg-raised-hover: #f9f9fb;
+  --bg-overlay: #ffffff;
+  --bg-inset: #efeef3;
+  --bg-hover: rgb(40 32 72 / 0.045);
+  --bg-active: rgb(40 32 72 / 0.08);
+  --bg-selected: rgb(179 94 0 / 0.1);
+  --bg-strip: transparent;
+  --bg-box: var(--bg-surface-2);
+
+  --border-subtle: rgb(40 32 72 / 0.07);
+  --border: #e1dfe7;
+  --border-strong: #cfccd8;
+  --border-control: #84808f;
+
+  --text: #17161c;
+  --text-muted: #54515e;
+  --text-faint: #6a6775;
+  --text-on-accent: var(--on-accent);
+
+  --accent: #b35e00;
+  --accent-hover: #994f00;
+  --accent-soft: rgb(179 94 0 / 0.1);
+  --accent-text: #8f4b00;
+  --focus: #b35e00;
+  --cursor: #b35e00;
+
+  --success: #17774a;
+  --success-soft: rgb(23 119 74 / 0.1);
+  --warning: #7a5f00;
+  --warning-soft: rgb(196 160 0 / 0.14);
+  --danger: #bd2a34;
+  --danger-soft: rgb(200 50 60 / 0.09);
+  --info: #2f5fb3;
+
+  --scrim: rgb(23 22 28 / 0.3);
+  --elevation-1: 0 6px 16px -6px rgb(30 24 52 / 0.18), 0 0 0 1px rgb(30 24 52 / 0.08);
+  --elevation-2: 0 18px 44px -14px rgb(30 24 52 / 0.3), 0 2px 6px rgb(30 24 52 / 0.08), 0 0 0 1px rgb(30 24 52 / 0.08);
+  --glow-accent: 0 0 0 3px var(--accent-soft);
+}
+
+/* Reduced motion: main's tokens collapse to 0 already; collapse Afterglow's own as well. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-ui="afterglow"] {
+    --duration-press: 0ms;
+    --scale-press: 1;
+    --scale-press-card: 1;
+  }
+}
+
+:root[data-ui="afterglow"][data-reduce-motion="true"] {
+  --duration-press: 0ms;
+  --scale-press: 1;
+  --scale-press-card: 1;
+}

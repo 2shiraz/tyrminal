@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { expPlugins } from "./vite.exp.mjs"; // experimental UI (branch only); empty unless TYRMINAL_UI=experimental
+
 // The version shown in the app is the one it is built and bundled with.
 import tauriConfig from "./src-tauri/tauri.conf.json" with { type: "json" };
 
@@ -22,7 +24,7 @@ function displayVersion(): string {
 // Tauri serves the built assets from disk; the dev server is loopback-only and fixed-port so the
 // development CSP allowance can be exact.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), ...expPlugins()],
   define: { __APP_VERSION__: JSON.stringify(displayVersion()) },
   clearScreen: false,
   server: { host: "127.0.0.1", port: 1420, strictPort: true },

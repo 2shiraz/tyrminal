@@ -28,6 +28,12 @@
     "test:ui:update": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests update",
     "test:ui:container": "node scripts/ui-container.mjs",
     "test:ui:update:container": "node scripts/ui-container.mjs --update",
-    "check:contrast": "node scripts/check-contrast.mjs"
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "dev:exp": "node scripts/exp/run.mjs dev",
+    "build:exp": "node scripts/exp/run.mjs build",
+    "build:web:exp": "node scripts/exp/run.mjs web",
+    "test:ui:exp": "node scripts/exp/run.mjs test",
+    "capture:exp": "node scripts/exp/run.mjs capture",
+    "check:contrast:exp": "node scripts/exp/check-contrast.mjs"
   }
 }

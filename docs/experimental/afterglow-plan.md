@@ -473,3 +473,46 @@ without explicit approval.
    better. The axe pass in `accessibility.spec.ts` runs in both themes.
 5. **Matrix.** The experimental UI gets its own `feature-matrix.csv` rows (DEFERRED_BY_SCOPE on main,
    IN_PROGRESS on the branch) and never claims VERIFIED from mocked UI tests.
+
+## 11. Deviations recorded during implementation
+
+Each entry says what changed from the plan above and why. Newest last.
+
+1. **No `@layer afterglow` (M0).** Unlayered styles always beat layered ones, so a layer would have
+   lost to `styles/global.css` everywhere. Afterglow rules are unlayered and scoped under
+   `:root[data-ui="afterglow"]`, which adds one attribute of specificity and wins without
+   `!important`. The entry is appended after `main.tsx`'s imports, so equal-specificity ties go to
+   Afterglow too.
+2. **Main's token names carry Afterglow values (M0).** Instead of only new `--bg-window`-style names,
+   `exp/styles/tokens.css` re-values main's own tokens (`--bg-app`, `--radius-control`, ...), so every
+   existing component takes the new look without a fork. Afterglow's names exist alongside for the
+   swapped components.
+3. **Geist is vendored, not a package dependency (M0).** The two woff2 files (latin, latin-ext; 46 KB)
+   live in `src/exp/fonts/` and are imported from exp CSS, so Vite emits them into `dist-exp` only.
+   Putting them in `public/fonts/` would have copied them into main's `dist/` as well.
+4. **Experimental output goes to `apps/desktop/dist-exp/` (M0)** via the plugin's `config` hook (still
+   one wiring line in `vite.config.ts`), so main's `dist/` and main's UI tests never see it.
+   `scripts/exp/check-isolation.mjs` builds main and asserts zero Afterglow bytes, instead of an
+   edit to main's `check-release.mjs`.
+5. **Afterglow Night takes main's default scheme id (M0).** The default scheme is a stored preference
+   (a Rust contract this branch does not touch), so the swapped `schemes.ts` gives "Afterglow Night"
+   the id `tyrminal-night`, and keeps main's Tyrminal Night as `tyrminal-night-classic`. The
+   selection colour is the plan's `rgb(247 164 64 / 0.28)` flattened over the background
+   (`#543c24`) so contrast checks measure what is drawn.
+6. **Light tokens tightened for AA (M0).** `scripts/exp/check-contrast.mjs` (129 checks) failed five
+   light values from §4.1; they moved: success `#17774a`, danger `#bd2a34`, warning `#7a5f00`,
+   control border `#84808f`, accent text `#8f4b00`. The accent and warning stay over 15 degrees apart
+   in OKLCH hue in both themes.
+7. **State is a fill, not an edge (M0).** Main marks selection with a 2 px edge; Afterglow sets the
+   edge tokens to nothing and uses fills: amber `--accent-soft` for "where you are" (current page,
+   current settings section) and neutral `--bg-active` for keyboard selection in lists (palette),
+   so a moving keyboard cursor never competes with the place marker.
+8. **Menus are 12 px, not 16 px (M0).** At 30 px rows, a 16 px menu forces 12 px items, which read as
+   pills. Menus use 12 px with 4 px padding and 8 px items (still concentric). Cards, dialogs,
+   popovers and sheets stay at 16 px.
+9. **Disabled buttons are neutral (M0).** Main dims a disabled button to 45% opacity; on amber that
+   turns brown and still reads as the primary action. A disabled button takes the neutral control
+   fill and faint text.
+10. **Captures use the compatibility renderer.** SwiftShader's WebGL context comes up blank at 2× device
+    pixels, so `tests/ui/afterglow-capture.ts` opens the app with `renderer: "compatibility"` for the
+    1440p screenshots. The role-based specs keep main's settings.

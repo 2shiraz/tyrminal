@@ -1,0 +1,553 @@
+/* Afterglow components (plan §4, M0): a CSS-only reskin of main's component classes. Rounded on
+   the concentric rule (child radius = parent radius - padding), soft fills for state, a 1 px top
+   highlight on raised surfaces, violet-tinted shadows. No behaviour changes. */
+
+:root[data-ui="afterglow"] {
+  /* ------------------------------------------------------------ buttons */
+
+  /* Main's colour variants set their own --btn-bg; the neutral fill only replaces the default. */
+  & .btn:not(.btn-primary, .btn-ghost, .btn-danger-solid, .btn-warning, .split-button-more) {
+    --btn-bg: var(--bg-control);
+    --btn-border: var(--border);
+  }
+
+  & .btn {
+    height: var(--control-height);
+    padding: 0 var(--space-3);
+    border-radius: var(--r-sm);
+    box-shadow: var(--shadow-card);
+    font-weight: var(--weight-medium);
+  }
+
+  & .btn:not(.btn-primary, .btn-ghost, .btn-danger, .btn-danger-solid, .btn-warning, .split-button-more):hover:not(:disabled) {
+    --btn-bg: var(--bg-control-hover);
+    --btn-border: var(--border-strong);
+  }
+
+  & .btn-primary {
+    --btn-bg: var(--accent);
+    --btn-fg: var(--on-accent);
+    --btn-border: transparent;
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.22) inset,
+      0 1px 2px rgb(6 4 14 / 0.3);
+  }
+
+  & .btn-primary:hover:not(:disabled) {
+    --btn-bg: var(--accent-hover);
+    --btn-border: transparent;
+  }
+
+  & .btn-ghost {
+    --btn-bg: transparent;
+    --btn-border: transparent;
+    box-shadow: none;
+  }
+
+  & .btn-ghost:hover:not(:disabled) {
+    --btn-bg: var(--bg-hover);
+    --btn-border: transparent;
+  }
+
+  & .btn-danger-solid {
+    --btn-border: transparent;
+  }
+
+  & .btn-sm {
+    height: var(--control-height-sm);
+    padding: 0 10px;
+    border-radius: var(--r-xs);
+  }
+
+  & .btn-icon {
+    width: var(--control-height);
+    padding: 0;
+  }
+
+  & .btn-icon.btn-sm {
+    width: var(--control-height-sm);
+  }
+
+  & .btn-lg {
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  & .btn-strip > .btn:first-child {
+    border-top-left-radius: var(--r-sm);
+    border-bottom-left-radius: var(--r-sm);
+  }
+
+  & .btn-strip > .btn:last-child {
+    border-top-right-radius: var(--r-sm);
+    border-bottom-right-radius: var(--r-sm);
+  }
+
+  & kbd,
+  & .kbd {
+    font-family: var(--font-ui);
+    letter-spacing: var(--tracking-caption);
+  }
+
+  /* ------------------------------------------------------------ form controls */
+
+  & .field > label,
+  & .field > .label,
+  & .label {
+    font-weight: var(--weight-medium);
+    letter-spacing: 0;
+  }
+
+  & .input,
+  & .textarea,
+  & .select {
+    min-height: var(--control-height);
+    border-radius: var(--r-sm);
+    background-color: var(--bg-control);
+  }
+
+  & .input:focus-visible,
+  & .textarea:focus-visible,
+  & .select:focus-visible,
+  & .input:focus,
+  & .textarea:focus,
+  & .select:focus {
+    border-color: var(--accent);
+    box-shadow: var(--glow-accent);
+  }
+
+  & .textarea {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  & .choice {
+    border-color: var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-surface-2);
+  }
+
+  & .choice:has(input:checked) {
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    background: var(--accent-soft);
+  }
+
+  & .choice input[type="radio"] {
+    background: var(--bg-control);
+  }
+
+  & .switch {
+    width: 36px;
+    height: 20px;
+    background: var(--bg-control);
+  }
+
+  & .switch::after {
+    background: var(--text-muted);
+    box-shadow: 0 1px 2px rgb(6 4 14 / 0.35);
+  }
+
+  & .switch:checked::after {
+    background: var(--on-accent);
+  }
+
+  & .segmented {
+    padding: 2px;
+    gap: 2px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--bg-inset);
+  }
+
+  & .segmented label {
+    height: 26px;
+    padding: 0 var(--space-3);
+    border-radius: var(--r-xs);
+  }
+
+  & .segmented label:has(input:checked) {
+    background: var(--bg-control);
+    box-shadow: var(--shadow-card), 0 0 0 1px var(--border);
+  }
+
+  & .range::-webkit-slider-thumb {
+    border-color: var(--accent);
+    background: var(--bg-control);
+    box-shadow: 0 1px 3px rgb(6 4 14 / 0.4);
+  }
+
+  /* ------------------------------------------------------------ feedback */
+
+  /* A notice is a soft wash with its icon; no edge line. */
+  & .notice {
+    border-color: var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--bg-surface-2);
+    box-shadow: none;
+  }
+
+  & .notice-info {
+    border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface-2));
+  }
+
+  & .notice-danger {
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  }
+
+  & .notice-warning {
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  }
+
+  & .notice-success {
+    border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  }
+
+  & .badge {
+    height: 20px;
+    padding: 0 7px;
+    border-radius: var(--r-xs);
+    font-weight: var(--weight-medium);
+  }
+
+  & .badge:not(.badge-accent, .badge-success, .badge-warning, .badge-danger, .badge-production) {
+    background: var(--bg-active);
+  }
+
+  & .status-dot[data-tone="ok"],
+  & .status-dot[data-tone="attention"],
+  & .status-dot[data-tone="bad"] {
+    box-shadow: none;
+  }
+
+  & .status-dot[data-tone="attention"] {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  & .skeleton {
+    border-radius: var(--r-xs);
+  }
+
+  & .spinner {
+    border-color: var(--border-strong);
+    border-top-color: var(--accent);
+  }
+
+  & .avatar {
+    border-radius: var(--r-md);
+  }
+
+  & .avatar-sm {
+    border-radius: var(--r-xs);
+  }
+
+  & .empty h2,
+  & .empty h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-section);
+  }
+
+  /* ------------------------------------------------------------ boxes, sections, lists */
+
+  /* Radii come from --radius-box (16 px), so main's joined strips and lists keep their seams. */
+  & .box,
+  & .section,
+  & .card,
+  & .list,
+  & .box-grid {
+    border-color: var(--border);
+    background: var(--bg-box);
+  }
+
+  & .box,
+  & .section,
+  & .card {
+    box-shadow: var(--shadow-card);
+  }
+
+  & .box[data-edge] {
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  & .box[data-flush] {
+    box-shadow: none;
+  }
+
+  & .box-strip,
+  & .section-head {
+    min-height: var(--strip-height);
+    padding: 0 var(--space-2) 0 var(--space-4);
+    border-bottom-color: var(--border-subtle);
+    background: transparent;
+  }
+
+  & .box-strip h2,
+  & .box-strip h3,
+  & .section-head h2 {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    letter-spacing: 0;
+  }
+
+  /* Rows are rounded shapes inside a 4 px padded box (16 - 4 = 12 px corners), no hairlines. */
+  & .list {
+    padding: 4px;
+    gap: 1px;
+  }
+
+  & .section > .list {
+    padding: 4px;
+  }
+
+  & .list > li,
+  & .list-row {
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--r-md);
+    background: transparent;
+  }
+
+  & .list > li + li {
+    border-top: 0;
+  }
+
+  & .list > li:hover {
+    background: var(--bg-hover);
+  }
+
+  & .row-title {
+    font-weight: var(--weight-medium);
+  }
+
+  & .fingerprint,
+  & .code-block,
+  & .banner-text {
+    border-color: var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--bg-inset);
+  }
+
+  & .dt thead th {
+    background: var(--bg-box);
+  }
+
+  & .dt tbody tr + tr td {
+    border-top-color: var(--border-subtle);
+  }
+
+  /* Rows take the fill; the selection ring belongs to whole rows, not to a first cell. */
+  & .dt tbody tr[aria-selected="true"] td:first-child,
+  & .dt tbody tr.is-selected td:first-child,
+  & .ft-table tbody tr.is-selected td:first-child {
+    box-shadow: none;
+  }
+
+  & .dt tbody tr td:first-child {
+    border-top-left-radius: var(--r-sm);
+    border-bottom-left-radius: var(--r-sm);
+  }
+
+  & .dt tbody tr td:last-child {
+    border-top-right-radius: var(--r-sm);
+    border-bottom-right-radius: var(--r-sm);
+  }
+
+  /* ------------------------------------------------------------ dialogs, menus, toasts */
+
+  & .dialog {
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop), 0 0 0 1px rgb(238 234 255 / 0.04);
+  }
+
+  & .dialog-head {
+    min-height: 52px;
+    border-bottom-color: var(--border-subtle);
+    background: transparent;
+  }
+
+  & .dialog-head h2 {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-section);
+  }
+
+  & .dialog .dialog-actions {
+    padding: var(--space-3) var(--space-4);
+    border-top-color: var(--border-subtle);
+    background: var(--bg-overlay);
+  }
+
+  /* Menus: 12 px corners with 4 px padding, so items take 8 px. */
+  & .menu {
+    padding: 4px;
+    border-color: var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop);
+  }
+
+  & .menu-item {
+    height: 30px;
+    padding: 0 var(--space-2);
+    border-radius: var(--r-sm);
+  }
+
+  & .menu-item:hover,
+  & .menu-item:focus-visible {
+    background: var(--bg-active);
+  }
+
+  & .menu-sep {
+    margin: 4px 6px;
+  }
+
+  & .toast {
+    border-color: var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* ------------------------------------------------------------ command palette */
+
+  & .palette {
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop);
+  }
+
+  & .palette-input {
+    height: 52px;
+    padding: 0 var(--space-4);
+    border-bottom-color: var(--border-subtle);
+  }
+
+  & .palette-input input {
+    font-size: 15px;
+  }
+
+  & .palette-list {
+    padding: 4px 6px 6px;
+  }
+
+  & .palette-group {
+    height: 28px;
+    padding: 0 var(--space-2);
+    border: 0;
+    background: transparent;
+    font-size: var(--text-2xs);
+  }
+
+  & .palette-group:not(:first-child) {
+    margin-top: var(--space-1);
+    border-top: 0;
+  }
+
+  & .palette-item {
+    min-height: 34px;
+    padding: 2px var(--space-2);
+    border-radius: 10px;
+  }
+
+  & .palette-item[aria-selected="true"] {
+    background: var(--accent-soft);
+    box-shadow: none;
+  }
+
+  & .palette-foot {
+    padding: 0 var(--space-4);
+    border-top-color: var(--border-subtle);
+    background: transparent;
+  }
+
+  /* ------------------------------------------------------------ tiles and host cards */
+
+  & .tile,
+  & .host-card {
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-card);
+  }
+
+  & .tile:hover,
+  & .host-card:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-raised-hover);
+  }
+
+  & .host-card:focus-within {
+    border-color: var(--accent);
+    box-shadow: var(--glow-accent);
+  }
+
+  & .tile-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-md);
+  }
+
+  & .os-icon {
+    width: 40px;
+    height: 40px;
+    border-color: var(--border-subtle);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--os-dark, var(--text-muted)) 14%, var(--bg-control));
+  }
+
+  &[data-theme="light"] .os-icon {
+    background: color-mix(in srgb, var(--os-light, var(--text-muted)) 12%, var(--bg-control));
+  }
+
+  & .os-icon-sm {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-sm);
+  }
+
+  & .suggest-item {
+    border-radius: var(--r-sm);
+  }
+}
+
+/* A disabled control reads as unavailable, not as a dimmed accent (amber at 45% turns brown). */
+:root[data-ui="afterglow"] .btn:disabled {
+  --btn-bg: var(--bg-control);
+  --btn-fg: var(--text-faint);
+  --btn-border: var(--border-subtle);
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+:root[data-ui="afterglow"] .btn-ghost:disabled {
+  --btn-bg: transparent;
+  --btn-border: transparent;
+}
+
+:root[data-ui="afterglow"] {
+  & .switch:checked {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  /* Keyboard-driven lists (palette, suggestions): a neutral selection with an amber glyph. Amber
+     fills are kept for "where you are" (the current page), so the two never compete. */
+  & .palette-item[aria-selected="true"] {
+    background: var(--bg-active);
+  }
+
+  & .palette-item[aria-selected="true"] > svg {
+    color: var(--accent-text);
+  }
+}
+
+/* The glide behind the current nav or settings item (main's lib/motion.ts useGlide) takes the
+   Afterglow pill: the soft amber fill, 8 px corners, no edge. */
+:root[data-ui="afterglow"] .nav-glide {
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
