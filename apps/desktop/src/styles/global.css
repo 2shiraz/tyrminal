@@ -1479,7 +1479,7 @@ kbd,
   align-items: stretch;
   min-width: 0;
   padding: 0;
-  background: var(--bg-sidebar);
+  background: var(--bg-strip);
   /* Painted under the tabs, so the active tab covers it where it meets the page. */
   box-shadow: inset 0 -1px 0 var(--border-subtle);
   overflow: hidden;
@@ -1519,6 +1519,8 @@ kbd,
   position: relative;
   display: flex;
   flex: 0 1 auto;
+  /* Set from the tabs' minimum widths (TabStrip.tsx). */
+  min-width: 0;
   align-items: flex-end;
   align-self: stretch;
   gap: 0;
@@ -1533,8 +1535,8 @@ kbd,
   /* A width rather than a flex basis: the tab list is sized from it, so a short title never
      leaves the tab hanging past the list (under the pinned "+"). */
   flex: 0 1 auto;
-  width: var(--tab-w, 180px);
-  min-width: var(--tab-min, 84px);
+  width: var(--tab-w, 150px);
+  min-width: var(--tab-min, 90px);
   height: var(--tab-h);
   padding: 0 6px 0 10px;
   border: 0;
@@ -1554,7 +1556,7 @@ kbd,
 }
 
 .tab[aria-selected="true"] {
-  --tab-w: 240px;
+  --tab-w: 220px;
   --tab-min: 140px;
   z-index: 1;
   flex-shrink: 0.3;
@@ -1562,15 +1564,35 @@ kbd,
   color: var(--text);
 }
 
-/* Width changes glide only after a pointer choice; a keyboard switch is instant. Reduced motion
-   sets every duration to 0. */
-.tabstrip[data-input="pointer"] .tab,
-.tabstrip[data-input="pointer"] .tab:hover {
+/* Width is the one thing that moves (TabStrip.tsx): when the active tab changes, the old one
+   narrows while the new one widens with the same duration and easing, so the pair stays in step
+   and the tabs between them follow. Pointer only; keyboard changes and reduced motion (every
+   duration 0) are instant. It also holds while the clicked tab is pressed, whose press feedback
+   otherwise drops transitions: a tab that stopped mid-way would jump. */
+:root[data-input="pointer"] .tabstrip-tabs > .tab,
+:root[data-input="pointer"] .tabstrip-tabs > .tab[data-pressed] {
   transition:
     width var(--duration-glide) var(--ease-in-out),
     min-width var(--duration-glide) var(--ease-in-out),
     background var(--duration-press) var(--ease-out),
-    color var(--duration-press) var(--ease-out);
+    color var(--duration-press) var(--ease-out) !important;
+}
+
+/* A new tab grows in from nothing, and one closed with the pointer narrows to nothing. */
+@starting-style {
+  :root[data-input="pointer"] .tabstrip-tabs > .tab:not(.tab-page) {
+    width: 0;
+    min-width: 0;
+  }
+}
+
+.tab[data-closing],
+.tab[data-closing][aria-selected="true"] {
+  --tab-w: 0px;
+  --tab-min: 0px;
+  padding-inline: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .tab:focus-visible {
@@ -1666,15 +1688,31 @@ kbd,
   font-size: var(--text-sm);
 }
 
-.tab-close {
+/* The leading slot: the status dot, or the close button where it shows (the active tab, and any
+   tab under the pointer). Both sit in the same 20 px cell, so neither ever changes the tab's layout. */
+.tab-lead {
   display: grid;
   place-items: center;
   flex: none;
   width: 20px;
   height: 20px;
-  border: 0;
+}
+
+.tab-lead > * {
+  grid-area: 1 / 1;
+}
+
+/* The dot only shows state; clicks in the slot go to the close button. */
+.tab-lead .status-dot {
+  pointer-events: none;
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: transparent;
   color: var(--text-faint);
   cursor: pointer;
   opacity: 0;
@@ -1683,11 +1721,14 @@ kbd,
     background var(--duration-press) var(--ease-out);
 }
 
-/* The close button shows on the active tab and on hover. */
 .tab:hover .tab-close,
-.tab[aria-selected="true"] .tab-close,
-.tab-close:focus-visible {
+.tab[aria-selected="true"] .tab-close {
   opacity: 1;
+}
+
+.tab:hover .tab-lead .status-dot,
+.tab[aria-selected="true"] .tab-lead .status-dot {
+  opacity: 0;
 }
 
 .tab-close:hover {
@@ -1703,7 +1744,7 @@ kbd,
   flex: none;
   align-self: flex-end;
   margin: 0 4px calc((var(--tab-h) - var(--control-height-sm)) / 2) 4px;
-  background-color: var(--bg-sidebar);
+  background-color: var(--bg-strip);
 }
 
 .tab-spacer {
