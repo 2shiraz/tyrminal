@@ -33,12 +33,11 @@ import {
 import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { beginUpload, sendUpload } from "./dropUpload";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
 
 /** Transfer ids of dropped-file uploads (cancelled in the page, not by the core's transfer id). */
 const DROP_PREFIX = "drop-";
-/** Size of each piece of a dropped file sent to the core. */
-const DROP_CHUNK = 1024 * 1024;
 
 export interface FilesTarget {
   sessionId: string;
@@ -304,7 +303,7 @@ export function FilesPanel({
     if (!sessionId) return;
     let started: StreamUpload;
     try {
-      started = await filesApi.uploadBegin(sessionId, dir, file.name, file.size, choice);
+      started = await beginUpload(sessionId, dir, file, choice);
     } catch (caught) {
       const e = toAppError(caught);
       if (e.code === "CONFLICT" && choice === "ask") {
@@ -322,25 +321,14 @@ export function FilesPanel({
     }
     const id = `${DROP_PREFIX}${started.uploadId}`;
     track({ transferId: id, name: started.name, direction: "upload", total: file.size }, dir);
-    let offset = 0;
     try {
-      while (offset < file.size) {
-        if (stopped.current.delete(id)) {
-          await filesApi.uploadAbort(started.uploadId);
-          apply(id, dir, true, { type: "cancelled" });
-          return;
-        }
-        const piece = new Uint8Array(await file.slice(offset, offset + DROP_CHUNK).arrayBuffer());
-        if (piece.length === 0) break;
-        await filesApi.uploadChunk(started.uploadId, offset, piece);
-        offset += piece.length;
-        apply(id, dir, true, { type: "progress", done: offset });
-      }
-      await filesApi.uploadFinish(started.uploadId);
-      apply(id, dir, true, { type: "done", bytes: offset, files: 1, skipped: 0 });
+      const completed = await sendUpload(started, file, {
+        onProgress: (done) => apply(id, dir, true, { type: "progress", done }),
+        shouldStop: () => stopped.current.delete(id),
+      });
+      apply(id, dir, true, completed ? { type: "done", bytes: file.size, files: 1, skipped: 0 } : { type: "cancelled" });
     } catch (caught) {
       const e = toAppError(caught);
-      await filesApi.uploadAbort(started.uploadId).catch(() => undefined);
       apply(id, dir, true, { type: "failed", error: { code: e.code, message: e.message } });
     }
   }
