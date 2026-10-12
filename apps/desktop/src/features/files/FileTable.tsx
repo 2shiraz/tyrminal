@@ -4,6 +4,7 @@ import { type DragEvent, type KeyboardEvent, type ReactNode, useEffect, useLayou
 import { IconArrowUpDown, IconChevronDown, IconEllipsis, IconFile, IconFolder, IconLink2 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { relativeTime } from "../../components/ui/controls";
+import { useWindowedList } from "../../components/ui/useWindowedList";
 import { type Sort, type SortKey, formatModified, formatSize, modeString, visibleName } from "../sftp/model";
 import { msgFiles } from "./messages";
 import { NO_SELECTION, type Selection, TYPE_AHEAD_MS, clickSelect, keySelect, pressFeedback, single, toggleKey, typeAhead } from "./selection";
@@ -36,6 +37,9 @@ function stemEnd(entry: RemoteEntry): number {
  * (arrows, Home/End, Shift extends, Space toggles), types ahead to a name, opens (Enter), goes up
  * (Backspace, Alt+Up), renames in place (F2), deletes (Delete) and opens the row menu
  * (Shift+F10 or the menu key). Right-click opens the same menu at the pointer.
+ * Long folders are windowed: only the rows near the visible part are in the DOM, two aria-hidden
+ * spacer rows hold the height of the rest, and the grid reports its full size (aria-rowcount and
+ * aria-rowindex, the header being row 1). The keyboard scrolls its target row in before focusing it.
  */
 export function FileTable({
   label,
@@ -86,6 +90,15 @@ export function FileTable({
 }) {
   const order = entries.map((e) => e.name);
   const tableRef = useRef<HTMLTableElement>(null);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  const rows = useWindowedList<HTMLTableSectionElement>(entries.length, 30, bodyRef);
+  const shown = rows.windowed ? entries.slice(rows.start, rows.end) : entries;
+  // The row Tab lands on: the cursor, else the first row; a windowed list without it in the DOM uses
+  // the first rendered row, so the table stays reachable.
+  const roving = (() => {
+    const name = selection.cursor ?? order[0];
+    return rows.windowed && !shown.some((e) => e.name === name) ? shown[0]?.name : name;
+  })();
   const typed = useRef({ text: "", at: 0 });
   /** The keyboard was in this table and has not been moved elsewhere on purpose. */
   const hadFocus = useRef(false);
@@ -103,6 +116,7 @@ export function FileTable({
   /** Moves keyboard focus to a row's name (after React has drawn the new selection). */
   const focusRow = (name: string | null) => {
     if (!name) return;
+    rows.scrollToIndex(order.indexOf(name));
     window.requestAnimationFrame(() => tableRef.current?.querySelector<HTMLButtonElement>(`tr[data-name="${CSS.escape(name)}"] .ft-name`)?.focus());
   };
 
@@ -197,6 +211,7 @@ export function FileTable({
         aria-multiselectable="true"
         aria-label={label}
         aria-busy={busy || undefined}
+        aria-rowcount={rows.windowed ? entries.length + 1 : undefined}
         onKeyDown={onKeyDown}
         onFocus={() => {
           hadFocus.current = true;
@@ -207,7 +222,7 @@ export function FileTable({
         }}
       >
         <thead>
-          <tr>
+          <tr aria-rowindex={rows.windowed ? 1 : undefined}>
             {columns.map((column) => {
               const key = SORTABLE[column];
               const title = msgFiles.columns[column];
@@ -235,8 +250,13 @@ export function FileTable({
             })}
           </tr>
         </thead>
-        <tbody>
-          {entries.map((entry) => {
+        <tbody ref={bodyRef}>
+          {rows.before > 0 && (
+            <tr className="ft-spacer" aria-hidden="true">
+              <td colSpan={columns.length} style={{ height: rows.before }} />
+            </tr>
+          )}
+          {shown.map((entry, i) => {
             const isSelected = selection.names.includes(entry.name);
             const isOpening = opening === entry.name;
             const name = visibleName(entry.name);
@@ -246,6 +266,8 @@ export function FileTable({
             return (
               <tr
                 key={entry.name}
+                data-window-item
+                aria-rowindex={rows.windowed ? rows.start + i + 2 : undefined}
                 aria-selected={isSelected}
                 className={isSelected ? "is-selected" : undefined}
                 data-name={entry.name}
@@ -283,7 +305,7 @@ export function FileTable({
                                 type="button"
                                 className="ft-name"
                                 aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
-                                tabIndex={(selection.cursor ?? order[0]) === entry.name ? 0 : -1}
+                                tabIndex={roving === entry.name ? 0 : -1}
                               >
                                 <span className={`ft-icon ft-icon-${entry.kind}`} aria-hidden="true">
                                   {isOpening ? <span className="spinner spinner-xs" /> : <EntryIcon entry={entry} />}
@@ -334,6 +356,11 @@ export function FileTable({
               </tr>
             );
           })}
+          {rows.after > 0 && (
+            <tr className="ft-spacer" aria-hidden="true">
+              <td colSpan={columns.length} style={{ height: rows.after }} />
+            </tr>
+          )}
         </tbody>
       </table>
       {entries.length === 0 && empty}
