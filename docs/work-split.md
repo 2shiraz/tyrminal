@@ -247,3 +247,18 @@ Never merge these by hand; regenerate them after resolving the sources:
    `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
+
+## SFTP tab hook-up (branch `claude/sftp-tab`)
+
+The SFTP tab lives in `apps/desktop/src/features/sftp/` (own messages and stylesheet). Its
+hook-up into files other branches own is kept to the minimum, for C (#7, tabs/workspaces) and
+the terminal-input branch (#9) to keep when they merge:
+
+- `app/workspace.ts`: `PaneTarget = TerminalTarget | { kind: "sftp" }` and `Pane.target: PaneTarget`.
+  An SFTP tab has one pane and is never split (AppShell ignores split requests for it).
+- `components/layout/PaneGrid.tsx`: a pane whose target is `sftp` renders `SftpView` instead of
+  `TerminalView`; it stays mounted while hidden like a terminal.
+- `components/layout/TabStrip.tsx`: one optional `onNewSftp` item in the **+** menu.
+- `features/terminal/TerminalView.tsx`: `AuthDialog` and `Fingerprint` are exported (no other change).
+- `Sidebar.tsx`, `HomeView.tsx`, `CommandPalette.tsx`: one optional `onSftp` entry each.
+- `AppShell.tsx`: `openSftp`; the side panels and status-bar session details are hidden on an SFTP tab.
