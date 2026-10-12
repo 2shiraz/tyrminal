@@ -1083,6 +1083,27 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
+    // P-33: containers on the host of an SSH session. Tests replace the list via __mockContainers.
+    containers_list: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return (
+        window.__mockContainers ?? {
+          engine: "docker",
+          containers: [
+            { id: "4f1c2b3a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a", name: "web", image: "nginx:1.27", status: "Up 3 hours" },
+            { id: "0a1b2c3d4e5f", name: "<img src=x onerror=window.__pwned=1>", image: "evil/<b>bold</b>", status: "Up 5 minutes" },
+          ],
+          problem: null,
+          skipped: 1,
+        }
+      );
+    },
+    container_session_open: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      // Like the core: anything that is not a container ID is refused before a session exists.
+      if (!/^[0-9a-f]{12,64}$/.test(a.containerId)) throw { code: "INVALID_INPUT", message: "That is not a container ID." };
+      return openSession(a, "local");
+    },
     session_diagnostics: () => {
       // terminal input: tests can replace the lines or make the request fail.
       if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };

@@ -660,7 +660,7 @@ impl VerifiedConnection {
         self.bounded(Stage::OpeningChannel, channel.request_shell(true)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read, ended: false }, ShellWriter { write }, rejected))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write: Some(write), close_on_drop: false }, rejected))
     }
 
     /// Sends one `env` request per variable and waits for each reply. A refused variable is
@@ -680,6 +680,33 @@ impl VerifiedConnection {
             }
         }
         Ok(rejected)
+    }
+
+    /// Runs one command on a new channel with a PTY, as an interactive program (for example a
+    /// shell inside a container). No environment is requested and the agent is never forwarded
+    /// on this channel. `command` is interpreted by the remote user's shell; callers must build it
+    /// only from fixed text and validated values.
+    pub async fn open_command_pty(
+        &self,
+        pty: &PtyRequest,
+        command: &str,
+    ) -> Result<(ShellReader, ShellWriter), SshError> {
+        if !self.authenticated {
+            return Err(SshError::NotAuthenticated);
+        }
+        let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        let term: String = pty.term.chars().filter(|c| c.is_ascii_graphic()).take(64).collect();
+        let term = if term.is_empty() { "xterm-256color".to_owned() } else { term };
+        self.bounded(
+            Stage::OpeningChannel,
+            channel.request_pty(true, &term, clamp_dimension(pty.cols), clamp_dimension(pty.rows), 0, 0, &[]),
+        )
+        .await?;
+        self.await_reply(&mut channel).await?;
+        self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
+        self.await_reply(&mut channel).await?;
+        let (read, write) = channel.split();
+        Ok((ShellReader { read, ended: false }, ShellWriter { write: Some(write), close_on_drop: true }))
     }
 
     /// Runs one command without a PTY and streams its output through the same bounded,
@@ -703,7 +730,7 @@ impl VerifiedConnection {
         self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read, ended: false }, ShellWriter { write }, rejected))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write: Some(write), close_on_drop: false }, rejected))
     }
 
     /// Opens the SFTP subsystem on a new channel of this connection.

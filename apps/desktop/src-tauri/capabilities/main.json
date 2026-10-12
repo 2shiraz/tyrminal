@@ -52,6 +52,8 @@
     "allow-session-attach",
     "allow-session-diagnostics",
     "allow-session-open-key-install",
+    "allow-containers-list",
+    "allow-container-session-open",
     "allow-files-pick-upload",
     "allow-files-pick-folder",
     "allow-files-pick-upload-folder",

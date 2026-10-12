@@ -327,3 +327,40 @@ pub struct EffectiveStartup {
     pub snippets: Vec<StartupSnippet>,
     pub origin: Option<SettingOrigin>,
 }
+
+/// P-33: the container engine found on the connected host. Chosen by the app from a fixed list,
+/// never taken as text from the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ContainerEngine {
+    Docker,
+    Podman,
+}
+
+/// One running container. `id` matched `^[0-9a-f]{12,64}$` (anything else was left out); the
+/// other fields are untrusted server text with control and direction-override characters removed,
+/// shown as plain text only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ContainerInfo {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub status: String,
+}
+
+/// What listing containers found. `engine` is `None` when neither Docker nor Podman is
+/// installed. `problem` is the engine's own error (for example a permission error), as the server
+/// wrote it, sanitized like the other text; the app never retries with more privilege.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ContainerList {
+    pub engine: Option<ContainerEngine>,
+    pub containers: Vec<ContainerInfo>,
+    pub problem: Option<String>,
+    /// Some entries were not shown (over the limit, or without a valid ID).
+    pub skipped: u32,
+}

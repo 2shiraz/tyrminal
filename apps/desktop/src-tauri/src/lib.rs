@@ -173,6 +173,8 @@ pub fn run() {
             commands::sessions::session_attach,
             commands::sessions::session_diagnostics,
             commands::sessions::session_open_key_install,
+            commands::sessions::containers_list,
+            commands::sessions::container_session_open,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
             commands::files::files_pick_upload_folder,

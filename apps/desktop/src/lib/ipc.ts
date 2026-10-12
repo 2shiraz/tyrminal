@@ -13,6 +13,8 @@ import type {
   BackupPreview,
   BulkHostChange,
   ConflictChoice,
+  ContainerEngine,
+  ContainerList,
   DiagnosticEntry,
   EditStatus,
   ErrorCode,
@@ -229,6 +231,18 @@ export const sessions = {
   close: (sessionId: string) => call<void>("session_close", { sessionId }),
   /** What happened while the session connected (no secrets), also shortly after it ended. */
   diagnostics: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
+  /** P-33: running Docker or Podman containers on the host of a connected SSH session. */
+  containers: (sessionId: string) => call<ContainerList>("containers_list", { sessionId }),
+  /** P-33: a shell in a container, as a new session on the connection of `sessionId`. */
+  openContainer: (
+    sessionId: string,
+    engine: ContainerEngine,
+    containerId: string,
+    cols: number,
+    rows: number,
+    onOutput: OutputHandler,
+    onEvent: EventHandler,
+  ) => call<SessionOpened>("container_session_open", { sessionId, engine, containerId, cols, rows, ...channels(onOutput, onEvent) }),
   answerTrust: (sessionId: string, promptId: string, decision: TrustDecision) =>
     call<void>("session_trust_answer", { sessionId, promptId, decision }),
   /** `secret: null` dismisses the prompt. */

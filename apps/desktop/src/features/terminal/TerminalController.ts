@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { ContainerEngine, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -38,7 +38,11 @@ import { CommandOutputs } from "./commandOutput";
 import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
-export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
+export type TerminalTarget =
+  | { kind: "ssh"; hostId: string }
+  | { kind: "local" }
+  /** P-33: a shell in a container, on the connection of the SSH session `sessionId`. */
+  | { kind: "container"; sessionId: string; engine: ContainerEngine; containerId: string };
 
 export type RendererKind = "webgl" | "dom";
 
@@ -385,7 +389,9 @@ export class TerminalController {
         ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
         : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
-          : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
+          : target.kind === "container"
+            ? await sessions.openContainer(target.sessionId, target.engine, target.containerId, cols, rows, onOutput, onEvent)
+            : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
       if (this.disposed) {
         // Closed while opening: do not leave an orphan session behind.
         void sessions.close(opened.sessionId).catch(() => undefined);
