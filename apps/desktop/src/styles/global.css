@@ -2056,9 +2056,9 @@ kbd,
   background: var(--bg-sidebar);
 }
 
-/* Side panels and the host panel slide a short way in from their edge (as .m-panel). */
-.side-panel,
-.host-panel {
+/* Side panels slide a short way in from their edge (as .m-panel). The host panel's motion is in
+   HostsView: it grows its width with the list instead, and must not re-slide when the host changes. */
+.side-panel {
   transition:
     opacity var(--duration-base) var(--ease-drawer),
     transform var(--duration-base) var(--ease-drawer);

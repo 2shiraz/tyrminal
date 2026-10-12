@@ -12,7 +12,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -55,6 +55,8 @@ import {
   IconX,
 } from "../../components/ui/icons";
 import { msgSftp } from "../sftp/messages";
+import { playExit } from "../../lib/exitGhost";
+import { motionMs, openedBy } from "../../lib/inputModality";
 import { type AppError, appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi, toAppError } from "../../lib/ipc";
 import { msgC } from "../../lib/messages-c";
 import { msg } from "../../lib/messages";
@@ -700,9 +702,34 @@ function HostsViewImpl({
     const back = opener.current;
     opener.current = null;
     panelUnsaved.current = { password: false, note: false };
+    // Closing by pointer: the panel fades out as an inert copy while the cards glide back.
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (el) playExit(el, { transform: "translateX(16px)" });
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
+  // Host details motion (docs/design/motion.md; owner request). One mechanism: the list takes its
+  // new width at once and the cards that move glide there (useFlip on the list), while the panel's
+  // content slides in 16 px and fades. Animating the panel's width instead would reflow the grid on
+  // every frame, so cards would jump between column counts. Switching hosts with the panel open
+  // only crossfades the content. Closing, an inert copy of the panel fades (closePanel) and the
+  // cards glide back. Keyboard opens and closes, and reduced motion, are instant.
+  const shownPanel = useRef<typeof panel>(null);
+  useLayoutEffect(() => {
+    const was = shownPanel.current;
+    shownPanel.current = panel;
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (!el || !panel) return;
+    const ms = motionMs("--duration-base");
+    if (ms <= 0 || openedBy() !== "pointer") return;
+    const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
+    if (!was) {
+      const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
+      for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
+    } else if (was.version !== panel.version) {
+      for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    }
+  }, [panel]);
   const panelHostId = panel?.target.kind === "edit" ? panel.target.host.id : null;
   const currentGroupId = filter.kind === "group" ? filter.id : null;
   const groupName = (id: string | null) => (id ? groupPath(groupList, id) : null);
