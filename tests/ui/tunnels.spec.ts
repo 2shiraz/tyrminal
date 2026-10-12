@@ -200,28 +200,29 @@ test("hosts: post-quantum key exchange can be required or turned off per host", 
   const edit = async (label: string) => {
     await page.getByRole("button", { name: `More actions for ${label}` }).click();
     await page.getByRole("menuitem", { name: "Edit" }).click();
-    return page.getByRole("dialog", { name: /Edit host/ });
+    return page.getByRole("complementary", { name: "Host details" });
   };
   const saved = () =>
     page.evaluate(() => Object.fromEntries((window as unknown as { __mockKeyExchanges: Map<string, string> }).__mockKeyExchanges));
 
-  let dialog = await edit("db-primary");
-  await dialog.getByText("Advanced").click();
-  const kex = dialog.getByRole("combobox", { name: "Post-quantum key exchange" });
+  let panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  const kex = panel.getByRole("combobox", { name: "Post-quantum key exchange" });
   await expect(kex).toHaveValue("prefer_post_quantum");
-  await expect(dialog).toContainText("Servers without it use X25519");
+  await expect(panel).toContainText("Servers without it use X25519");
   await kex.selectOption("classic");
-  await expect(dialog).toContainText("For servers that fail with post-quantum key exchange");
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog).toHaveCount(0);
+  await expect(panel).toContainText("For servers that fail with post-quantum key exchange");
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByTestId("host-panel-status")).toHaveText("Saved");
   expect(Object.values(await saved())).toEqual(["classic"]);
 
-  // A non-default setting keeps the Advanced section open when the editor is reopened.
-  dialog = await edit("db-primary");
-  await expect(dialog.getByRole("combobox", { name: "Post-quantum key exchange" })).toBeVisible();
-  await dialog.getByRole("combobox", { name: "Post-quantum key exchange" }).selectOption("require_post_quantum");
-  await expect(dialog).toContainText("Otherwise the connection stops before you sign in");
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog).toHaveCount(0);
+  // Reopening shows the saved setting.
+  panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  await expect(panel.getByRole("combobox", { name: "Post-quantum key exchange" })).toHaveValue("classic");
+  await panel.getByRole("combobox", { name: "Post-quantum key exchange" }).selectOption("require_post_quantum");
+  await expect(panel).toContainText("Otherwise the connection stops before you sign in");
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByTestId("host-panel-status")).toHaveText("Saved");
   expect(Object.values(await saved())).toEqual(["require_post_quantum"]);
 });
