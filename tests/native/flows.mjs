@@ -22,12 +22,17 @@ export function ui(s) {
         }, { describe, timeout });
       } catch (error) {
         const screen = (await api.terminalText().catch(() => "")).split("\n").slice(-25).join("\n");
+        // Row-by-row DOM text (textContent, independent of layout) shows whether rows were
+        // updated but not painted, or never updated.
+        const rows = await s
+          .execute(`const r = [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows > div")]; return r.length + " rows; nonblank: " + JSON.stringify(r.map((e, i) => [i, e.textContent.replaceAll("\\u00a0", " ").trimEnd()]).filter(([, t]) => t).map(([i, t]) => i + ":" + t.slice(0, 40)))`)
+          .catch(() => "?");
         const io = await s
           .execute(`const h = document.querySelector(".terminal-pane:not([hidden]) .terminal-host"); return h ? JSON.stringify({ ...h.dataset }) : "no terminal"`)
           .catch(() => "?");
         const status = await api.statusText().catch(() => "?");
         const errors = await s.execute("return JSON.stringify(window.__tyrErrors ?? null)").catch(() => "?");
-        throw new Error(`${error.message}\n--- terminal (io ${io}; status ${status.replaceAll("\n", " ")}; page errors ${errors}) ---\n${screen}`);
+        throw new Error(`${error.message}\n--- terminal (io ${io}; status ${status.replaceAll("\n", " ")}; page errors ${errors}) ---\n${screen}\n--- rows ${rows}`);
       }
     },
     async type(text) {

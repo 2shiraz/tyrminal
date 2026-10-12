@@ -146,7 +146,7 @@ export class TerminalController {
    * Byte counts only (never content), published on the host element for diagnostics: received
    * from the session, parsed by xterm, sent as input, and input writes the native side refused.
    */
-  private readonly counters = { rx: 0, parsed: 0, tx: 0, txFailed: 0 };
+  private readonly counters = { rx: 0, parsed: 0, tx: 0, txFailed: 0, renders: 0 };
 
   private publishCounters(): void {
     const d = this.container.dataset;
@@ -154,6 +154,10 @@ export class TerminalController {
     d.parsed = String(this.counters.parsed);
     d.tx = String(this.counters.tx);
     d.txFailed = String(this.counters.txFailed);
+    d.renders = String(this.counters.renders);
+    // Positions only: where parsing has moved the cursor, to compare with what is on screen.
+    const b = this.term.buffer.active;
+    d.cursor = `${b.type}:${b.baseY}+${b.cursorY},${b.cursorX}`;
   }
 
   constructor(
@@ -209,6 +213,11 @@ export class TerminalController {
     const textarea = this.term.textarea;
     textarea?.addEventListener("paste", onPaste, true);
     this.cleanups.push(() => textarea?.removeEventListener("paste", onPaste, true));
+    const rendered = this.term.onRender(() => {
+      this.counters.renders += 1;
+      this.publishCounters();
+    });
+    this.cleanups.push(() => rendered.dispose());
 
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(container);

@@ -576,7 +576,7 @@ function delegateToWsl() {
   const self = run("wsl.exe", ["-d", distro, "-u", "root", "--", "wslpath", "-a", fileURLToPath(import.meta.url).replaceAll("\\", "/")]);
   const r = spawnSync(
     "wsl.exe",
-    ["-d", distro, "-u", "root", "--", "env", "TYRMINAL_LAB_MODE=local", "TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1", "TYRMINAL_LAB_WINDOWS_PATHS=1", "node", self, ...process.argv.slice(2)],
+    ["-d", distro, "-u", "root", "--", "env", "TYRMINAL_LAB_MODE=local", "TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1", "TYRMINAL_LAB_WINDOWS_PATHS=1", process.env.TYRMINAL_LAB_WSL_NODE || "node", self, ...process.argv.slice(2)],
     { stdio: "inherit" },
   );
   process.exit(r.status ?? 1);

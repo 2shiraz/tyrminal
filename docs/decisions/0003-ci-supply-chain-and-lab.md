@@ -52,6 +52,7 @@ runners do not provide Linux containers, so the Docker SSH lab cannot run there.
 | `lucide-static` (build-time icon source, not shipped as a package) | 1.47.0 | ISC | Inline SVG icons generated into `icons.tsx` |
 | Playwright container image (CI/dev only) | `mcr.microsoft.com/playwright:v1.56.1-noble` by digest | Apache-2.0 | Identical fonts and Chromium for visual baselines in CI and locally |
 | `Vampire/setup-wsl` (Windows CI only) | v7.0.0, commit d1da7f2c | Apache-2.0 | Debian 12 under WSL 1 as the Windows lab server (same OpenSSH, PAM and TUI apps as the Linux lab; shares Windows loopback) |
+| Node.js official Linux build (Windows CI only, inside WSL) | v20.18.1, SHA-256 c6fa75c8…e567 checked before extraction | MIT | Runs `scripts/lab.mjs` inside the WSL distribution; Debian's packaged node does not execute under WSL 1 |
 | Ubuntu packages (CI/dev only): WebKitGTK 4.1, GTK 3, xvfb, gnome-keyring, openssh-server | distro | various | Linux build, headless native tests, lab |
 
 ## Accepted advisories (reviewed at each release)
