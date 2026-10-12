@@ -16,7 +16,7 @@ Updated: 2026-10-12 (main 99d8d89 merged).
 | 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Done, tested (lab, real vault, UI mock) |
 | 6. Suggestions (AUT-02/03/04/12) and paste/snippet review (P-14), reassigned by agent A | Done, tested (UI mock); AUT-01 stays with agent B (command history) |
 | 7. Shell integration (AUT-06/07), assigned by agent A | Done, tested (core, lab, local Bash/Zsh, UI mock, native test) |
-| 5. Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18 | Identities and environment variables done and tested (real vault, lab, UI mock); startup scripts next; IMP-02 and HST-05 moved to the tunnels owner |
+| 5. Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18 | Identities and environment variables done and tested (real vault, lab, UI mock); startup scripts (SNP-08) done on `claude/automation` and tested (real vault, lab, UI mock, native); IMP-02 and HST-05 moved to the tunnels owner |
 
 ## Design notes
 
@@ -116,3 +116,11 @@ cargo test -p tyrminal-core --test inventory
 TYRMINAL_LAB_MODE=local TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1 pnpm lab:up
 cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib
 ```
+
+- **Startup snippets (SNP-08)** are a `startup` list in the same workflow record as identity and
+  variables (`None`: inherit, `Some([])`: run nothing), edited in the Environment dialog and saved
+  with `startup_set`. Every id must name an existing snippet when saved; one deleted later is
+  skipped. The session reads the list under the plan's generation after trust and sign-in, then
+  queues each snippet (as Run, through the session's own input queue, so the terminal encoding and
+  ordering apply) once the shell is open. The connection log (CON-15) gets one line per snippet by
+  name and a line naming the variables sent and refused; no value or snippet text is logged.

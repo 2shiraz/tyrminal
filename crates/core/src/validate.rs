@@ -241,6 +241,22 @@ pub(crate) fn env_vars(vars: &[tyrminal_contracts::EnvVar]) -> Result<Vec<(Strin
     Ok(out)
 }
 
+/// A startup list (SNP-08): at most `MAX_STARTUP_SNIPPETS` snippet ids, each once.
+pub(crate) fn startup_snippet_ids(ids: &[String]) -> Result<Vec<String>, IpcError> {
+    if ids.len() > tyrminal_contracts::limits::MAX_STARTUP_SNIPPETS {
+        return Err(invalid("Choose 16 startup snippets at most."));
+    }
+    let mut out: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id_text(&self::id(id)?);
+        if out.contains(&id) {
+            return Err(invalid("A startup snippet is listed twice."));
+        }
+        out.push(id);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +342,20 @@ mod tests {
         for bad in ["a//b", "a/\u{1b}b", &"f".repeat(257)] {
             assert!(folder(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn startup_lists_are_bounded_well_formed_and_free_of_duplicates() {
+        let a = "0".repeat(32);
+        let b = "1".repeat(32);
+        assert_eq!(startup_snippet_ids(&[a.clone(), b.clone()]).unwrap(), [a.clone(), b]);
+        assert!(startup_snippet_ids(&[]).unwrap().is_empty());
+        assert!(startup_snippet_ids(&[a.clone(), a.clone()]).is_err());
+        assert!(startup_snippet_ids(&["not an id".into()]).is_err());
+        assert!(startup_snippet_ids(&["A".repeat(32)]).is_err(), "ids are lower-case hex");
+        let many: Vec<String> = (0..17).map(|i| format!("{i:032x}")).collect();
+        assert!(startup_snippet_ids(&many).is_err());
+        assert_eq!(startup_snippet_ids(&many[..16]).unwrap().len(), 16);
     }
 
     #[test]

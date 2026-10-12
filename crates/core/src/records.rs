@@ -255,6 +255,10 @@ pub(crate) struct WorkflowRecord {
     /// Environment variables sent with sessions, in order. Values are sensitive.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<StoredEnv>,
+    /// Snippet ids typed into the shell once it is open (SNP-08). `None` inherits the nearest
+    /// group's list; `Some([])` runs nothing. Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -265,7 +269,7 @@ pub(crate) struct StoredEnv {
 
 impl WorkflowRecord {
     pub fn is_empty(&self) -> bool {
-        self.identity_id.is_none() && self.env.is_empty()
+        self.identity_id.is_none() && self.env.is_empty() && self.startup.is_none()
     }
 
     pub fn content_len(&self) -> usize {
@@ -273,6 +277,7 @@ impl WorkflowRecord {
             + self.group_id.as_ref().map_or(0, String::len)
             + self.identity_id.as_ref().map_or(0, String::len)
             + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
+            + self.startup.as_ref().map_or(0, |ids| ids.iter().map(|id| id.len() + 4).sum())
     }
 }
 

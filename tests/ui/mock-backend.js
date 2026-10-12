@@ -140,7 +140,11 @@ export function installMockBackend(options) {
         : ["connected"];
     let delay = 10;
     for (const step of steps) {
-      if (step === "connected" && kind === "ssh") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+      if (step === "connected" && kind === "ssh") {
+        setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+        // Startup snippets are typed once the shell is open (SNP-08).
+        setTimeout(() => window.__mockRunStartup?.(s, host), delay + 40);
+      }
       // Environment variables of the host: the mock server's AcceptEnv allows TYR_* only.
       if (step === "opening_channel" && host) {
         const sent = (window.__mockEnvOf?.(host.id) ?? []).map((v) => v.name);
@@ -835,6 +839,8 @@ export function installMockBackend(options) {
         channelSend(s.events, NEGOTIATED);
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+        const host = state.hosts.find((h) => h.label === s.host);
+        if (host) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
     link_open: (a) => {
@@ -981,6 +987,21 @@ export function installMockBackend(options) {
       return a.vars;
     },
     env_effective: (a) => window.__mockEnvOf(a.hostId, true),
+    startup_get: (a) => structuredClone(startupState.get(envKey(a.target)) ?? null),
+    startup_set: (a) => {
+      const ids = a.snippetIds;
+      if (ids && (ids.length > 16 || new Set(ids).size !== ids.length)) throw { code: "INVALID_INPUT", message: "Choose 16 startup snippets at most, each once." };
+      for (const sid of ids ?? []) {
+        if (!state.snippets.some((x) => x.id === sid)) throw { code: "NOT_FOUND", message: "A startup snippet no longer exists. Choose the snippets again." };
+      }
+      if (ids === null) startupState.delete(envKey(a.target));
+      else startupState.set(envKey(a.target), [...ids]);
+      return ids;
+    },
+    startup_effective: (a) => {
+      const { ids, origin } = startupOf(a.hostId);
+      return { snippets: ids.map((snippetId) => ({ snippetId, name: state.snippets.find((x) => x.id === snippetId)?.name ?? null })), origin };
+    },
     identity_list: () =>
       identityState.list.map((i) => ({
         id: i.id,
@@ -1047,6 +1068,25 @@ export function installMockBackend(options) {
   window.__mockAddFile = (path) => addNode(path, "file", 10);
   /** Environment variables in the mock, per target; hosts get their group chain's, outermost first. */
   const envState = new Map();
+  // Startup snippet lists by `host:<id>` / `group:<id>` (absent: inherit).
+  const startupState = new Map();
+  function startupOf(hostId) {
+    const own = startupState.get(`host:${hostId}`);
+    if (own) return { ids: own, origin: { kind: "host" } };
+    const host = state.hosts.find((h) => h.id === hostId);
+    for (let g = state.groups.find((x) => x.id === host?.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const list = startupState.get(`group:${g.id}`);
+      if (list) return { ids: list, origin: { kind: "group", groupId: g.id, name: g.name } };
+    }
+    return { ids: [], origin: null };
+  }
+  window.__mockRunStartup = (s, host) => {
+    if (!host) return;
+    for (const sid of startupOf(host.id).ids) {
+      const snippet = state.snippets.find((x) => x.id === sid);
+      if (snippet) write(s.id, new TextEncoder().encode(`${snippet.text.replace(/\n$/, "").replaceAll("\n", "\r")}\r`));
+    }
+  };
   function envKey(target) {
     return target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`;
   }

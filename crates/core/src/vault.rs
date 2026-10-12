@@ -52,6 +52,7 @@ use tyrminal_contracts::{
     IdentityInput, IdentitySummary, KeyCertificate, KeyKind, KnownHostImportEntry, KnownHostImportPreview,
     KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
+use tyrminal_contracts::{EffectiveStartup, StartupSnippet};
 
 struct Stored<T> {
     revision: u64,
@@ -106,6 +107,12 @@ struct Inner {
 }
 
 /// What a session needs to connect, copied out of the vault at one generation.
+/// A startup snippet as a session runs it: its text, or `None` when it was deleted.
+pub(crate) struct StartupItem {
+    pub name: String,
+    pub text: Option<Zeroizing<String>>,
+}
+
 pub(crate) struct ConnectionPlan {
     pub host_id: String,
     pub endpoint: Endpoint,
@@ -2748,6 +2755,96 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    // ---------- startup snippets (SNP-08) ----------
+
+    /// A host's startup list: its own, else the nearest group's that sets one.
+    fn effective_startup(open: &Open, id: &Id, host: &HostRecord) -> (Vec<String>, Option<SettingOrigin>) {
+        if let Some(list) =
+            Self::workflow_of_host(open, &validate::id_text(id)).and_then(|(_, w)| w.record.startup.clone())
+        {
+            return (list, Some(SettingOrigin::Host));
+        }
+        for (group_id, group) in Self::group_chain(open, host) {
+            if let Some(list) = Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.startup.clone()) {
+                return (list, Some(SettingOrigin::Group { group_id, name: group.name.clone() }));
+            }
+        }
+        (Vec::new(), None)
+    }
+
+    /// The startup list a host or group sets itself (`None`: inherit).
+    pub async fn startup_snippets(&self, target: SettingsTarget) -> Result<Option<Vec<String>>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::workflow_of(open, &target).and_then(|(_, w)| w.record.startup.clone()))
+    }
+
+    /// Replaces the startup list a host or group sets itself. Every snippet must exist now.
+    pub async fn set_startup_snippets(
+        &self,
+        target: SettingsTarget,
+        ids: Option<Vec<String>>,
+    ) -> Result<Option<Vec<String>>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let ids = ids.as_deref().map(validate::startup_snippet_ids).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        for id in ids.iter().flatten() {
+            if !open.snippets.contains_key(&validate::id(id)?) {
+                return Err(not_found("A startup snippet no longer exists. Choose the snippets again."));
+            }
+        }
+        let startup = ids.clone();
+        self.update_workflow(open, &target, |w| WorkflowRecord { startup, ..w }).await?;
+        Ok(ids)
+    }
+
+    /// What a host runs at startup, with where the list comes from.
+    pub async fn effective_startup_snippets(&self, host_id: &str) -> Result<EffectiveStartup, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let (ids, origin) = Self::effective_startup(open, &id, host);
+        let snippets = ids
+            .into_iter()
+            .map(|snippet_id| {
+                let name = validate::id(&snippet_id)
+                    .ok()
+                    .and_then(|sid| open.snippets.get(&sid))
+                    .map(|s| s.record.name.clone());
+                StartupSnippet { snippet_id, name }
+            })
+            .collect();
+        Ok(EffectiveStartup { snippets, origin })
+    }
+
+    /// The startup snippets of a session to `host_id`, read under `generation`: after a lock
+    /// nothing is returned. A deleted snippet has no text.
+    pub(crate) async fn session_startup(&self, generation: u32, host_id: &str) -> Result<Vec<StartupItem>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let (ids, _) = Self::effective_startup(open, &id, host);
+        Ok(ids
+            .into_iter()
+            .map(|snippet_id| {
+                let found = validate::id(&snippet_id).ok().and_then(|sid| open.snippets.get(&sid));
+                StartupItem {
+                    name: found.map(|s| s.record.name.clone()).unwrap_or_default(),
+                    text: found.map(|s| Zeroizing::new(s.record.text.clone())),
+                }
+            })
+            .collect())
     }
 
     fn workflow_of_host<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<WorkflowRecord>)> {

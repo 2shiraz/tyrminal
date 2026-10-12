@@ -433,3 +433,11 @@ export const environment = {
     call<import("@tyrminal/contracts").EnvVar[]>("env_set", { target, vars }),
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
 };
+
+/** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
+export const startup = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
+    call<string[] | null>("startup_set", { target, snippetIds }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
+};

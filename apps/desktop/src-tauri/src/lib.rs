@@ -249,6 +249,9 @@ pub fn run() {
             commands::inventory::env_get,
             commands::inventory::env_set,
             commands::inventory::env_effective,
+            commands::inventory::startup_get,
+            commands::inventory::startup_set,
+            commands::inventory::startup_effective,
         ])
         .build(tauri::generate_context!());
 

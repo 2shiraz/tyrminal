@@ -304,3 +304,23 @@ pub struct EffectiveEnvVar {
     pub value: String,
     pub origin: SettingOrigin,
 }
+
+/// One startup snippet of a host (SNP-08). `name` is `None` when the snippet was deleted after it
+/// was chosen; connecting skips it and says so in the connection log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StartupSnippet {
+    pub snippet_id: String,
+    pub name: Option<String>,
+}
+
+/// The snippets a host types into its shell once it is open, in order, and where the list comes
+/// from: the host's own list, else the nearest group that sets one (`origin: None`: nothing set).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EffectiveStartup {
+    pub snippets: Vec<StartupSnippet>,
+    pub origin: Option<SettingOrigin>,
+}

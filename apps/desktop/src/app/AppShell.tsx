@@ -11,7 +11,7 @@ import { HostsView } from "../features/hosts/HostsView";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
-import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
@@ -197,9 +197,16 @@ function Shell() {
       const handle = p ? handles.current.get(p.id) : undefined;
       const sessionId = handle?.sessionId();
       if (!p || !handle || !sessionId || !handle.connected()) return;
-      const request: SnippetRunRequest = { snippet, mode, paneId: p.id, sessionId, targetLabel: p.label, targetIdentity: p.identity };
-      const lines = snippet.text.replace(/\n$/, "").split("\n").length;
-      if (lines > 1) {
+      const request: SnippetRunRequest = {
+        snippet,
+        mode,
+        paneId: p.id,
+        sessionId,
+        targetLabel: p.label,
+        targetIdentity: p.identity,
+        environment: handle.environment(),
+      };
+      if (needsSnippetReview(request)) {
         setRunRequest(request);
       } else {
         void sendSnippet(request);
