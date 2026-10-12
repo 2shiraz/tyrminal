@@ -10,6 +10,7 @@
 
 pub mod limits;
 
+mod discovery;
 mod dto;
 mod error;
 // agent B: tunnels and history
@@ -19,6 +20,7 @@ mod tunnels;
 mod defaults;
 mod inventory;
 
+pub use discovery::*;
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history

@@ -85,6 +85,8 @@ pub(crate) struct Entry {
     // agent B: tunnels and history
     /// The saved host an SSH session was opened for (`None` for local terminals).
     pub(crate) host_id: Option<String>,
+    /// Startup snippets not yet typed (SNP-08); the supervisor notes them if the session ends first.
+    startup_left: std::sync::atomic::AtomicUsize,
 }
 
 impl Entry {
@@ -224,6 +226,7 @@ impl Sessions {
             connection: Mutex::new(None),
             sftp: Mutex::new(None),
             host_id,
+            startup_left: std::sync::atomic::AtomicUsize::new(0),
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -419,6 +422,11 @@ impl Sessions {
             )),
         };
         self.entries().remove(session_id);
+        // The body (and with it any startup typing) is gone: say what was left untyped.
+        let left = entry.startup_left.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if left > 0 {
+            entry.log.note(&format!("startup snippets stopped with {left} not typed: the session ended"));
+        }
         if let Some(error) = &outcome.error {
             entry.log.note(&format!("ended: {}", error.message));
         }
@@ -1473,10 +1481,19 @@ async fn run_ssh(
             tokio::spawn(async move {
                 sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
             });
-            run_startup(&ctx.entry, startup);
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
-            let outcome =
-                pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, &*ctx.sink, input, transcoder).await;
+            // Startup snippets are typed alongside the pump, inside the session body: when the
+            // session is closed or the vault locks, the supervisor drops both together, so the
+            // typing (and the text not yet typed) never outlives the session.
+            let pumping = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, &*ctx.sink, input, transcoder);
+            let typing = async {
+                run_startup(&ctx.entry, startup).await;
+                std::future::pending::<Outcome>().await
+            };
+            let outcome = tokio::select! {
+                outcome = pumping => outcome,
+                outcome = typing => outcome,
+            };
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
             ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
             if let Ok(conn) = Arc::try_unwrap(conn) {
@@ -1619,8 +1636,8 @@ async fn connect_ssh(
                                 &key,
                                 Arc::new(move || {
                                     entry.log.note("the server used your forwarded key to sign");
-                                    sink.event(SessionEvent::Banner {
-                                        text: "The server used your forwarded key to sign in somewhere.\n".into(),
+                                    sink.event(SessionEvent::Notice {
+                                        text: "The server used your forwarded key to sign in somewhere.".into(),
                                     });
                                 }),
                             ));
@@ -1658,28 +1675,46 @@ async fn connect_ssh(
 
 /// Types a host's startup snippets into its new shell, in order, each followed by Enter, through
 /// the session's own input queue (so they are encoded and ordered like typed input). Called only
-/// once the shell is open, which is after host trust and authentication. Every snippet is noted
-/// in the connection log by name; a deleted one is skipped and noted.
-fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
-    if startup.is_empty() {
-        return;
-    }
-    let entry = Arc::clone(entry);
-    tokio::spawn(async move {
-        for item in startup {
-            let Some(text) = item.text else {
-                entry.log.note("startup snippet skipped: it was deleted");
-                continue;
-            };
-            let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
-            for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
-                if entry.input.send(Input::Data(chunk.to_vec())).await.is_err() {
-                    return;
-                }
+/// once the shell is open, which is after host trust and authentication, and only from inside the
+/// session body (see `run_ssh`). Every snippet is noted in the connection log by name; a deleted
+/// one is skipped and noted; `startup_left` tells the supervisor what was not typed.
+async fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
+    use std::sync::atomic::Ordering;
+    entry.startup_left.store(startup.len(), Ordering::SeqCst);
+    type_startup(
+        startup,
+        |chunk| {
+            let input = entry.input.clone();
+            async move { input.send(Input::Data(chunk)).await.is_ok() }
+        },
+        |line| {
+            entry.log.note(line);
+            // One note per snippet, typed or skipped.
+            let _ = entry.startup_left.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        },
+    )
+    .await;
+}
+
+/// The startup typing itself: `send` delivers one input chunk and reports whether the session
+/// still takes input; the first refusal ends the sequence.
+async fn type_startup<F>(startup: Vec<StartupItem>, mut send: impl FnMut(Vec<u8>) -> F, note: impl Fn(&str))
+where
+    F: Future<Output = bool>,
+{
+    for item in startup {
+        let Some(text) = item.text else {
+            note("startup snippet skipped: it was deleted");
+            continue;
+        };
+        let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
+        for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+            if !send(chunk.to_vec()).await {
+                return;
             }
-            entry.log.note(&format!("startup snippet \"{}\" typed", item.name));
         }
-    });
+        note(&format!("startup snippet \"{}\" typed", item.name));
+    }
 }
 
 /// Longest starting folder accepted for a local terminal.
@@ -1739,8 +1774,8 @@ async fn run_telnet(
     rows: u16,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
-    sink.event(SessionEvent::Banner {
-        text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.\n".into(),
+    sink.event(SessionEvent::Notice {
+        text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.".into(),
     });
     sink.event(SessionEvent::State { state: SessionState::Connecting });
     let host = endpoint.address.trim_start_matches('[').trim_end_matches(']').to_owned();
@@ -2081,6 +2116,74 @@ mod start_folder_tests {
 #[cfg(test)]
 mod snippet_tests {
     use super::*;
+
+    fn startup(names: &[&str]) -> Vec<StartupItem> {
+        names
+            .iter()
+            .map(|n| StartupItem {
+                name: (*n).to_owned(),
+                text: (!n.starts_with("gone")).then(|| Zeroizing::new(format!("echo {n}"))),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn startup_typing_is_in_order_skips_deleted_snippets_and_stops_when_input_is_refused() {
+        let sent = std::sync::Mutex::new(Vec::<Vec<u8>>::new());
+        let notes = std::sync::Mutex::new(Vec::<String>::new());
+        // The session stops taking input after two chunks (it was closed or locked).
+        type_startup(
+            startup(&["one", "gone", "two", "three"]),
+            |chunk| {
+                let mut sent = sent.lock().unwrap();
+                let ok = sent.len() < 2;
+                if ok {
+                    sent.push(chunk);
+                }
+                async move { ok }
+            },
+            |line| notes.lock().unwrap().push(line.to_owned()),
+        )
+        .await;
+        assert_eq!(*sent.lock().unwrap(), [b"echo one\r".to_vec(), b"echo two\r".to_vec()]);
+        assert_eq!(
+            *notes.lock().unwrap(),
+            [
+                "startup snippet \"one\" typed",
+                "startup snippet skipped: it was deleted",
+                "startup snippet \"two\" typed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_typing_stops_mid_sequence_when_the_stop_signal_wins() {
+        // The second snippet blocks (a full input queue); the session then closes.
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let sent = std::sync::Mutex::new(Vec::<Vec<u8>>::new());
+        let typing = type_startup(
+            startup(&["first", "second", "third"]),
+            |chunk| {
+                let first = sent.lock().unwrap().is_empty();
+                sent.lock().unwrap().push(chunk);
+                async move {
+                    if !first {
+                        std::future::pending::<()>().await;
+                    }
+                    true
+                }
+            },
+            |_| {},
+        );
+        stop_tx.send(()).unwrap();
+        let stopped = tokio::select! {
+            () = typing => false,
+            _ = stop_rx => true,
+        };
+        assert!(stopped);
+        assert!(sent.lock().unwrap().len() <= 2, "nothing after the blocked snippet is sent");
+        assert!(!sent.lock().unwrap().iter().any(|c| c.starts_with(b"echo third")));
+    }
 
     #[test]
     fn snippets_are_typed_lines_and_paste_is_bracketed_only_when_asked() {

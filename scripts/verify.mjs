@@ -77,6 +77,7 @@ const SUITES = {
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
+    { name: "LAN discovery against a DNS-SD responder (loopback)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "discovery_lab", "--quiet", "--", "--ignored") },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
     // Pseudo-terminals stand in for serial devices on Unix only; Windows serial is untested.
     ...(process.platform === "win32"
