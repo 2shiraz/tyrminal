@@ -73,7 +73,7 @@ import { AssignIdentityDialog } from "./AssignIdentityDialog";
 import { EnvironmentDialog } from "./EnvironmentDialog";
 // quick connect
 import { msgQuick } from "../../lib/messages-quick";
-import { parseAddress } from "../../lib/quickConnect";
+import { type QuickTarget, formatTarget, parseAddress } from "../../lib/quickConnect";
 import { QuickConnectDialog } from "./QuickConnectDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
@@ -197,7 +197,7 @@ function HostsViewImpl({
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
   // quick connect: the address the sheet is open for.
-  const [quick, setQuick] = useState<{ username: string; address: string; port: number | null } | null>(null);
+  const [quick, setQuick] = useState<QuickTarget | null>(null);
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   // Layout, sort and group filter live in preferences, so they survive other views and restarts.
   const { prefs, update } = usePreferences();
@@ -741,7 +741,7 @@ function HostsViewImpl({
                 <>
                   {" "}
                   <button type="button" className="btn btn-sm" onClick={() => setQuick(quickTarget)}>
-                    {msgQuick.option(query.trim())}
+                    {msgQuick.option(formatTarget(quickTarget))}
                   </button>
                 </>
               )}
