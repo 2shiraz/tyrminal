@@ -7,6 +7,7 @@ import { SftpView } from "../../features/sftp/SftpView";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
 import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
+import { msgI } from "../../lib/messages-input";
 import { msgC } from "../../lib/messages-c";
 import { IconButton } from "../ui/controls";
 import { IconArrowUpRight, IconColumns2, IconGripVertical, IconMaximize2, IconMinimize2, IconRows2, IconX } from "../ui/icons";
@@ -39,6 +40,7 @@ export function PaneGrid({
   onOpenKnownHosts,
   register,
   broadcasting,
+  broadcastPaneIds,
   onUserInput,
 }: {
   ws: Workspace;
@@ -65,6 +67,8 @@ export function PaneGrid({
   register: (pane: number, handle: PaneHandle | null) => void;
   /** Tabs whose typed input goes to every pane (an explicit, unsaved mode). */
   broadcasting: ReadonlySet<number>;
+  /** Panes confirmed to receive broadcast input (P-13); others in a broadcasting tab were left out. */
+  broadcastPaneIds?: ReadonlySet<number> | undefined;
   onUserInput: (tab: number, pane: number, bytes: Uint8Array) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -113,7 +117,7 @@ export function PaneGrid({
               data-pane-id={id}
               data-has-directory={pane.directory ? true : undefined}
               data-focused={focused}
-              data-broadcast={broadcasting.has(tab.id) || undefined}
+              data-broadcast={broadcasting.has(tab.id) ? (broadcastPaneIds && !broadcastPaneIds.has(id) ? "excluded" : true) : undefined}
               data-drop={dragPane && dragPane.over === id && dragPane.from !== id ? "swap" : undefined}
               aria-label={pane.label}
               style={style}
@@ -149,6 +153,7 @@ export function PaneGrid({
                     {pane.label}
                     <span className="pane-identity"> · {pane.identity}</span>
                   </span>
+                  {broadcasting.has(tab.id) && broadcastPaneIds && !broadcastPaneIds.has(id) && <span className="faint">{msgI.broadcast.excluded}</span>}
                   {canOpen && (
                     <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>
                       <IconArrowUpRight size={13} />

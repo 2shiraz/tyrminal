@@ -3565,6 +3565,167 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--accent-text);
 }
 
+/* terminal input and connection tools */
+
+/* A pane left out of broadcast in a broadcasting tab: a dashed muted outline, and its header says so. */
+.pane[data-broadcast="excluded"] {
+  box-shadow: inset 0 0 0 2px var(--border);
+}
+
+.broadcast-targets li[data-excluded] .row-main {
+  opacity: 0.6;
+}
+
+/* The side panel's sections: snippets, history, appearance (TRM-14). */
+.panel-sections {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.panel-section-tab {
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.panel-section-tab:hover {
+  color: var(--text);
+}
+
+.panel-section-tab[aria-selected="true"] {
+  background: var(--bg-inset);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.panel-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.panel-history li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.panel-history li[data-current] {
+  font-weight: var(--weight-medium);
+}
+
+.panel-history .row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Highlight kinds (TRM-07): a toggle per kind with a sample in the scheme's own colors. */
+.highlight-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.highlight-kinds legend {
+  margin-bottom: var(--space-2);
+}
+
+.highlight-kind {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.highlight-kind:has(input:checked) {
+  border-color: var(--border);
+}
+
+.highlight-kind-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight-kind-sample {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.highlight-kind:has(input:not(:checked)) .highlight-kind-sample {
+  opacity: 0.45;
+}
+
+.highlight-preview {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* Command boundaries from shell integration (OSC 133): a hairline above each prompt, and a
+   short bar in the gutter of a command that failed. Display only. */
+.cmd-separator {
+  box-sizing: border-box;
+  border-top: 1px solid color-mix(in srgb, var(--cmd-line) 20%, transparent);
+  pointer-events: none;
+}
+
+.cmd-failed {
+  box-sizing: border-box;
+  width: 3px !important;
+  border-radius: 2px;
+  background: var(--cmd-failed);
+  pointer-events: none;
+}
+
+/* Connection details (CON-15): the core's lines, aligned as they come, scrollable. */
+.connection-details {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  list-style: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* agent D: inventory and snippets */
 .os-icon {
   font-weight: 700;

@@ -37,6 +37,9 @@ export type ActionId =
   | "movePaneRight"
   | "movePaneUp"
   | "movePaneDown"
+  // terminal input: jump between commands (shell integration marks)
+  | "previousCommand"
+  | "nextCommand"
   | "nextPane"
   | "prevPane"
   | "goToTab1"
@@ -52,7 +55,9 @@ export type ActionId =
   | "focusTerminal"
   | "focusSidebar"
   // agent D: inventory and snippets
-  | "suggest";
+  | "suggest"
+  // privilege prompts (KEY-18)
+  | "insertPassword";
 
 export interface Binding {
   key: string;
@@ -108,6 +113,9 @@ const mac: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", mod: true },
+  nextCommand: { key: "ArrowDown", mod: true },
   nextPane: { key: "]", mod: true },
   prevPane: { key: "[", mod: true },
   ...GO_TO_TAB,
@@ -116,6 +124,8 @@ const mac: Record<ActionId, Binding> = {
   focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", mod: true, shift: true },
+  // privilege prompts (KEY-18)
+  insertPassword: { key: "p", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -148,6 +158,9 @@ const other: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", ctrl: true, shift: true },
+  nextCommand: { key: "ArrowDown", ctrl: true, shift: true },
   nextPane: { key: "]", ctrl: true, shift: true },
   prevPane: { key: "[", ctrl: true, shift: true },
   ...GO_TO_TAB,
@@ -156,6 +169,8 @@ const other: Record<ActionId, Binding> = {
   focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", ctrl: true, shift: true },
+  // privilege prompts (KEY-18)
+  insertPassword: { key: "p", ctrl: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */

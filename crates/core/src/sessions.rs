@@ -53,6 +53,9 @@ pub trait SessionSink: Send + Sync + 'static {
 
 enum Input {
     Data(Vec<u8>),
+    // privilege prompts (KEY-18)
+    /// Bytes that hold a secret (an inserted password): written like `Data`, zeroized on drop.
+    Secret(Zeroizing<Vec<u8>>),
     Resize(u16, u16),
     /// Bytes the owning window processed, with the handoff epoch it was authorized in.
     Ack(usize, u64),
@@ -1039,6 +1042,40 @@ impl Sessions {
             entry.input.send(Input::Data(chunk.to_vec())).await.map_err(|_| denied())?;
         }
         Ok(())
+    }
+
+    // privilege prompts (KEY-18)
+    /// The identity whose password this session can insert: the one its host uses now. `None`
+    /// for local terminals and hosts without an identity.
+    pub async fn session_identity(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<Option<tyrminal_contracts::SessionIdentity>, IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let Some(host_id) = entry.host_id.as_deref() else { return Ok(None) };
+        self.vault.session_identity(entry.generation, host_id).await
+    }
+
+    /// Types the stored password of `identity_id` into a session, without Enter (BUILD_SPEC
+    /// §4.5, AUT-05). Only ever reached from an explicit user action: nothing in the core
+    /// watches terminal output for password prompts, because a server can print anything. The
+    /// password is read from the vault here, never passes through the renderer, and is refused
+    /// unless the host still uses that identity.
+    pub async fn insert_identity_password(
+        &self,
+        owner: &str,
+        session_id: &str,
+        identity_id: &str,
+    ) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let host_id = entry
+            .host_id
+            .as_deref()
+            .ok_or_else(|| err(ErrorCode::InvalidInput, "This works in an SSH session to a saved host only."))?;
+        let password = self.vault.identity_password(entry.generation, host_id, identity_id).await?;
+        let bytes = Zeroizing::new(password.as_bytes().to_vec());
+        entry.input.send(Input::Secret(bytes)).await.map_err(|_| denied())
     }
 
     pub async fn resize(&self, owner: &str, session_id: &str, cols: u16, rows: u16) -> Result<(), IpcError> {
@@ -2129,6 +2166,12 @@ async fn pump(
                         Some(t) => t.encode(&data),
                         None => data,
                     };
+                    if !transport.write(&data).await {
+                        return lost();
+                    }
+                }
+                // privilege prompts (KEY-18)
+                Some(Input::Secret(data)) => {
                     if !transport.write(&data).await {
                         return lost();
                     }
