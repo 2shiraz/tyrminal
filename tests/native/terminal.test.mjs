@@ -125,7 +125,8 @@ describe("terminal with real applications", { concurrency: false }, () => {
     await t.waitForText("GNU nano", "nano title bar");
     await t.type("hello from nano");
     await s.chord([KEYS.ctrl, "O"]);
-    await t.waitForText(/File Name to Write/i, "nano save prompt");
+    // nano before 8 says "File Name to Write", later versions "Write to File".
+    await t.waitForText(/File Name to Write|Write to File/i, "nano save prompt");
     await s.chord([KEYS.enter]);
     await t.waitForText(/Wrote 1 line/i, "nano saved the file");
     await s.chord([KEYS.ctrl, "X"]);

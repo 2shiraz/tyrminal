@@ -142,6 +142,19 @@ export class TerminalController {
   private readonly cleanups: (() => void)[] = [];
   /** Serializes input writes so chunks of one paste arrive in order. */
   private inputChain: Promise<void> = Promise.resolve();
+  /**
+   * Byte counts only (never content), published on the host element for diagnostics: received
+   * from the session, parsed by xterm, sent as input, and input writes the native side refused.
+   */
+  private readonly counters = { rx: 0, parsed: 0, tx: 0, txFailed: 0 };
+
+  private publishCounters(): void {
+    const d = this.container.dataset;
+    d.rx = String(this.counters.rx);
+    d.parsed = String(this.counters.parsed);
+    d.tx = String(this.counters.tx);
+    d.txFailed = String(this.counters.txFailed);
+  }
 
   constructor(
     private readonly container: HTMLElement,
@@ -429,7 +442,13 @@ export class TerminalController {
 
   private receive(bytes: Uint8Array): void {
     if (this.disposed) return;
-    this.term.write(bytes, () => this.acknowledge(bytes.length));
+    this.counters.rx += bytes.length;
+    this.publishCounters();
+    this.term.write(bytes, () => {
+      this.counters.parsed += bytes.length;
+      this.publishCounters();
+      this.acknowledge(bytes.length);
+    });
   }
 
   private acknowledge(count: number): void {
@@ -456,7 +475,19 @@ export class TerminalController {
     if (!id || this.disposed || bytes.length === 0) return;
     for (let offset = 0; offset < bytes.length; offset += INPUT_CHUNK) {
       const chunk = bytes.subarray(offset, offset + INPUT_CHUNK);
-      this.inputChain = this.inputChain.then(() => sessions.write(id, chunk)).catch(() => undefined);
+      this.inputChain = this.inputChain
+        .then(() => sessions.write(id, chunk))
+        .then(
+          () => {
+            this.counters.tx += chunk.length;
+            this.publishCounters();
+          },
+          () => {
+            // The session ended or refused input; the state events report why.
+            this.counters.txFailed += 1;
+            this.publishCounters();
+          },
+        );
     }
   }
 

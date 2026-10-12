@@ -22,7 +22,11 @@ export function ui(s) {
         }, { describe, timeout });
       } catch (error) {
         const screen = (await api.terminalText().catch(() => "")).split("\n").slice(-25).join("\n");
-        throw new Error(`${error.message}\n--- terminal ---\n${screen}`);
+        const io = await s
+          .execute(`const h = document.querySelector(".terminal-pane:not([hidden]) .terminal-host"); return h ? JSON.stringify({ ...h.dataset }) : "no terminal"`)
+          .catch(() => "?");
+        const status = await api.statusText().catch(() => "?");
+        throw new Error(`${error.message}\n--- terminal (io ${io}; status ${status.replaceAll("\n", " ")}) ---\n${screen}`);
       }
     },
     async type(text) {

@@ -73,6 +73,14 @@ jobs:
           wsl-conf: |
             [automount]
             options = "metadata,umask=022"
+      # Installing a distribution makes System32\bash.exe the WSL launcher; keep pnpm's script
+      # shell on Git Bash so `pnpm run …` keeps running Windows node.
+      - name: Script shell stays Git Bash
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "npm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
+          "pnpm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
       - name: Keep the WSL instance running for the whole job
         if: runner.os == 'Windows'
         shell: pwsh
