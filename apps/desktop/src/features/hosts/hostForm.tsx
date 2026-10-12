@@ -16,7 +16,16 @@ import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 import { OsIcon } from "./OsIcon";
-import { AgentForwarding, DEFAULT_SERIAL, DEFAULT_TERMINAL, type ProtocolKind, SerialFields, TelnetWarning, TerminalFields } from "./ProtocolFields";
+import {
+  AgentForwarding,
+  DEFAULT_SERIAL,
+  DEFAULT_TERMINAL,
+  PasteFields,
+  type ProtocolKind,
+  SerialFields,
+  TelnetWarning,
+  TerminalFields,
+} from "./ProtocolFields";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -172,6 +181,8 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     (protocol === "serial" && JSON.stringify(serial) !== JSON.stringify(start.serial)) ||
     terminal.encoding !== start.terminal.encoding ||
     terminal.term !== start.terminal.term ||
+    terminal.pasteSkipMultiline !== start.terminal.pasteSkipMultiline ||
+    terminal.pasteSkipTrailingNewline !== start.terminal.pasteSkipTrailingNewline ||
     forwardAgent !== start.forwardAgent ||
     advanced.changed;
 
@@ -566,6 +577,7 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
       <div className="stack-sm host-more-body">
         <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />
+        <PasteFields value={form.fields.terminal} onChange={form.set.setTerminal} />
         {form.fields.protocol === "ssh" && form.fields.authKind === "key" && (
           <AgentForwarding checked={form.fields.forwardAgent} onChange={form.set.setForwardAgent} />
         )}
