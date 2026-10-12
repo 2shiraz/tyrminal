@@ -659,3 +659,69 @@ fn presented_host_key_is_plain_public_data() {
     };
     assert_eq!(key.clone(), key);
 }
+
+// ---------- RSA keys whose modulus is not a whole number of 64-bit words ----------
+
+/// An RSA key made by `ssh-keygen` for this run, authorised for the lab user in
+/// `~/.ssh/authorized_keys` (tagged with a unique comment) until dropped.
+struct GeneratedRsaKey {
+    key: ClientKey,
+    tag: String,
+    dir: PathBuf,
+}
+
+impl GeneratedRsaKey {
+    async fn new(lab: &Lab, bits: u32) -> Self {
+        let tag = format!("tyrminal-lab-rsa{bits}-{}", std::process::id());
+        let dir = std::env::temp_dir().join(&tag);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_rsa");
+        let status = Command::new("ssh-keygen")
+            .args(["-q", "-t", "rsa", "-b", &bits.to_string(), "-N", "", "-C", &tag, "-f"])
+            .arg(&path)
+            .status()
+            .expect("ssh-keygen runs");
+        assert!(status.success(), "ssh-keygen -b {bits}");
+        let public = std::fs::read_to_string(path.with_extension("pub")).unwrap();
+        let key = ClientKey::from_openssh(&std::fs::read_to_string(&path).unwrap(), None).unwrap();
+        // Authorised through the server itself, signed in with the lab password.
+        let mut conn = connect(&options(lab.endpoint("a")), Pinned(lab.host_key("a"))).await.unwrap();
+        assert!(conn.authenticate_password(&lab.user(), lab.password()).await.unwrap().is_success());
+        let cmd = format!(
+            "umask 077; mkdir -p ~/.ssh && printf '%s\\n' '{}' >> ~/.ssh/authorized_keys && echo added",
+            public.trim()
+        );
+        let out = conn.exec(&cmd, 64, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.stdout, b"added\n");
+        Self { key, tag, dir }
+    }
+
+    async fn remove(self, lab: &Lab) {
+        let mut conn = connect(&options(lab.endpoint("a")), Pinned(lab.host_key("a"))).await.unwrap();
+        assert!(conn.authenticate_password(&lab.user(), lab.password()).await.unwrap().is_success());
+        let cmd = format!(
+            "grep -vF '{tag}' ~/.ssh/authorized_keys > ~/.ssh/ak.{tag}; mv ~/.ssh/ak.{tag} ~/.ssh/authorized_keys",
+            tag = self.tag
+        );
+        conn.exec(&cmd, 64, Duration::from_secs(10)).await.unwrap();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn rsa_keys_of_any_size_sign_in_with_a_signature_of_exactly_the_modulus_length() {
+    let lab = Lab::load();
+    // 4048 and 4000 bits are not multiples of 64, which is where a signature padded to whole
+    // words came out longer than the modulus and OpenSSH refused the key. 3072 is the control.
+    for bits in [4048, 4000, 3072] {
+        let generated = GeneratedRsaKey::new(&lab, bits).await;
+        let mut conn = connect(&options(lab.endpoint("a")), Pinned(lab.host_key("a"))).await.unwrap();
+        let outcome = conn.authenticate_key(&lab.user(), &generated.key).await.unwrap();
+        generated.remove(&lab).await;
+        assert_eq!(outcome, AuthOutcome::Success, "a {bits}-bit RSA key signs in");
+        let out = conn.exec("echo ok", 64, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.stdout, b"ok\n");
+    }
+}
