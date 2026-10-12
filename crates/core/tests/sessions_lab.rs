@@ -194,10 +194,10 @@ impl Client {
         let mut states = Vec::new();
         loop {
             match self.event().await {
-                SessionEvent::State { state } if state != SessionState::Connected => states.push(state),
+                SessionEvent::State { state, .. } if state != SessionState::Connected => states.push(state),
                 event @ SessionEvent::Negotiated { .. } => self.negotiated = Some(event),
                 other => {
-                    if let SessionEvent::State { state } = &other {
+                    if let SessionEvent::State { state, .. } = &other {
                         states.push(*state);
                     }
                     return (states, other);
@@ -208,7 +208,11 @@ impl Client {
 
     async fn until_connected(&mut self) -> Vec<SessionState> {
         let (states, last) = self.until_not_state().await;
-        assert_eq!(last, SessionEvent::State { state: SessionState::Connected }, "states so far: {states:?}");
+        assert_eq!(
+            last,
+            SessionEvent::State { state: SessionState::Connected, hop: None },
+            "states so far: {states:?}"
+        );
         states
     }
 
@@ -373,7 +377,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
 
     let mut client = Client::open_ssh(&f.core, &host_id).await;
     let (states, prompt) = client.until_not_state().await;
-    assert_eq!(states, [SessionState::Connecting, SessionState::VerifyingHost]);
+    assert_eq!(states, [SessionState::Resolving, SessionState::Connecting, SessionState::VerifyingHost]);
     match &prompt {
         SessionEvent::TrustPrompt { host, port, resolved_address, algorithm, fingerprint, .. } => {
             assert_eq!((host.as_str(), *port), ("127.0.0.1", f.lab.port("a")));
@@ -390,7 +394,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(states, [SessionState::Authenticating, SessionState::OpeningChannel, SessionState::Connected]);
     // The negotiated algorithms are reported, and each one is from this client's own offer.
     match client.negotiated.as_ref().expect("negotiated algorithms are reported") {
-        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex } => {
+        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex, .. } => {
             let offer = tyrminal_ssh::negotiation_summary();
             for value in [kex, host_key, cipher] {
                 assert!(offer.contains(value.as_str()), "{value} is not in the offer:\n{offer}");
@@ -431,6 +435,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(
         states,
         [
+            SessionState::Resolving,
             SessionState::Connecting,
             SessionState::VerifyingHost,
             SessionState::Authenticating,

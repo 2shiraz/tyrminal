@@ -119,7 +119,7 @@ async fn a_telnet_host_warns_negotiates_and_carries_the_terminal() {
         panic!("the first thing shown must be the warning: {events:?}")
     };
     assert!(text.contains("not encrypted"));
-    assert!(events.contains(&SessionEvent::State { state: SessionState::Connected }));
+    assert!(events.contains(&SessionEvent::State { state: SessionState::Connected, hop: None }));
 
     core.sessions.write(WINDOW, &session, [b'g', b'u', b'e', b's', b't', IAC, b'\r'].to_vec()).await.unwrap();
     output_until(&core, &session, &mut rx, &[b'w', b'e', b'l', b'c', b'o', b'm', b'e', IAC, b'\r']).await;

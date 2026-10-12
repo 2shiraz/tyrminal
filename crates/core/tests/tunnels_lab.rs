@@ -191,7 +191,7 @@ impl Fixture {
                     }
                     self.core.sessions.answer_trust(window, &opened.session_id, &prompt_id, decision).unwrap();
                 }
-                SessionEvent::State { state: SessionState::Connected } => break,
+                SessionEvent::State { state: SessionState::Connected, .. } => break,
                 SessionEvent::Closed { error, .. } => panic!("session closed while connecting: {error:?}"),
                 _ => {}
             }
@@ -497,7 +497,7 @@ async fn open_until_prompt(f: &Fixture, host_id: &str) -> (String, mpsc::Unbound
 async fn next_decision(events: &mut mpsc::UnboundedReceiver<SessionEvent>) -> SessionEvent {
     loop {
         match tokio::time::timeout(WAIT, events.recv()).await.expect("event in time").expect("channel open") {
-            SessionEvent::State { state } if state != SessionState::Connected => {}
+            SessionEvent::State { state, .. } if state != SessionState::Connected => {}
             SessionEvent::Negotiated { .. } | SessionEvent::Banner { .. } => {}
             other => return other,
         }
@@ -546,7 +546,7 @@ async fn a_jump_chain_verifies_and_signs_in_to_every_hop_in_order() {
     assert_eq!(resolved_address, None, "a hop reached through a bastion has no locally resolved address");
     assert_eq!(f.lab.auth_log_lines("b"), b_before, "no credential before the inner key is trusted");
     f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Always).unwrap();
-    assert_eq!(next_decision(&mut events).await, SessionEvent::State { state: SessionState::Connected });
+    assert_eq!(next_decision(&mut events).await, SessionEvent::State { state: SessionState::Connected, hop: None });
     assert!(f.lab.auth_log_lines("b") > b_before, "the inner server saw the sign-in");
 
     // A tunnel on the chained session runs through every hop (FWD-09).
