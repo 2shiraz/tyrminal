@@ -454,3 +454,13 @@ test("broadcast: typed input reaches every pane of the tab, terminal replies do 
   await expect(page.getByTestId("broadcast")).toHaveCount(0);
   await expect(page.locator(".pane[data-broadcast]")).toHaveCount(0);
 });
+
+test("a shortcut hint is one text string, not a row of key caps", async ({ page }) => {
+  await openApp(page);
+  const hint = page.locator(".sidebar-search kbd");
+  await expect(hint).toHaveCount(1);
+  await expect(hint).toHaveText("Ctrl+Shift+K");
+  // Decoration only: the search button has its own accessible name.
+  await expect(hint).toHaveAttribute("aria-hidden", "true");
+  await expect(hint.locator("kbd")).toHaveCount(0);
+});

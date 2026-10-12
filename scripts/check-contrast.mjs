@@ -100,6 +100,10 @@ for (const [theme, tokens] of themes) {
   }
   // Selected rows in file lists: accent text and icons on the selection tint.
   for (const under of ["bg-surface", "bg-raised", "bg-inset"]) check(theme, "selected row", tokens, "accent-text", "bg-selected", 4.5, under);
+  // Box state edges (revamp §3): the 2 px accent edge on a box body and on a selected row (non-text, 3:1).
+  check(theme, "accent edge", tokens, "accent", "bg-raised", 3);
+  for (const under of ["bg-surface", "bg-raised"]) check(theme, "accent edge on selection", tokens, "accent", "bg-selected", 3, under);
+  check(theme, "danger edge", tokens, "danger", "bg-raised", 3);
   check(theme, "primary button", tokens, "text-on-accent", "accent", 4.5);
   check(theme, "primary button hover", tokens, "text-on-accent", "accent-hover", 4.5);
 }

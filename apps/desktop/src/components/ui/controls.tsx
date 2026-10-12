@@ -11,7 +11,8 @@ import {
 import type { AppError } from "../../lib/ipc";
 import { useDelayed } from "../../lib/useDelayed";
 import { msg } from "../../lib/messages";
-import { type ActionId, bindings, keyCaps } from "../../lib/shortcuts";
+import { isMac } from "../../lib/platform";
+import { type ActionId, bindings, keyCaps, shortcutText } from "../../lib/shortcuts";
 import { IconCircleAlert, IconCircleCheck, IconEye, IconEyeOff, IconInfo, IconTriangleAlert } from "./icons";
 
 interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "onChange" | "value"> {
@@ -195,23 +196,20 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   );
 });
 
+/** A shortcut as one quiet text hint ("Ctrl+Shift+K", "⌘K"), not a row of key caps. */
 export function Shortcut({ action }: { action: ActionId }) {
   return (
-    <span className="kbd-group" aria-hidden="true">
-      {keyCaps(bindings[action]).map((cap) => (
-        <kbd key={cap}>{cap}</kbd>
-      ))}
-    </span>
+    <kbd className="kbd-group" aria-hidden="true">
+      {shortcutText(action)}
+    </kbd>
   );
 }
 
 export function Keys({ caps }: { caps: string[] }) {
   return (
-    <span className="kbd-group" aria-hidden="true">
-      {caps.map((cap) => (
-        <kbd key={cap}>{cap}</kbd>
-      ))}
-    </span>
+    <kbd className="kbd-group" aria-hidden="true">
+      {caps.join(isMac ? "" : "+")}
+    </kbd>
   );
 }
 
@@ -362,6 +360,19 @@ export function EmptyState({
       <Heading>{title}</Heading>
       <p>{body}</p>
       {children && <div className="empty-actions">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * The empty state inside a box: one left-aligned sentence and at most one action, in place of a
+ * centred illustration (docs/design/revamp.md §4).
+ */
+export function BoxEmpty({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="box-empty">
+      <p>{children}</p>
+      {action}
     </div>
   );
 }

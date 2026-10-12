@@ -5,7 +5,6 @@ import { Dialog } from "../../components/ui/Dialog";
 import type { MenuEntry } from "../../components/ui/Menu";
 import { EmptyState, ErrorNotice } from "../../components/ui/controls";
 import {
-  IconArrowLeftRight,
   IconFolderOpen,
   IconHardDrive,
   IconRefreshCw,
@@ -351,9 +350,6 @@ function HostPicker({ hosts, onLocal, onHost }: { hosts: HostSummary[]; onLocal:
   return (
     <div className="sftp-picker">
       <div className="sftp-picker-head">
-        <span className="sftp-picker-art" aria-hidden="true">
-          <IconArrowLeftRight size={22} />
-        </span>
         <h3>{msgSftp.connectTitle}</h3>
         <p>{msgSftp.connectBody}</p>
       </div>
