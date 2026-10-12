@@ -169,6 +169,7 @@ impl Fixture {
             protocol: Default::default(),
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -673,6 +674,7 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         protocol: Default::default(),
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     f.core.vault.save_host(input).await.unwrap();
     f.core.vault.lock().await;
@@ -838,6 +840,7 @@ async fn a_host_goes_through_its_groups_jump_host_until_it_sets_its_own_route() 
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();

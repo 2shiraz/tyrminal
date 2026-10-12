@@ -2,6 +2,7 @@
 // against the UI test mock. The connections themselves (trust prompt, changed key, sign-in that
 // needs input, cancel and lock mid-run, exec channels only) are tested against the SSH lab in
 // crates/core/tests/sessions_lab.rs.
+// Production confirmations (P-26) are covered in production.spec.ts; the production tag is off here.
 
 import { type Page, expect, test } from "@playwright/test";
 
@@ -31,7 +32,7 @@ const row = (page: Page, host: string) => page.getByTestId("run-results").locato
 
 test("closed hosts run on their own connection; an unknown key is asked about, never assumed", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await openApp(page, { trustPromptFor: "edge-cache" });
+  await openApp(page, { productionTag: "", trustPromptFor: "edge-cache" });
   await connect(page, "api-gateway");
   const dialog = await runOnHosts(page, "Disk usage");
   for (const label of ["api-gateway", "edge-cache", "build-runner-03"]) await dialog.getByRole("checkbox", { name: `Select ${label}` }).check();
@@ -70,7 +71,7 @@ test("closed hosts run on their own connection; an unknown key is asked about, n
 });
 
 test("a changed host key fails that host with the standard error", async ({ page }) => {
-  await openApp(page, { hostKeyChangedFor: "edge-cache" });
+  await openApp(page, { productionTag: "", hostKeyChangedFor: "edge-cache" });
   const dialog = await runOnHosts(page, "Disk usage");
   await dialog.getByRole("checkbox", { name: "Select edge-cache" }).check();
   await dialog.getByRole("button", { name: "Review 1 host" }).click();
@@ -81,7 +82,7 @@ test("a changed host key fails that host with the standard error", async ({ page
 });
 
 test("hosts that need sign-in input are asked in turn, or skipped when the user says so", async ({ page }) => {
-  await openApp(page, { passwordPromptFor: "db-primary" });
+  await openApp(page, { productionTag: "", passwordPromptFor: "db-primary" });
   let dialog = await runOnHosts(page, "Disk usage");
   await dialog.getByRole("checkbox", { name: "Select db-primary" }).check();
   await dialog.getByRole("button", { name: "Review 1 host" }).click();
@@ -104,7 +105,7 @@ test("hosts that need sign-in input are asked in turn, or skipped when the user 
 });
 
 test("groups select their hosts and subgroups at once; a saved target keeps the group", async ({ page }) => {
-  await openApp(page);
+  await openApp(page, { productionTag: "" });
   const dialog = await runOnHosts(page, "Disk usage");
   const production = dialog.getByRole("checkbox", { name: "Select group Production" });
   await production.check();
@@ -138,7 +139,7 @@ test("groups select their hosts and subgroups at once; a saved target keeps the 
 });
 
 test("run on all open sessions goes straight to the review of exactly those sessions", async ({ page }) => {
-  await openApp(page);
+  await openApp(page, { productionTag: "" });
   await connect(page, "api-gateway", "staging-web");
   await primary(page).getByRole("button", { name: /^Snippets/ }).click();
   await page.getByRole("button", { name: "More actions for Disk usage" }).click();

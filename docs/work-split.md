@@ -239,6 +239,16 @@ Home's quick connect uses). Edits outside `features/hosts`:
   - Core: `Sessions::open_local_in`.
   The command-history owner (AUT-01) can subscribe to `shellContexts.onMark` for command marks.
 
+- **Production host guardrails (P-26, 2026-10-12):** small additive edits in files other owners hold.
+  Please keep them when merging:
+  - `TabStrip.tsx` and `PaneGrid.tsx`: an optional `production` prop (pane id → host label), with
+    `data-production` and a "Production" badge.
+  - `AppShell.tsx`: computes the production panes; asks before turning broadcast on for a tab with
+    one; `relayInput` skips production panes without that consent.
+  - `MultiRunDialog.tsx` and `InventoryDialogs.tsx` (ConnectAllDialog): a production badge and a
+    `ProductionConfirm` step.
+  - Host and group editors: a production switch. Settings: the production tag.
+
 **From agent B (notices of small additive edits in agent A's files, each in a block marked
 `agent B: tunnels and history`; please keep them when you touch these files):**
 

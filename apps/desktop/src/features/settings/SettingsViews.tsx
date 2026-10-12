@@ -20,6 +20,7 @@ import { IconFingerprint, IconMonitor, IconPlus, IconMoon, IconShieldAlert, Icon
 import { msgB } from "../../lib/messages-b";
 import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SchemePreview } from "../terminal/SchemePreview";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
@@ -424,6 +425,10 @@ export function SettingsView({
               <QuickUnlockSetting key={quickKey} onEnable={() => setDialog("quick")} />
               {/* compromised-password check (SEC-11) */}
               <PasswordCheckSetting />
+              <ProductionTagSetting
+                value={prefs.productionTag}
+                onCommit={(productionTag) => update((p) => ({ ...p, productionTag }))}
+              />
             </section>
 
             {/* security review (P-27) */}
@@ -767,5 +772,31 @@ function EditorChoices({
       </div>
       <ErrorNotice error={error} />
     </div>
+  );
+}
+
+/** The tag that marks production hosts (P-26); saved when the field is left or Enter is pressed. */
+function ProductionTagSetting({ value, onCommit }: { value: string; onCommit: (tag: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commit = () => {
+    const tag = text.trim();
+    if (tag !== value) onCommit(tag);
+  };
+  return (
+    <SettingRow label={msgProduction.settingTag} hint={msgProduction.settingTagHint}>
+      <input
+        className="input"
+        aria-label={msgProduction.settingTag}
+        value={text}
+        maxLength={32}
+        spellCheck={false}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+        }}
+      />
+    </SettingRow>
   );
 }

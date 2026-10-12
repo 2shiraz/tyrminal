@@ -62,6 +62,18 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     prefs.password_check.endpoint = crate::password_check::validate_endpoint(&prefs.password_check.endpoint)?;
     // agent C: workspaces
     prefs.workspace = prefs.workspace.map(crate::layouts::sanitize_workspace).transpose()?;
+    // The production tag follows the rules of host tags; empty turns the tag rule off.
+    prefs.production_tag = crate::validate::tags(std::slice::from_ref(&prefs.production_tag))
+        .map_err(|_| invalid("Use a production tag like those on hosts: 32 bytes at most, no commas."))?
+        .pop()
+        .unwrap_or_default();
+    if let Some(tyrminal_contracts::HostsViewPreferences {
+        filter: tyrminal_contracts::HostsFilter::Group { id },
+        ..
+    }) = &prefs.hosts_view
+    {
+        crate::validate::id(id)?;
+    }
     Ok(prefs)
 }
 
@@ -200,6 +212,21 @@ mod tests {
     }
 
     #[test]
+    fn the_production_tag_follows_host_tag_rules_and_can_be_off() {
+        assert_eq!(Preferences::default().production_tag, "prod");
+        let with = |tag: &str| sanitize(Preferences { production_tag: tag.into(), ..Preferences::default() });
+        assert_eq!(with("  live ").unwrap().production_tag, "live");
+        assert_eq!(with("").unwrap().production_tag, "", "empty turns the tag rule off");
+        assert_eq!(with("   ").unwrap().production_tag, "");
+        for bad in ["a,b", "pro\u{202e}d", "x\ny", &"t".repeat(33)] {
+            assert!(with(bad).is_err(), "{bad:?}");
+        }
+        // Older preference files without the field keep the default.
+        let old: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(old.production_tag, "prod");
+    }
+
+    #[test]
     fn values_are_clamped_and_unknown_choices_rejected() {
         let mut prefs = Preferences::default();
         prefs.terminal.font_size = 400.0;
@@ -243,5 +270,28 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn the_hosts_view_survives_a_restart_and_a_group_filter_must_be_an_id() {
+        use tyrminal_contracts::{HostsFilter, HostsLayout, HostsSort, HostsViewPreferences};
+        // Hosts opens as a list until the user picks cards.
+        assert_eq!(HostsViewPreferences::default().layout, HostsLayout::List);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let store = PreferencesStore::open(&path);
+        let view = HostsViewPreferences {
+            layout: HostsLayout::List,
+            sort: HostsSort::Address,
+            filter: HostsFilter::Group { id: "0123456789abcdef0123456789abcdef".into() },
+        };
+        store.set(Preferences { hosts_view: Some(view.clone()), ..Preferences::default() }).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().hosts_view, Some(view));
+
+        let bad = HostsViewPreferences { filter: HostsFilter::Group { id: "../x".into() }, ..Default::default() };
+        assert!(store.set(Preferences { hosts_view: Some(bad), ..Preferences::default() }).is_err());
+        // Files from before the setting existed read as the default view.
+        std::fs::write(&path, br#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().hosts_view, None);
     }
 }

@@ -386,6 +386,7 @@ impl Fixture {
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -1965,6 +1966,67 @@ fn attached(f: &Fixture, window: &'static str, session: String, inbox: mpsc::Unb
     }
 }
 
+/// The SFTP tab with several locations: files-only connections to two servers open at once (each
+/// with its own trust prompt), a copy from one to the other streamed through the app, and closing
+/// one connection leaving the other usable.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn two_files_only_connections_at_once_copy_between_their_servers() {
+    let f = fixture().await;
+    let _b = SERVER_B.lock().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let auth = || HostAuthInput::Key { key_id: key_id.clone() };
+    let host_a = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), auth()).await;
+    let host_b = f.host("lab b files", f.lab.port("b"), &f.lab.str("/user"), auth()).await;
+
+    // Both open before either is used: two trust prompts, two connections.
+    let mut a = Client::open_files(&f.core, &host_a).await;
+    let mut b = Client::open_files(&f.core, &host_b).await;
+    for client in [&mut a, &mut b] {
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+        client.until_connected().await;
+    }
+    assert_ne!(a.session, b.session);
+    let s = &f.core.sessions;
+    let (a_home, b_home) = (
+        s.list_files(WINDOW, &a.session, None).await.unwrap().path,
+        s.list_files(WINDOW, &b.session, None).await.unwrap().path,
+    );
+    let tag = std::process::id();
+    let (src_name, dst_name) = (format!("tyr-multi-src-{tag}"), format!("tyr-multi-dst-{tag}"));
+    s.make_dir(WINDOW, &a.session, &a_home, &src_name).await.unwrap();
+    s.make_dir(WINDOW, &b.session, &b_home, &dst_name).await.unwrap();
+    let src = format!("{}/{src_name}", a_home.trim_end_matches('/'));
+    let dst = format!("{}/{dst_name}", b_home.trim_end_matches('/'));
+
+    let local = TempDir::new().unwrap();
+    let data = pattern(2 * 1024 * 1024 + 5, 41);
+    std::fs::write(local.path().join("data.bin"), &data).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &a.session, local.path().join("data.bin"), &src, "data.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+
+    // Server A to server B, byte for byte (read back through B).
+    let (sink, mut rx) = transfer_sink();
+    s.copy_between(WINDOW, &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &b.session, &dst, "data.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    transfer_end(&mut rx).await;
+    assert!(std::fs::read(back.path().join("data.bin")).unwrap() == data);
+
+    // Closing one location's connection leaves the other one working.
+    s.close(WINDOW, &a.session).unwrap();
+    assert!(s.list_files(WINDOW, &a.session, None).await.is_err());
+    assert_eq!(s.list_files(WINDOW, &b.session, Some(&dst)).await.unwrap().entries.len(), 1);
+}
+
 /// Duplicate in the file browser: a copy within one server folder through one session, which
 /// always keeps both (the next free name) and never touches the original.
 #[tokio::test(flavor = "multi_thread")]
@@ -2308,6 +2370,7 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent,
+        production: false,
     };
     let hop = format!(
         "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {} {user}@127.0.0.1 echo HOP-$((40+2))",
@@ -2526,6 +2589,7 @@ async fn a_files_only_connection_is_refused_for_a_telnet_host() {
         protocol: HostProtocol::Telnet,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     let host = f.core.vault.save_host(input).await.unwrap().id;
     let (tx, _inbox) = mpsc::unbounded_channel();
@@ -2554,6 +2618,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();
@@ -2570,6 +2635,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         })
         .await
         .unwrap()

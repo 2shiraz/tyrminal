@@ -5,6 +5,7 @@ import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "..
 import { msg } from "../../lib/messages";
 import { animateOut, useFlip } from "../../lib/motion";
 import { msgC } from "../../lib/messages-c";
+import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
 import {
@@ -60,6 +61,7 @@ export function TabStrip({
   onOpenPalette,
   layout,
   recent,
+  production,
 }: {
   ws: Workspace;
   destination: Destination;
@@ -81,6 +83,8 @@ export function TabStrip({
   layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
   /** Recently connected hosts, reopened from the new-tab menu (UX-04). */
   recent?: { id: string; label: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Panes connected to a production host (P-26); their tabs show a "Production" label. */
+  production?: ReadonlyMap<number, string> | undefined;
 }) {
   const [layoutMenu, setLayoutMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
@@ -183,6 +187,7 @@ export function TabStrip({
           const selected = ws.active === tab.id;
           const paneCount = panesOf(tab.layout).length;
           const status = tabStatus(ws, tab);
+          const isProduction = production ? panesOf(tab.layout).some((id) => production.has(id)) : false;
           return (
             <div
               key={tab.id}
@@ -199,6 +204,7 @@ export function TabStrip({
               data-dragging={drag?.from === index}
               data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
               data-status={status.indicator}
+              data-production={isProduction || undefined}
               data-unread={status.unread || undefined}
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}
@@ -266,6 +272,7 @@ export function TabStrip({
                   {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
                 </span>
               )}
+              {isProduction && <span className="badge badge-production tab-production">{msgProduction.label}</span>}
               <span className="visually-hidden">{msgC.status.describe(status)}</span>
               {/* A pointer target only: a focusable control may not sit inside a tab. From the
                   keyboard a tab closes with Delete or from its menu (Shift+F10). */}
