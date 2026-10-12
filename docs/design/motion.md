@@ -50,6 +50,26 @@ spinner and pulse stopping under reduced motion, and the files table's instant p
 8. **Resting pixels never change.** Every proposal below leaves the settled state identical, so the
    reduced-motion screenshot baselines stay valid and nothing is re-recorded.
 
+### As built (2026-10-12)
+
+What shipped differs from the plan in a few places, on the owner's word or after review:
+
+- **Tab strip width (owner).** Tabs animate their width when one opens or closes: the old tab
+  shrinks while the new one grows, in sync (one `width`/`min-width` transition, `--duration-glide`,
+  `--ease-in-out`, pointer only via `html[data-input="pointer"]`, none under the keyboard or reduced
+  motion). It is the one exception to principle 3, and there are no FLIP transforms on tabs.
+- **Host details panel.** Opened by a click, the list takes its narrower width at once and the
+  cards that move glide there (FLIP), while the panel's content slides in 16 px and fades;
+  switching hosts only crossfades the content; closing fades an inert copy. Its width is not
+  animated: that would reflow the host grid every frame and make cards jump between column counts.
+- **Exits** are static, inert copies (`lib/exitGhost.ts`) rather than kept-mounted elements
+  (`usePresence`), so no component needs a leaving state; a lock removes them before they paint.
+- **Calmer lists (owner: "motion 3 looks bad").** The arrival stagger is opacity only, 6 rows,
+  `--stagger` 20 ms; rows glide only for small changes (two or fewer rows added or removed), and a
+  re-filter snaps; glides are 140 ms on `--ease-out`.
+- **No spring** (owner), no Home stagger (Home was removed), connection-step checks in the
+  connection sheet's own track.
+
 ## 2. Motion tokens (add to `styles/tokens.css`)
 
 Add these after line 96, inside the existing `:root` motion block. Keep the existing tokens.

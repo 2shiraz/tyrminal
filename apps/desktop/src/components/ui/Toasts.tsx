@@ -1,6 +1,7 @@
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 import { useExit } from "../../lib/exitGhost";
+import { useFlip } from "../../lib/motion";
 
 import { IconCircleAlert, IconCircleCheck, IconInfo } from "./icons";
 
@@ -63,11 +64,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // The stack closes up when a toast leaves (toasts rise in through CSS, so no entrance here).
+  const stackRef = useRef<HTMLDivElement>(null);
+  useFlip(stackRef, { stagger: false, enter: false, evenFromKeyboard: true });
+
   const value = useMemo(() => notify, [notify]);
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toasts" role="status" aria-live="polite" onPointerEnter={pause} onPointerLeave={resume}>
+      <div className="toasts" role="status" aria-live="polite" onPointerEnter={pause} onPointerLeave={resume} ref={stackRef}>
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} />
         ))}
@@ -81,7 +86,7 @@ function ToastItem({ toast }: { toast: Toast }) {
   const exitRef = useExit<HTMLDivElement>({ evenFromKeyboard: true });
   const Icon = ICONS[toast.tone];
   return (
-    <div ref={exitRef} className="toast" data-tone={toast.tone}>
+    <div ref={exitRef} className="toast" data-tone={toast.tone} data-flip-key={toast.id}>
       <Icon size={16} />
       <span className="selectable" style={{ wordBreak: "break-word" }}>
         {toast.text}
