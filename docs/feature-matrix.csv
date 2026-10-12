@@ -310,3 +310,5 @@ P-28,Search across all open sessions,product-addition,,in_scope,05,,,,NOT_STARTE
 P-29,Save or copy one command's output,product-addition,,in_scope,05,,,,NOT_STARTED,,,
 P-30,Encrypted host and group notes,product-addition,,in_scope,04,,,,NOT_STARTED,,,
 P-31,tmux and screen session awareness,product-addition,,in_scope,05,,,,NOT_STARTED,,,
+P-32,"Server at a glance: uptime, load, memory and disk",product-addition,,in_scope,05,,,,NOT_STARTED,,,
+P-33,Container shells on the connected host,product-addition,,in_scope,05,,,,NOT_STARTED,,,

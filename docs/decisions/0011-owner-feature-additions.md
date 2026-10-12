@@ -1,12 +1,13 @@
-# ADR 0011: Owner-requested features P-23 to P-31
+# ADR 0011: Owner-requested features P-23 to P-33
 
 Status: accepted (owner request), 2026-10-12
 
 ## Context
 
 The owner asked for these features, which are not in the reference matrix; P-28 to P-31 were
-chosen by the coordinator under the owner's standing request to add useful features. They are
-recorded as product additions P-23 to P-31 in BUILD_SPEC §12.4 so they are tracked like every other row.
+first chosen by the coordinator under the owner's standing request to add useful features, then
+confirmed by the owner with P-32 and P-33. They are
+recorded as product additions P-23 to P-33 in BUILD_SPEC §12.4 so they are tracked like every other row.
 This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC §0.1 still apply.
 
 ## Decision
@@ -113,6 +114,31 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
   is built only from a name that matches a strict pattern; anything else is not offered.
 - After an automatic reconnect (CON-13), the app may offer to reattach the session the user was
   in. It never reattaches without that choice.
+
+### P-32: server at a glance
+
+- Shows uptime, load, memory and disk use in the connection side panel, for SSH sessions on
+  Linux servers. On other systems it says "Not available", and it is never offered for Telnet or
+  serial sessions.
+- Reads them over a separate exec channel on the verified connection, using a fixed command the
+  app builds itself (for example reading `/proc/loadavg` and `/proc/meminfo`, and running
+  `df -P`). The command never includes user or server input, and it never types into the user's
+  shell.
+- Output is untrusted. It is parsed strictly, and anything malformed shows as unavailable rather
+  than as a guess.
+- Refreshes no more often than every 5 s, and only while the panel is open. Stops when the
+  session closes or the vault locks. Can be turned off for one host.
+
+### P-33: container shells on the connected host
+
+- Lists Docker or Podman containers over a separate exec channel on the verified connection,
+  using a fixed listing command with JSON output.
+- Container names and images come from the server and are shown as plain text only.
+- A shell opens in a new tab as a new channel on the same verified connection. Its command is
+  built only from a container ID that matches `^[0-9a-f]{12,64}$`; any other value is refused.
+- The app never adds `sudo` and never retries with more privilege. A permission error is shown
+  as it is.
+- Listing and shells stop when the session closes or the vault locks.
 
 ## Consequences
 

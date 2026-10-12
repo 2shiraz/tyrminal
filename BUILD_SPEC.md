@@ -1474,8 +1474,10 @@ References: [S33], [S34], [S35], [S42].
 | P-29 | Save or copy one command's output | 05 |
 | P-30 | Encrypted host and group notes | 04 |
 | P-31 | tmux and screen session awareness | 05 |
+| P-32 | Server at a glance: uptime, load, memory and disk | 05 |
+| P-33 | Container shells on the connected host | 05 |
 
-P-23 to P-31 were added at the owner's request on 2026-10-12 ([docs/decisions/0011-owner-feature-additions.md](docs/decisions/0010-owner-feature-additions.md)).
+P-23 to P-33 were added at the owner's request on 2026-10-12 ([docs/decisions/0011-owner-feature-additions.md](docs/decisions/0010-owner-feature-additions.md)).
 
 ## 13. Additional hardening details and decision rules
 
