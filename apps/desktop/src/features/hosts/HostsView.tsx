@@ -35,8 +35,12 @@ import { HostEditor, groupPath } from "./HostEditor";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+// identities (KEY-15..18)
+import type { IdentitySummary } from "@tyrminal/contracts";
+import { IconUser } from "../../components/ui/icons";
+import { msgI } from "../../lib/messages-identities";
 
-export function authSummary(host: HostSummary, keys: KeySummary[]): string {
+export function authSummary(host: HostSummary, keys: KeySummary[], identities: IdentitySummary[] = []): string {
   switch (host.auth.kind) {
     case "ask_password":
       return msg.hosts.authAsk;
@@ -46,6 +50,13 @@ export function authSummary(host: HostSummary, keys: KeySummary[]): string {
       const keyId = host.auth.keyId;
       const key = keys.find((k) => k.id === keyId);
       const text = key ? msg.hosts.authKey(key.label) : msg.hosts.authKeyMissing;
+      return host.inherited.auth ? msg.hosts.authInherited(text) : text;
+    }
+    // identities (KEY-15..18)
+    case "identity": {
+      const identityId = host.auth.identityId;
+      const identity = identities.find((i) => i.id === identityId);
+      const text = identity ? msgI.hosts.summary(identity.label) : msgI.hosts.summaryMissing;
       return host.inherited.auth ? msg.hosts.authInherited(text) : text;
     }
   }
@@ -73,13 +84,23 @@ function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number
 
 type GroupFilter = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
 
-function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
-  const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
-  const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
+function AuthBadge({ host, keys, identities }: { host: HostSummary; keys: KeySummary[]; identities: IdentitySummary[] }) {
+  const Icon =
+    host.auth.kind === "key"
+      ? IconKeyRound
+      : host.auth.kind === "identity"
+        ? IconUser
+        : host.auth.kind === "stored_password"
+          ? IconLock
+          : IconTextCursorInput;
+  const missing =
+    (host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId)) ||
+    (host.auth.kind === "identity" && !identities.some((i) => host.auth.kind === "identity" && i.id === host.auth.identityId));
+  const tone = missing ? "badge-danger" : "";
   return (
     <span className={`badge ${tone}`}>
       <Icon size={12} />
-      {authSummary(host, keys)}
+      {authSummary(host, keys, identities)}
     </span>
   );
 }
@@ -119,6 +140,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const remove = useAction();
   const action = useAction();
   const keyList = keys.value ?? [];
+  // identities (KEY-15..18)
+  const identityList = useVaultData().identities.value ?? [];
   const groupList = groups.value ?? [];
   const tree = useMemo(() => groupTree(groupList), [groupList]);
 
@@ -456,7 +479,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                     </div>
                     <div className="host-card-meta">
                       <div className="host-card-badges">
-                      <AuthBadge host={host} keys={keyList} />
+                      <AuthBadge host={host} keys={keyList} identities={identityList} />
                       {isConnected ? (
                         <span className="badge badge-success">
                           <span className="status-dot" data-tone="ok" aria-hidden="true" />
@@ -492,7 +515,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                 <div className="row-main">
                   <span className="row-title">{host.label}</span>
                   <span className="row-sub">
-                    {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keyList)}
+                    {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keyList, identityList)}
                     {host.groupId ? ` · ${groupName(host.groupId)}` : ""}
                     {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                   </span>

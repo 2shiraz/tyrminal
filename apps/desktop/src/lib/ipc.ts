@@ -368,3 +368,16 @@ export const promptMarks = {
   remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
     call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
 };
+
+// identities (KEY-15..18)
+export const identities = {
+  list: () => call<import("@tyrminal/contracts").IdentitySummary[]>("identity_list"),
+  save: (identity: import("@tyrminal/contracts").IdentityInput) =>
+    call<import("@tyrminal/contracts").IdentitySummary>("identity_save", { identity }),
+  remove: (id: string) => call<void>("identity_delete", { id }),
+  /** The identity whose password the session could type in, or null. */
+  forSession: (sessionId: string) => call<import("@tyrminal/contracts").SessionIdentity | null>("session_identity", { sessionId }),
+  /** Types that identity's password into the session (an explicit user action; no Enter). */
+  insertPassword: (sessionId: string, identityId: string) =>
+    call<void>("session_insert_identity_password", { sessionId, identityId }),
+};

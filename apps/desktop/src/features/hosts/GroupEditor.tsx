@@ -8,6 +8,9 @@ import { groups as groupsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { groupPath } from "./HostEditor";
+// identities (KEY-15..18)
+import { useVaultData } from "../../app/vaultData";
+import { msgI } from "../../lib/messages-identities";
 
 /** Ids of `id` and every group nested under it (a group cannot move into these). */
 export function descendantsOf(groups: GroupSummary[], id: string): Set<string> {
@@ -45,7 +48,13 @@ export function GroupEditor({
   const [parent, setParent] = useState<string | null>(group ? group.parentId : (parentId ?? null));
   const [username, setUsername] = useState(group?.username ?? "");
   const [port, setPort] = useState(group?.port ? String(group.port) : "");
-  const [keyId, setKeyId] = useState(group?.keyId ?? "");
+  // identities (KEY-15..18): one choice, "key:<id>" or "identity:<id>"; a group sets at most one.
+  const identities = useVaultData().identities.value ?? [];
+  const [credential, setCredential] = useState(
+    group?.keyId ? `key:${group.keyId}` : group?.identityId ? `identity:${group.identityId}` : "",
+  );
+  const keyId = credential.startsWith("key:") ? credential.slice(4) : "";
+  const identityId = credential.startsWith("identity:") ? credential.slice(9) : "";
   const { pending, error, run } = useAction();
 
   const excluded = group ? descendantsOf(groups, group.id) : new Set<string>();
@@ -64,6 +73,7 @@ export function GroupEditor({
         username: username.trim() === "" ? null : username.trim(),
         port: portNumber,
         keyId: keyId === "" ? null : keyId,
+        identityId: identityId === "" ? null : identityId,
       }),
     );
     if (saved) onSaved(saved);
@@ -110,14 +120,26 @@ export function GroupEditor({
             />
           </div>
           <label className="field">
-            <span className="label">{msg.hosts.groupKey}</span>
-            <select className="select" value={keyId} onChange={(event) => setKeyId(event.target.value)}>
+            <span className="label">{identities.length > 0 ? msgI.hosts.groupCredential : msg.hosts.groupKey}</span>
+            <select className="select" value={credential} onChange={(event) => setCredential(event.target.value)}>
               <option value="">{msg.hosts.groupKeyNone}</option>
-              {keys.map((key) => (
-                <option key={key.id} value={key.id}>
-                  {key.label} ({key.algorithm})
-                </option>
-              ))}
+              <optgroup label={msgI.hosts.groupKeys}>
+                {keys.map((key) => (
+                  <option key={key.id} value={`key:${key.id}`}>
+                    {key.label} ({key.algorithm})
+                  </option>
+                ))}
+              </optgroup>
+              {identities.length > 0 && (
+                <optgroup label={msgI.hosts.groupIdentities}>
+                  {identities.map((identity) => (
+                    <option key={identity.id} value={`identity:${identity.id}`}>
+                      {identity.label}
+                      {identity.username ? ` (${identity.username})` : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
         </fieldset>

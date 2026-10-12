@@ -43,6 +43,9 @@ export function installMockBackend(options) {
     groups: [],
     snippets: [],
     knownHosts: [],
+    // identities (KEY-15..18): summaries plus the mock's own copy of each password.
+    identities: [],
+    identityPasswords: new Map(),
     sessions: new Map(),
     nextSession: 1,
   };
@@ -65,9 +68,9 @@ export function installMockBackend(options) {
       lastConnectedAt: last,
     });
     state.groups = [
-      { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
-      { id: id(501), name: "Databases", parentId: id(500), username: "postgres", port: null, keyId: null },
-      { id: id(502), name: "Lab", parentId: null, username: null, port: null, keyId: null },
+      { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1), identityId: null },
+      { id: id(501), name: "Databases", parentId: id(500), username: "postgres", port: null, keyId: null, identityId: null },
+      { id: id(502), name: "Lab", parentId: null, username: null, port: null, keyId: null, identityId: null },
     ];
     state.hosts = [
       host(1, "api-gateway", "10.20.0.11", "deploy", 22, { kind: "key", keyId: id(1) }, now - 600, id(500), ["prod", "web"]),
@@ -122,7 +125,7 @@ export function installMockBackend(options) {
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
     state.sessions.set(sessionId, s);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
@@ -213,12 +216,19 @@ export function installMockBackend(options) {
   }
 
   function groupDefaults(groupId) {
-    const out = { username: null, port: null, keyId: null };
+    const out = { username: null, port: null, keyId: null, identityId: null };
+    let credential = false;
     let current = state.groups.find((g) => g.id === groupId);
     for (let d = 0; current && d < 16; d += 1) {
-      out.username ??= current.username;
+      // identities (KEY-15..18): a group's identity names the user when the group sets none.
+      const identityUser = state.identities.find((i) => i.id === current.identityId)?.username || null;
+      out.username ??= current.username ?? identityUser;
       out.port ??= current.port;
-      out.keyId ??= current.keyId;
+      if (!credential && (current.keyId || current.identityId)) {
+        credential = true;
+        out.keyId = current.keyId ?? null;
+        out.identityId = current.keyId ? null : (current.identityId ?? null);
+      }
       current = state.groups.find((g) => g.id === current.parentId);
     }
     return out;
@@ -644,14 +654,19 @@ export function installMockBackend(options) {
       const auth = inherited.auth
         ? defaults.keyId
           ? { kind: "key", keyId: defaults.keyId }
-          : { kind: "ask_password" }
+          : defaults.identityId
+            ? { kind: "identity", identityId: defaults.identityId }
+            : { kind: "ask_password" }
         : a.host.auth.kind === "stored_password"
           ? { kind: "stored_password" }
           : a.host.auth;
+      // identities (KEY-15..18): the host's own identity names the user when the host sets none.
+      const ownIdentityUser = a.host.auth.kind === "identity" ? state.identities.find((i) => i.id === a.host.auth.identityId)?.username || "" : "";
+      if (ownIdentityUser && a.host.username === "") inherited.username = false;
       const saved = {
         ...a.host,
         id: existing?.id ?? id(400 + state.hosts.length),
-        username: inherited.username ? (defaults.username ?? "") : a.host.username,
+        username: a.host.username !== "" ? a.host.username : ownIdentityUser || (defaults.username ?? ""),
         port: inherited.port ? (defaults.port ?? 22) : a.host.port,
         auth,
         inherited,
@@ -782,6 +797,61 @@ export function installMockBackend(options) {
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
       }
+    },
+    // identities (KEY-15..18)
+    identity_list: () =>
+      structuredClone(
+        state.identities.map((i) => ({
+          ...i,
+          usedByHosts: state.hosts.filter((h) => h.auth.kind === "identity" && h.auth.identityId === i.id && !h.inherited.auth).length,
+          usedByGroups: state.groups.filter((g) => g.identityId === i.id).length,
+        })),
+      ),
+    identity_save: (a) => {
+      const input = a.identity;
+      const existing = state.identities.find((i) => i.id === input.id);
+      if (input.id && !existing) throw { code: "NOT_FOUND", message: "That identity no longer exists." };
+      const saved = {
+        id: existing?.id ?? id(800 + state.identities.length),
+        label: input.label,
+        username: input.username,
+        hasPassword: existing?.hasPassword ?? false,
+        keyId: input.keyId,
+        usedByHosts: 0,
+        usedByGroups: 0,
+      };
+      if (input.password.kind === "set") {
+        state.identityPasswords.set(saved.id, input.password.password);
+        saved.hasPassword = true;
+      } else if (input.password.kind === "clear") {
+        state.identityPasswords.delete(saved.id);
+        saved.hasPassword = false;
+      }
+      state.identities = existing ? state.identities.map((i) => (i.id === saved.id ? saved : i)) : [...state.identities, saved];
+      return handlers.identity_list().find((i) => i.id === saved.id);
+    },
+    identity_delete: (a) => {
+      const used = handlers.identity_list().find((i) => i.id === a.id);
+      if (used && (used.usedByHosts > 0 || used.usedByGroups > 0))
+        throw { code: "IN_USE", message: "Hosts or groups still use this identity. Choose another sign-in method for them first." };
+      state.identities = state.identities.filter((i) => i.id !== a.id);
+      state.identityPasswords.delete(a.id);
+    },
+    session_identity: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      const host = state.hosts.find((h) => h.id === s.hostId);
+      const identity = host?.auth.kind === "identity" ? state.identities.find((i) => i.id === host.auth.identityId) : undefined;
+      return identity ? { identityId: identity.id, label: identity.label, hasPassword: identity.hasPassword } : null;
+    },
+    session_insert_identity_password: (a) => {
+      const current = handlers.session_identity({ sessionId: a.sessionId });
+      if (!current || current.identityId !== a.identityId)
+        throw { code: "CONFLICT", message: "The identity of this host changed. Check which identity it uses and try again." };
+      const password = state.identityPasswords.get(a.identityId);
+      if (!password) throw { code: "INVALID_INPUT", message: "This identity has no stored password." };
+      // Typed by the "core": the renderer never receives the password, and no Enter is added.
+      write(a.sessionId, new TextEncoder().encode(password));
     },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
