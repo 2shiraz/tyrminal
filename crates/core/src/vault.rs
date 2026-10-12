@@ -101,6 +101,15 @@ impl core::fmt::Debug for VaultService {
     }
 }
 
+const SUSPEND_CHECK_EVERY: Duration = Duration::from_secs(5);
+/// More wall-clock time than monotonic time between two checks means the machine was asleep
+/// (or the clock jumped forward); either way the vault locks.
+const SUSPEND_GAP: Duration = Duration::from_secs(30);
+
+pub(crate) fn slept_between(wall: Duration, monotonic: Duration) -> bool {
+    wall.saturating_sub(monotonic) >= SUSPEND_GAP
+}
+
 fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -181,14 +190,21 @@ impl VaultService {
                     self.lock().await;
                     break;
                 }
+                // Wake at least every few seconds so a system sleep is noticed promptly: the
+                // monotonic clock (and so `idle`) does not advance while macOS or Linux sleeps.
+                let (wall, mono) = (SystemTime::now(), std::time::Instant::now());
                 tokio::select! {
-                    () = tokio::time::sleep(timeout - idle) => {}
+                    () = tokio::time::sleep((timeout - idle).min(SUSPEND_CHECK_EVERY)) => {}
                     changed = status.wait_for(|s| s.state != VaultState::Unlocked) => {
                         if changed.is_err() {
                             return;
                         }
                         break;
                     }
+                }
+                if slept_between(wall.elapsed().unwrap_or(Duration::ZERO), mono.elapsed()) {
+                    self.lock().await;
+                    break;
                 }
             }
         }
@@ -1033,5 +1049,20 @@ impl VaultService {
             return Err(locked());
         }
         Ok(self.generation())
+    }
+}
+
+#[cfg(test)]
+mod suspend_tests {
+    use super::*;
+
+    #[test]
+    fn a_wall_clock_gap_means_the_machine_slept() {
+        let s = Duration::from_secs;
+        assert!(!slept_between(s(5), s(5)));
+        assert!(!slept_between(s(34), s(5)), "small drift or NTP slew is not sleep");
+        assert!(slept_between(s(35), s(5)));
+        assert!(slept_between(s(7200), s(5)));
+        assert!(!slept_between(Duration::ZERO, s(5)), "a clock set backwards is not sleep");
     }
 }

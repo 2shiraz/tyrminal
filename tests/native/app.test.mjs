@@ -275,7 +275,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     // Commands that were never granted are refused by the runtime, whatever the page asks for.
     // (This reaches for the internal invoke function deliberately: it is what injected script
     // in a compromised renderer would do.)
-    const attempts = ["plugin:app|version", "plugin:path|resolve_directory", "plugin:webview|create_webview_window", "plugin:shell|open", "plugin:fs|read_text_file", "read_any_file", "decrypt_secret"];
+    const attempts = ["plugin:app|version", "plugin:path|resolve_directory", "plugin:webview|create_webview_window", "plugin:shell|open", "plugin:fs|read_text_file", "plugin:dialog|open", "plugin:dialog|save", "read_any_file", "decrypt_secret"];
     const outcomes = await s.executeAsync(`
       const [commands, done] = arguments;
       Promise.all(commands.map((c) => window.__TAURI_INTERNALS__.invoke(c, {}).then(() => "ALLOWED", (e) => "denied: " + String(e).slice(0, 80))))
@@ -283,5 +283,23 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     for (const [index, outcome] of outcomes.entries()) {
       assert.match(outcome, /^denied: /, `${attempts[index]} must not be callable from the renderer`);
     }
+  });
+
+  test("a second instance on the same data refuses to start and leaves the first untouched", async () => {
+    const second = await App.launch({ dataDir: app.dataDir });
+    try {
+      await second.session.until(
+        async () => /already open/.test(await second.session.execute("return document.body.innerText")),
+        { describe: "already-open message", timeout: 20_000 },
+      );
+      const text = await second.session.execute("return document.body.innerText");
+      assert.match(text, /could not start/);
+      assert.ok(!/Unlock your vault|Create your local vault/.test(text), "the second instance shows no vault screen");
+    } finally {
+      await second.quit({ keepData: true });
+    }
+    // The first instance still works.
+    assert.ok(await s.execute(`return document.querySelector("nav.sidebar, .auth-card") !== null`), "first window still renders");
+    assert.ok(!/already open/.test(await s.execute("return document.body.innerText")));
   });
 });
