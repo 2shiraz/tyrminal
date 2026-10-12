@@ -30,14 +30,15 @@ import {
   IconKeyRound,
   IconLayoutGrid,
   IconList,
-  IconNetwork,
   IconLock,
+  IconNetwork,
   IconPencil,
   IconPlay,
   IconPlus,
   IconSearch,
   IconServer,
   IconSlidersHorizontal,
+  IconStar,
   IconTextCursorInput,
   IconTrash2,
   IconUpload,
@@ -550,6 +551,16 @@ export function HostsView({
     }
   }
 
+  async function favourite(host: HostSummary) {
+    const saved = await action.run(() => hostsApi.setFavourite(host.id, !host.favourite));
+    if (!saved) return;
+    // The open panel shows the same host: keep its copy current.
+    setPanel((current) =>
+      current && current.target.kind === "edit" && current.target.host.id === saved.id ? { ...current, target: { kind: "edit", host: saved } } : current,
+    );
+    reload();
+  }
+
   const actions = (host: HostSummary, anchor: HTMLElement) => setMenu({ host, anchor });
 
   // The panel takes the whole view when the list and the panel do not both fit.
@@ -940,6 +951,7 @@ export function HostsView({
           onConnect={(host) => guard(() => onConnect(host))}
           onOpenSftp={onOpenSftp}
           onDuplicate={(host) => void duplicate(host)}
+          onFavourite={(host) => void favourite(host)}
           onCopyAddress={(host) => {
             // A user-initiated copy of non-secret data.
             void navigator.clipboard
@@ -976,6 +988,11 @@ export function HostsView({
               ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(menu.host) }]
               : []),
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => openPanel({ kind: "edit", host: menu.host }) },
+            {
+              label: menu.host.favourite ? msg.hosts.unfavourite : msg.hosts.favourite,
+              icon: <IconStar size={15} fill={menu.host.favourite ? "currentColor" : "none"} />,
+              onSelect: () => void favourite(menu.host),
+            },
             {
               label: msg.hosts.duplicate,
               icon: <IconCopy size={15} />,

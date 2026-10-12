@@ -33,6 +33,7 @@ const COMMANDS: &[&str] = &[
     "group_delete",
     "host_search",
     "host_duplicate",
+    "host_favourite_set",
     "host_bulk",
     "import_preview",
     "import_hosts",
@@ -97,6 +98,7 @@ const COMMANDS: &[&str] = &[
     "app_info",
     // backup and restore
     "backup_export",
+    "backup_status",
     "backup_choose",
     "backup_preview",
     "backup_restore",

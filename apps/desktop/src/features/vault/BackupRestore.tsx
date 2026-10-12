@@ -10,7 +10,7 @@ import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 
 /** Saves a backup of the unlocked vault through the native save dialog. */
-export function ExportBackupButton() {
+export function ExportBackupButton({ onExported }: { onExported?: () => void } = {}) {
   const notify = useToast();
   const { pending, error, run } = useAction();
   return (
@@ -22,7 +22,10 @@ export function ExportBackupButton() {
           disabled={pending}
           onClick={async () => {
             const name = await run(() => backup.export());
-            if (name) notify("success", msg.backup.exported(name));
+            if (name) {
+              notify("success", msg.backup.exported(name));
+              onExported?.();
+            }
           }}
         >
           <IconDownload size={15} />

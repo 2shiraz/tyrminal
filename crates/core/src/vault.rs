@@ -41,8 +41,8 @@ use crate::records::{
 use crate::validate;
 // agent B: tunnels and history
 use crate::records::{
-    KIND_RECORDING_SETTINGS, KIND_SESSION_LOG, KIND_TUNNEL, LogEnd, RecordingSettingsRecord, SessionLogRecord,
-    TunnelRecord,
+    BackupStatusRecord, KIND_BACKUP_STATUS, KIND_RECORDING_SETTINGS, KIND_SESSION_LOG, KIND_TUNNEL, LogEnd,
+    RecordingSettingsRecord, SessionLogRecord, TunnelRecord,
 };
 use tyrminal_contracts::{
     ChainHop, HostConnection, HostConnectionInput, RecordingSettings, TunnelInput, TunnelSummary,
@@ -94,6 +94,8 @@ struct Open {
     session_logs: BTreeMap<Id, Stored<SessionLogRecord>>,
     /// The one settings record, if the user ever saved settings.
     recording_settings: Option<(Id, Stored<RecordingSettingsRecord>)>,
+    /// When the vault was last backed up, if ever.
+    backup_status: Option<(Id, Stored<BackupStatusRecord>)>,
     // agent C: workspaces
     layouts: BTreeMap<Id, Stored<LayoutRecord>>,
     // agent D: inventory and snippets
@@ -122,6 +124,7 @@ impl Open {
             tunnels: BTreeMap::new(),
             session_logs: BTreeMap::new(),
             recording_settings: None,
+            backup_status: None,
             // agent C: workspaces
             layouts: BTreeMap::new(),
             // agent D: inventory and snippets
@@ -255,6 +258,7 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
         terminal: record.terminal,
         forward_agent: record.forward_agent,
         production: inventory::production(groups, record),
+        favourite: record.favourite,
     }
 }
 
@@ -316,6 +320,7 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         terminal: record.terminal,
         forward_agent: record.forward_agent,
         production: record.production,
+        favourite: record.favourite,
         // agent B: tunnels and history
         connection: record.connection.clone(),
     }
@@ -589,6 +594,13 @@ impl VaultService {
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
                 KIND_SESSION_LOG => load!(SessionLogRecord, open.session_logs),
+                KIND_BACKUP_STATUS => match decode::<BackupStatusRecord>(&payload)? {
+                    Decoded::Live(record) if !row.deleted && open.backup_status.is_none() => {
+                        open.backup_status = Some((row.record_id, Stored { revision: row.revision, record }));
+                    }
+                    Decoded::Tombstone if row.deleted => {}
+                    _ => return Err(damaged()),
+                },
                 KIND_RECORDING_SETTINGS => match decode::<RecordingSettingsRecord>(&payload)? {
                     // There is only ever one: a second live one means the store was altered.
                     Decoded::Live(record) if !row.deleted && open.recording_settings.is_none() => {
@@ -778,7 +790,8 @@ impl VaultService {
         let rows = self.db.list_records().await.map_err(from_storage)?;
         let records: Vec<BackupRecord> = rows
             .into_iter()
-            .filter(|row| !row.deleted)
+            // When this vault was last backed up says nothing true about a vault restored from it.
+            .filter(|row| !row.deleted && row.kind != KIND_BACKUP_STATUS)
             .map(|row| BackupRecord {
                 record_id: row.record_id,
                 kind: row.kind,
@@ -787,6 +800,28 @@ impl VaultService {
             })
             .collect();
         open.keys.encode_backup(header, now_unix(), &records).map_err(from_vault)
+    }
+
+    /// Notes that a backup of this vault was saved, once the file is written.
+    pub async fn record_backup_export(&self) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let record = BackupStatusRecord { last_export_at: now_unix() };
+        let (id, revision) = match &open.backup_status {
+            Some((id, stored)) => (*id, stored.revision + 1),
+            None => (random_id().map_err(from_vault)?, 1),
+        };
+        self.write(open, id, KIND_BACKUP_STATUS, revision, Some((&record, 0))).await?;
+        open.backup_status = Some((id, Stored { revision, record }));
+        Ok(())
+    }
+
+    pub async fn backup_status(&self) -> Result<tyrminal_contracts::BackupStatus, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(tyrminal_contracts::BackupStatus {
+            last_export_at: open.backup_status.as_ref().map(|(_, s)| s.record.last_export_at),
+        })
     }
 
     /// Fully validates a backup with the secret it was made with: strict parse, unlock of its own
@@ -1097,6 +1132,8 @@ impl VaultService {
         // agent B: tunnels and history: connection settings are saved on their own and kept here.
         let connection =
             existing_id.and_then(|id| open.hosts.get(&id)).map(|s| s.record.connection.clone()).unwrap_or_default();
+        // Starring is its own action; editing a host keeps it.
+        let favourite = existing_id.and_then(|id| open.hosts.get(&id)).is_some_and(|s| s.record.favourite);
         let record = HostRecord {
             label,
             address,
@@ -1110,6 +1147,7 @@ impl VaultService {
             terminal: input.terminal,
             forward_agent: input.forward_agent,
             production: input.production,
+            favourite,
             connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
@@ -1131,7 +1169,7 @@ impl VaultService {
         if label.len() > MAX_LABEL_LEN {
             label = source.label.clone();
         }
-        let record = HostRecord { label, last_connected_at: None, ..copy_host(source) };
+        let record = HostRecord { label, last_connected_at: None, favourite: false, ..copy_host(source) };
         let id = random_id().map_err(from_vault)?;
         // agent D: the copy keeps the source's appearance, written in the same transaction.
         let appearance = Self::appearance_of(open, &validate::id_text(&source_id))
@@ -1435,6 +1473,7 @@ impl VaultService {
                 terminal: tyrminal_contracts::HostTerminal::default(),
                 forward_agent: false,
                 production: false,
+                favourite: false,
                 // agent B: tunnels and history
                 connection: crate::records::StoredConnection {
                     jump_host,
@@ -1912,6 +1951,21 @@ impl VaultService {
     }
 
     /// Turns quick forward suggestions on or off for one host (P-24); nothing else changes.
+    /// Stars or unstars a host (Home's favourites); nothing else changes.
+    pub async fn set_favourite(&self, host_id: &str, favourite: bool) -> Result<HostSummary, IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
+        let mut record = copy_host(&current.record);
+        record.favourite = favourite;
+        let revision = current.revision + 1;
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        let summary = host_summary(&group_index(open), &id, &record);
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
     pub async fn set_port_suggestions(&self, host_id: &str, enabled: bool) -> Result<(), IpcError> {
         let id = validate::id(host_id)?;
         let mut inner = self.inner.lock().await;
