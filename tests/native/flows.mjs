@@ -141,7 +141,7 @@ export function ui(s) {
      */
     async addHost({ label, port, user, key }) {
       await api.nav("Hosts");
-      await s.clickButton("Add host");
+      await s.clickButton("New host");
       await s.fill("Name", label, { within: HOST_PANEL });
       await s.fill("Address", "127.0.0.1", { within: HOST_PANEL });
       const portField = await s.fill("Port", "", { within: HOST_PANEL });

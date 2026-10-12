@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { chooseLayout, openApp, sortHosts } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -23,26 +23,27 @@ const labels = (page: Page) => hostCards(page).evaluateAll((cards) => cards.map(
 test("hosts sort by name, address and group", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
-  const sort = page.getByRole("radiogroup", { name: "Sort" });
-  await sort.getByText("Address").click();
+  await sortHosts(page, "Address");
   expect(await labels(page)).toEqual(["api-gateway", "Home lab", "edge-cache", "build-runner-03", "db-primary", "staging-web"]);
-  await sort.getByText("Group").click();
+  await sortHosts(page, "Group");
   // Databases sorts after Lab only by path: "Lab" < "Production" < "Production/Databases"; ungrouped last.
   expect(await labels(page)).toEqual(["Home lab", "api-gateway", "db-primary", "build-runner-03", "edge-cache", "staging-web"]);
-  await sort.getByText("Name").click();
+  await sortHosts(page, "Name");
   expect(await labels(page)).toEqual(["api-gateway", "build-runner-03", "db-primary", "edge-cache", "Home lab", "staging-web"]);
 });
 
 test("the chosen layout, sort and group filter stay after other views and a restart", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
-  await page.getByRole("radiogroup", { name: "Layout" }).getByText("List").click();
-  await page.getByRole("radiogroup", { name: "Sort" }).getByText("Address").click();
-  await page.getByRole("button", { name: "Lab", exact: true }).click();
+  await chooseLayout(page, "List");
+  await sortHosts(page, "Address");
+  await page.getByTestId("group-bar").getByRole("button", { name: "Lab", exact: true }).click();
   const check = async () => {
     await expect(page.getByRole("radiogroup", { name: "Layout" }).getByRole("radio", { name: "List" })).toBeChecked();
-    await expect(page.getByRole("radiogroup", { name: "Sort" }).getByRole("radio", { name: "Address" })).toBeChecked();
-    await expect(page.getByRole("button", { name: "Lab", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Sort", exact: true }).click();
+    await expect(page.getByRole("menuitemcheckbox", { name: "Address" })).toBeChecked();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("breadcrumb").locator('[aria-current="page"]')).toHaveText("Lab");
     await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(0);
     await expect(page.getByTestId("host-list").getByRole("listitem")).toHaveCount(1);
   };
@@ -66,8 +67,9 @@ test("Hosts opens as a list by default; Cards, once chosen, stays after other vi
   await expect(layout.getByRole("radio", { name: "List" })).toBeChecked();
   await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(0);
 
-  await layout.getByText("Cards").click();
-  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(6);
+  await chooseLayout(page, "Cards");
+  // The default top level: the groups, then the hosts in no group.
+  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(3);
   await primary(page).getByRole("button", { name: /^Settings/ }).click();
   await openHosts(page);
   await expect(layout.getByRole("radio", { name: "Cards" })).toBeChecked();
@@ -75,7 +77,7 @@ test("Hosts opens as a list by default; Cards, once chosen, stays after other vi
   await page.reload();
   await openHosts(page);
   await expect(layout.getByRole("radio", { name: "Cards" })).toBeChecked();
-  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(6);
+  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(3);
 });
 
 test("select all shown hosts and shift-click a range", async ({ page }) => {
@@ -109,7 +111,8 @@ test("set the OS of selected hosts: the tile shows its icon", async ({ page }) =
   await openHosts(page);
   await name(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
   await name(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Set OS" }).click();
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await page.getByRole("menuitem", { name: "Set OS icon…" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Operating system").selectOption({ label: "Debian" });
   await dialog.getByRole("button", { name: "Save" }).click();
@@ -118,7 +121,8 @@ test("set the OS of selected hosts: the tile shows its icon", async ({ page }) =
   expect(set?.args).toMatchObject({ os: "debian" });
   await expect(hostCards(page).filter({ has: page.getByRole("img", { name: "Operating system: Debian" }) })).toHaveCount(2);
 
-  // One host from its menu; "Not set" clears it.
+  // One host from its menu (outside a selection, so it acts on that host); "Not set" clears it.
+  await page.getByRole("button", { name: "Clear selection" }).click();
   await page.getByRole("button", { name: "More actions for edge-cache" }).click();
   await page.getByRole("menuitem", { name: "Set OS" }).click();
   await expect(page.getByRole("dialog").getByLabel("Operating system")).toHaveValue("debian");
@@ -177,7 +181,8 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
 async function openImport(page: Page) {
   await openApp(page);
   await openHosts(page);
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.getByRole("button", { name: "More ways to add" }).click();
+  await page.getByRole("menuitem", { name: "Import…" }).click();
   return page.getByRole("dialog", { name: "Import hosts" });
 }
 

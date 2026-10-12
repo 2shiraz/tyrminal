@@ -11,6 +11,7 @@ import { Avatar, IconButton, RangeField, Segmented, SettingRow, Shortcut, relati
 import { IconPanelRightClose, IconZoomIn, IconZoomOut } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { SnippetLibrary, type SnippetTarget, TargetIndicator } from "../snippets/SnippetLibrary";
 import { SCHEMES } from "../terminal/schemes";
 import { useExit } from "../../lib/exitGhost";
@@ -115,6 +116,7 @@ export function ConnectionPanel({
         {section === "history" && <History hostId={hostId} onConnect={onConnect} />}
         {section === "appearance" && <Appearance onZoom={onZoom} />}
       </div>
+      <ResizeHandle panel="sidePanel" />
     </aside>
   );
 }

@@ -5,6 +5,7 @@ import { ErrorNotice, IconButton, Switch } from "../../components/ui/controls";
 import { IconPanelRightClose } from "../../components/ui/icons";
 import { type AppError, glance, toAppError } from "../../lib/ipc";
 import { msgG } from "../../lib/messages-glance";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { MultiplexerSection } from "../multiplexers/MultiplexerSection";
 import { formatSize } from "../sftp/model";
 import { useExit } from "../../lib/exitGhost";
@@ -133,6 +134,7 @@ export function ServerPanel({
           </>
         )}
       </div>
+      <ResizeHandle panel="sidePanel" />
     </aside>
   );
 }

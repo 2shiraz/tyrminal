@@ -55,7 +55,7 @@ test("hosts are production through their flag, a group above them or the product
   await groupEditor.getByRole("switch", { name: /Production group/ }).check();
   await expect.poll(async () => (await calls(page, "group_save")).at(-1)?.args.group).toMatchObject({ production: true });
   await groupEditor.getByRole("button", { name: "Done" }).click();
-  await page.getByRole("button", { name: "All hosts" }).click();
+  // Every host is shown ("Show all hosts"), Home lab among them.
   await expect(badge(page, "Home lab")).toBeVisible();
   // Its details say why, without turning the host's own switch on.
   await page.getByTestId("host-list").getByRole("button", { name: "Home lab", exact: true }).click();

@@ -40,7 +40,7 @@ for (const theme of ["dark", "light"] as const) {
     test("host details panel, new and existing host, wide and narrow", async ({ page }) => {
       await openApp(page, base);
       await nav(page, "Hosts");
-      await page.getByRole("button", { name: "Add host" }).click();
+      await page.getByRole("button", { name: "New host" }).click();
       await expect(page.getByRole("complementary", { name: "New host" })).toBeVisible();
       await audit(page);
       await page.getByTestId("host-list").getByRole("button", { name: "db-primary", exact: true }).click();

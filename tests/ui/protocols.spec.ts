@@ -10,7 +10,7 @@ const calls = (page: Page, cmd: string) =>
 async function addHost(page: Page) {
   await openApp(page);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   // The panel is renamed "Host details" once autosave creates the host.
   return page.getByTestId("host-panel");
 }

@@ -73,7 +73,7 @@ test("notes: markup, scripts, unsafe links and remote images stay inert in the h
   const ssh = page.getByRole("dialog", { name: "Add this server as a host?" });
   await expect(ssh).toContainText("bastion.example");
   await ssh.getByRole("button", { name: "Add as host…" }).click();
-  const editor = page.getByRole("dialog", { name: "Add host" });
+  const editor = page.getByRole("dialog", { name: "New host" });
   await expect(editor.getByLabel("Address")).toHaveValue("bastion.example");
   expect(await calls(page, "session_open_ssh")).toHaveLength(0);
   expect(await calls(page, "host_save")).toHaveLength(0);

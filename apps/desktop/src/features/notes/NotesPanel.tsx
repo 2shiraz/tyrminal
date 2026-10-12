@@ -7,6 +7,7 @@ import { EmptyState, ErrorNotice, IconButton, SkeletonRows } from "../../compone
 import { IconFile, IconPanelRightClose } from "../../components/ui/icons";
 import { type AppError, notes as notesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { NoteView } from "./NoteView";
 import { useExit } from "../../lib/exitGhost";
 
@@ -70,6 +71,7 @@ export function NotesPanel({
           </section>
         ))}
       </div>
+      <ResizeHandle panel="sidePanel" />
     </aside>
   );
 }

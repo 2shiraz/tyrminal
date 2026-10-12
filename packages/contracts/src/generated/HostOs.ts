@@ -4,4 +4,4 @@
  * The operating system a host runs, as the user recorded it. Presentation only: it picks the
  * icon on the host tile and is never used to decide how to connect.
  */
-export type HostOs = "linux" | "ubuntu" | "debian" | "fedora" | "red_hat" | "centos" | "alpine" | "arch" | "suse" | "raspberry_pi" | "free_bsd" | "open_bsd" | "macos" | "windows" | "network_device";
+export type HostOs = "linux" | "ubuntu" | "debian" | "fedora" | "red_hat" | "centos" | "rocky" | "alma" | "alpine" | "arch" | "suse" | "raspberry_pi" | "free_bsd" | "open_bsd" | "macos" | "windows" | "network_device";

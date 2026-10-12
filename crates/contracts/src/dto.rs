@@ -573,6 +573,43 @@ pub struct Preferences {
     /// Interface size in percent, one of [`INTERFACE_SCALES`]. `None`: automatic, from the
     /// window size.
     pub interface_scale: Option<u16>,
+    /// Widths the user dragged side panels to, in CSS pixels; kept across restarts. Absent in
+    /// files written before it existed. Clamped natively per panel in core `preferences::sanitize`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub panel_widths: Option<PanelWidths>,
+}
+
+/// One width per resizable panel; `None` is the panel's default width. Only these panels are
+/// known: other names in a stored file are ignored when it is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct PanelWidths {
+    /// The app sidebar (when expanded).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sidebar: Option<u16>,
+    /// The panel beside the terminals: snippets, history, appearance, server and notes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub side_panel: Option<u16>,
+    /// The files panel beside the terminals, server only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub files: Option<u16>,
+    /// The files panel beside the terminals with this computer shown too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub files_two_pane: Option<u16>,
+    /// The host details panel in Hosts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_panel: Option<u16>,
+    /// The left pane of the SFTP view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sftp_split: Option<u16>,
 }
 
 /// The interface sizes the user can choose, in percent.
@@ -585,6 +622,9 @@ pub struct HostsViewPreferences {
     pub layout: HostsLayout,
     pub sort: HostsSort,
     pub filter: HostsFilter,
+    /// Connections made by double-click or Enter on Hosts, counted up to the few that show the
+    /// "Double-click to connect" hint.
+    pub connect_hint_uses: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -637,6 +677,7 @@ impl Default for Preferences {
             password_check: crate::PasswordCheckPreferences::default(),
             production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
             hosts_view: None,
+            panel_widths: None,
             no_port_suggestions: false,
             interface_scale: None,
         }

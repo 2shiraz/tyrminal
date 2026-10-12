@@ -18,7 +18,11 @@ async function openHosts(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).first().click();
 }
 
+/** Subgroups show inside their parent: open the parents first. */
+const PARENTS: Record<string, string[]> = { Databases: ["Production"] };
+
 async function editGroup(page: Page, name: string) {
+  for (const parent of PARENTS[name] ?? []) await page.getByTestId("group-bar").getByRole("button", { name: parent, exact: true }).click();
   await page.getByRole("button", { name: `Actions for group ${name}` }).first().click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
   return page.getByRole("dialog", { name: "Edit group" });
@@ -60,7 +64,7 @@ test("a new group is created on its first valid name; closing with none creates 
   await expect.poll(count(page, "group_save")).toBe(2);
   expect((await calls(page, "group_save"))[1]?.args).toMatchObject({ group: { id: expect.any(String), name: "Web", username: "www" } });
   await edited.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByTestId("group-bar").getByRole("button", { name: "› Web", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("breadcrumb").locator('[aria-current="page"]')).toHaveText("Web");
 });
 
 test("group undo restores the previous record exactly", async ({ page }) => {

@@ -17,19 +17,30 @@ async function openHosts(page: Page) {
 
 const hostCards = (page: Page) => page.getByTestId("host-list").getByRole("article");
 
-test("groups filter the hosts, including their subgroups", async ({ page }) => {
+test("groups: each level shows its subgroups, then its own hosts; a breadcrumb leads back", async ({ page }) => {
   await openHosts(page);
-  const bar = page.getByTestId("group-bar");
+  const groups = page.getByTestId("group-bar");
+  const crumbs = page.getByTestId("breadcrumb");
+  // At the top: the top-level groups, and every host while "Show all hosts" is on.
+  await expect(groups.locator(".group-open")).toHaveText(["Lab", "Production"]);
+  await expect(groups.getByText("2 hosts")).toBeVisible();
   await expect(hostCards(page)).toHaveCount(6);
-  await bar.getByRole("button", { name: "Production", exact: true }).click();
-  // Production and its Databases subgroup.
-  await expect(hostCards(page)).toHaveCount(2);
-  await bar.getByRole("button", { name: "› Databases", exact: true }).click();
+  await groups.getByRole("button", { name: "Production", exact: true }).click();
+  // Inside Production: its subgroup, then its own host.
+  await expect(groups.locator(".group-open")).toHaveText(["Databases"]);
   await expect(hostCards(page)).toHaveCount(1);
-  await bar.getByRole("button", { name: "Not in a group" }).click();
-  await expect(hostCards(page)).toHaveCount(3);
-  await bar.getByRole("button", { name: "All hosts" }).click();
+  await expect(crumbs.locator('[aria-current="page"]')).toHaveText("Production");
+  await groups.getByRole("button", { name: "Databases", exact: true }).click();
+  await expect(hostCards(page)).toHaveCount(1);
+  await expect(hostCards(page)).toHaveAttribute("aria-label", "db-primary");
+  await crumbs.getByRole("button", { name: "Production" }).click();
+  await expect(crumbs.locator('[aria-current="page"]')).toHaveText("Production");
+  await crumbs.getByRole("button", { name: "Hosts" }).click();
+  await expect(crumbs).toHaveCount(0);
   await expect(hostCards(page)).toHaveCount(6);
+  // Without "Show all hosts", the top level lists the hosts in no group.
+  await page.getByRole("button", { name: "Show all hosts" }).click();
+  await expect(hostCards(page)).toHaveCount(3);
 });
 
 test("search goes through the core and understands tag: and group:", async ({ page }) => {
@@ -53,7 +64,9 @@ test("bulk: select hosts, add a tag and move them, all in one call each", async 
   const bar = page.getByTestId("bulk-bar");
   await expect(bar).toContainText("2 selected");
 
-  await bar.getByRole("button", { name: "Add tag" }).click();
+  await bar.getByRole("button", { name: "More…" }).click();
+
+  await page.getByRole("menuitem", { name: "Add tag…" }).click();
   await page.getByRole("dialog").getByLabel("Tag").fill("legacy");
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("2 hosts changed")).toBeVisible();
@@ -84,8 +97,9 @@ test("duplicate creates a full copy through the core", async ({ page }) => {
 
 test("a host in a group may leave user, port and key to the group", async ({ page }) => {
   await openHosts(page);
-  await page.getByTestId("group-bar").getByRole("button", { name: "› Databases", exact: true }).click();
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByTestId("group-bar").getByRole("button", { name: "Production", exact: true }).click();
+  await page.getByTestId("group-bar").getByRole("button", { name: "Databases", exact: true }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   // Renamed "Host details" once autosave creates the host.
   const dialog = page.getByTestId("host-panel");
   await expect(dialog.getByRole("combobox", { name: "Group" })).toHaveValue(/./);
@@ -115,8 +129,9 @@ test("groups: create a subgroup; a non-empty group cannot be deleted", async ({ 
   await dialog.getByLabel("Name", { exact: true }).press("Enter");
   await expect.poll(async () => (await calls(page, "group_save")).length).toBe(1);
   await dialog.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByTestId("group-bar").getByRole("button", { name: "› Web", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("breadcrumb").locator('[aria-current="page"]')).toHaveText("Web");
 
+  await page.getByTestId("breadcrumb").getByRole("button", { name: "Hosts" }).click();
   await page.getByRole("button", { name: "Actions for group Production" }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
@@ -125,7 +140,8 @@ test("groups: create a subgroup; a non-empty group cannot be deleted", async ({ 
 
 test("import shows a preview with what is left out before anything is added", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.getByRole("button", { name: "More ways to add" }).click();
+  await page.getByRole("menuitem", { name: "Import…" }).click();
   const dialog = page.getByRole("dialog", { name: "Import hosts" });
   await expect(dialog.getByRole("button", { name: "Import 0 hosts" })).toBeDisabled();
   await dialog.getByLabel("Choose file").setInputFiles({

@@ -17,7 +17,7 @@ async function pressOn(page: Page, locator: ReturnType<Page["locator"]>) {
 test("press: buttons, rows and menu items show a pressed state on pointer down, with no transition", async ({ page }) => {
   await openApp(page);
   await nav(page, /^Hosts/).click();
-  const add = page.getByRole("button", { name: "Add host" });
+  const add = page.getByRole("button", { name: "New host" });
   await pressOn(page, add);
   // Marked in the pointerdown itself, before any click handler ran.
   await expect(add).toHaveAttribute("data-pressed", "true");
