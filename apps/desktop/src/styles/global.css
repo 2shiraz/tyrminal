@@ -252,6 +252,12 @@ textarea {
   box-shadow: none;
 }
 
+.btn-primary:disabled {
+  --btn-bg: var(--btn-disabled-bg);
+  --btn-fg: var(--btn-disabled-fg);
+  opacity: 1;
+}
+
 .btn-primary:hover:not(:disabled) {
   --btn-bg: var(--accent-hover);
   --btn-border: transparent;
@@ -900,6 +906,8 @@ kbd,
   color: var(--text-muted);
   font-size: var(--text-sm);
   max-width: 360px;
+  /* Even lines: no single word left alone on the last one. */
+  text-wrap: balance;
 }
 
 .empty-actions {
@@ -971,8 +979,14 @@ kbd,
 }
 
 /* Identities follow the keys box on the Keychain page. */
-.identities-page {
+.page-inner.identities-page {
   padding-top: 0;
+}
+
+/* Keychain stacks Keys and Identities as two page columns: keep the usual section gap between them
+   rather than one column's bottom padding plus the next one's top. */
+.page-inner:has(+ .identities-page) {
+  padding-bottom: var(--space-5);
 }
 
 .section :focus-visible {
@@ -1282,12 +1296,15 @@ kbd,
 
 .toasts {
   position: fixed;
-  right: var(--space-4);
+  /* --toast-inset: the width of an open right-edge panel (Toasts.tsx), so its footer stays clear. */
+  right: calc(var(--toast-inset, 0px) + var(--space-4));
   bottom: calc(var(--statusbar-height) + var(--space-4));
   z-index: 70;
   display: grid;
   gap: var(--space-2);
-  width: min(380px, calc(100vw - 32px));
+  width: min(380px, calc(100vw - 32px - var(--toast-inset, 0px)));
+  /* Click-through: a toast never covers a control (Toasts.tsx finds hover by hit-testing). */
+  pointer-events: none;
 }
 
 .toast {
@@ -1475,10 +1492,6 @@ kbd,
   font-variant-numeric: tabular-nums;
 }
 
-.nav-session {
-  height: 30px;
-  font-weight: var(--weight-regular);
-}
 
 .sidebar-footer {
   display: grid;
@@ -1771,9 +1784,80 @@ kbd,
   grid-area: 1 / 1;
 }
 
-/* The dot only shows state; clicks in the slot go to the close button. */
-.tab-lead .status-dot {
+/* A plain 8 px dot in tabs (no halo); it only shows state, and clicks in the slot go to the close
+   button. */
+.tab-lead .status-dot,
+.tab-lead .status-dot[data-unread] {
+  box-shadow: none;
+  outline: none;
   pointer-events: none;
+}
+
+/* The host's OS logo in the slot: compact, without the tile it has in the host list. A small dot
+   on its corner shows a session that is connecting, waiting or dropped; none while simply open. */
+.tab-os {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.tab-lead .os-icon {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: none;
+}
+
+.tab-lead .os-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tab-os:not([data-tone="ok"])::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 1.5px var(--bg-strip);
+}
+
+.tab-os[data-tone="busy"]::after {
+  background: var(--warning);
+}
+
+.tab-os[data-tone="attention"]::after {
+  background: var(--accent);
+}
+
+.tab-os[data-tone="bad"]::after {
+  background: var(--danger);
+}
+
+.tab:hover .tab-lead .tab-os,
+.tab[aria-selected="true"] .tab-lead .tab-os {
+  opacity: 0;
+}
+
+/* On an inactive tab the red top edge marks a production host, so the name keeps its room; the
+   label is still read out, and the active tab shows it in full. */
+.tab:not([aria-selected="true"]) .tab-production {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Unread output in a background tab shows in its name rather than as a ring round the dot. */
+.tab[data-unread]:not([aria-selected="true"]) .tab-label {
+  color: var(--text);
+  font-weight: var(--weight-medium);
 }
 
 .tab-close {
@@ -1835,11 +1919,13 @@ kbd,
   overflow: auto;
 }
 
+/* Pages are a left-aligned column (revamp §5), as Hosts and Settings are, so on a wide window every
+   page starts at the same edge instead of some floating in the middle. */
 .page-inner {
   display: grid;
   gap: var(--space-5);
   max-width: var(--page-max);
-  margin: 0 auto;
+  margin: 0;
   padding: var(--space-6) var(--space-6) var(--space-7);
 }
 
@@ -2050,9 +2136,9 @@ kbd,
   background: var(--bg-sidebar);
 }
 
-/* Side panels and the host panel slide a short way in from their edge (as .m-panel). */
-.side-panel,
-.host-panel {
+/* Side panels slide a short way in from their edge (as .m-panel). The host panel's motion is in
+   HostsView: it grows its width with the list instead, and must not re-slide when the host changes. */
+.side-panel {
   transition:
     opacity var(--duration-base) var(--ease-drawer),
     transform var(--duration-base) var(--ease-drawer);
@@ -2080,7 +2166,7 @@ kbd,
 .panel-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden auto;
   padding: var(--space-3);
 }
 
@@ -2118,25 +2204,37 @@ kbd,
   width: auto;
 }
 
+/* Where snippets go: a slim strip under the panel head. */
 .panel-target {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
-  margin: 0 var(--space-3) var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
   font-size: var(--text-xs);
 }
 
 .panel-target[data-ready="false"] {
-  border-style: dashed;
   color: var(--text-muted);
 }
 
+/* Snippets (revamp §7): folders are strips with a count, snippets dense rows with the command's
+   first line in muted mono. Nothing is wider than its container. */
+.snippet-list {
+  display: grid;
+  min-width: 0;
+}
+
 .folder {
-  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.folder + .folder {
+  margin-top: var(--space-2);
 }
 
 .folder-head {
@@ -2144,10 +2242,11 @@ kbd,
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 28px;
-  padding: 0 6px;
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -2156,11 +2255,15 @@ kbd,
 }
 
 .folder-head:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
+.folder-head .box-count {
+  margin-left: auto;
+}
+
 .folder-head svg.chevron {
+  flex: none;
   transition: transform var(--duration-press) var(--ease-out);
 }
 
@@ -2168,29 +2271,38 @@ kbd,
   transform: rotate(90deg);
 }
 
+.folder ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .snippet {
-  display: grid;
-  gap: 6px;
-  margin: 4px 0;
-  padding: 10px var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
-  transition:
-    border-color var(--duration-press) var(--ease-out),
-    box-shadow var(--duration-press) var(--ease-out);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--box-rule);
 }
 
 .snippet:hover,
 .snippet:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-1);
+  background: var(--bg-hover);
+}
+
+.snippet-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
 }
 
 .snippet-name {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
@@ -2201,14 +2313,53 @@ kbd,
   font: var(--text-xs) / 1.5 var(--font-mono);
   white-space: pre;
   text-overflow: ellipsis;
-  max-height: 3em;
   font-variant-ligatures: none;
 }
 
 .snippet-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+/* In the side panel Run shows on hover or when the row has focus; Paste is in the row's menu. */
+.snippet-list[data-compact] .snippet-run {
+  opacity: 0;
+}
+
+.snippet-list[data-compact] .snippet:hover .snippet-run,
+.snippet-list[data-compact] .snippet:focus-within .snippet-run {
+  opacity: 1;
+}
+
+.snippets-panel-body {
+  padding: var(--space-2) 0 0;
+}
+
+.snippets-panel-body .row-flex {
+  padding: 0 var(--space-3);
+}
+
+/* On the Snippets page each folder is a box. */
+.snippet-list:not([data-compact]) .folder {
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
+}
+
+.snippet-list:not([data-compact]) .folder li:last-child {
+  border-bottom: 0;
+}
+
+.snippet-list:not([data-compact]) .folder-row:has(> .folder-head[aria-expanded="false"]) {
+  border-bottom: 0;
+}
+
+.snippet :focus-visible,
+.folder-head:focus-visible {
+  outline-offset: -2px;
 }
 
 /* ---------- status bar ---------- */
@@ -2457,7 +2608,7 @@ mark {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
 }
 
 .host-card-dest {
@@ -2559,9 +2710,10 @@ mark {
 
 /* The active terminal tab and, while a terminal is in front, the status bar take the terminal
    scheme's colours, so the terminal reads as part of the window rather than a box pasted into it.
-   Text uses the scheme's foreground, which every scheme keeps at 4.5:1 on its background. */
-.tab:not(.tab-page)[aria-selected="true"],
-.main:has(.workspace:not([hidden])) .statusbar {
+   Text uses the scheme's foreground, which every scheme keeps at 4.5:1 on its background. A tab of
+   SFTP panes only is not a terminal and keeps the app's colours. */
+.tab:not(.tab-page, [data-files-only])[aria-selected="true"],
+.main:has(.workspace:not([hidden], [data-files-only])) .statusbar {
   --text: var(--scheme-fg);
   --text-muted: var(--scheme-fg);
   --text-faint: color-mix(in srgb, var(--scheme-fg) 80%, var(--scheme-bg));
@@ -2579,16 +2731,16 @@ mark {
   color: var(--scheme-fg);
 }
 
-.tab:not(.tab-page)[aria-selected="true"] {
+.tab:not(.tab-page, [data-files-only])[aria-selected="true"] {
   --tab-fill: var(--scheme-bg);
 }
 
-.main:has(.workspace:not([hidden])) .statusbar {
+.main:has(.workspace:not([hidden], [data-files-only])) .statusbar {
   background: var(--scheme-bg);
   border-top-color: var(--border-subtle);
 }
 
-.main:has(.workspace:not([hidden])) .status-button[aria-pressed="true"] {
+.main:has(.workspace:not([hidden], [data-files-only])) .status-button[aria-pressed="true"] {
   background: var(--bg-active);
 }
 
@@ -3741,16 +3893,20 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* The side panel's sections: snippets, history, appearance (TRM-14). */
+/* Section tabs under the panel head: a strip of square tabs, the current one with the live edge. */
 .panel-sections {
   display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) 0;
+  flex: none;
+  min-width: 0;
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .panel-section-tab {
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
-  padding: var(--space-1) var(--space-2);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
@@ -3763,9 +3919,14 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .panel-section-tab[aria-selected="true"] {
-  background: var(--bg-inset);
+  background: var(--bg-sidebar);
+  box-shadow: var(--edge-live);
   color: var(--text);
   font-weight: var(--weight-medium);
+}
+
+.panel-section-tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .panel-section {
@@ -3775,10 +3936,22 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-height: 0;
 }
 
+/* Connection history in the side panel: dense rows on the panel's edges, Open on hover or focus. */
+.panel-history-body {
+  padding: 0;
+}
+
+.panel-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--box-rule);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .panel-history {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3788,18 +3961,48 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--box-rule);
   font-size: var(--text-sm);
 }
 
+.panel-history li:hover,
+.panel-history li:focus-within {
+  background: var(--bg-hover);
+}
+
 .panel-history li[data-current] {
-  font-weight: var(--weight-medium);
+  box-shadow: var(--edge-select);
 }
 
 .panel-history .row-main {
-  display: flex;
+  display: grid;
   flex: 1;
-  flex-direction: column;
   min-width: 0;
+}
+
+.panel-history-name {
+  font-weight: var(--weight-medium);
+}
+
+.panel-history-sub {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.panel-history-open {
+  opacity: 0;
+}
+
+.panel-history li:hover .panel-history-open,
+.panel-history li:focus-within .panel-history-open {
+  opacity: 1;
+}
+
+.panel-history :focus-visible {
+  outline-offset: -2px;
 }
 
 /* Highlight kinds (TRM-07): a toggle per kind with a sample in the scheme's own colors. */
@@ -3944,6 +4147,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  padding-right: var(--space-1);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .folder-row > .folder-head {
@@ -4203,15 +4409,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   padding: var(--space-3);
 }
 
+/* The panel's sections are boxes (box.css): a strip with the heading, then the fields. */
 .host-section {
+  flex: none;
+  /* Unclipped, unlike other boxes: a clipped box has no minimum height, and the panel's grid would
+     squeeze it. The strip rounds its own corners instead. */
+  overflow: visible;
+}
+
+.host-section > .box-strip {
+  border-radius: calc(var(--radius-box) - 1px) calc(var(--radius-box) - 1px) 0 0;
+}
+
+.host-section-body {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
 }
 
 .host-section-title {
@@ -4219,16 +4433,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-weight: var(--weight-semibold);
 }
 
-.host-address {
-  display: grid;
+.host-address > .host-section-body {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-3);
 }
 
-/* Line the mark up with the input, below the field's label. */
-.host-address > .avatar {
-  margin-top: 22px;
+/* The strip names the box; the field's label stays for assistive technology. */
+.host-address .field > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .host-address-mark {
@@ -4254,6 +4471,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .protocol-select {
   width: auto;
   min-width: 7em;
+}
+
+/* "SSH on [22] port" stays one line at the panel's narrowest: the protocol menu gives way, not the
+   line (hosts.css makes the panel's other selects full width). */
+.host-panel .host-panel-body .protocol-line {
+  flex-wrap: nowrap;
+}
+
+.host-panel .host-panel-body .protocol-line > .protocol-select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.host-panel .host-panel-body .protocol-line > :is(.protocol-port, span) {
+  flex: none;
+  overflow-wrap: normal;
 }
 
 .host-auth {
@@ -4290,16 +4524,43 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-more > summary {
-  width: fit-content;
   cursor: pointer;
+  list-style: none;
+}
+
+.host-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A disclosure arrow at the start of the strip, turned while the box is open. */
+.host-more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.host-more[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 .host-more > summary:hover {
   color: var(--text);
 }
 
-.host-more:not([open]) {
-  gap: 0;
+.host-more:not([open]) > summary {
+  border-bottom: 0;
+  border-radius: calc(var(--radius-box) - 1px);
+}
+
+.host-reuse {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .host-effective {
@@ -4650,18 +4911,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
-/* P-30: host and group notes. Plain token styling. */
+/* P-30: host and group notes, a box like the host's other sections. */
 .note-card {
-  display: grid;
-  gap: var(--space-3);
   min-width: 0;
-}
-
-.note-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
 }
 
 .note-view {
@@ -4943,4 +5195,10 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Snippets: where a folder has no rename button, hold its place so the counts line up. */
+.folder-row-spacer {
+  flex: none;
+  width: var(--control-height-sm);
 }

@@ -36,13 +36,15 @@ async function allowMotion(page: Page) {
   });
 }
 
-const newTabMenu = (page: Page) => page.getByRole("menu", { name: "New tab" });
+// A menu to open and close: Sort on Hosts ("+" in the tab strip opens the new tab page now).
+const menuButton = (page: Page) => page.getByRole("button", { name: "Sort", exact: true });
+const newTabMenu = (page: Page) => page.getByRole("menu", { name: "Sort" });
 
 test.describe("motion allowed", () => {
   test("a menu opened by the pointer grows from its trigger's corner, briefly", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     const menu = newTabMenu(page);
     await expect(menu).toBeVisible();
     const style = await menu.evaluate((el) => {
@@ -64,13 +66,13 @@ test.describe("motion allowed", () => {
   test("a menu opened from the keyboard is simply there, with focus on its first item", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).focus();
+    await menuButton(page).focus();
     await page.keyboard.press("Enter");
     const menu = newTabMenu(page);
     await expect(menu).toBeVisible();
     await expect(menu).toHaveAttribute("data-opened-by", "keyboard");
     expect(await menu.evaluate((el) => el.getAnimations().length)).toBe(0);
-    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
   });
 
   test("the palette from the keyboard does not animate and takes typing at once", async ({ page }) => {
@@ -117,7 +119,7 @@ for (const mode of ["system setting", "in-app switch"] as const) {
     const still = async () => expect(await liveAnimations(page)).toEqual([]);
     const primary = page.getByRole("navigation", { name: "Primary" });
 
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await still();
     await page.keyboard.press("Escape");
@@ -162,7 +164,7 @@ test.describe("exits", () => {
   test("a menu closed with the pointer fades out as an inert copy; the menu itself is gone at once", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await page.mouse.click(5, 400);
     await expect(newTabMenu(page)).toHaveCount(0);
@@ -178,7 +180,7 @@ test.describe("exits", () => {
   test("closed from the keyboard, or under reduced motion, nothing lingers", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(newTabMenu(page)).toHaveCount(0);
@@ -187,7 +189,7 @@ test.describe("exits", () => {
     await page.evaluate(() => {
       document.documentElement.dataset.reduceMotion = "true";
     });
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await page.mouse.click(5, 400);
     await expect(newTabMenu(page)).toHaveCount(0);
     expect(await ghosts(page).count()).toBe(0);
@@ -211,6 +213,28 @@ test.describe("exits", () => {
     for (const leaked of ["Disk usage", "api-gateway", "df -h"]) expect(text).not.toContain(leaked);
   });
 
+  test("a new toast pushes the stack up with a glide, not a jump", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.type("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+S");
+    const run = page.getByRole("button", { name: "Run Disk usage in the terminal" });
+    await run.click();
+    const toasts = page.locator(".toasts .toast");
+    await expect(toasts).toHaveCount(1);
+    await page.waitForTimeout(400);
+    await run.click();
+    await expect(toasts).toHaveCount(2);
+    // The stack sits on the status bar: the older toast moves up, gliding from where it was.
+    const glides = await toasts.first().evaluate((el) =>
+      el.getAnimations().filter((a) => String((a.effect as KeyframeEffect).getKeyframes()[0]?.transform ?? "").startsWith("translate(")).length,
+    );
+    expect(glides).toBe(1);
+  });
+
   test("a hovered toast stays until the pointer leaves", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
@@ -222,7 +246,9 @@ test.describe("exits", () => {
     await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
     const toast = page.locator(".toast").filter({ hasText: "Sent “Disk usage”" });
     await expect(toast).toBeVisible();
-    await toast.hover();
+    // The stack is click-through (a toast never covers a control), so the pointer is placed on it
+    // without the "receives pointer events" check; the hover is found by hit-testing.
+    await toast.hover({ force: true });
     await page.waitForTimeout(5000);
     await expect(toast).toBeVisible();
     await page.mouse.move(5, 400);
@@ -325,5 +351,60 @@ test.describe("glides and lists", () => {
     await page.getByRole("searchbox").first().click();
     await page.keyboard.type("di");
     expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+  });
+});
+
+// Host details (owner request): opened by a click, the content slides in while the cards glide to
+// the narrower list; switching hosts only crossfades; keyboard and reduced motion are instant.
+test.describe("host details", () => {
+  const panelContent = (page: Page) =>
+    page.getByTestId("host-panel").evaluate((el) =>
+      [...el.children]
+        .filter((c) => !c.classList.contains("resize-handle"))
+        .flatMap((c) => c.getAnimations().map((a) => Object.keys((a.effect as KeyframeEffect).getKeyframes()[0] ?? {}).filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)).sort().join("+"))),
+    );
+  async function toHosts(page: Page) {
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+    await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
+  }
+
+  test("a click slides the content in; switching hosts only crossfades; closing by pointer fades a copy", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    const list = page.getByTestId("host-list");
+    await list.getByRole("button", { name: "staging-web", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(new Set(await panelContent(page))).toEqual(new Set(["opacity+transform"]));
+    await expect.poll(() => panelContent(page)).toEqual([]);
+
+    await list.getByRole("button", { name: "edge-cache", exact: true }).click();
+    await expect(page.getByTestId("host-panel-location")).toBeVisible();
+    await expect.poll(async () => new Set(await panelContent(page))).toEqual(new Set(["opacity"]));
+
+    await page.getByTestId("host-panel").getByRole("button", { name: "Close host details" }).click();
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(1);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(0);
+  });
+
+  test("opened from the keyboard, or under reduced motion, the panel is simply there", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    await page.getByRole("button", { name: "New host", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    expect(await page.locator("[data-exit-ghost]").count()).toBe(0);
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await page.getByRole("button", { name: "New host", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
   });
 });

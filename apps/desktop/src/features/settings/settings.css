@@ -216,6 +216,12 @@
   flex: 1;
 }
 
+/* A segmented control filling the control column shares the width evenly, with no empty slot. */
+.setting-control > .segmented label {
+  flex: 1;
+  justify-content: center;
+}
+
 [data-setting]:focus-visible {
   outline: var(--focus-width) solid var(--focus);
   outline-offset: calc(-1 * var(--focus-width));

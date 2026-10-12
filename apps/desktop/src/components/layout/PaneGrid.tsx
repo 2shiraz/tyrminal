@@ -1,9 +1,11 @@
-import type { TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { HostSummary, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState, memo } from "react";
 
 import { useOptionalVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Tab, type Workspace, activeTab, panesOf, paneRects } from "../../app/workspace";
 import { SftpView } from "../../features/sftp/SftpView";
+import { StartPage } from "../../features/start/StartPage";
+import type { QuickTarget } from "../../lib/quickConnect";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
 import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
@@ -31,6 +33,8 @@ function PaneGridImpl({
   onSelectPane,
   onUnread,
   onClose,
+  onQuickSaved,
+  start,
   onSplit,
   onRatio,
   onSwap,
@@ -56,6 +60,10 @@ function PaneGridImpl({
   onSelectPane: (pane: number) => void;
   onUnread: (pane: number) => void;
   onClose: (pane: number) => void;
+  /** Quick connect saved its host: the pane becomes that host's. */
+  onQuickSaved?: (pane: number, host: HostSummary) => void;
+  /** The new-tab page: what it opens, in its own pane. */
+  start?: StartHandlers;
   onSplit: (pane: number, dir: Direction) => void;
   onRatio: (tab: number, path: ("a" | "b")[], ratio: number) => void;
   onSwap: (a: number, b: number) => void;
@@ -80,6 +88,8 @@ function PaneGridImpl({
   const [dragPane, setDragPane] = useState<{ from: number; over: number | null } | null>(null);
   const front = activeTab(ws);
   const frontIds = front ? panesOf(front.layout) : [];
+  // SFTP panes only: the status bar keeps the app's colours (styles/global.css, terminal chrome).
+  const frontFilesOnly = frontIds.length > 0 && frontIds.every((id) => ws.panes[id]?.target.kind === "sftp");
   const frontSplit = frontIds.length > 1;
   const focusLayout = front !== null && front.focusMode && frontSplit;
   const frontGeometry = front ? paneRects(front.layout) : null;
@@ -101,7 +111,7 @@ function PaneGridImpl({
   };
 
   return (
-    <div className="workspace" hidden={front === null} role="tabpanel" aria-label={msg.terminal.pane} data-focus-layout={focusLayout || undefined}>
+    <div className="workspace" hidden={front === null} role="tabpanel" aria-label={msg.terminal.pane} data-focus-layout={focusLayout || undefined} data-files-only={frontFilesOnly || undefined}>
       <div ref={ref} className="panes" data-split={frontSplit && !focusLayout}>
         {all.map((id) => {
           const pane = ws.panes[id];
@@ -199,7 +209,21 @@ function PaneGridImpl({
                 </div>
               )}
               <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-                {pane.target.kind === "sftp" ? (
+                {pane.target.kind === "start" ? (
+                  start && (
+                    <StartPage
+                      interactive={visible && focused}
+                      hostIdentity={start.hostIdentity}
+                      onHost={(host) => start.onHost(id, host)}
+                      onQuick={(target) => start.onQuick(id, target)}
+                      onLocal={() => start.onLocal(id)}
+                      onSftp={() => start.onSftp(id)}
+                      onHosts={() => start.onHosts(id)}
+                      onSerial={() => start.onSerial(id)}
+                      onClose={() => onClose(id)}
+                    />
+                  )
+                ) : pane.target.kind === "sftp" ? (
                   <SftpView
                     visible={visible}
                     onIndicator={(indicator) => onPatch(id, { indicator })}
@@ -207,6 +231,8 @@ function PaneGridImpl({
                   />
                 ) : (
                 <TerminalView
+                  // quick connect: a pane that becomes a saved host's starts afresh as that host's.
+                  key={pane.target.kind === "quick" ? pane.target.token : "session"}
                   paneId={id}
                   target={pane.target}
                   startIn={pane.startIn}
@@ -222,6 +248,7 @@ function PaneGridImpl({
                   onFocus={() => onFocus(id)}
                   onUnread={() => onUnread(id)}
                   onClose={() => onClose(id)}
+                  onQuickSaved={onQuickSaved ? (host) => onQuickSaved(id, host) : undefined}
                   onOpenKnownHosts={onOpenKnownHosts}
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
@@ -291,6 +318,18 @@ function PaneGridImpl({
 }
 
 /** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+/** What the new-tab page opens in its pane (the pane is retargeted in place). */
+export interface StartHandlers {
+  hostIdentity: (host: HostSummary) => string;
+  onHost: (pane: number, host: HostSummary) => void;
+  onQuick: (pane: number, target: QuickTarget) => void;
+  onLocal: (pane: number) => void;
+  onSftp: (pane: number) => void;
+  onHosts: (pane: number) => void;
+  /** Serial devices are hosts: a new serial host on the Hosts page. */
+  onSerial: (pane: number) => void;
+}
+
 export const PaneGrid = memo(PaneGridImpl);
 
 function Splitters({

@@ -65,8 +65,9 @@ export function connectionStops(states: StageState[]): TrackStop[] {
  * arrives, so it never runs ahead of the connection and never holds it back. Decorative (the step
  * list below says the same in words), so it is hidden from assistive technology.
  */
-export function ConnectTrack({ states, stops: given }: { states?: StageState[]; stops?: TrackStop[] }) {
-  const stops = given ?? connectionStops(states ?? []);
+export function ConnectTrack({ states, stops: given, lead = [] }: { states?: StageState[]; stops?: TrackStop[]; lead?: TrackStop[] | undefined }) {
+  // `lead`: stops passed before the connection began (quick connect's setup), shown done.
+  const stops = given ?? [...lead, ...connectionStops(states ?? [])];
   const current = stops.findIndex((s) => s.state !== "done");
   const settled = current === -1;
   // Rail points: this computer at 0, the stops at 1..n, the shell at n + 1.

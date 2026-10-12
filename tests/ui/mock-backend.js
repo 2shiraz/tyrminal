@@ -2004,6 +2004,7 @@ export function installMockBackend(options) {
   window.__mockState = state;
   window.__mockEmit = emit;
 
+  let serial = Promise.resolve();
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   window.__TAURI_INTERNALS__ = {
     // agent C: workspaces — a page can play a detached window (options.windowLabel).
@@ -2044,6 +2045,13 @@ export function installMockBackend(options) {
         throw failure;
       }
       if (window.__mockDelay?.[cmd]) await new Promise((r) => setTimeout(r, window.__mockDelay[cmd]));
+      // A vault that serves one request at a time (the core holds one lock per vault call):
+      // perf specs see what each extra call on the startup path costs.
+      if (options.ipcSerialMs && !cmd.startsWith("plugin:")) {
+        const turn = serial.then(() => new Promise((r) => setTimeout(r, options.ipcSerialMs)));
+        serial = turn;
+        await turn;
+      }
       return handler(args, opts);
     },
     convertFileSrc: (path) => path,

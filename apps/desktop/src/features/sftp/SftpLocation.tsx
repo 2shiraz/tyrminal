@@ -3,13 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import type { MenuEntry } from "../../components/ui/Menu";
-import { EmptyState, ErrorNotice } from "../../components/ui/controls";
+import { BoxEmpty, ErrorNotice } from "../../components/ui/controls";
 import {
   IconFolderOpen,
   IconHardDrive,
   IconRefreshCw,
   IconSearch,
-  IconServer,
   IconShieldAlert,
   IconShieldCheck,
   IconTriangleAlert,
@@ -22,6 +21,8 @@ import { FILE_DRAG, type FileDrag, FilePane, type PaneBackend, type PaneView, em
 import { AuthDialog, Fingerprint } from "../terminal/TerminalView";
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgFiles } from "../files/messages";
+import { OsIcon } from "../hosts/OsIcon";
+import { useHostOs } from "./hostOs";
 import { msgSftp } from "./messages";
 import type { Endpoint, Loc } from "./model";
 
@@ -269,11 +270,26 @@ export function SftpLocation({
       <ErrorNotice error={error} />
       {source.kind === "none" && <HostPicker hosts={sshHosts} onLocal={() => choose({ kind: "local" })} onHost={(h) => choose({ kind: "host", hostId: h.id, label: h.label })} />}
       {source.kind === "local" && (
-        <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
-          <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
-            <IconFolderOpen size={15} /> {msgSftp.localChoose}
-          </button>
-        </EmptyState>
+        // Laid out as the host picker beside it: the same padding, a box with a strip head, its
+        // sentence and action left-aligned, so two empty panes line up.
+        <div className="sftp-picker-body">
+          <p className="sftp-picker-note">{msgSftp.localBody}</p>
+          <section className="section" aria-labelledby={`sftp-${paneId}-local-title`}>
+            <div className="section-head">
+              <IconHardDrive size={14} aria-hidden="true" />
+              <h2 id={`sftp-${paneId}-local-title`}>{msgSftp.localTitle}</h2>
+            </div>
+            <BoxEmpty
+              action={
+                <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
+                  <IconFolderOpen size={15} /> {msgSftp.localChoose}
+                </button>
+              }
+            >
+              {msgSftp.localNone}
+            </BoxEmpty>
+          </section>
+        </div>
       )}
       {source.kind === "host" && conn && (
         <ConnectionState label={source.label} conn={conn} onReconnect={() => connect(source.hostId)} onOther={() => choose({ kind: "none" })} onOpenKnownHosts={onOpenKnownHosts} />
@@ -345,41 +361,61 @@ export function SftpLocation({
 
 function HostPicker({ hosts, onLocal, onHost }: { hosts: HostSummary[]; onLocal: () => void; onHost: (host: HostSummary) => void }) {
   const [query, setQuery] = useState("");
+  const osOf = useHostOs(hosts);
   const needle = query.trim().toLowerCase();
   const shown = hosts.filter((h) => !needle || h.label.toLowerCase().includes(needle) || h.address.toLowerCase().includes(needle));
   return (
     <div className="sftp-picker">
-      <div className="sftp-picker-head">
-        <h3>{msgSftp.connectTitle}</h3>
-        <p>{msgSftp.connectBody}</p>
-      </div>
-      <div className="sftp-picker-list" role="group" aria-label={msgSftp.selectHost}>
-        {hosts.length > 6 && (
-          <label className="sftp-filter sftp-picker-search">
-            <IconSearch size={13} aria-hidden="true" />
-            <input className="input" type="search" aria-label={msgSftp.searchHosts} placeholder={msgSftp.searchHosts} value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
-        )}
-        <button type="button" className="sftp-host" onClick={onLocal}>
-          <span className="sftp-host-icon" data-kind="local" aria-hidden="true">
-            <IconHardDrive size={15} />
-          </span>
-          <span className="sftp-host-text">
-            <span>{msgSftp.thisComputer}</span>
-          </span>
-        </button>
-        {hosts.length === 0 && <p className="muted sftp-empty">{msgSftp.noHosts}</p>}
-        {shown.map((h) => (
-          <button key={h.id} type="button" className="sftp-host" onClick={() => onHost(h)}>
-            <span className="sftp-host-icon" aria-hidden="true">
-              <IconServer size={15} />
-            </span>
-            <span className="sftp-host-text">
-              <span>{h.label}</span>
-              <span className="faint mono">{msg.hosts.destination(h.username, h.address, h.port)}</span>
-            </span>
-          </button>
-        ))}
+      {/* A note, then boxes with a strip head, as the local pane beside it and the Hosts page. */}
+      <div className="sftp-picker-body">
+        <p className="sftp-picker-note">{msgSftp.connectBody}</p>
+        <div className="sftp-picker-list" role="group" aria-label={msgSftp.selectHost}>
+          <section className="section" aria-labelledby="sftp-picker-local">
+            <div className="section-head">
+              <h2 id="sftp-picker-local">{msgSftp.thisComputer}</h2>
+            </div>
+            <ul className="list">
+              <li>
+                <button type="button" className="sftp-host" onClick={onLocal}>
+                  <span className="os-icon os-icon-sm sftp-host-local" aria-hidden="true">
+                    <IconHardDrive size={15} />
+                  </span>
+                  <span className="sftp-host-name">{msgSftp.thisComputer}</span>
+                </button>
+              </li>
+            </ul>
+          </section>
+          <section className="section" aria-labelledby="sftp-picker-hosts">
+            <div className="section-head">
+              <h2 id="sftp-picker-hosts">{msgSftp.connectTitle}</h2>
+              <span className="box-count">{shown.length}</span>
+              <label className="sftp-picker-search">
+                <IconSearch size={13} aria-hidden="true" />
+                <input type="search" aria-label={msgSftp.searchHosts} placeholder={msgSftp.searchHosts} value={query} onChange={(e) => setQuery(e.target.value)} />
+              </label>
+            </div>
+            {hosts.length === 0 ? (
+              <BoxEmpty>{msgSftp.noHosts}</BoxEmpty>
+            ) : shown.length === 0 ? (
+              <BoxEmpty>{msgSftp.noHostMatch(query.trim())}</BoxEmpty>
+            ) : (
+              <ul className="list">
+                {shown.map((h) => (
+                  <li key={h.id}>
+                    <button type="button" className="sftp-host" onClick={() => onHost(h)}>
+                      {/* Decorative here: the row's name is the host's. */}
+                      <span className="sftp-host-os" aria-hidden="true">
+                        <OsIcon os={osOf.get(h.id) ?? null} size="sm" />
+                      </span>
+                      <span className="sftp-host-name">{h.label}</span>
+                      <span className="sftp-host-dest mono">{msg.hosts.destination(h.username, h.address, h.port)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

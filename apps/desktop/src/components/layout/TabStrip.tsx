@@ -30,6 +30,9 @@ import {
   IconX,
 } from "../ui/icons";
 import { msgSftp } from "../../features/sftp/messages";
+import { OsIcon } from "../../features/hosts/OsIcon";
+import { appearance } from "../../lib/ipc";
+import type { HostOs } from "@tyrminal/contracts";
 
 const PAGE_ICONS: Record<Destination, typeof IconServer> = {
   hosts: IconServer,
@@ -57,6 +60,7 @@ function TabStripImpl({
   onDetach,
   onNewLocal,
   onNewSftp,
+  onNewTab,
   onOpenPalette,
   finished,
   layout,
@@ -78,6 +82,8 @@ function TabStripImpl({
   onNewLocal: () => void;
   /** Opens a new SFTP tab. */
   onNewSftp?: () => void;
+  /** "+" opens the new-tab page (in place of the small menu). */
+  onNewTab?: () => void;
   onOpenPalette: () => void;
   /** Tabs whose long command finished while out of view, with its exit status (P-23). */
   finished?: ReadonlyMap<number, number | null> | undefined;
@@ -111,6 +117,28 @@ function TabStripImpl({
   // them follow; opening grows a tab in and closing with the pointer shrinks it out. Pointer only:
   // keyboard changes and reduced motion are instant. No transform (FLIP) runs on tabs.
   const tabsRef = useRef<HTMLDivElement>(null);
+
+  // The OS of each host open in a tab, for its icon (Termius-style). Read again when the hosts or
+  // their connection states change: OS detection fills it in when a connection opens.
+  const [osOf, setOsOf] = useState<ReadonlyMap<string, HostOs>>(new Map());
+  const osKey = ws.tabs
+    .map((t) => {
+      const p = ws.panes[t.focused];
+      return p?.target.kind === "ssh" ? `${p.target.hostId}:${tabStatus(ws, t).indicator}` : "";
+    })
+    .filter(Boolean)
+    .join(",");
+  useEffect(() => {
+    if (!osKey) return;
+    let live = true;
+    appearance.list().then(
+      (list) => live && setOsOf(new Map(list.map((a) => [a.hostId, a.os]))),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [osKey]);
 
   // Overflow scrolls sideways only: the wheel scrolls the strip horizontally, the active tab is
   // kept in view, and faded edges show that more tabs are hidden on that side.
@@ -258,7 +286,10 @@ function TabStripImpl({
           const selected = ws.active === tab.id;
           const paneCount = panesOf(tab.layout).length;
           const status = tabStatus(ws, tab);
+          const os = pane?.target.kind === "ssh" ? (osOf.get(pane.target.hostId) ?? null) : null;
           const isProduction = production ? panesOf(tab.layout).some((id) => production.has(id)) : false;
+          // A tab of SFTP panes only is not a terminal: it keeps the app's colours, not the scheme's.
+          const filesOnly = panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind === "sftp");
           return (
             <div
               key={tab.id}
@@ -276,6 +307,7 @@ function TabStripImpl({
               data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
               data-status={status.indicator}
               data-production={isProduction || undefined}
+              data-files-only={filesOnly || undefined}
               data-unread={status.unread || undefined}
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}
@@ -314,8 +346,15 @@ function TabStripImpl({
                   hovered tab (as Termius), so nothing in the tab changes size while widths move.
                   The close button is a pointer target only: a focusable control may not sit inside
                   a tab. From the keyboard a tab closes with Delete or from its menu (Shift+F10). */}
-              <span className="tab-lead">
-                <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+              <span className="tab-lead" aria-hidden="true">
+                {os ? (
+                  // The host's OS; a small dot on it only while the session is not simply open.
+                  <span className="tab-os" data-tone={status.indicator}>
+                    <OsIcon os={os} size="sm" />
+                  </span>
+                ) : (
+                  <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+                )}
                 <span
                   className="tab-close"
                   aria-hidden="true"
@@ -379,8 +418,17 @@ function TabStripImpl({
         // vertically); the native one is drawn outside it.
         data-tooltip={undefined}
         title={msg.nav.newTab}
-        aria-haspopup="menu"
-        onClick={(event) => setNewMenu(event.currentTarget)}
+        // With a new-tab page, "+" opens it (its menu stays on right click); otherwise the menu.
+        aria-haspopup={onNewTab ? undefined : "menu"}
+        onClick={(event) => (onNewTab ? onNewTab() : setNewMenu(event.currentTarget))}
+        onContextMenu={
+          onNewTab
+            ? (event) => {
+                event.preventDefault();
+                setNewMenu(event.currentTarget);
+              }
+            : undefined
+        }
       >
         <IconPlus size={16} />
       </IconButton>

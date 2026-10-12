@@ -151,10 +151,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.hosts-main .hosts-section-head .chip {
-  height: 24px;
-}
-
 .hosts-main .hosts-empty {
   margin: 0;
   padding: var(--space-4);
@@ -356,4 +352,101 @@
 
 .host-panel .host-panel-body :is(p, span, label, .hint, .row-sub, code, .mono) {
   overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ polish */
+
+/* An empty list draws nothing (no stray border under an empty state or "no matches"). */
+.hosts-main [data-testid="host-list"]:empty {
+  display: none;
+}
+
+/* The message closes the box its strip opened. */
+.hosts-main .hosts-empty {
+  border-end-start-radius: var(--radius-box);
+  border-end-end-radius: var(--radius-box);
+  background: var(--bg-box);
+}
+
+/* Keyboard focus shows on the whole row or card, not as a box around the name. */
+.hosts-main .host-open:focus-visible,
+.hosts-main .group-open:focus-visible {
+  outline: none;
+}
+
+.hosts-main .list > li:has(:is(.host-open, .group-open):focus-visible),
+.hosts-main .host-card:has(.host-open:focus-visible),
+.hosts-main .group-grid > .group-row:has(.group-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Cards: favourites as small cards (OS tile, name, "ssh, user") on the host card grid. */
+.hosts-main .fav-strip[data-layout="grid"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.hosts-main .fav-strip[data-layout="grid"] .fav-tile {
+  width: 100%;
+  max-width: none;
+  height: 56px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+}
+
+.hosts-main .fav-text {
+  display: grid;
+  min-width: 0;
+  text-align: start;
+}
+
+.hosts-main .fav-sub {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular, 400);
+}
+
+/* Cards: group tiles answer the pointer like host cards. */
+.hosts-main .group-grid > .group-row {
+  transition: background var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+
+.hosts-main .group-grid > .group-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--bg-raised-hover, var(--bg-hover));
+}
+
+/* "Show all hosts": a small switch with its label, quiet in the section header. */
+.hosts-main .hosts-show-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-end: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.hosts-main .hosts-show-all:hover {
+  color: var(--text);
+}
+
+.hosts-main .hosts-show-all .switch {
+  width: 28px;
+  height: 16px;
+}
+
+.hosts-main .hosts-show-all .switch::after {
+  width: 10px;
+  height: 10px;
+}
+
+.hosts-main .hosts-show-all .switch:checked::after {
+  transform: translateX(12px);
+}
+
+.hosts-main .hosts-show-all .switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }

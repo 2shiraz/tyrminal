@@ -27,6 +27,7 @@ export const msgSftp = {
   selectHost: "Select host",
   noHosts: "No SSH hosts yet. Add one in Hosts first.",
   searchHosts: "Filter hosts",
+  noHostMatch: (query: string) => `No host matches “${query}”.`,
   connecting: (label: string) => `Connecting to ${label}`,
   state: {
     resolving: "Looking up",
@@ -48,6 +49,7 @@ export const msgSftp = {
   otherHost: "Choose another host",
   openKnownHosts: "Open Known hosts",
   localTitle: "Choose a folder on this computer",
+  localNone: "No folder chosen yet.",
   localBody: "The pane shows only a folder you choose and what is inside it; nothing outside it is listed or changed.",
   localChoose: "Choose folder…",
   localChange: "Choose another folder…",

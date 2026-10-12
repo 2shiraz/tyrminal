@@ -637,6 +637,23 @@ test("files: type-ahead finds a name, Enter opens, Backspace goes up, and the me
   await expect(page.getByRole("menu", { name: "Folder actions" }).getByRole("menuitem").first()).toHaveText("New folder");
 });
 
+test("files: Enter right after typing a name opens that name, even before focus has moved to it", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page).getByRole("button", { name: "Open app" })).toBeFocused();
+  // Type-ahead selects logs at once but focuses it a frame later. Enter pressed in between (the
+  // next task, before the next frame) still arrives at the app row; it must open what was typed.
+  await list(page).evaluate(async (table) => {
+    const send = (key: string) => (document.activeElement ?? table).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    send("l");
+    send("o");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    send("Enter");
+  });
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
+});
+
 test("files: sorting by a column keeps folders first, and empty, hidden-only and failed folders say so", async ({ page }) => {
   await openApp(page);
   await connect(page, "api-gateway");

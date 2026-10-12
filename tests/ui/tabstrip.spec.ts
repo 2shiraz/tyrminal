@@ -249,10 +249,62 @@ test("closing with the pointer narrows the tab to nothing, then removes it", asy
   await page.waitForTimeout(400);
   const target = terminalTabs(page).nth(1);
   await target.hover();
-  const frames = await sampleWidths(page, 1, 2, () => target.locator(".tab-close").click(), 120);
-  const widths = frames.map((f) => f[0]);
+  // Sample the closing tab itself, by reference, until it leaves the page: sampling by position
+  // would read the next tab once this one is gone.
+  await target.evaluate((el) => {
+    const w = window as unknown as { __closing: number[]; __closingSampler: number };
+    w.__closing = [el.getBoundingClientRect().width];
+    w.__closingSampler = window.setInterval(() => {
+      if (el.isConnected) w.__closing.push(el.getBoundingClientRect().width);
+      else window.clearInterval(w.__closingSampler);
+    }, 8);
+  });
+  await target.locator(".tab-close").click();
+  await expect(terminalTabs(page)).toHaveCount(2);
+  const widths = await page.evaluate(() => (window as unknown as { __closing: number[] }).__closing);
   expect(widths[0]).toBeGreaterThan(100);
   expect(widths.filter((w) => w > 1 && w < widths[0]! - 1).length).toBeGreaterThanOrEqual(2);
   for (let k = 1; k < widths.length; k += 1) expect(widths[k]!).toBeLessThanOrEqual(widths[k - 1]! + 0.5);
   await expect(terminalTabs(page)).toHaveCount(2);
+});
+
+test("status dots in tabs are plain 8 px dots, with no halo or ring", async ({ page }) => {
+  await openApp(page);
+  await openLocalTabs(page, 2);
+  const dots = await page.locator(".tabstrip-tabs .tab-lead .status-dot").evaluateAll((els) =>
+    els.map((e) => {
+      const s = getComputedStyle(e);
+      return { w: e.getBoundingClientRect().width, shadow: s.boxShadow, outline: s.outlineStyle };
+    }),
+  );
+  expect(dots.length).toBe(2);
+  for (const d of dots) {
+    expect(d.w).toBe(8);
+    expect(d.shadow).toBe("none");
+    expect(d.outline).toBe("none");
+  }
+});
+
+test("a host's tab shows its OS logo; a local tab keeps the status dot", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    const s = (window as unknown as { __mockState: { hosts: { id: string; label: string }[]; os?: Record<string, string> } }).__mockState;
+    const host = s.hosts.find((h) => h.label === "api-gateway")!;
+    s.os = { ...(s.os ?? {}), [host.id]: "ubuntu" };
+  });
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("api-gateway");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await openLocalTabs(page, 1);
+  const host = page.getByRole("tab", { name: /api-gateway/ });
+  await expect(host.locator('.tab-os .os-icon[data-os="ubuntu"]')).toBeAttached();
+  // Not the active tab, so the logo shows (the close button takes the slot on the active tab).
+  await page.mouse.move(5, 500);
+  await expect(host.locator(".tab-os")).toHaveCSS("opacity", "1");
+  const local = page.getByRole("tab", { name: /Local terminal/ });
+  await expect(local.locator(".tab-lead .status-dot")).toBeAttached();
+  await expect(local.locator(".tab-os")).toHaveCount(0);
+  // The tab's accessible name is unchanged by the logo (the slot is hidden from assistive tech).
+  await expect(host).toHaveAccessibleName(/^api-gateway/);
 });

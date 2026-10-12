@@ -119,6 +119,33 @@ test("snippets: target is the visible session, multi-line runs only after a prev
   expect(await calls(page, "snippet_send")).toHaveLength(2);
 });
 
+test("snippets panel: dense rows; Paste is in the row menu, double-click runs, nothing overflows sideways", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+S");
+  const panel = page.getByRole("complementary", { name: "Snippets" });
+  const row = panel.locator('[data-snippet="Disk usage"]');
+  // The command's first line is shown as text, exactly as it will be sent.
+  await expect(row).toContainText("df -h");
+  // No Paste button in the row; it is the first item of the row's menu.
+  await expect(row.getByRole("button", { name: "Paste Disk usage into the terminal" })).toHaveCount(0);
+  await row.getByRole("button", { name: "More actions for Disk usage" }).click();
+  await page.getByRole("menuitem", { name: "Paste Disk usage into the terminal" }).click();
+  await expect.poll(async () => (await calls(page, "snippet_send")).map((c) => (c.args as { mode: string }).mode)).toEqual(["paste"]);
+  // Double-clicking the row runs it, as Run does.
+  await row.locator(".snippet-name").dblclick();
+  await expect.poll(async () => (await calls(page, "snippet_send")).map((c) => (c.args as { mode: string }).mode)).toEqual(["paste", "run"]);
+  // Nothing in the panel is wider than the panel, and it cannot scroll sideways.
+  const sticking = await panel.evaluate((el) => {
+    const body = el.querySelector<HTMLElement>(".panel-body");
+    if (!body) return ["no panel body"];
+    const right = body.getBoundingClientRect().right;
+    return [...body.querySelectorAll<HTMLElement>("*")].filter((e) => e.getBoundingClientRect().right > right + 0.5).map((e) => e.className);
+  });
+  expect(sticking).toEqual([]);
+  await expect(panel.locator(".panel-body")).toHaveCSS("overflow-x", "hidden");
+});
+
 test("snippets page has no target, so nothing can be sent from it", async ({ page }) => {
   await openApp(page);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).click();
@@ -465,4 +492,30 @@ test("a shortcut hint is one text string, not a row of key caps", async ({ page 
   // Decoration only: the search button has its own accessible name.
   await expect(hint).toHaveAttribute("aria-hidden", "true");
   await expect(hint.locator("kbd")).toHaveCount(0);
+});
+
+test("toasts sit beside an open side panel, not over its footer", async ({ page }) => {
+  await openApp(page);
+  await page.keyboard.press("Control+Shift+K");
+  await page.keyboard.type("api-gateway");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await page.keyboard.press("Control+Shift+S");
+  const panel = page.locator(".side-panel");
+  await expect(panel).toBeVisible();
+  await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
+  const toast = page.locator(".toasts .toast");
+  await expect(toast).toBeVisible();
+  const panelLeft = (await panel.boundingBox())!.x;
+  const toastBox = (await toast.boundingBox())!;
+  expect(toastBox.x + toastBox.width).toBeLessThanOrEqual(panelLeft);
+  // Closing the panel gives the stack its corner back.
+  await page.keyboard.press("Control+Shift+S");
+  await expect(panel).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const box = (await toast.boundingBox())!;
+      return Math.round(page.viewportSize()!.width - (box.x + box.width));
+    })
+    .toBe(16);
 });

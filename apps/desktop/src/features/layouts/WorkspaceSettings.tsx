@@ -106,6 +106,7 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
     "tabs",
     [
       "newLocal",
+      "newTabPage",
       "closePane",
       "nextTab",
       "prevTab",

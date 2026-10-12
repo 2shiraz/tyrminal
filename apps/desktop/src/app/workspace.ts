@@ -9,7 +9,8 @@ import type { TerminalTarget } from "../features/terminal/TerminalController";
 export const MAX_PANES = 16;
 
 /** What a pane shows: a terminal, or the SFTP file manager (one pane per SFTP tab, never split). */
-export type PaneTarget = TerminalTarget | { kind: "sftp" };
+/** `start`: the new-tab page, until something is opened in it (then the pane is retargeted). */
+export type PaneTarget = TerminalTarget | { kind: "sftp" } | { kind: "start" };
 
 export type Direction = "row" | "column";
 
@@ -99,7 +100,7 @@ export type PaneSeed = Pick<Pane, "target" | "label" | "identity" | "startIn">;
 
 function newPane(ws: Workspace, seed: PaneSeed, pending = false): [Workspace, number] {
   const id = ws.nextId;
-  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: pending ? "idle" : "busy", unread: false, pending };
+  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: pending || seed.target.kind === "start" ? "idle" : "busy", unread: false, pending };
   return [{ ...ws, panes: { ...ws.panes, [id]: pane }, nextId: id + 1 }, id];
 }
 
@@ -396,6 +397,16 @@ export function paneVisible(ws: Workspace, pane: number): boolean {
   return !tab.focusMode || tab.focused === pane;
 }
 
+/**
+ * The pane opens something else in place (same tab, same layout): quick connect saved its host,
+ * or the new-tab page opened what was picked in it.
+ */
+export function retargetPane(ws: Workspace, pane: number, seed: PaneSeed): Workspace {
+  const current = ws.panes[pane];
+  if (!current) return ws;
+  return { ...ws, panes: { ...ws.panes, [pane]: { ...current, target: seed.target, label: seed.label, identity: seed.identity, remoteTitle: "", indicator: "busy" } } };
+}
+
 export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator" | "directory">>): Workspace {
   const current = ws.panes[pane];
   if (!current) return ws;
@@ -504,7 +515,7 @@ export function templateTabs(ws: Workspace): LayoutTab[] {
 
 function terminalOnly(ws: Workspace, tab: Tab): boolean {
   // quick connect: an unsaved connection is not part of a template either.
-  return panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp" && ws.panes[id]?.target.kind !== "quick");
+  return panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp" && ws.panes[id]?.target.kind !== "quick" && ws.panes[id]?.target.kind !== "start");
 }
 
 function tabTemplate(ws: Workspace, tab: Tab): LayoutTab {

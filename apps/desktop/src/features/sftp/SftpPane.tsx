@@ -2,7 +2,9 @@ import type { HostSummary } from "@tyrminal/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { IconButton } from "../../components/ui/controls";
-import { IconArrowLeftRight, IconHardDrive, IconPlus, IconServer, IconX } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconHardDrive, IconPlus, IconX } from "../../components/ui/icons";
+import { OsIcon } from "../hosts/OsIcon";
+import { useHostOs } from "./hostOs";
 import { msgSftp } from "./messages";
 import type { Endpoint } from "./model";
 import { type LocationStatus, type PaneHealth, type PaneTransfers, SftpLocation, type Side, type Source } from "./SftpLocation";
@@ -76,6 +78,7 @@ export function SftpPane({
   const [locations, setLocations] = useState<Location[]>(() => [{ id: nextId.current++, initial, startPath: null, go: null }]);
   const [shown, setShown] = useState(1);
   const [status, setStatus] = useState<Record<number, LocationStatus>>({});
+  const osOf = useHostOs(hosts);
   const [endpoints, setEndpoints] = useState<Record<number, Endpoint | null>>({});
   const tabRefs = useRef(new Map<number, HTMLButtonElement>());
   /** Per-location refresh counters: a finished transfer refreshes the location shown only. */
@@ -203,7 +206,7 @@ export function SftpPane({
                   onKeyDown={(e) => onTabKey(e, index)}
                 >
                   <span className="sftp-tab-icon" data-kind={s?.kind ?? "none"} aria-hidden="true">
-                    {s?.kind === "host" ? <IconServer size={13} /> : s?.kind === "local" ? <IconHardDrive size={13} /> : <IconArrowLeftRight size={13} />}
+                    {s?.kind === "host" ? <OsIcon os={(s.hostId && osOf.get(s.hostId)) || null} size="sm" /> : s?.kind === "local" ? <IconHardDrive size={13} /> : <IconArrowLeftRight size={13} />}
                   </span>
                   <span className="sftp-tab-label">{label}</span>
                   {tone && <span className="status-dot" data-tone={tone} role="img" aria-label={msgSftp.health[tone]} />}

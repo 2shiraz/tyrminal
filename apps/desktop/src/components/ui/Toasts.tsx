@@ -1,6 +1,7 @@
-import { type ReactNode, createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useExit } from "../../lib/exitGhost";
+import { useFlip } from "../../lib/motion";
 
 import { IconCircleAlert, IconCircleCheck, IconInfo } from "./icons";
 
@@ -20,6 +21,10 @@ const VISIBLE_MS = 4500;
 /**
  * Transient, non-blocking notifications announced politely to assistive technology. Hovering the
  * stack pauses the timers, so a toast being read does not leave; leaving, a toast fades.
+ *
+ * Toasts never take a click: the stack is click-through and the hover is found by hit-testing the
+ * pointer. A toast that appears over a control (Stop on a forward, Connect in Host details) would
+ * otherwise pause itself as the user points at that control and cover it for as long as they do.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -50,24 +55,88 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [schedule],
   );
 
-  const pause = () => {
+  const pause = useCallback(() => {
     paused.current = true;
     for (const entry of timers.current.values()) window.clearTimeout(entry.timer);
-  };
-  const resume = () => {
+  }, []);
+  const resume = useCallback(() => {
     paused.current = false;
     const now = Date.now();
     for (const [id, entry] of [...timers.current]) {
       // What was left when the pointer arrived, counted from now.
       schedule(id, Math.max(0, entry.due - now));
     }
-  };
+  }, [schedule]);
+
+  // The stack closes up when a toast leaves (toasts rise in through CSS, so no entrance here).
+  const stackRef = useRef<HTMLDivElement>(null);
+  useFlip(stackRef, { stagger: false, enter: false, evenFromKeyboard: true });
+
+  // Hover by hit-test, while any toast is shown: the pointer over a toast pauses, off it resumes.
+  const shown = toasts.length > 0;
+  useEffect(() => {
+    if (!shown) return;
+    const over = (x: number, y: number) =>
+      [...(stackRef.current?.children ?? [])].some((el) => {
+        const r = el.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      });
+    const move = (event: PointerEvent) => {
+      const inside = over(event.clientX, event.clientY);
+      if (inside && !paused.current) pause();
+      else if (!inside && paused.current) resume();
+    };
+    // Leaving the window counts as leaving the toast.
+    const out = (event: PointerEvent) => {
+      if (event.relatedTarget === null && paused.current) resume();
+    };
+    window.addEventListener("pointermove", move, { passive: true });
+    document.addEventListener("pointerout", out);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerout", out);
+      if (paused.current) resume();
+    };
+  }, [shown, pause, resume]);
+
+  // A panel along the right edge (side panels, Host details) has its own footer down there: while
+  // one is open the stack sits beside it, not over it. Measured before paint, so a toast never
+  // shows over the panel first.
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    if (!shown || !stack) return;
+    let frame = 0;
+    const sizes = new ResizeObserver(() => later());
+    const measure = () => {
+      frame = 0;
+      let inset = 0;
+      for (const panel of document.querySelectorAll<HTMLElement>(PANELS)) {
+        sizes.observe(panel);
+        // Layout width, not the box: a panel still sliding in is translated a few pixels.
+        const r = panel.getBoundingClientRect();
+        if (r.height > 0 && r.right > window.innerWidth - 2) inset = Math.max(inset, panel.offsetWidth);
+      }
+      stack.style.setProperty("--toast-inset", `${inset}px`);
+    };
+    const later = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    sizes.observe(document.documentElement);
+    measure();
+    const panels = new MutationObserver(later);
+    panels.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      panels.disconnect();
+      sizes.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [shown]);
 
   const value = useMemo(() => notify, [notify]);
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toasts" role="status" aria-live="polite" onPointerEnter={pause} onPointerLeave={resume}>
+      <div className="toasts" role="status" aria-live="polite" ref={stackRef}>
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} />
         ))}
@@ -76,14 +145,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Exit copies (lib/exitGhost.ts) are leaving: they do not hold the stack aside.
+const PANELS = ":is(.side-panel, .host-panel):not([data-exit-ghost])";
+
 function ToastItem({ toast }: { toast: Toast }) {
   // A toast times out on its own, so it fades whichever input was last.
   const exitRef = useExit<HTMLDivElement>({ evenFromKeyboard: true });
   const Icon = ICONS[toast.tone];
   return (
-    <div ref={exitRef} className="toast" data-tone={toast.tone}>
+    <div ref={exitRef} className="toast" data-tone={toast.tone} data-flip-key={toast.id}>
       <Icon size={16} />
-      <span className="selectable" style={{ wordBreak: "break-word" }}>
+      <span style={{ wordBreak: "break-word" }}>
         {toast.text}
       </span>
     </div>

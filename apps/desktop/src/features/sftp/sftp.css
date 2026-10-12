@@ -132,50 +132,10 @@
   color: var(--text-muted);
 }
 
-.sftp-source-icon,
-.sftp-host-icon {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-.sftp-source-icon[data-kind="local"],
-.sftp-host-icon[data-kind="local"] {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
 .sftp-source-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sftp-filter {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 0 1 180px;
-  min-width: 90px;
-}
-
-.sftp-filter > svg {
-  position: absolute;
-  left: 8px;
-  color: var(--text-faint);
-  pointer-events: none;
-}
-
-.sftp-filter .input {
-  width: 100%;
-  height: var(--control-height-sm);
-  padding-left: 26px;
-  font-size: var(--text-sm);
 }
 
 .sftp-body {
@@ -185,50 +145,86 @@
   overflow: auto;
 }
 
+/* The host picker, as on the Hosts page: a search strip across the top, then boxes with a strip
+   head and 36 px rows (OS icon, name, destination). */
 .sftp-picker {
-  display: grid;
-  gap: var(--space-4);
-  max-width: 380px;
-  margin: var(--space-6) auto;
-  padding: 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
-.sftp-picker-head {
-  display: grid;
+/* The host filter sits at the right of the hosts box's strip, as a quiet field. */
+.sftp-picker-search {
+  display: flex;
+  align-items: center;
   gap: var(--space-1);
+  width: min(200px, 45%);
+  height: var(--control-height-sm);
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  color: var(--text-faint);
 }
 
-.sftp-picker-head h3 {
-  margin: 0;
-  font-size: var(--text-md);
+.sftp-picker-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
 }
 
-.sftp-picker-head p {
+.sftp-picker-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.sftp-picker-search input:focus-visible {
+  outline: none;
+}
+
+.sftp-picker-search:focus-within {
+  border-color: var(--focus);
+  box-shadow: var(--glow-accent);
+}
+
+.sftp-picker-body {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-4);
+}
+
+.sftp-picker-note {
   margin: 0;
+  max-width: 60ch;
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
 
 .sftp-picker-list {
   display: grid;
-  gap: 2px;
-  padding: var(--space-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
+  gap: var(--space-3);
 }
 
-.sftp-picker-search {
-  margin: var(--space-1) var(--space-1) var(--space-2);
+.sftp-picker-list .list > li {
+  padding: 0;
 }
 
 .sftp-host {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 7px var(--space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -246,19 +242,36 @@
   outline-offset: -2px;
 }
 
-.sftp-host-text {
-  display: grid;
-  min-width: 0;
+.sftp-host-os {
+  display: inline-flex;
+  flex: none;
 }
 
-.sftp-host-text > span {
+.sftp-host-os .os-icon-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.sftp-host-local {
+  color: var(--text-muted);
+}
+
+.sftp-host-name {
+  flex: none;
+  max-width: 50%;
   overflow: hidden;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sftp-host-text .faint {
+.sftp-host-dest {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
   font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sftp-status {
@@ -386,6 +399,19 @@
 
 .sftp-tab-icon[data-kind="none"] {
   color: var(--text-faint);
+}
+
+/* A host tab shows the host's OS mark as a bare glyph (no square) at tab size. */
+.sftp-tab-icon .os-icon {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: none;
+}
+
+.sftp-tab-icon .os-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .sftp-tab-label {

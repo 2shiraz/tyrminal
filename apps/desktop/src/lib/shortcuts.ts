@@ -10,6 +10,7 @@ import { isMac, keyLabels } from "./platform";
 export type ActionId =
   | "palette"
   | "newLocal"
+  | "newTabPage"
   | "closePane"
   | "splitRight"
   | "splitDown"
@@ -88,6 +89,8 @@ const GO_TO_TAB = {
 const mac: Record<ActionId, Binding> = {
   palette: { key: "k", mod: true },
   newLocal: { key: "t", mod: true },
+  // Shift+T is taken (reopen closed tab here, a new local terminal elsewhere).
+  newTabPage: { key: "n", mod: true, shift: true },
   closePane: { key: "w", mod: true },
   splitRight: { key: "d", mod: true },
   splitDown: { key: "d", mod: true, shift: true },
@@ -134,6 +137,7 @@ const mac: Record<ActionId, Binding> = {
 const other: Record<ActionId, Binding> = {
   palette: { key: "k", ctrl: true, shift: true },
   newLocal: { key: "t", ctrl: true, shift: true },
+  newTabPage: { key: "n", ctrl: true, shift: true },
   closePane: { key: "w", ctrl: true, shift: true },
   splitRight: { key: "=", alt: true, shift: true },
   splitDown: { key: "-", alt: true, shift: true },

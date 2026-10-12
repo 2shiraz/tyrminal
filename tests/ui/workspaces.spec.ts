@@ -37,8 +37,8 @@ test("status: output in a background tab is marked unread until the tab is shown
   await output(page, "background line\r\n");
   await expect(local).toHaveAttribute("data-unread", "true");
   await expect(local).toHaveAccessibleName(/new output/);
-  // The sidebar's session list says the same.
-  await expect(page.getByRole("list", { name: "Open sessions" }).getByRole("button", { name: /Local terminal.*new output/ })).toBeVisible();
+  // The sidebar no longer lists sessions; the tab strip is the one place they are shown.
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("list", { name: "Open sessions" })).toHaveCount(0);
 
   await local.click();
   await expect(local).not.toHaveAttribute("data-unread", /.*/);
@@ -507,7 +507,7 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
   // The command jumps (shell integration) are listed with the terminal actions.
   await expect(list.getByRole("list", { name: "Terminal" })).toContainText("Jump to the previous command");
-  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(47);
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(48);
 
   // Search filters by name and by keys; no match says so.
   await search.fill("zoom");
@@ -795,7 +795,7 @@ test("detached window: a refused token fails closed, with no way to reconnect fr
   expect(await calls(page, "session_open_ssh")).toHaveLength(0);
 });
 
-test("palette and new-tab menu: switch to an open tab by name; reopen a recent connection", async ({ page }) => {
+test("palette and new tab page: switch to an open tab by name; reopen a recent connection", async ({ page }) => {
   await openApp(page);
   await connectFromPalette(page, "api-gateway");
   await page.keyboard.press("Control+Shift+T");
@@ -810,20 +810,19 @@ test("palette and new-tab menu: switch to an open tab by name; reopen a recent c
   await expect(page.getByRole("tab", { name: /api-gateway/ })).toHaveAttribute("aria-selected", "true");
   expect(await calls(page, "session_open_ssh")).toHaveLength(before);
 
-  // Recent connections are listed first among hosts, and the new-tab menu reopens them.
+  // Recent connections are listed first among hosts, and the new tab page reopens them.
   await page.keyboard.press("Control+Shift+K");
   await expect(page.locator(".palette-group", { hasText: "Recent connections" })).toBeVisible();
   await page.keyboard.press("Escape");
   const recent = await page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((c) => c.cmd === "host_recent").length);
   expect(recent).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "New tab" }).click();
-  const menu = page.getByRole("menu", { name: "New tab" });
-  // The first recent connection, after the fixed entries (local terminal, SFTP, connect).
-  const first = menu.getByRole("menuitem").filter({ hasNotText: /^(Local terminal|SFTP|Connect)/ }).first();
-  const label = (await first.textContent())!.trim();
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  // The most recent connection, opened in the new tab itself.
+  const first = page.getByRole("list", { name: "Recent connections" }).getByRole("button").first();
+  await expect(first).toContainText("api-gateway");
   await first.click();
   await expect(terminalTabs(page)).toHaveCount(3);
-  await expect(terminalTabs(page).nth(2)).toHaveText(new RegExp(label));
+  await expect(terminalTabs(page).nth(2)).toHaveText(/api-gateway/);
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(before + 1);
 });
 
@@ -900,11 +899,11 @@ test("templates: the reported directory is saved; after Connect a return is offe
 
 test("templates: an SFTP tab is left out of a saved layout", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("button", { name: "New tab" }).click();
-  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /Local terminal/ }).click();
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await page.getByRole("region", { name: "Open in this tab" }).getByRole("button", { name: /Local terminal/ }).click();
   await expect(page.locator(".pane:not([hidden]) .xterm")).toBeVisible();
-  await page.getByRole("button", { name: "New tab" }).click();
-  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /SFTP/ }).click();
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await page.getByRole("region", { name: "Open in this tab" }).getByRole("button", { name: "SFTP", exact: true }).click();
   await expect(page.getByRole("tab", { name: /SFTP/ })).toHaveAttribute("aria-selected", "true");
 
   await paletteRun(page, "Save layout as");

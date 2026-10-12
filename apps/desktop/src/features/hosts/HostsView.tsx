@@ -1,5 +1,4 @@
 import type {
-  QuickConnectInput,
   BulkHostChange,
   GroupSummary,
   HostOs,
@@ -12,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -55,6 +54,8 @@ import {
   IconX,
 } from "../../components/ui/icons";
 import { msgSftp } from "../sftp/messages";
+import { playExit } from "../../lib/exitGhost";
+import { motionMs, openedBy } from "../../lib/inputModality";
 import { type AppError, appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi, toAppError } from "../../lib/ipc";
 import { msgC } from "../../lib/messages-c";
 import { msg } from "../../lib/messages";
@@ -84,7 +85,6 @@ import { EnvironmentDialog } from "./EnvironmentDialog";
 // quick connect
 import { msgQuick } from "../../lib/messages-quick";
 import { type QuickTarget, formatTarget, parseAddress } from "../../lib/quickConnect";
-import { QuickConnectDialog } from "./QuickConnectDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -123,6 +123,12 @@ function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { ki
 }
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
+/** The address as the list shows it: the port only when it is not 22, the device for serial. */
+function shortAddress(host: HostSummary): string {
+  if (host.protocol.type === "serial") return host.address;
+  return host.port === 22 ? host.address : `${host.address}:${host.port}`;
+}
+
 function rangeBetween(order: string[], from: string, to: string): string[] {
   const a = order.indexOf(from);
   const b = order.indexOf(to);
@@ -148,11 +154,12 @@ function HostsViewImpl({
   onOpenSftp,
   onOpenSftpMany,
   onLocal,
+  newSerial,
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
-  /** Quick connect: an address typed in the search that matches no host (nothing is saved). */
-  onQuickConnect?: (input: QuickConnectInput) => void;
+  /** Quick connect: an address typed in the search that matches no host opens a new tab for it. */
+  onQuickConnect?: (target: QuickTarget) => void;
   /** Several hosts at once, one tab each or one split tab; each still asks for trust and sign-in. */
   onConnectMany?: (hosts: HostSummary[], layout: OpenLayout) => void;
   /** Connect in split: beside the focused pane of the terminal tab in front. */
@@ -163,6 +170,8 @@ function HostsViewImpl({
   onOpenSftpMany?: (hosts: HostSummary[]) => void;
   /** "Terminal": a terminal on this computer. */
   onLocal?: () => void;
+  /** The new-tab page's Serial tile: open a new serial host, once per change of this number. */
+  newSerial?: number;
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
@@ -170,8 +179,6 @@ function HostsViewImpl({
   const notify = useToast();
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
-  // quick connect: the address the sheet is open for.
-  const [quick, setQuick] = useState<QuickTarget | null>(null);
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   // Layout, sort and group filter live in preferences, so they survive other views and restarts.
   const { prefs, update } = usePreferences();
@@ -376,7 +383,7 @@ function HostsViewImpl({
   const [addMenu, setAddMenu] = useState<HTMLElement | null>(null);
   const [tagMenu, setTagMenu] = useState<HTMLElement | null>(null);
   const [sortMenu, setSortMenu] = useState<HTMLElement | null>(null);
-  // quick connect (#101): an address typed in the search that matches no host opens the sheet.
+  // quick connect: an address typed in the search that matches no host opens a new tab for it.
   const quickTarget = searching && filtered.length === 0 ? parseAddress(query) : null;
   const canSubmit = searching && (filtered.length > 0 || (quickTarget !== null && onQuickConnect !== undefined));
   /** Enter or Connect in the search bar: the first match connects; an unknown address opens quick connect. */
@@ -384,7 +391,11 @@ function HostsViewImpl({
     if (!searching) return;
     const first = filtered[0];
     if (first) connectFrom(first);
-    else if (quickTarget && onQuickConnect) setQuick(quickTarget);
+    else if (quickTarget && onQuickConnect) startQuick(quickTarget);
+  }
+  function startQuick(target: QuickTarget) {
+    setQuery("");
+    onQuickConnect?.(target);
   }
   /**
    * A local, reversible edit (move to a group, add or remove a tag) shows at once; the vault call
@@ -695,14 +706,47 @@ function HostsViewImpl({
     if (active instanceof HTMLElement && active !== document.body && !active.closest(".host-panel")) opener.current = active;
     guard(() => show(target, takeFocus));
   };
+  // The new-tab page's Serial tile: the same new serial host as the toolbar's Serial button.
+  const servedSerial = useRef(0);
+  useEffect(() => {
+    if (!newSerial || newSerial === servedSerial.current) return;
+    servedSerial.current = newSerial;
+    openPanel({ kind: "new", initial: { address: "", port: 0, username: "", protocol: "serial" } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newSerial]);
   /** Closes the panel and puts focus back where it was opened from (or on "Add host"). */
   const closePanel = useCallback(() => {
     const back = opener.current;
     opener.current = null;
     panelUnsaved.current = { password: false, note: false };
+    // Closing by pointer: the panel fades out as an inert copy while the cards glide back.
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (el) playExit(el, { transform: "translateX(16px)" });
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
+  // Host details motion (docs/design/motion.md; owner request). One mechanism: the list takes its
+  // new width at once and the cards that move glide there (useFlip on the list), while the panel's
+  // content slides in 16 px and fades. Animating the panel's width instead would reflow the grid on
+  // every frame, so cards would jump between column counts. Switching hosts with the panel open
+  // only crossfades the content. Closing, an inert copy of the panel fades (closePanel) and the
+  // cards glide back. Keyboard opens and closes, and reduced motion, are instant.
+  const shownPanel = useRef<typeof panel>(null);
+  useLayoutEffect(() => {
+    const was = shownPanel.current;
+    shownPanel.current = panel;
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (!el || !panel) return;
+    const ms = motionMs("--duration-base");
+    if (ms <= 0 || openedBy() !== "pointer") return;
+    const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
+    if (!was) {
+      const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
+      for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
+    } else if (was.version !== panel.version) {
+      for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    }
+  }, [panel]);
   const panelHostId = panel?.target.kind === "edit" ? panel.target.host.id : null;
   const currentGroupId = filter.kind === "group" ? filter.id : null;
   const groupName = (id: string | null) => (id ? groupPath(groupList, id) : null);
@@ -840,29 +884,6 @@ function HostsViewImpl({
             </EmptyState>
           )}
 
-          {total > 0 && filtered.length === 0 && searching && (
-            // Short: Connect in the search box (or Enter) starts quick connect for an address.
-            <p className="muted hosts-empty">{msgHv.noSavedMatch}</p>
-          )}
-          {quick && onQuickConnect && (
-            <QuickConnectDialog
-              address={quick.address}
-              initialUser={quick.username}
-              initialPort={quick.port}
-              onConnect={(input) => {
-                setQuick(null);
-                setQuery("");
-                onQuickConnect(input);
-              }}
-              onConnectSaved={(host) => {
-                setQuick(null);
-                setQuery("");
-                onConnect(host);
-              }}
-              onClose={() => setQuick(null)}
-            />
-          )}
-
           {bulkCount > 0 && (
             <div className="bulk-bar box-strip" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
               <strong>{msg.hosts.selected(selectedIds.length)}</strong>
@@ -902,7 +923,7 @@ function HostsViewImpl({
                 <h2 id="hosts-fav-title">{msgBulk.favourites}</h2>
                 <span className="count">{favourites.length}</span>
               </div>
-              <ul className="fav-strip" aria-label={msgBulk.favourites}>
+              <ul className="fav-strip" data-layout={layout} aria-label={msgBulk.favourites}>
                 {favourites.map((h) => (
                   <li key={h.id}>
                     <button
@@ -925,8 +946,15 @@ function HostsViewImpl({
                         } else onConnect(h);
                       }}
                     >
-                      <OsIcon os={osOf.get(h.id) ?? null} size="sm" />
-                      <span className="truncate">{h.label}</span>
+                      <OsIcon os={osOf.get(h.id) ?? null} size={layout === "grid" ? "md" : "sm"} />
+                      {layout === "grid" ? (
+                        <span className="fav-text">
+                          <span className="truncate">{h.label}</span>
+                          <span className="fav-sub truncate">{msgHv.protocolUser(h.protocol.type, h.protocol.type === "serial" ? "" : h.username)}</span>
+                        </span>
+                      ) : (
+                        <span className="truncate">{h.label}</span>
+                      )}
                     </button>
                   </li>
                 ))}
@@ -990,14 +1018,16 @@ function HostsViewImpl({
                 <span className="count">{filtered.length}</span>
                 <span className="spacer" />
                 {!searching && filter.kind !== "group" && groupList.length > 0 && (
-                  <button type="button" className="chip" aria-pressed={filter.kind === "all"} onClick={() => setFilter({ kind: filter.kind === "all" ? "none" : "all" })}>
-                    {msgHv.showAll}
-                  </button>
+                  <label className="hosts-show-all">
+                    <span>{msgHv.showAll}</span>
+                    <input type="checkbox" role="switch" className="switch" checked={filter.kind === "all"} onChange={(e) => setFilter({ kind: e.target.checked ? "all" : "none" })} />
+                  </label>
                 )}
               </div>
             )}
-            {total > 0 && filtered.length === 0 && !searching && (
-              <p className="muted hosts-empty">{filter.kind === "group" ? msgHv.emptyGroup : msgHv.noUngrouped}</p>
+            {total > 0 && filtered.length === 0 && (
+              // Short: with a search, Connect in the search box (or Enter) starts quick connect.
+              <p className="muted hosts-empty">{searching ? msgHv.noSavedMatch : filter.kind === "group" ? msgHv.emptyGroup : msgHv.noUngrouped}</p>
             )}
 
             <span id={selectedNoteId} className="visually-hidden">
@@ -1057,7 +1087,10 @@ function HostsViewImpl({
                               </span>
                             )}
                           </span>
-                          <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                          <span className="row-sub">{msgHv.protocolUser(host.protocol.type, host.protocol.type === "serial" ? "" : (identityOf(host.id) ?? host.username))}</span>
+                          <span className="host-card-dest truncate" title={msg.hosts.destination(host.username, host.address, host.port)}>
+                            {shortAddress(host)}
+                          </span>
                           {(host.groupId || host.tags.length > 0) && (
                             <span className="host-card-tags">
                               {host.groupId && (
@@ -1156,7 +1189,7 @@ function HostsViewImpl({
                       </span>
                     </div>
                     <span className="host-col-address mono truncate" title={msg.hosts.destination(host.username, host.address, host.port)}>
-                      {host.protocol.type === "serial" ? host.address : `${host.address}${host.port === 22 ? "" : `:${host.port}`}`}
+                      {shortAddress(host)}
                     </span>
                     <span className="host-col-badges">
                       {host.favourite && (

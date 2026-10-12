@@ -39,8 +39,12 @@ test("groups: each level shows its subgroups, then its own hosts; a breadcrumb l
   await expect(crumbs).toHaveCount(0);
   await expect(hostCards(page)).toHaveCount(6);
   // Without "Show all hosts", the top level lists the hosts in no group.
-  await page.getByRole("button", { name: "Show all hosts" }).click();
+  const showAll = page.getByRole("switch", { name: "Show all hosts" });
+  await expect(showAll).toBeChecked();
+  await showAll.uncheck();
   await expect(hostCards(page)).toHaveCount(3);
+  await showAll.check();
+  await expect(hostCards(page)).toHaveCount(6);
 });
 
 test("search goes through the core and understands tag: and group:", async ({ page }) => {
@@ -52,7 +56,7 @@ test("search goes through the core and understands tag: and group:", async ({ pa
   await expect(hostCards(page)).toHaveCount(1);
   await expect(hostCards(page).first()).toHaveAccessibleName("Home lab");
   await search.fill("nothing-matches-this");
-  await expect(page.getByText("No hosts match your search.")).toBeVisible();
+  await expect(page.getByText("No saved host matches.")).toBeVisible();
   expect((await calls(page, "host_search")).length).toBeGreaterThan(0);
 });
 
