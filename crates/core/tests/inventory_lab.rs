@@ -888,3 +888,160 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
     let text = format!("{trail:?}");
     assert!(!text.contains("PRIVATE KEY"));
 }
+
+/// A Keychain key the server does not accept is named, with what to do, and installing it by
+/// signing in once with the password makes it the key that signs in. The lab's sshd reads the
+/// user's own `~/.ssh/authorized_keys` too, so the line the app writes is the one that is used.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn a_refused_key_is_named_and_installing_it_with_a_password_lets_it_sign_in() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let label = format!("fresh key {}", std::process::id());
+    // Made here, so the test knows the private key and can show it never reaches the log.
+    let private = tyrminal_ssh::ClientKey::generate_ed25519().unwrap().to_openssh().unwrap();
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: label.clone(),
+            private_key: private.as_str().to_owned(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: key.id.clone() },
+            ..host("lab a", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let s = &core.sessions;
+
+    // Signing in with a key the server does not have: the key is named, nothing else is tried.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = s.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let mut rejected = None;
+    let closed = loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                s.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Always).unwrap();
+            }
+            SessionEvent::AuthPrompt { .. } => panic!("a refused key must not turn into a password prompt"),
+            SessionEvent::KeyRejected { key_id, label, hop } => rejected = Some((key_id, label, hop)),
+            SessionEvent::Closed { error, .. } => break error.expect("an error"),
+            _ => {}
+        }
+    };
+    assert_eq!(rejected, Some((key.id.clone(), label.clone(), None)));
+    assert_eq!(closed.code, ErrorCode::AuthFailed);
+    assert_eq!(
+        closed.message,
+        format!("The server did not accept the key \"{label}\". Its public key may not be installed on this server.")
+    );
+    let log = s.diagnostics(WINDOW, &opened.session_id).unwrap().join("\n");
+    assert!(log.contains(&format!("did not accept the key \"{label}\"")), "{log}");
+    // Which key was offered (public facts only) and what the server would still take.
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{label}\" (ssh-ed25519, {}), signing with ssh-ed25519",
+            key.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("server still allows: ") && log.contains("password"), "{log}");
+    assert!(!log.contains("PRIVATE KEY") && !closed.message.contains("PRIVATE KEY"));
+    for line in private.lines().filter(|l| !l.starts_with("-----") && l.len() > 16) {
+        assert!(!log.contains(line) && !closed.message.contains(line), "no private key material in the log");
+    }
+
+    // An RSA key is offered with a SHA-2 signature, never SHA-1.
+    let rsa_label = format!("fresh rsa {}", std::process::id());
+    let rsa = core.vault.generate_key_of(&rsa_label, tyrminal_core::contracts::KeyKind::Rsa3072).await.unwrap();
+    let rsa_host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: rsa.id.clone() },
+            ..crate::host("lab a rsa", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let rsa_session = s.open_ssh(WINDOW, &rsa_host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                s.answer_trust(WINDOW, &rsa_session.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::Closed { .. } => break,
+            _ => {}
+        }
+    }
+    let log = s.diagnostics(WINDOW, &rsa_session.session_id).unwrap().join("\n");
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{rsa_label}\" (ssh-rsa, {}), signing with rsa-sha2-",
+            rsa.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("signing with rsa-sha2-512") || log.contains("signing with rsa-sha2-256"), "{log}");
+
+    // Install it: sign in once with the password (the normal prompt), preview, install.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let setup = s.open_for_key_install(WINDOW, &host.id, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { .. } => panic!("the host is already trusted"),
+            SessionEvent::AuthPrompt { prompt_id, .. } => {
+                s.answer_auth(WINDOW, &setup.session_id, &prompt_id, Some(lab.str("/password"))).unwrap();
+            }
+            SessionEvent::State { state: SessionState::Connected, .. } => break,
+            SessionEvent::Closed { error, .. } => panic!("install connection ended: {error:?}"),
+            _ => {}
+        }
+    }
+    // A files-only connection has no terminal.
+    assert!(s.write(WINDOW, &setup.session_id, b"x".to_vec()).await.is_err());
+    let preview = s.deploy_key_preview(WINDOW, &setup.session_id, &key.id).await.unwrap();
+    assert!(!preview.already_present, "{preview:?}");
+    assert_eq!(preview.line.trim(), key.public_key.trim());
+    let installed = s.deploy_key(WINDOW, &setup.session_id, &key.id).await.unwrap();
+    assert!(installed.already_present, "{installed:?}");
+    s.close(WINDOW, &setup.session_id).unwrap();
+
+    // Now the key signs in, with no prompt at all.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = s.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { .. } | SessionEvent::AuthPrompt { .. } => panic!("no prompt expected"),
+            SessionEvent::KeyRejected { .. } => panic!("the installed key was refused"),
+            SessionEvent::State { state: SessionState::Connected, .. } => break,
+            SessionEvent::Closed { error, .. } => panic!("ended: {error:?}"),
+            _ => {}
+        }
+    }
+    // Leave the lab account as it was.
+    let body = key.public_key.split_whitespace().nth(1).unwrap().to_owned();
+    let cleanup = core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "cleanup".into(),
+            folder: String::new(),
+            text: format!(
+                "grep -vF '{body}' ~/.ssh/authorized_keys > ~/.ssh/ak.tmp; mv ~/.ssh/ak.tmp ~/.ssh/authorized_keys"
+            ),
+        })
+        .await
+        .unwrap();
+    let out = s.exec_snippet(WINDOW, &opened.session_id, &cleanup.id, "cleanup").await.unwrap();
+    assert_eq!(out.exit_status, Some(0), "{}", out.stderr);
+    s.close(WINDOW, &opened.session_id).unwrap();
+}

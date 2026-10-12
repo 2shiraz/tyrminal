@@ -29,6 +29,11 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
+/** The shared lists where the vault is part of the window, else null (a detached window). */
+export function useOptionalVaultData(): VaultData | null {
+  return useContext(Context);
+}
+
 export function useVaultData(): VaultData {
   const value = useContext(Context);
   if (!value) throw new Error("useVaultData outside VaultDataProvider");

@@ -12,7 +12,8 @@ AllowUsers tyr noforward nosession
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
-AuthorizedKeysFile /etc/ssh/lab/authorized_keys
+# The lab's own file, and the user's own one, so a key the app installs is the key that signs in.
+AuthorizedKeysFile /etc/ssh/lab/authorized_keys .ssh/authorized_keys
 # Per-run lab CA (user certificates, KEY-07).
 TrustedUserCAKeys /etc/ssh/lab/trusted_user_ca
 StrictModes yes

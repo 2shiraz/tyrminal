@@ -207,7 +207,16 @@ Safety features:
 - Links open only after you confirm the real destination (http and https only).
 - A server may write to your clipboard only if you allow it for that session; reads are never
   answered.
-- Pasting several lines, or a lot of text, shows the text first.
+- Pasting several lines, a lot of text, or one line that ends in a newline (which would run at
+  once) shows the text first, with the session it goes to.
+- Control characters, invisible characters (zero-width spaces, byte-order marks) and characters
+  that reorder text (bidirectional overrides) are always shown by name, for example ␛ or
+  `<U+202E>`, with a warning. Such a paste is reviewed on every host.
+- A paste that contains the bracketed-paste end marker (`ESC [201~`) is never sent as it is.
+  It could end the paste early and run the rest as typed input. The review lets you remove the
+  marker and paste the rest, or cancel.
+- In the host editor, **Paste review** can turn off the review of several lines and of a
+  trailing newline for that host. The review of control and invisible characters stays on.
 
 **Highlighting.** Tyrminal colors addresses, numbers and sizes, links, dates and times, quoted
 text, paths, hashes and status words (error in red, warn in yellow, ok in green) in plain output,
@@ -353,7 +362,9 @@ variable a snippet uses and whether this session set it.
 **Startup snippets.** The same dialog chooses snippets to run when a session to the host opens:
 the group's list, nothing, or a list of your own, in order. They are typed into the shell only
 after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
-deleted later is skipped.
+deleted later is skipped. So is a snippet with a line longer than 1000 bytes, which the shell
+may not be ready to read yet and a terminal would cut or garble (macOS keeps about 1 KB of an
+unfinished line); the list marks such snippets, and the connection log names the line.
 
 **Broadcast** sends what you type to several sessions at once. Before it starts, Tyrminal lists
 every pane of the tab; clear the box next to a pane to leave it out (it keeps its own input and

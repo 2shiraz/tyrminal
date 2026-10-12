@@ -32,7 +32,7 @@ export function installMockBackend(options) {
         letterSpacing: 0,
         cursorStyle: "block",
         cursorBlink: false,
-        padding: 10,
+        padding: 12,
         scrollback: 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
@@ -66,7 +66,7 @@ export function installMockBackend(options) {
       tags,
       lastConnectedAt: last,
       protocol: { type: "ssh" },
-      terminal: { encoding: "utf8", term: "xterm256color" },
+      terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
     });
     state.groups = [
@@ -142,9 +142,10 @@ export function installMockBackend(options) {
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
+    const keyRejected = kind === "ssh" && options.keyRejectedFor === host?.label && host.auth.kind === "key" && !state.deployed?.has(host.auth.keyId);
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked || passwordPrompt
+        ? trustPrompt || blocked || passwordPrompt || keyRejected
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -163,6 +164,22 @@ export function installMockBackend(options) {
       }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
+    }
+    // The server refuses the host's key until it has been installed (key_deploy).
+    if (keyRejected) {
+      const key = state.keys.find((k) => k.id === host.auth.keyId);
+      setTimeout(() => {
+        channelSend(s.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(s.events, { type: "key_rejected", keyId: key.id, label: key.label, hop: null });
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed", hop: null });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "AUTH_FAILED", message: `The server did not accept the key "${key.label}". Its public key may not be installed on this server.` },
+          exitStatus: null,
+        });
+      }, 40);
+      return { sessionId };
     }
     if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
       setTimeout(() => {
@@ -710,6 +727,7 @@ export function installMockBackend(options) {
       window.__mockTransfers.set(transferId, {
         finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -813,6 +831,11 @@ export function installMockBackend(options) {
       edits.delete(a.editId);
     },
     files_list: (a) => {
+      // Tests make the next listings fail to see the error state and its retry.
+      if ((window.__mockListFail ?? 0) > 0) {
+        window.__mockListFail -= 1;
+        fsErr("ACCESS_DENIED", "The server refused to list this folder.");
+      }
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
       if (!node) fsErr("NOT_FOUND", "That file or folder does not exist on the server.");
@@ -895,6 +918,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -921,6 +945,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },
@@ -1017,7 +1042,7 @@ export function installMockBackend(options) {
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
         protocol: a.host.protocol ?? { type: "ssh" },
-        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: a.host.forwardAgent ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
@@ -1126,7 +1151,7 @@ export function installMockBackend(options) {
           tags: h.tags,
           lastConnectedAt: null,
           protocol: { type: "ssh" },
-          terminal: { encoding: "utf8", term: "xterm256color" },
+          terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
           forwardAgent: false,
         });
       }
@@ -1152,6 +1177,17 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
+    // Signs in with a typed password, whatever the host uses (to install a key).
+    session_open_key_install: (a) => {
+      const host = state.hosts.find((h) => h.id === a.hostId);
+      const sessionId = `${state.nextSession++}`.padStart(32, "a");
+      state.sessions.set(sessionId, { id: sessionId, output: null, events: a.events, user: host.username, host: host.label, line: "", files: true });
+      setTimeout(() => {
+        channelSend(a.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(a.events, { type: "auth_prompt", promptId: "k1", kind: "password", username: host.username, attempt: 1, maxAttempts: 3, message: null, echo: false, hop: null });
+      }, 20);
+      return { sessionId };
+    },
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;

@@ -18,16 +18,19 @@ export function DeployKeyDialog({
   sessionId,
   host,
   keys,
+  initialKeyId,
   onClose,
   onHostChanged,
 }: {
   sessionId: string;
   host: HostSummary | null;
   keys: KeySummary[];
+  /** The key to start with (for example the one the server refused). */
+  initialKeyId?: string | undefined;
   onClose: () => void;
   onHostChanged: () => void;
 }) {
-  const [keyId, setKeyId] = useState(keys[0]?.id ?? "");
+  const [keyId, setKeyId] = useState(initialKeyId ?? keys[0]?.id ?? "");
   const [preview, setPreview] = useState<KeyDeployPreview | null>(null);
   const [installed, setInstalled] = useState(false);
   const [switched, setSwitched] = useState(false);

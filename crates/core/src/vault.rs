@@ -188,7 +188,13 @@ pub(crate) struct HopPlan {
 pub(crate) enum PlanAuth {
     Ask,
     Password(Zeroizing<String>),
-    Key { private_key: Zeroizing<String>, passphrase: Option<Zeroizing<String>> },
+    /// `key_id` and `label` name the key when the server refuses it; neither is secret.
+    Key {
+        private_key: Zeroizing<String>,
+        passphrase: Option<Zeroizing<String>>,
+        key_id: String,
+        label: String,
+    },
 }
 
 pub struct VaultService {
@@ -1954,6 +1960,8 @@ impl VaultService {
             Ok(PlanAuth::Key {
                 private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
                 passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                key_id: key_id.to_owned(),
+                label: key.record.label.clone(),
             })
         };
         let auth = match (identity, &effective.auth) {

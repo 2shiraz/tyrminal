@@ -490,7 +490,7 @@ impl Default for TerminalPreferences {
             letter_spacing: 0.0,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
-            padding: 10,
+            padding: 12,
             scrollback: 5_000,
             ligatures: false,
             renderer: RendererPreference::Auto,
@@ -687,6 +687,16 @@ pub enum SessionEvent {
     /// A notice from Tyrminal itself, never server text, shown when it happens (for example
     /// that the server used a forwarded key, or that a Telnet session is not encrypted).
     Notice { text: String },
+    /// The server refused the Keychain key a hop signed in with. Sent just before the session
+    /// ends with `AUTH_FAILED`, so the app can offer to install that key. `hop` is set during a
+    /// jump-host chain (the destination is the hop whose index equals the total). Names only.
+    #[serde(rename_all = "camelCase")]
+    KeyRejected {
+        key_id: String,
+        label: String,
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
+    },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
     Closed { error: Option<IpcError>, exit_status: Option<u32> },
@@ -704,6 +714,22 @@ pub struct SessionOpened {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_terminal_settings_from_older_records_keep_every_paste_check() {
+        let old: HostTerminal = serde_json::from_str(r#"{"encoding":"koi8-r","term":"vt100"}"#).unwrap();
+        assert_eq!(old.encoding, TerminalEncoding::Koi8R);
+        assert!(!old.paste_skip_multiline && !old.paste_skip_trailing_newline);
+        assert!(HostTerminal::default() == serde_json::from_str("{}").unwrap());
+        let lowered: HostTerminal =
+            serde_json::from_str(r#"{"pasteSkipMultiline":true,"pasteSkipTrailingNewline":true}"#).unwrap();
+        assert!(!lowered.is_default());
+        // There is no field that turns off the control-character review.
+        let json = serde_json::to_value(lowered).unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["encoding", "pasteSkipMultiline", "pasteSkipTrailingNewline", "term"]);
+    }
 
     #[test]
     fn secret_bearing_inputs_do_not_print_their_secrets() {
@@ -1006,6 +1032,11 @@ impl TerminalType {
 pub struct HostTerminal {
     pub encoding: TerminalEncoding,
     pub term: TerminalType,
+    /// Paste safety (P-25): skip the review of pastes with several lines or a large size on this
+    /// host. Control and invisible characters are reviewed regardless; there is no setting for that.
+    pub paste_skip_multiline: bool,
+    /// Paste safety (P-25): skip the review of a one-line paste that ends in a newline on this host.
+    pub paste_skip_trailing_newline: bool,
 }
 
 impl HostTerminal {

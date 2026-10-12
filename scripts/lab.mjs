@@ -358,7 +358,9 @@ function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false })
     `PasswordAuthentication ${kbdOnly ? "no" : "yes"}`,
     `KbdInteractiveAuthentication ${kbdOnly ? "yes" : "no"}`,
     `PubkeyAuthentication ${kbdOnly ? "no" : "yes"}`,
-    `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))}`,
+    // The lab's own file, and the user's own one, so a key the app installs (KEY deploy) is the
+    // key that then signs in.
+    `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))} .ssh/authorized_keys`,
     `TrustedUserCAKeys ${toConfigPath(caFile ?? join(inDir, "trusted_user_ca"))}`,
     // Lab only: the generated files live in the checkout, owned by the CI user rather than the
     // lab accounts, so the ownership walk would refuse them. Never copy this to a real server.
