@@ -374,11 +374,23 @@ th.ft-col-size .ft-head {
   white-space: nowrap;
 }
 
+/* A crumb never draws outside its own slot: squeezed, it clips to an ellipsis instead of
+   spilling over the next one (which read "r/oot"). */
 .pathbar-crumbs li {
   display: flex;
   flex: 0 100 auto;
   align-items: center;
   min-width: 0;
+  overflow: hidden;
+}
+
+/* The root crumb is one character: it never shrinks, and keeps a full 24 px target. */
+.pathbar-crumbs li:first-child:has(> [title="/"]) {
+  flex: none;
+}
+
+.pathbar-crumbs li:first-child > [title="/"] {
+  min-width: 24px;
 }
 
 /* The folder shown keeps its room; earlier crumbs shrink (much) sooner. */
@@ -401,7 +413,7 @@ th.ft-col-size .ft-head {
 
 .pathbar-crumb {
   overflow: hidden;
-  min-width: 24px;
+  min-width: 0;
   min-height: 24px;
   max-width: 14em;
   padding: 3px 5px;
@@ -446,19 +458,17 @@ button.pathbar-crumb:hover {
   opacity: 0.65;
 }
 
-/* The free space after the crumbs: a click there edits the path (text cursor says so). */
+/* The free space after the crumbs: a click there edits the path (text cursor says so). It draws
+   nothing itself, so it never reads as an empty box. */
 .pathbar-edit {
   flex: 1;
   align-self: stretch;
-  min-width: 24px;
+  min-width: 16px;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: transparent;
   cursor: text;
-}
-
-.pathbar-edit:hover {
-  background: var(--bg-hover);
 }
 
 .pathbar-editing {
@@ -469,7 +479,7 @@ button.pathbar-crumb:hover {
   flex: 1;
   min-width: 0;
   height: 28px;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
   border: 1px solid var(--focus);
   border-radius: var(--radius-control);
   background: var(--bg-raised);
