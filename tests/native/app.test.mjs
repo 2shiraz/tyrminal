@@ -13,6 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
+import { KEYS } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
@@ -38,9 +39,15 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   let recoveryKey = "";
 
   const terminalText = () => s.execute(`return [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows")].map((e) => e.innerText).join("\\n")`);
+  // Each newline is the Enter key (a terminal sends CR), not a typed line feed: PowerShell's
+  // line editor, the Windows local shell, treats a line feed as "continue on the next line".
   const typeInTerminal = async (text) => {
     const input = await s.waitFor(".terminal-pane:not([hidden]) .xterm-helper-textarea");
-    await s.type(input, text);
+    const lines = text.split("\n");
+    for (const [i, line] of lines.entries()) {
+      if (line) await s.type(input, line);
+      if (i < lines.length - 1) await s.chord([KEYS.enter]);
+    }
   };
   const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const nav = async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`));
