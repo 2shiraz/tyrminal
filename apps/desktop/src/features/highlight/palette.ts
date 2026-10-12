@@ -22,7 +22,8 @@ const PREFERENCES: Record<TokenKind, SchemeColor[]> = {
   number: ["brightCyan", "cyan", "brightBlue"],
   url: ["brightBlue", "blue", "brightCyan"],
   string: ["green", "brightGreen"],
-  date: ["magenta", "brightMagenta", "blue"],
+  // Blue, so pink stays unique to addresses (links take the bright blue).
+  date: ["blue", "brightBlue", "cyan"],
   path: ["yellow", "brightYellow"],
   hex: ["brightBlue", "blue", "brightMagenta"],
 };
