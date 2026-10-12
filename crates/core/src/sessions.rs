@@ -106,8 +106,9 @@ struct Offer {
     expires: tokio::time::Instant,
 }
 
-/// A running transfer: the window that started it and its cancel switch.
-type Transfer = (String, watch::Sender<bool>);
+/// A running transfer: the window that started it, the sessions whose connections it uses (it
+/// stops when any of them ends) and its cancel switch.
+type Transfer = (String, Vec<String>, watch::Sender<bool>);
 
 pub struct Sessions {
     vault: Arc<VaultService>,
@@ -451,6 +452,20 @@ impl Sessions {
                 "The vault was locked, so this session was closed.",
             )),
         };
+        // Whatever ended it, everything tied to the session stops now: the ended signal reaches
+        // file operations and edits in flight, transfers over its connection are cancelled (under
+        // the lock `start_transfer` checks the signal under), and its links are dropped.
+        entry.close.send_replace(true);
+        {
+            let transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
+            for (_, sessions, cancel) in transfers.values() {
+                if sessions.iter().any(|s| s == session_id) {
+                    let _ = cancel.send(true);
+                }
+            }
+        }
+        entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
+        entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.entries().remove(session_id);
         if let Some(error) = &outcome.error {
             entry.log.note(&format!("ended: {}", error.message));
@@ -534,7 +549,15 @@ impl Sessions {
         Fut: std::future::Future<Output = Result<T, tyrminal_ssh::FileError>>,
     {
         let (entry, sftp) = self.sftp(owner, session_id).await?;
-        let result = op(sftp).await;
+        // An operation in flight when the session ends (closed, lost or the vault locked) stops
+        // there instead of finishing on a connection its owner has left.
+        let mut ended = entry.close.subscribe();
+        let result = tokio::select! {
+            result = op(sftp) => result,
+            _ = ended.wait_for(|ended| *ended) => {
+                return Err(err(ErrorCode::Cancelled, "The session was closed, so this was not done."));
+            }
+        };
         if matches!(result, Err(tyrminal_ssh::FileError::Lost | tyrminal_ssh::FileError::Protocol)) {
             entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
         }
@@ -618,14 +641,25 @@ impl Sessions {
         self.file_op(owner, session_id, |sftp| async move { sftp.set_permissions(&path, mode).await }).await
     }
 
-    fn start_transfer(&self, owner: &str) -> Result<(String, watch::Receiver<bool>), IpcError> {
+    /// Registers a transfer over the connections of `sessions`. A session that has already ended
+    /// refuses it: the check and the insert happen under the same lock that `supervise` takes to
+    /// cancel a session's transfers, after marking the session ended, so none can slip through.
+    fn start_transfer(
+        &self,
+        owner: &str,
+        sessions: &[(&str, &Arc<Entry>)],
+    ) -> Result<(String, watch::Receiver<bool>), IpcError> {
         let id = random_token()?;
         let (cancel, cancelled) = watch::channel(false);
         let mut transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
+        if sessions.iter().any(|(_, entry)| *entry.close.borrow()) {
+            return Err(err(ErrorCode::Cancelled, "The session was closed, so nothing was transferred."));
+        }
         if transfers.len() >= MAX_TRANSFERS {
             return Err(err(ErrorCode::LimitExceeded, "Too many transfers are running. Wait for one to finish."));
         }
-        transfers.insert(id.clone(), (owner.to_owned(), cancel));
+        let ids = sessions.iter().map(|(id, _)| (*id).to_owned()).collect();
+        transfers.insert(id.clone(), (owner.to_owned(), ids, cancel));
         Ok((id, cancelled))
     }
 
@@ -645,7 +679,7 @@ impl Sessions {
         sink: Arc<dyn TransferSink>,
     ) -> Result<TransferStarted, IpcError> {
         let remote = files::join(files::remote_dir(dir)?, name)?;
-        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let (entry, sftp) = self.sftp(owner, session_id).await?;
         let token = random_token()?;
         let overwrite = choice == ConflictChoice::Replace;
         let local_name = if choice == ConflictChoice::KeepBoth {
@@ -658,7 +692,7 @@ impl Sessions {
         if sftp.stat(&remote).await.map_err(from_file)?.kind == tyrminal_ssh::RemoteKind::Dir {
             let job = folders::prepare_download(sftp, remote, local_dir, name, token).await?;
             let total = job.tree.bytes();
-            let (id, cancel) = self.start_transfer(owner)?;
+            let (id, cancel) = self.start_transfer(owner, &[(session_id, &entry)])?;
             let transfers = Arc::clone(&self.transfers);
             let done_id = id.clone();
             tokio::spawn(async move {
@@ -669,7 +703,7 @@ impl Sessions {
         }
         let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token };
         let total = files::prepare_download(&job).await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[(session_id, &entry)])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -694,7 +728,7 @@ impl Sessions {
     ) -> Result<TransferStarted, IpcError> {
         let dir = files::remote_dir(dir)?.to_owned();
         files::remote_name(name)?;
-        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let (entry, sftp) = self.sftp(owner, session_id).await?;
         let token = random_token()?;
         let overwrite = choice == ConflictChoice::Replace;
         let remote_name = if choice == ConflictChoice::KeepBoth {
@@ -708,7 +742,7 @@ impl Sessions {
             files::remote_name(name)?;
             let job = folders::prepare_upload(sftp, local, dir, name, token).await?;
             let total = job.tree.bytes();
-            let (id, cancel) = self.start_transfer(owner)?;
+            let (id, cancel) = self.start_transfer(owner, &[(session_id, &entry)])?;
             let transfers = Arc::clone(&self.transfers);
             let done_id = id.clone();
             tokio::spawn(async move {
@@ -719,7 +753,7 @@ impl Sessions {
         }
         let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token };
         let (total, mode) = files::prepare_upload(&job).await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[(session_id, &entry)])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -775,7 +809,7 @@ impl Sessions {
         if !files::local_name_ok(name) {
             return Err(invalid("That name cannot be used for a file on this computer."));
         }
-        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let (entry, sftp) = self.sftp(owner, session_id).await?;
         let attrs = sftp.stat(&remote).await.map_err(from_file)?;
         if attrs.kind != tyrminal_ssh::RemoteKind::File {
             return Err(invalid("Only files can be opened for editing."));
@@ -791,7 +825,8 @@ impl Sessions {
             let mut out = files::create_private(&file).await.map_err(|e| files::local_io(&e))?;
             let sink = files::NullSink;
             let mut progress = files::Progress::new(&sink);
-            let (_never, mut cancel) = tokio::sync::watch::channel(false);
+            // Stops when the session ends (closed, lost or the vault locked).
+            let mut cancel = entry.close.subscribe();
             files::pull(&sftp, &remote, &mut out, &mut progress, &mut cancel).await.map_err(files::Stop::into_error)?;
             drop(out);
             edits::hash_file(&file).await
@@ -841,7 +876,7 @@ impl Sessions {
         let (session_id, remote, name, file) = self
             .edits
             .with(owner, edit_id, |e| (e.session_id.clone(), e.remote.clone(), e.name.clone(), e.file.clone()))?;
-        let (_, sftp) = self.sftp(owner, &session_id).await?;
+        let (entry, sftp) = self.sftp(owner, &session_id).await?;
         let now = sftp.stat(&remote).await.map_err(from_file)?;
         if !overwrite {
             let (same_attrs, saved) = self.edits.with(owner, edit_id, |e| (e.remote_unchanged(&now), e.saved_hash))?;
@@ -855,7 +890,8 @@ impl Sessions {
         let temp = files::join(&dir, &files::temp_name(&name, &random_token()?))?;
         let sink = files::NullSink;
         let mut progress = files::Progress::new(&sink);
-        let (_never, mut cancel) = tokio::sync::watch::channel(false);
+        // Stops when the session ends (closed, lost or the vault locked).
+        let mut cancel = entry.close.subscribe();
         files::push(&sftp, &file, &temp, &mut progress, &mut cancel).await.map_err(files::Stop::into_error)?;
         let replaced = async {
             sftp.set_permissions(&temp, edits::sftp_mode(&now)).await?;
@@ -902,8 +938,8 @@ impl Sessions {
     ) -> Result<TransferStarted, IpcError> {
         let src_path = files::join(files::remote_dir(src_dir)?, name)?;
         let dst_dir = files::remote_dir(dst_dir)?.to_owned();
-        let (_, src) = self.sftp(owner, src_session).await?;
-        let (_, dst) = self.sftp(owner, dst_session).await?;
+        let (src_entry, src) = self.sftp(owner, src_session).await?;
+        let (dst_entry, dst) = self.sftp(owner, dst_session).await?;
         let final_name = if choice == ConflictChoice::KeepBoth {
             files::free_remote_name(&dst, &dst_dir, name).await?
         } else {
@@ -919,7 +955,7 @@ impl Sessions {
             random_token()?,
         )
         .await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[(src_session, &src_entry), (dst_session, &dst_entry)])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -933,7 +969,7 @@ impl Sessions {
     pub fn cancel_transfer(&self, owner: &str, transfer_id: &str) -> Result<(), IpcError> {
         let transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
         match transfers.get(transfer_id) {
-            Some((who, cancel)) if who == owner => {
+            Some((who, _, cancel)) if who == owner => {
                 let _ = cancel.send(true);
                 Ok(())
             }

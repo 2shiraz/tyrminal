@@ -2567,3 +2567,99 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
 }
+
+/// Names in a local folder, temporary files included.
+fn local_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> =
+        std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
+}
+
+/// A transfer holds its own handle to the connection, so it must not outlive its session:
+/// closing the files-only connection (its tab) or locking the vault cancels it at once, and
+/// nothing partial is left on either side.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn closing_or_locking_stops_a_files_only_transfer_at_once_and_leaves_nothing_partial() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let s = &f.core.sessions;
+    let open = |trust: bool| {
+        let core = f.core.clone();
+        let host = host.clone();
+        async move {
+            let mut client = Client::open_files(&core, &host).await;
+            if trust {
+                let (_, prompt) = client.until_not_state().await;
+                client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+            }
+            client.until_connected().await;
+            client
+        }
+    };
+
+    // A large file on the server to work with.
+    let mut client = open(true).await;
+    let home = s.list_files(WINDOW, &client.session, None).await.unwrap().path;
+    let folder = format!("tyr-stop-{}", std::process::id());
+    let dir = format!("{}/{folder}", home.trim_end_matches('/'));
+    let _ = s.remove_file(WINDOW, &client.session, &dir, "big.bin").await;
+    let _ = s.remove_file(WINDOW, &client.session, &home, &folder).await;
+    s.make_dir(WINDOW, &client.session, &home, &folder).await.unwrap();
+    let local = TempDir::new().unwrap();
+    let big = pattern(96 * 1024 * 1024, 5);
+    std::fs::write(local.path().join("big.bin"), &big).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &client.session, local.path().join("big.bin"), &dir, "big.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
+
+    // Closing the tab during a download: cancelled at once, nothing left locally.
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &client.session, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    s.close(WINDOW, &client.session).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), transfer_end(&mut rx)).await.unwrap(),
+        TransferEvent::Cancelled
+    );
+    assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+    client.until_closed().await;
+    assert_eq!(local_names(down.path()), Vec::<String>::new(), "no partial download");
+    // Nothing more can be started or listed on it.
+    let (sink, _rx) = transfer_sink();
+    let refused = s
+        .download(WINDOW, &client.session, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::AccessDenied);
+
+    // Locking the vault during an upload: cancelled at once; the server keeps no partial file.
+    let client = open(false).await;
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &client.session, local.path().join("big.bin"), &dir, "up.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    f.core.vault.lock().await;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), transfer_end(&mut rx)).await.unwrap(),
+        TransferEvent::Cancelled
+    );
+    assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+
+    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let client = open(false).await;
+    let names: Vec<String> =
+        s.list_files(WINDOW, &client.session, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["big.bin"], "no partial upload under any name");
+    s.remove_file(WINDOW, &client.session, &dir, "big.bin").await.unwrap();
+    s.remove_file(WINDOW, &client.session, &home, &folder).await.unwrap();
+    s.close(WINDOW, &client.session).unwrap();
+}
