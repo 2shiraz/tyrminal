@@ -1,18 +1,51 @@
-# Parallel work split (two agents)
+# Parallel work split (four agents)
 
-Two Claude sessions build Tyrminal at the same time. This file says who owns what so their
+Four Claude sessions build Tyrminal at the same time. This file says who owns what so their
 branches merge without conflicts, and what to do when one happens anyway. AGENTS.md and
-BUILD_SPEC.md §0.1 bind both agents unchanged (no weakened checks, lab and synthetic data only,
-no secrets in logs or artifacts, a blocked check is BLOCKED).
+BUILD_SPEC.md §0.1 bind every agent unchanged (no weakened checks, lab and synthetic data only,
+no secrets in logs or artifacts, a blocked check is BLOCKED). Goal: every desktop feature of
+phases 02–09 implemented and verified; phases 10+ are out of scope for now.
 
-| | Agent A (first session) | Agent B (second session) |
-|---|---|---|
-| Branch | `claude/blissful-brown-7h9l18` (PR 2shiraz/tyrminal#2) | `claude/agent-b-tunnels-logs` |
-| Started from | — | commit `ed76320` of agent A's branch (includes this file) |
-| Scope | Phase 06 remainder (SFTP), Phase 05 remainder (workspaces, layouts, tabs), Phase 02 remainder (screen-lock hook), snippets (Phase 08 SNP rows), Phase 09 release-candidate work | Phase 07 (port forwarding, jump hosts, proxies, agent forwarding, advanced auth) and Phase 08 history, logs and session recording |
-| Feature-matrix rows | every other row (`FIL`, `WSP`, `TRM`, `HST`, `IMP`, `KEY`, `SNP`, `UX`, `VLT`, `SEC`, `P` except `P-14`/`P-16`, `CON` except those listed for B, and the later-phase `ACC`, `COL`, `MOB`, `VID`, `Q`, `H` rows) | `FWD-*`, `LOG-*`, `AUT-*`, `CON-09`, `CON-10`, `CON-11`, `CON-15`, `P-14`, `P-16` |
+| | Agent A (integrator) | Agent B | Agent C | Agent D |
+|---|---|---|---|---|
+| Branch | `claude/blissful-brown-7h9l18` (PR 2shiraz/tyrminal#2) | `claude/agent-b-tunnels-logs` | `claude/agent-c-workspaces` | `claude/agent-d-inventory-snippets` |
+| Started from | — | `ed76320` | `f404100` | `f404100` |
+| Scope | Phase 06 remainder (SFTP), Phase 02/03 leftovers (vault, secret store, recovery, formats, local terminal, escape permissions), Phase 09 release candidate, merging everyone's work | Phase 07 tunnels, jump hosts, proxies, agent forwarding, advanced auth; Phase 08 history, logs, recording | Phase 05: tabs (duplicate/detach), workspaces, split/focus layouts, pane reorder, named layout templates and restore, status indicators, shortcuts and keyboard customization, encodings/emulation, output highlighting, command palette and recent connections, broadcast target review | Phase 04 remainder (protocol settings, inherited workflow settings, group-wide connect, inventory presentation, key import/generation incl. formats and certificates, PuTTY/MobaXterm/SecureCRT importers, known-host conversion), Phase 08 snippets (multi-host, saved targets, startup scripts, organization, environment variables), post-quantum/algorithm controls |
+| Matrix rows | `FIL-*`, `VLT-*`, `SEC-*` except D's, `P-*` except others', `CON-02..06`, `CON-08`, `CON-12..14`, `UX-01`, `UX-02`, `UX-05`, `UX-06` | `FWD-*`, `LOG-*`, `AUT-*`, `CON-09`, `CON-10`, `CON-11`, `CON-15`, `P-14`, `P-16` | `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13` | `HST-*`, `KEY-*`, `IMP-*`, `SNP-*`, `SEC-03`, `SEC-08`, `SEC-09`, `SEC-10` |
 
-Each agent edits only its own rows of `docs/feature-matrix.csv` (never deletes a row).
+Each agent edits only its own rows of `docs/feature-matrix.csv` (never deletes a row). Rows that
+need third parties or later phases (cloud discovery, team vaults, mobile) are marked BLOCKED or left
+NOT_STARTED with a reason; nobody contacts a real cloud API.
+
+**Ordering constraints between agents:**
+
+- Host fields: B adds jump/proxy/agent fields first. D's reusable identities (KEY-15..17), per-host
+  environment variables (SNP-11..14) and startup scripts (SNP-08) also add host fields; D starts
+  those only after B's PR has merged into `main` and D has merged `main` (do the other D rows first).
+- IMP-02 (jump-host conversion in the OpenSSH importer) needs B's jump hosts: also after B merges.
+
+## Agents C and D: files they own
+
+**Agent C** owns: `apps/desktop/src/app/workspace.ts`, `apps/desktop/src/app/AppShell.tsx` (others add
+only one-line hook-ups, see below), `apps/desktop/src/components/layout/{TabStrip,PaneGrid,Sidebar}.tsx`,
+`apps/desktop/src/features/{terminal,palette,home}/` (terminal: `TerminalController.ts`, `TerminalView.tsx`,
+`terminalPolicy.ts`), `apps/desktop/src/lib/shortcuts.ts`, new `crates/core/src/layouts.rs` and
+`crates/contracts/src/layouts.rs`, `apps/desktop/src-tauri/src/commands/layouts.rs`,
+`apps/desktop/src/features/layouts/`, `apps/desktop/src/lib/messages-c.ts` (`msgC`),
+`tests/ui/{workspaces,terminal}*.spec.ts`, `tests/native/terminal.test.mjs`, `docs/progress-c.md`,
+`docs/decisions/0005-*.md`.
+
+**Agent D** owns: `crates/core/src/{inventory,import}.rs`, new `crates/core/src/{identities,importers,envvars}.rs`,
+`crates/core/src/validate.rs` (host/key validation parts), `crates/ssh/src/{auth,algorithms}.rs`
+(key formats, certificates, algorithm preferences), `crates/vault/` key parsing if needed,
+`apps/desktop/src/features/{hosts,credentials,snippets}/` (except B's "Advanced" section in
+`HostEditor.tsx`), `apps/desktop/src-tauri/src/commands/{inventory,snippets}.rs`, new contract module
+`crates/contracts/src/inventory.rs` for new types, `apps/desktop/src/lib/messages-d.ts` (`msgD`),
+`tests/ui/{inventory,snippets}*.spec.ts`, `tests/native/snippets.test.mjs`, `crates/core/tests/inventory.rs`,
+`docs/progress-d.md`, `docs/decisions/0006-*.md`.
+
+`crates/core/src/vault.rs` and `crates/core/src/records.rs` are shared: append new record kinds and
+methods in a marked block per agent; never reorder existing code. Agent A keeps everything else.
 
 ## File ownership
 
@@ -70,7 +103,9 @@ additions in one contiguous block at the end of the relevant list, opened with a
 | `tests/ui/mock-backend.js` | B's handlers in one block at the start of `handlers` |
 | `scripts/verify.mjs` | B's new suites in one block |
 
-Neither agent refactors, renames or reformats a shared file beyond its own lines. A change that
+No agent refactors, renames or reformats a shared file beyond its own lines. Agents C and D use
+the same rule as B: their additions to shared lists go in one contiguous block opened with a comment
+naming the agent (`// agent C: workspaces`, `// agent D: inventory and snippets`). A change that
 needs more (for example moving code both use) is written down under "Requests" below and done by
 the owner.
 
@@ -89,15 +124,17 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 1. Each agent commits small, runs `pnpm verify:fast` plus the lab suites it touched before every
    push, and pushes only its own branch. No force-push, no rebase of pushed commits.
-2. Agent A's PR (2shiraz/tyrminal#2) merges into `main` when its CI is green.
-3. Agent B then merges `main` into its branch (a merge commit, not a rebase), resolves conflicts
+2. Agent A's PR (2shiraz/tyrminal#2) merges into `main` when its CI is green. After that every agent
+   merges `main` into its own branch regularly (at least after each finished slice), so conflicts stay
+   small, and opens a draft PR into `main` once its first slice is done.
+3. To merge a PR: merge `main` into the branch (a merge commit, not a rebase), resolves conflicts
    with the rules above, regenerates generated files, runs `pnpm verify:fast`, the UI suite and the
    lab suites, pushes, and opens its own PR into `main`.
 4. Whichever PR merges second is responsible for a green `main` after it: CI on the merge result
    must pass before merging.
 5. Agent A does the final integration pass on `main` after both are in (full native CI on all
    three platforms) and updates `docs/progress.md` from `docs/progress-b.md`.
-6. Neither agent dispatches the release workflow or creates tags; that stays with agent A.
+6. No agent other than A dispatches the release workflow or creates tags.
 
 ### Resolving a conflict
 
@@ -110,11 +147,11 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 ## Status (each agent edits only its own column)
 
-| | Agent A | Agent B |
-|---|---|---|
-| Working on | Release fix (2shiraz/tyrminal#3), then SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | — |
-| Done since split | — | — |
-| Blocked | — | — |
+| | Agent A | Agent B | Agent C | Agent D |
+|---|---|---|---|---|
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | — |
+| Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
