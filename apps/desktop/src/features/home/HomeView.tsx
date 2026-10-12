@@ -17,7 +17,7 @@ import type { Section as SettingsSection } from "../settings/SettingsViews";
 import { msgSftp } from "../sftp/messages";
 import { MultiRunDialog } from "../snippets/MultiRunDialog";
 import type { PaneStatus } from "../terminal/TerminalView";
-import { ForwardsBox, GetStartedBox, HostsBox, ReviewBox, SessionsBox, SnippetsBox, VaultBox } from "./HomeBoxes";
+import { FavouritesBox, ForwardsBox, GetStartedBox, HostsBox, ReviewBox, SessionsBox, SnippetsBox, VaultBox } from "./HomeBoxes";
 import { QuickConnect } from "./QuickConnect";
 
 export { parseDestination } from "./QuickConnect";
@@ -123,6 +123,7 @@ export function HomeView({
           <div className="home-grid">
             <div className="box-grid home-column">
               {ws.tabs.length > 0 && <SessionsBox ws={ws} statuses={statuses} onSelectTab={onSelectTab} onNewTab={onLocal} />}
+              <FavouritesBox onConnect={onConnect} />
               <HostsBox onConnect={onConnect} onAllHosts={() => onNavigate("hosts")} />
               <SnippetsBox canRun={canRun} onRun={setRunning} onLibrary={() => onNavigate("snippets")} />
             </div>

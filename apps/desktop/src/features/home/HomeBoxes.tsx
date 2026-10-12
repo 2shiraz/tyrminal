@@ -10,7 +10,7 @@ import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { Box } from "../../components/ui/Box";
 import { BoxEmpty, relativeTime } from "../../components/ui/controls";
 import { IconPlay, IconServer, IconX } from "../../components/ui/icons";
-import { securityReview as reviewApi, tunnels as tunnelsApi, vault as vaultApi } from "../../lib/ipc";
+import { backup as backupApi, securityReview as reviewApi, tunnels as tunnelsApi, vault as vaultApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { severityOf } from "../security-review/SecurityReviewSection";
@@ -69,9 +69,62 @@ export function SessionsBox({
  * Saved hosts, most recently used first. A click selects a row and a double-click connects; the
  * Connect button in each row is the keyboard and assistive-technology path.
  */
+/** The hosts table shared by the hosts and favourites boxes. */
+function HostRows({ rows, onConnect }: { rows: HostSummary[]; onConnect: (host: HostSummary) => void }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  return (
+    <div className="box-scroll">
+      <table className="dt home-hosts">
+        <thead>
+          <tr>
+            <th scope="col">{msg.home.colName}</th>
+            <th scope="col">{msg.home.colAddress}</th>
+            <th scope="col">{msg.home.colSignIn}</th>
+            <th scope="col">{msg.home.colWhen}</th>
+            <th scope="col">
+              <span className="visually-hidden">{msg.home.connect}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((host) => (
+            <tr key={host.id} className={selected === host.id ? "is-selected" : undefined} onClick={() => setSelected(host.id)} onDoubleClick={() => onConnect(host)}>
+              <td>
+                <span className="home-host">
+                  <IconServer size={14} className="faint" />
+                  <span className="truncate">{host.label}</span>
+                </span>
+              </td>
+              <td className="mono muted">{msg.hosts.destination(host.username, host.address, host.port)}</td>
+              <td className="muted">{msg.home.signIn[host.auth.kind]}</td>
+              <td className="muted">{host.lastConnectedAt ? relativeTime(host.lastConnectedAt) : msg.home.never}</td>
+              <td className="dt-action">
+                <button type="button" className="btn btn-ghost btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
+                  {msg.home.connect}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Starred hosts, by name. Shown only when there are any. */
+export function FavouritesBox({ onConnect }: { onConnect: (host: HostSummary) => void }) {
+  const { hosts } = useVaultData();
+  const rows = (hosts.value ?? []).filter((h) => h.favourite).sort((a, b) => a.label.localeCompare(b.label));
+  if (rows.length === 0) return null;
+  return (
+    <Box title={msg.home.favourites} count={rows.length} flush>
+      <HostRows rows={rows} onConnect={onConnect} />
+    </Box>
+  );
+}
+
 export function HostsBox({ onConnect, onAllHosts }: { onConnect: (host: HostSummary) => void; onAllHosts: () => void }) {
   const { hosts } = useVaultData();
-  const [selected, setSelected] = useState<string | null>(null);
   const all = hosts.value ?? [];
   const rows = [...all].sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0) || a.label.localeCompare(b.label)).slice(0, ROWS);
   return (
@@ -85,45 +138,7 @@ export function HostsBox({ onConnect, onAllHosts }: { onConnect: (host: HostSumm
         </button>
       }
     >
-      {rows.length === 0 ? (
-        <BoxEmpty>{msg.home.recentEmpty}</BoxEmpty>
-      ) : (
-        <div className="box-scroll">
-          <table className="dt home-hosts">
-            <thead>
-              <tr>
-                <th scope="col">{msg.home.colName}</th>
-                <th scope="col">{msg.home.colAddress}</th>
-                <th scope="col">{msg.home.colSignIn}</th>
-                <th scope="col">{msg.home.colWhen}</th>
-                <th scope="col">
-                  <span className="visually-hidden">{msg.home.connect}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((host) => (
-                <tr key={host.id} className={selected === host.id ? "is-selected" : undefined} onClick={() => setSelected(host.id)} onDoubleClick={() => onConnect(host)}>
-                  <td>
-                    <span className="home-host">
-                      <IconServer size={14} className="faint" />
-                      <span className="truncate">{host.label}</span>
-                    </span>
-                  </td>
-                  <td className="mono muted">{msg.hosts.destination(host.username, host.address, host.port)}</td>
-                  <td className="muted">{msg.home.signIn[host.auth.kind]}</td>
-                  <td className="muted">{host.lastConnectedAt ? relativeTime(host.lastConnectedAt) : msg.home.never}</td>
-                  <td className="dt-action">
-                    <button type="button" className="btn btn-ghost btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
-                      {msg.home.connect}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {rows.length === 0 ? <BoxEmpty>{msg.home.recentEmpty}</BoxEmpty> : <HostRows rows={rows} onConnect={onConnect} />}
     </Box>
   );
 }
@@ -179,6 +194,14 @@ export function VaultBox({ onLock }: { onLock: () => void }) {
       live = false;
     };
   }, []);
+  // When this vault was last backed up; `undefined` until known.
+  const [lastBackup, setLastBackup] = useState<number | null | undefined>(undefined);
+  const loadBackup = () =>
+    void backupApi
+      .status()
+      .then((s) => setLastBackup(s.lastExportAt))
+      .catch(() => undefined);
+  useEffect(loadBackup, []);
   const counts = msg.home.counts(hosts.value?.length ?? 0, keys.value?.length ?? 0, snippets.value?.length ?? 0);
   return (
     <Box title={msg.home.vault} flush>
@@ -192,12 +215,17 @@ export function VaultBox({ onLock }: { onLock: () => void }) {
             <span key={c}>{c}</span>
           ))}
         </p>
+        {lastBackup !== undefined && (
+          <p className="muted" data-testid="home-last-backup">
+            {lastBackup === null ? msg.home.neverBackedUp : msg.home.lastBackup(relativeTime(lastBackup))}
+          </p>
+        )}
       </div>
       <div className="home-box-foot">
         <button type="button" className="btn btn-sm" onClick={onLock}>
           {msg.home.lockNow}
         </button>
-        <ExportBackupButton />
+        <ExportBackupButton onExported={loadBackup} />
       </div>
     </Box>
   );

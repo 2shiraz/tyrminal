@@ -76,6 +76,9 @@ pub(crate) struct HostRecord {
     /// Production host (P-26). Absent (not production) in older records.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub production: bool,
+    /// Starred by the user, shown first on Home. Absent (not a favourite) in older records.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub favourite: bool,
     // agent B: tunnels and history
     /// Jump host and other advanced connection settings. Absent in older records.
     #[serde(default, skip_serializing_if = "StoredConnection::is_default")]
@@ -396,6 +399,15 @@ impl GlanceSettingsRecord {
 // Session recordings
 pub(crate) const KIND_SESSION_LOG: u16 = 101;
 pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;
+/// When the vault was last exported as a backup (one record). Never part of a backup itself.
+pub(crate) const KIND_BACKUP_STATUS: u16 = 103;
+
+/// The time of the last successful backup export. Not secret; kept encrypted like every record.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub(crate) struct BackupStatusRecord {
+    /// Unix seconds.
+    pub last_export_at: u64,
+}
 
 /// What the vault knows about one session recording. The recording itself is a separate encrypted
 /// file named by this record's id (docs/crypto-format.md §11); everything identifying is here.
@@ -510,6 +522,7 @@ mod tests {
             terminal: tyrminal_contracts::HostTerminal::default(),
             forward_agent: false,
             production: true,
+            favourite: false,
             connection: StoredConnection::default(),
         };
         let bytes = encode(&host, 64).unwrap();

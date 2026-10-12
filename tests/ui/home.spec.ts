@@ -97,3 +97,41 @@ test("home: a first run welcomes and offers four ways to start", async ({ page }
   await start.getByRole("button", { name: /Add a host/ }).click();
   await expect(page.getByRole("dialog", { name: /host/i })).toBeVisible();
 });
+
+test("home: starred hosts appear in Favourites, which is hidden while there are none", async ({ page }) => {
+  await openApp(page);
+  await expect(box(page, "Hosts")).toBeVisible();
+  await expect(box(page, "Favourites")).toHaveCount(0);
+
+  // Starred from the host's "…" menu.
+  await page.locator('[data-nav="hosts"]').click();
+  await page.getByRole("button", { name: "More actions for db-primary" }).click();
+  await page.getByRole("menuitem", { name: "Add to favourites" }).click();
+  await expect.poll(async () => (await calls(page, "host_favourite_set")).at(-1)?.args).toEqual(expect.objectContaining({ favourite: true }));
+
+  await page.locator('[data-nav="home"]').click();
+  const favourites = box(page, "Favourites");
+  await expect(favourites.locator("tbody tr")).toHaveCount(1);
+  await expect(favourites).toContainText("db-primary");
+
+  // And unstarred again from Host details: its menu now offers removal, and the box goes away.
+  await page.locator('[data-nav="hosts"]').click();
+  await page.getByRole("button", { name: "More actions for db-primary" }).click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  const panel = page.getByRole("complementary", { name: "Host details" });
+  await panel.getByRole("button", { name: "Host details actions" }).click();
+  await page.getByRole("menuitem", { name: "Remove from favourites" }).click();
+  await expect.poll(async () => (await calls(page, "host_favourite_set")).at(-1)?.args).toEqual(expect.objectContaining({ favourite: false }));
+  await page.locator('[data-nav="home"]').click();
+  await expect(box(page, "Hosts")).toBeVisible();
+  await expect(box(page, "Favourites")).toHaveCount(0);
+});
+
+test("home: the vault box says when the vault was last backed up, and an export updates it", async ({ page }) => {
+  await openApp(page);
+  const lastBackup = box(page, "Vault").getByTestId("home-last-backup");
+  await expect(lastBackup).toHaveText("Never backed up");
+  await box(page, "Vault").getByRole("button", { name: "Save a backup…" }).click();
+  await expect(lastBackup).toHaveText(/^Last backup /);
+  await expect(lastBackup).not.toHaveText("Never backed up");
+});

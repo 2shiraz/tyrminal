@@ -7,7 +7,16 @@ import { type FormEvent, type KeyboardEvent, type MutableRefObject, useEffect, u
 
 import { Menu } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
-import { IconArrowLeftRight, IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
+import {
+  IconArrowLeftRight,
+  IconCopy,
+  IconEllipsis,
+  IconPanelRightClose,
+  IconPlay,
+  IconSlidersHorizontal,
+  IconStar,
+  IconTrash2,
+} from "../../components/ui/icons";
 import { AutosaveStatus, handleUndoKey } from "../../lib/autosave";
 import { toAppError } from "../../lib/ipc";
 import { msgSftp } from "../sftp/messages";
@@ -33,6 +42,7 @@ export function HostPanel({
   onConnect,
   onOpenSftp,
   onDuplicate,
+  onFavourite,
   onCopyAddress,
   onDelete,
   onEnvironment,
@@ -53,6 +63,8 @@ export function HostPanel({
   /** Open in SFTP (SSH hosts). */
   onOpenSftp?: ((host: HostSummary) => void) | undefined;
   onDuplicate: (host: HostSummary) => void;
+  /** Stars or unstars the host. */
+  onFavourite: (host: HostSummary) => void;
   onCopyAddress: (host: HostSummary) => void;
   onDelete: (host: HostSummary) => void;
   onEnvironment: (host: HostSummary) => void;
@@ -179,6 +191,11 @@ export function HostPanel({
           onClose={() => setMenu(null)}
           items={[
             ...(onOpenSftp && host.protocol.type === "ssh" ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(host) }] : []),
+            {
+              label: host.favourite ? msg.hosts.unfavourite : msg.hosts.favourite,
+              icon: <IconStar size={15} fill={host.favourite ? "currentColor" : "none"} />,
+              onSelect: () => onFavourite(host),
+            },
             { label: msg.hosts.duplicate, icon: <IconCopy size={15} />, onSelect: () => onDuplicate(host) },
             { label: msgD.hostPanel.copyAddress, icon: <IconCopy size={15} />, onSelect: () => onCopyAddress(host) },
             "separator",
