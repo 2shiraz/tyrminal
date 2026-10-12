@@ -66,3 +66,23 @@ test("windowing: a folder of 500 files keeps a window of rows; keys and type-ahe
   await expect(grid.getByRole("button", { name: "Select zz-300.log" })).toHaveCount(0);
   await expect(grid.locator(".ft-name[tabindex='0']")).toHaveCount(1);
 });
+
+test("windowing: 500 trusted servers render a window; scrolling to the bottom shows the last one", async ({ page }) => {
+  await openApp(page, { extraKnownHosts: 500 });
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Known hosts/ }).click();
+  const list = page.locator("main ul.list");
+  const rows = list.locator(":scope > li[data-window-item]");
+  await expect(rows.first()).toBeVisible();
+  expect(await rows.count()).toBeLessThan(150);
+  // The mock's own trusted servers plus the 500 added ones.
+  const total = await page.evaluate(() => (window as unknown as { __mockState: { knownHosts: unknown[] } }).__mockState.knownHosts.length);
+  expect(total).toBeGreaterThan(500);
+  await expect(rows.first()).toHaveAttribute("aria-setsize", String(total));
+  await list.evaluate((el) => {
+    let s: HTMLElement | null = el.parentElement;
+    while (s && !["auto", "scroll"].includes(getComputedStyle(s).overflowY)) s = s.parentElement;
+    (s ?? document.scrollingElement)?.scrollTo(0, 1e7);
+  });
+  await expect(page.getByText("bulk-500.example", { exact: true })).toBeVisible();
+  expect(await rows.count()).toBeLessThan(150);
+});

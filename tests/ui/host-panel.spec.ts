@@ -578,3 +578,36 @@ test("Credentials offers an identity when other hosts sign in with the same user
   });
   await settled(page);
 });
+
+test("Host details boxes never scroll sideways at the panel's minimum width", async ({ page }) => {
+  await openHosts(page);
+  await list(page).getByRole("button", { name: "build-runner-03", exact: true }).click();
+  // The narrowest the resize handle allows (ResizeHandle.tsx, hostPanel.min).
+  const handle = page.getByRole("separator", { name: "Resize host details" });
+  await handle.focus();
+  await page.keyboard.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  // The widest content: a long user name in the reuse hint, the key picker and Show more open.
+  await details(page).getByLabel("User name").fill("deploy");
+  await expect(details(page).getByTestId("host-reuse")).toBeVisible();
+  await details(page).getByText("Show more").click();
+  const body = panel(page).locator(".host-panel-body");
+  const { scroll, client } = await body.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(scroll).toBeLessThanOrEqual(client);
+  // "SSH on [22] port" stays on one line.
+  const protocol = await details(page).getByRole("combobox", { name: "Protocol" }).boundingBox();
+  const port = await details(page).getByRole("textbox", { name: "Port" }).boundingBox();
+  expect(Math.abs((protocol?.y ?? 0) - (port?.y ?? 100))).toBeLessThan(8);
+});
+
+test("Host details never scroll sideways, even at their narrowest, with long values", async ({ page }) => {
+  await openHosts(page);
+  await page.setViewportSize({ width: 1024, height: 760 });
+  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  const panel = page.getByTestId("host-panel");
+  await panel.getByLabel("Name", { exact: true }).fill("a-very-long-host-name-that-keeps-going-".repeat(4));
+  await panel.getByText("Show more").click();
+  const body = panel.locator(".host-panel-body");
+  const { scroll, client } = await body.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(scroll).toBeLessThanOrEqual(client);
+});

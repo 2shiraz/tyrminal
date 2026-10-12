@@ -5,6 +5,7 @@ export const msgHv = {
   searchPlaceholder: "Find a host or ssh user@hostname…",
   connect: "Connect",
   connectHint: "Connect to the host shown first, or to the address typed",
+  noSavedMatch: "No saved host matches.",
   newHost: "New host",
   moreNew: "More ways to add",
   newGroup: "New group",

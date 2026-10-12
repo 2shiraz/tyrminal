@@ -230,6 +230,54 @@ test.describe("exits", () => {
   });
 });
 
+// Moments (motion.md PR 4).
+test.describe("moments", () => {
+  test("a wrong passphrase shakes the card once and puts focus back in the field", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    await allowMotion(page);
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    const card = page.locator("form.auth-card");
+    const shakes = await card.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)));
+    expect(shakes).toEqual([220]);
+    // The right one still opens the vault, and the window fades in.
+    await field.fill("correct horse");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  });
+
+  test("under reduced motion a wrong passphrase only refocuses", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    expect(await page.locator("form.auth-card").evaluate((el) => el.getAnimations().length)).toBe(0);
+  });
+
+  test("a finished transfer flashes once, and status dots change colour gently", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    const style = await page.evaluate(() => {
+      const row = document.createElement("li");
+      row.className = "xfer-row";
+      row.dataset.state = "done";
+      const dot = document.createElement("span");
+      dot.className = "status-dot";
+      document.body.append(row, dot);
+      const result = { flash: getComputedStyle(row).animationName, dot: getComputedStyle(dot).transitionProperty };
+      row.remove();
+      dot.remove();
+      return result;
+    });
+    expect(style).toEqual({ flash: "m-flash", dot: "background-color" });
+  });
+});
+
 // Glides and lists (motion.md PR 3).
 test.describe("glides and lists", () => {
   const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" });
@@ -240,7 +288,7 @@ test.describe("glides and lists", () => {
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
     const glide = primary(page).locator(".nav-glide");
     await expect(glide).toHaveCount(1);
-    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([180]);
+    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([140]);
     await expect(primary(page)).toHaveAttribute("data-gliding", "");
     // Settled: no copy left, and the item carries its own marker again.
     await expect(glide).toHaveCount(0);
@@ -271,7 +319,7 @@ test.describe("glides and lists", () => {
     const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
     await expect(rows.first()).toBeVisible();
     const delays = await rows.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().delay))[0] ?? null));
-    expect(delays).toEqual([0, 30, 60]);
+    expect(delays).toEqual([0, 20, 40]);
     // Once the arrival has settled, filtering from the keyboard re-orders at once.
     await expect.poll(() => rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
     await page.getByRole("searchbox").first().click();

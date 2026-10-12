@@ -17,7 +17,7 @@ async function search(page: Page, text: string) {
   // missing offer means the text was refused rather than not yet searched.
   await expect.poll(async () => (await calls(page, "host_search")).slice(before).some((c) => c.args.query === text.trim())).toBe(true);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await expect(page.getByText("No hosts match")).toBeVisible();
+  await expect(page.getByText("No saved host matches.")).toBeVisible();
 }
 const sheet = (page: Page, address: string) => page.getByRole("dialog", { name: `Connect to ${address}` });
 const stops = (page: Page) =>
@@ -25,24 +25,27 @@ const stops = (page: Page) =>
 
 test("an address offers quick connect only when no saved host matches", async ({ page }) => {
   await openApp(page);
-  const offer = page.getByRole("button", { name: /^Connect to .*…$/ });
+  // Connect in the search box names the address it would open (its tooltip); nothing to open, disabled.
+  const offer = page.getByRole("search").getByRole("button", { name: "Connect" });
   for (const address of ["198.51.100.7", "198.51.100.7:2200", "db.example.org", "ops@db.example.org:2200", "2001:db8::5", "[2001:db8::5]:2200", "backup01"]) {
     await search(page, address);
-    await expect(offer, address).toHaveText(`Connect to ${address}…`);
+    await expect(offer, address).toHaveAttribute("title", `Connect to ${address}…`);
+    await expect(offer, address).toBeEnabled();
   }
   // A saved host's name finds the host, not a new connection.
   await field(page).fill("api-gateway");
   await expect(page.locator('[data-testid="host-list"]')).toContainText("api-gateway");
-  await expect(offer).toHaveCount(0);
+  await expect(offer).not.toHaveAttribute("title", /^Connect to .*…$/);
   for (const text of ["ssh://db.example.org", "not an address", "db.example.org/path", "300.1.1.1"]) {
     await search(page, text);
-    await expect(offer, text).toHaveCount(0);
+    await expect(offer, text).toBeDisabled();
   }
 });
 
 test("an ssh command line opens the sheet with its user and port; options it cannot honour do not", async ({ page }) => {
   await openApp(page);
-  const offer = page.getByRole("button", { name: /^Connect to .*…$/ });
+  // Connect in the search box names the address it would open (its tooltip); nothing to open, disabled.
+  const offer = page.getByRole("search").getByRole("button", { name: "Connect" });
   for (const [text, shown] of [
     ["ssh ops@db.example.org -p 2222", "ops@db.example.org:2222"],
     ["ssh -p2222 -l ops db.example.org", "ops@db.example.org:2222"],
@@ -50,11 +53,12 @@ test("an ssh command line opens the sheet with its user and port; options it can
     ["ssh backup01", "backup01"],
   ]) {
     await search(page, text as string);
-    await expect(offer, text).toHaveText(`Connect to ${shown}…`);
+    await expect(offer, text).toHaveAttribute("title", `Connect to ${shown}…`);
+    await expect(offer, text).toBeEnabled();
   }
   for (const text of ["ssh -i id_ed25519 db.example.org", "ssh db.example.org:2222", "ssh -l ops root@db.example.org", "ssh -p 70000 db.example.org", "ssh a.example.org b.example.org", "ssh -p"]) {
     await search(page, text);
-    await expect(offer, text).toHaveCount(0);
+    await expect(offer, text).toBeDisabled();
   }
 
   await search(page, "ssh ops@db.example.org -p 2222");
@@ -169,7 +173,10 @@ test("Escape and Close cancel without connecting or saving", async ({ page }) =>
   await expect(sheet(page, "198.51.100.9")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet(page, "198.51.100.9")).toHaveCount(0);
-  await page.getByRole("button", { name: "Connect to 198.51.100.9…" }).click();
+  // Connect sits in the search box; the line under it stays short, with no second button.
+  await expect(page.getByText("No saved host matches.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Connect to / })).toHaveCount(0);
+  await page.getByRole("search").getByRole("button", { name: "Connect" }).click();
   await sheet(page, "198.51.100.9").getByRole("button", { name: "Close" }).click();
   await expect(sheet(page, "198.51.100.9")).toHaveCount(0);
   expect(await calls(page, "session_open_quick")).toHaveLength(0);
