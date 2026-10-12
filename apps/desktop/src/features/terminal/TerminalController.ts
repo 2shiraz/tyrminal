@@ -334,7 +334,7 @@ export class TerminalController {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      // A middle click mapped to paste already pasted the clipboard (not the X11 selection).
+      // The X11 primary selection after a middle click is never sent (see mouseMap.ts).
       if (this.mouse.swallowPaste()) return;
       const text = event.clipboardData?.getData("text/plain") ?? "";
       this.pasteText(text);

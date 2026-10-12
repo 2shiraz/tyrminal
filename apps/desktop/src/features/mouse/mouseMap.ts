@@ -10,7 +10,11 @@ export interface MouseMapping {
   middleClickPaste: boolean;
 }
 
-/** How long after a handled middle click a platform paste event (X11 primary selection) is ignored. */
+/**
+ * How long after a middle click a platform paste event (X11 primary selection) is ignored. The
+ * platform's primary-selection paste is never sent: with the mapping off a middle click sends
+ * nothing, and with it on the clipboard is pasted instead (through the review).
+ */
 const PRIMARY_PASTE_WINDOW_MS = 500;
 
 export class MouseMap {
@@ -28,11 +32,12 @@ export class MouseMap {
       this.cleanups.push(() => container.removeEventListener(type, handler, true));
     };
     on("mousedown", (event) => {
-      if (event.button !== 1 || !this.mapping.middleClickPaste || !this.ours(event)) return;
-      // No autoscroll and no platform primary-selection paste: the clipboard is pasted instead.
+      if (event.button !== 1) return;
+      this.swallowUntil = performance.now() + PRIMARY_PASTE_WINDOW_MS;
+      if (!this.mapping.middleClickPaste || !this.ours(event)) return;
+      // No autoscroll: the clipboard is pasted instead of the primary selection.
       event.preventDefault();
       event.stopPropagation();
-      this.swallowUntil = performance.now() + PRIMARY_PASTE_WINDOW_MS;
       this.term.focus();
       this.paste();
     });
@@ -54,7 +59,7 @@ export class MouseMap {
     this.container.dataset.mouse = [mapping.rightClickPaste && "right-paste", mapping.middleClickPaste && "middle-paste"].filter(Boolean).join(" ") || "default";
   }
 
-  /** True for a platform paste event caused by a middle click this map already handled. */
+  /** True for a platform paste event caused by a middle click (the X11 primary selection). */
   swallowPaste(): boolean {
     return performance.now() < this.swallowUntil;
   }

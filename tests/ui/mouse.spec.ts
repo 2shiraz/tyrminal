@@ -66,10 +66,15 @@ test("middle click pastes only when turned on", async ({ page }) => {
   await page.evaluate(() => navigator.clipboard.writeText("hostname"));
   const before = await inputs(page);
   await screen(page).click({ button: "middle" });
+  // What X11 does after a middle click: a paste event carrying the primary selection.
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "Local terminal");
+    document.querySelector(".pane:not([hidden]) .xterm-helper-textarea")?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  });
   await page.waitForTimeout(200);
-  // Off: the clipboard is not pasted. (On Linux the platform may still paste its own primary
-  // selection, through the usual paste review; that is not this mapping.)
-  expect((await sentSince(page, before)).join("")).not.toContain("hostname");
+  // Off: nothing is sent, neither the clipboard nor the platform's primary selection.
+  expect((await sentSince(page, before)).join("")).toBe("");
   const offset = await inputs(page);
 
   await settings(page);

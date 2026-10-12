@@ -173,9 +173,11 @@ and zooms only the pane you are in.
 when you commit it; keys the input method uses (Enter to choose, Escape to cancel) never reach
 the server, and shortcuts wait until the composition ends.
 
-**Mouse.** Settings → Shortcuts and input → **Right click** selects a word, pastes, or does
-nothing; **Middle click pastes** can be turned on. A paste from the mouse is reviewed like any
-paste. Programs that use the mouse (vim, htop, mc) get the click; hold Shift to paste anyway.
+**Mouse.** Settings → Keyboard shortcuts → **Right click** selects a word, pastes, or does
+nothing; **Middle click pastes** the clipboard when turned on. A paste from the mouse is reviewed
+like any paste. On Linux the system's middle-click paste of the selected text is never sent, so a
+middle click with the setting off sends nothing. Programs that use the mouse (vim, htop, mc) get
+the click; hold Shift to paste anyway.
 
 **Search all sessions** (command palette) finds text in the scrollback of every open terminal
 and lists the matches by tab; choosing one brings its tab to the front and selects the match.
