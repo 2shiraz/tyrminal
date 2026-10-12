@@ -103,15 +103,19 @@ export function TabStrip({
   useFlip(tabsRef);
   // The active tab's indicator slides between tabs (transform only). The first placement and any
   // placement under reduced motion are instant.
+  // It sits beside the tablist (which holds only tabs). Layout offsets, not client rects, so a tab
+  // still sliding into place (useFlip) and the strip's scroll position do not skew it.
   const indicatorRef = useRef<HTMLSpanElement>(null);
   const indicatorPlaced = useRef(false);
   useLayoutEffect(() => {
+    const tabs = tabsRef.current;
     const indicator = indicatorRef.current;
     const tab = tabRefs.current.get(ws.active ?? -1);
-    if (!indicator || !tab) return;
+    if (!tabs || !indicator || !tab) return;
     const animate = indicatorPlaced.current && motionAllowed();
+    const left = tabs.offsetLeft + tab.offsetLeft;
     indicator.style.transition = animate ? "" : "none";
-    indicator.style.transform = `translateX(${tab.offsetLeft}px) scaleX(${tab.offsetWidth / 100})`;
+    indicator.style.transform = `translateX(${left}px) scaleX(${tab.offsetWidth / 100})`;
     indicatorPlaced.current = true;
   });
   /** A tab closed with the pointer shrinks out first; from the keyboard it closes at once. */
@@ -173,9 +177,9 @@ export function TabStrip({
 
   return (
     <div className="tabstrip">
+      <span className="tab-indicator" aria-hidden="true" ref={indicatorRef} />
       {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
       <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions} ref={tabsRef}>
-        <span className="tab-indicator" aria-hidden="true" ref={indicatorRef} />
         <div
           ref={(el) => {
             if (el) tabRefs.current.set(-1, el);
