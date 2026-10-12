@@ -407,6 +407,64 @@ pub async fn files_local_list(
     Ok(LocalListing { token, root_name: file_name(&root), path, entries, truncated })
 }
 
+/// Creates a folder inside a local folder the user chose.
+#[tauri::command]
+pub async fn files_local_mkdir(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+    name: String,
+) -> Result<(), IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    tyrminal_core::local_make_dir(&root, &path, &name).await
+}
+
+/// Renames an item inside a local folder the user chose (never replacing another).
+#[tauri::command]
+pub async fn files_local_rename(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+    from: String,
+    to: String,
+) -> Result<(), IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    tyrminal_core::local_rename(&root, &path, &from, &to).await
+}
+
+/// Deletes a file, link or empty folder inside a local folder the user chose.
+#[tauri::command]
+pub async fn files_local_remove(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+    name: String,
+) -> Result<(), IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    tyrminal_core::local_remove(&root, &path, &name).await
+}
+
+/// Changes the permission bits of an item inside a local folder the user chose.
+#[tauri::command]
+pub async fn files_local_chmod(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+    name: String,
+    mode: u32,
+) -> Result<(), IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    tyrminal_core::local_set_mode(&root, &path, &name, mode).await
+}
+
 /// Copies a file or folder from one connected session's server to another's, streaming through
 /// the app (nothing is written locally).
 #[tauri::command]

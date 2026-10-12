@@ -8,6 +8,9 @@ import type { TerminalTarget } from "../features/terminal/TerminalController";
 
 export const MAX_PANES = 16;
 
+/** What a pane shows: a terminal, or the SFTP file manager (one pane per SFTP tab, never split). */
+export type PaneTarget = TerminalTarget | { kind: "sftp" };
+
 export type Direction = "row" | "column";
 
 export type Layout =
@@ -16,7 +19,7 @@ export type Layout =
 
 export interface Pane {
   id: number;
-  target: TerminalTarget;
+  target: PaneTarget;
   /** The user's own name for the destination (host label or "Local terminal"). */
   label: string;
   /** `user@host port N`, from the saved host, never from the server. */
@@ -470,18 +473,24 @@ function toTarget(target: TerminalTarget): LayoutTarget {
   return target.kind === "ssh" ? { kind: "ssh", hostId: target.hostId } : { kind: "local" };
 }
 
+/** A pane's terminal destination; SFTP tabs are never part of a template or a detached window. */
+function terminalTarget(pane: Pane | undefined): TerminalTarget | null {
+  return pane && pane.target.kind !== "sftp" ? pane.target : null;
+}
+
 /**
  * The open tabs as a template: arrangement, destinations, tab names and focus. Only that: no
  * session, output, command or directory is part of a template.
  */
 export function templateTabs(ws: Workspace): LayoutTab[] {
-  return ws.tabs.map((tab) => {
+  const terminalTabs = ws.tabs.filter((tab) => panesOf(tab.layout).every((id) => terminalTarget(ws.panes[id]) !== null));
+  return terminalTabs.map((tab) => {
     const ids = panesOf(tab.layout);
     const index = new Map(ids.map((id, i) => [id, i]));
     const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
     return {
       title: tab.customTitle,
-      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target)),
+      panes: ids.map((id) => toTarget(terminalTarget(ws.panes[id]) as TerminalTarget)),
       layout: toNode(tab.layout, index),
       focused: index.get(tab.focused) ?? 0,
       focusMode: tab.focusMode,
@@ -565,7 +574,9 @@ export function detachInput(ws: Workspace, tab: Tab, sessionOf: (pane: number) =
     layout: toNode(tab.layout, index),
     panes: ids.map((id) => {
       const p = ws.panes[id] as Pane;
-      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(p.target) };
+      const target = terminalTarget(p);
+      if (!target) throw new Error("An SFTP tab cannot move to another window.");
+      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(target) };
     }),
     focused: index.get(tab.focused) ?? 0,
   };

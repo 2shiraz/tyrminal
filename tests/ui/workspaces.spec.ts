@@ -670,7 +670,8 @@ test("palette and new-tab menu: switch to an open tab by name; reopen a recent c
   expect(recent).toBeGreaterThan(0);
   await page.getByRole("button", { name: "New tab" }).click();
   const menu = page.getByRole("menu", { name: "New tab" });
-  const first = menu.getByRole("menuitem").nth(2);
+  // Local terminal, SFTP and Hosts come before the recent connections.
+  const first = menu.getByRole("menuitem").nth(3);
   const label = (await first.textContent())!.trim();
   await first.click();
   await expect(terminalTabs(page)).toHaveCount(3);
@@ -747,4 +748,24 @@ test("templates: the reported directory is saved; after Connect a return is offe
   await offer.getByRole("button", { name: "Send" }).click();
   await expect(offer).toHaveCount(0);
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("cd -- '/srv/it'\\''s app': synthetic output");
+});
+
+test("templates: an SFTP tab is left out of a saved layout", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /Local terminal/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm")).toBeVisible();
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /SFTP/ }).click();
+  await expect(page.getByRole("tab", { name: /SFTP/ })).toHaveAttribute("aria-selected", "true");
+
+  await paletteRun(page, "Save layout as");
+  const dialog = page.getByRole("dialog", { name: "Save the open tabs as a layout" });
+  await expect(dialog).toContainText("1 tab, 1 pane");
+  await dialog.getByLabel("Layout name").fill("Mixed");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved layout “Mixed”.")).toBeVisible();
+  const [saved] = await calls(page, "layout_save");
+  const tabs = (saved!.args as { layout: { tabs: { panes: unknown[] }[] } }).layout.tabs;
+  expect(tabs.map((t) => t.panes)).toEqual([[{ kind: "local" }]]);
 });

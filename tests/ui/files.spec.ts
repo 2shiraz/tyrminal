@@ -12,7 +12,7 @@ async function connect(page: Page, host: string) {
 }
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Files" });
-const list = (page: Page) => panel(page).getByRole("list", { name: /^Contents of \// });
+const list = (page: Page) => panel(page).getByRole("grid", { name: /^Contents of \// });
 /** Lets the newest running mock transfer complete. */
 const finishLatest = (page: Page) =>
   page.evaluate(() => {
@@ -32,7 +32,7 @@ test("files: browse the login folder, hidden files on request, folders open and 
   await panel(page).getByRole("switch", { name: "Show hidden files" }).check();
   await expect(list(page).getByRole("button", { name: "Select .bashrc" })).toBeVisible();
 
-  await list(page).getByRole("button", { name: "Open app" }).click();
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
   await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/app");
   await expect(list(page).getByRole("button")).toHaveText([/config\.yml/]);
   await panel(page).getByRole("button", { name: "Up one folder" }).click();
@@ -138,7 +138,7 @@ test("files: new folder, rename, permissions and delete, with errors explained",
   await expect(list(page).getByRole("button", { name: "Select NOTES.md" })).toContainText("600");
 
   // A folder with contents is not removed; the reason is shown.
-  await list(page).getByRole("button", { name: "Open app" }).click({ modifiers: [] });
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
   await panel(page).getByRole("button", { name: "Up one folder" }).click();
   await list(page).getByRole("button", { name: "Select NOTES.md" }).click();
   await panel(page).getByRole("button", { name: "Delete" }).click();
@@ -179,7 +179,7 @@ test("files: whole folders upload and download, report skipped links, and are ne
   await expect(list(page).getByRole("button", { name: "Open site (1)" })).toBeVisible();
 
   // Download the folder being shown.
-  await list(page).getByRole("button", { name: "Open app" }).click();
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
   await panel(page).getByRole("button", { name: "Download this folder…" }).click();
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
@@ -315,7 +315,7 @@ test("files: switching tabs keeps each session's folder, selection, toggles and 
   });
   await connect(page, "api-gateway");
   await page.keyboard.press("Control+Shift+O");
-  await list(page).getByRole("button", { name: "Open app" }).click();
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
   await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/app");
   await panel(page).getByRole("switch", { name: "Show hidden files" }).check();
   await list(page).getByRole("button", { name: "Select log-40.txt" }).click();
@@ -340,7 +340,7 @@ test("files: switching tabs keeps each session's folder, selection, toggles and 
   await expect(panel(page).getByRole("status", { name: "Target" })).toHaveText(/Files on api-gateway/);
   await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/app");
   await expect(panel(page).getByRole("switch", { name: "Show hidden files" })).toBeChecked();
-  await expect(list(page).getByRole("button", { name: "Select log-40.txt" })).toHaveAttribute("aria-pressed", "true");
+  await expect(list(page).getByRole("row", { name: /log-40\.txt/ })).toHaveAttribute("aria-selected", "true");
   await expect.poll(() => page.locator(".files-body").evaluate((el) => el.scrollTop)).toBe(scrolled);
   // And back to B, which also kept its place.
   await page.getByRole("tab", { name: /db-primary/ }).click();
@@ -350,4 +350,62 @@ test("files: switching tabs keeps each session's folder, selection, toggles and 
   // Refresh is the way to list again.
   await panel(page).getByRole("button", { name: "Refresh" }).click();
   await expect.poll(listCalls).toBe(before + 1);
+});
+
+test("files: a click visibly selects, Shift/Ctrl extend it, keys move it, and opening a folder shows it is loading", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  const row = (name: RegExp) => list(page).getByRole("row", { name });
+  const footer = panel(page).getByRole("status", { name: "Selection" });
+  await expect(footer).toHaveText("5 items");
+
+  // A click selects: aria-selected and the selected class, and it stays when focus leaves.
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await expect(row(/README\.md/)).toHaveAttribute("aria-selected", "true");
+  await expect(row(/README\.md/)).toHaveClass(/is-selected/);
+  await panel(page).getByRole("textbox", { name: "Folder on the server" }).focus();
+  await expect(row(/README\.md/)).toHaveClass(/is-selected/);
+  await expect(footer).toHaveText("1 selected · 5.0 KB");
+
+  // The pressed state appears on pointer down, before the click completes.
+  const pressed = list(page).getByRole("button", { name: "Select deploy.sh" });
+  await pressed.hover();
+  await page.mouse.down();
+  await expect(row(/deploy\.sh/)).toHaveAttribute("data-pressed", "true");
+  await page.mouse.up();
+  await expect(row(/deploy\.sh/)).not.toHaveAttribute("data-pressed", "true");
+
+  // Ctrl adds, Shift takes a range; the footer counts them.
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click({ modifiers: ["ControlOrMeta"] });
+  await expect(footer).toHaveText(/^2 selected · 700 MB/);
+  await list(page).getByRole("button", { name: "Open app" }).click();
+  await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click({ modifiers: ["Shift"] });
+  await expect(list(page).locator('[role="row"][aria-selected="true"]')).toHaveCount(3);
+  await expect(footer).toHaveText(/^3 selected · 700 MB \+ folders$/);
+
+  // Keyboard: arrows move, Space toggles, Enter opens a folder.
+  await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click();
+  await page.keyboard.press("ArrowDown");
+  await expect(row(/deploy\.sh/)).toHaveAttribute("aria-selected", "true");
+  await expect(list(page).getByRole("button", { name: "Select deploy.sh" })).toBeFocused();
+  await page.keyboard.press("Shift+ArrowDown");
+  await expect(footer).toHaveText(/^2 selected/);
+  await page.keyboard.press("Space");
+  await expect(footer).toHaveText(/^1 selected/);
+  await page.keyboard.press("Home");
+  await expect(row(/Open app/)).toHaveAttribute("aria-selected", "true");
+
+  // A folder that is slow to list: the row and the path show it at once, a bar after 300 ms.
+  await page.evaluate(() => {
+    (window as unknown as { __mockListDelay: number }).__mockListDelay = 900;
+  });
+  await list(page).getByRole("button", { name: "Open logs" }).dblclick();
+  await expect(row(/Open logs/)).toHaveAttribute("data-loading", "true");
+  await expect(panel(page).locator("form.files-path")).toHaveAttribute("aria-busy", "true");
+  await expect(panel(page).getByRole("progressbar", { name: "Opening folder" })).toBeVisible();
+  await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/logs");
+  await expect(panel(page).getByRole("progressbar")).toHaveCount(0);
+  await expect(panel(page).locator("form.files-path")).not.toHaveAttribute("aria-busy", "true");
 });

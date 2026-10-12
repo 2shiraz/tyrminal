@@ -37,6 +37,22 @@ for (const theme of ["dark", "light"] as const) {
       }
     });
 
+    test("host details panel, new and existing host, wide and narrow", async ({ page }) => {
+      await openApp(page, base);
+      await nav(page, "Hosts");
+      await page.getByRole("button", { name: "Add host" }).click();
+      await expect(page.getByRole("complementary", { name: "New host" })).toBeVisible();
+      await audit(page);
+      await page.getByTestId("host-list").getByRole("button", { name: "db-primary", exact: true }).click();
+      const details = page.getByRole("complementary", { name: "Host details" });
+      await details.getByText("Show more").click();
+      await details.getByRole("radio", { name: /Store a password in the vault/ }).check();
+      await audit(page);
+      await page.setViewportSize({ width: 760, height: 760 });
+      await expect(page.locator(".hosts-layout")).toHaveAttribute("data-narrow", "true");
+      await audit(page);
+    });
+
     test("a connected terminal with the files and snippets panels", async ({ page }) => {
       await openApp(page, { ...base, renderer: "compatibility" });
       await page.keyboard.press("Control+Shift+K");
@@ -45,10 +61,28 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
       await audit(page);
       await page.keyboard.press("Control+Shift+O");
-      await expect(page.getByRole("complementary", { name: "Files" }).getByRole("list", { name: /^Contents of \// })).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Files" }).getByRole("grid", { name: /^Contents of \// })).toBeVisible();
       await audit(page);
       await page.keyboard.press("Control+Shift+S");
       await expect(page.getByRole("complementary", { name: "Snippets" })).toBeVisible();
+      await audit(page);
+    });
+
+    test("the SFTP tab: host picker, both panes listed, and the actions menu", async ({ page }) => {
+      await openApp(page, base);
+      await page.keyboard.press("Control+Shift+K");
+      await page.getByRole("combobox", { name: /Type a command/ }).fill("SFTP");
+      await page.keyboard.press("Enter");
+      const view = page.getByRole("region", { name: "SFTP file manager" });
+      await expect(view.getByRole("heading", { name: "Connect to host" })).toBeVisible();
+      await audit(page);
+      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
+      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await expect(view.getByRole("grid", { name: /on api-gateway/ })).toBeVisible();
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
+      await audit(page);
+      await view.getByRole("button", { name: "Actions for the right pane" }).click();
+      await expect(page.getByRole("menu", { name: "Actions" })).toBeVisible();
       await audit(page);
     });
   });

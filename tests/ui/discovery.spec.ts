@@ -1,5 +1,5 @@
 // LAN discovery (HST-14) against the UI test mock: nothing is sent until Start, announced names
-// are shown as text, adding a result only prefills the host editor. Real DNS-SD browsing against a
+// are shown as text, adding a result only prefills the Host details panel. Real DNS-SD browsing against a
 // responder is tested in crates/core/tests/discovery_lab.rs. The mock never makes a row VERIFIED.
 
 import AxeBuilder from "@axe-core/playwright";
@@ -19,7 +19,7 @@ async function openDiscovery(page: Page, options: MockOptions = {}) {
   return dialog;
 }
 
-test("nothing is sent before Start; results are text; adding one only prefills the editor", async ({ page }) => {
+test("nothing is sent before Start; results are text; adding one only prefills the host panel", async ({ page }) => {
   const dialog = await openDiscovery(page);
   await expect(dialog.getByLabel("Network")).toHaveValue("en0");
   await expect(dialog.getByRole("option", { name: "en0 (192.0.2.20, fe80::1)" })).toBeAttached();
@@ -44,11 +44,13 @@ test("nothing is sent before Start; results are text; adding one only prefills t
   await expect(dialog).toBeHidden();
   // Closing the dialog stops listening.
   await expect.poll(async () => (await callsOf(page, "discovery_stop")).length).toBe(1);
-  const editor = page.getByRole("dialog").filter({ has: page.getByLabel("Address") });
-  await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Build server");
-  await expect(editor.getByLabel("Address")).toHaveValue("192.0.2.30");
-  await expect(editor.getByLabel("Port")).toHaveValue("22");
-  await editor.getByRole("button", { name: "Cancel" }).click();
+  const panel = page.getByRole("complementary", { name: "New host" });
+  await expect(panel.getByLabel("Name", { exact: true })).toHaveValue("Build server");
+  await expect(panel.getByLabel("Address")).toHaveValue("192.0.2.30");
+  await expect(panel.getByLabel("Port")).toHaveValue("22");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  await expect(panel).toBeHidden();
   expect(await callsOf(page, "host_save")).toHaveLength(0);
 });
 
