@@ -505,8 +505,13 @@ async fn next_decision(events: &mut mpsc::UnboundedReceiver<SessionEvent>) -> Se
 }
 
 async fn jump_to(f: &Fixture, host: &str, via: &str) {
-    let connection =
-        tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(via.into()), inherit: false };
+    let connection = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(via.into()),
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     f.core.vault.set_host_connection(host, connection).await.unwrap();
 }
 
@@ -628,16 +633,28 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
     let a = f.host_at(&user, "a", f.lab.port_of("a")).await;
     let b = f.host_at(&user, "b", f.lab.port_of("b")).await;
     jump_to(&f, &b, &a).await;
-    let looped =
-        tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(b.clone()), inherit: false };
+    let looped = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(b.clone()),
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
-    let itself =
-        tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(a.clone()), inherit: false };
+    let itself = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(a.clone()),
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
     let missing = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some("00000000000000000000000000000000".into()),
         inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
 
@@ -737,6 +754,8 @@ fn proxy_input(port: u16, password: Option<&str>) -> tyrminal_core::contracts::H
             password: password.map(Into::into),
         }),
         inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
     }
 }
 
@@ -855,7 +874,13 @@ async fn a_host_goes_through_its_groups_jump_host_until_it_sets_its_own_route() 
     f.core.sessions.close(WINDOW, &session).unwrap();
 
     // Its own route ("directly") replaces the group's: the first prompt is the inner server's.
-    let direct = tyrminal_core::contracts::HostConnectionInput { jump_host_id: None, proxy: None, inherit: false };
+    let direct = tyrminal_core::contracts::HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     f.core.vault.set_host_connection(&inner, direct).await.unwrap();
     let (session, mut events) = open_until_prompt(&f, &inner).await;
     let SessionEvent::TrustPrompt { port, hop, .. } = next_decision(&mut events).await else {
@@ -863,4 +888,397 @@ async fn a_host_goes_through_its_groups_jump_host_until_it_sets_its_own_route() 
     };
     assert_eq!((port, hop), (f.lab.port_of("b"), None));
     f.core.sessions.close(WINDOW, &session).unwrap();
+}
+
+// ---------- session recording over SSH (LOG-01) ----------
+
+/// Output of a recording so far, as text.
+async fn recorded_text(f: &Fixture, log_id: &str) -> String {
+    use base64::Engine;
+    let playback = f.core.sessions.open_session_log(log_id).await.unwrap();
+    playback
+        .frames
+        .iter()
+        .filter_map(|frame| match frame {
+            tyrminal_core::contracts::PlaybackFrame::Output { data, .. } => Some(
+                String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(data).unwrap()).into_owned(),
+            ),
+            tyrminal_core::contracts::PlaybackFrame::Resize { .. } => None,
+        })
+        .collect()
+}
+
+async fn recorded_until(f: &Fixture, log_id: &str, needle: &str) -> String {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let text = recorded_text(f, log_id).await;
+        if text.contains(needle) {
+            return text;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{needle:?} not recorded; got {text:?}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn an_ssh_session_is_recorded_under_its_host_without_the_answer_to_a_hidden_prompt() {
+    let f = fixture().await;
+    let settings = tyrminal_core::contracts::RecordingSettings { enabled: true, keep_per_host: 5, max_log_mib: 64 };
+    f.core.sessions.set_recording_settings(settings).await.unwrap();
+    let host = f.host_at(&f.lab.str("/user"), "recorded lab host", f.lab.port()).await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let logs = f.core.sessions.list_session_logs().await.unwrap();
+    assert_eq!(logs.len(), 1);
+    let log = &logs[0];
+    assert_eq!((log.title.as_str(), log.host_id.as_deref()), ("recorded lab host", Some(host.as_str())));
+    assert_eq!(log.kind, tyrminal_core::contracts::SessionLogKind::Ssh);
+    assert_eq!(log.state, tyrminal_core::contracts::SessionLogState::Recording);
+
+    let write = |text: &str| f.core.sessions.write(WINDOW, &session.id, text.as_bytes().to_vec());
+    write("stty -echo; printf '%s%s: ' Pass word; read answer; stty echo; echo; echo remote-done-$((8*8))\r")
+        .await
+        .unwrap();
+    recorded_until(&f, &log.id, "Password: ").await;
+    write("lab-hidden-answer-canary\r").await.unwrap();
+    let text = recorded_until(&f, &log.id, "remote-done-64").await;
+    assert!(!text.contains("lab-hidden-answer-canary"), "typed input must never be recorded: {text:?}");
+
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    assert_eq!(session.closed().await, None);
+    let done = f.core.sessions.list_session_logs().await.unwrap().remove(0);
+    assert_eq!(done.state, tyrminal_core::contracts::SessionLogState::Complete);
+    assert!(!recorded_text(&f, &done.id).await.contains("lab-hidden-answer-canary"));
+}
+
+// ---------- key exchange per host (SEC-08, SEC-10) ----------
+
+fn key_exchange(mode: tyrminal_core::contracts::KeyExchangeMode) -> tyrminal_core::contracts::HostConnectionInput {
+    tyrminal_core::contracts::HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        key_exchange: mode,
+        inherit: false,
+        no_port_suggestions: false,
+    }
+}
+
+/// Opens a session and returns every event up to the shell or the close.
+async fn events_until_settled(f: &Fixture, host_id: &str) -> Vec<SessionEvent> {
+    let (tx, mut events) = mpsc::unbounded_channel();
+    let opened = f.core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
+    let mut seen = Vec::new();
+    loop {
+        let event = tokio::time::timeout(WAIT, events.recv()).await.expect("settles in time").unwrap();
+        if let SessionEvent::TrustPrompt { prompt_id, .. } = &event {
+            f.core.sessions.answer_trust(WINDOW, &opened.session_id, prompt_id, TrustDecision::Once).unwrap();
+        }
+        let done =
+            matches!(event, SessionEvent::State { state: SessionState::Connected, .. } | SessionEvent::Closed { .. });
+        seen.push(event);
+        if done {
+            if matches!(seen.last(), Some(SessionEvent::State { .. })) {
+                f.core.sessions.close(WINDOW, &opened.session_id).unwrap();
+            }
+            return seen;
+        }
+    }
+}
+
+fn negotiated_kex(events: &[SessionEvent]) -> Option<String> {
+    events.iter().find_map(|e| match e {
+        SessionEvent::Negotiated { kex, .. } => Some(kex.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_can_turn_post_quantum_off_for_compatibility_or_require_it() {
+    use tyrminal_core::contracts::KeyExchangeMode;
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::PreferPostQuantum);
+    let offers_post_quantum = {
+        let version = f.lab.str("/serverVersion");
+        let digits: Vec<u32> = version
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|p| !p.is_empty())
+            .take(2)
+            .map(|p| p.parse().unwrap())
+            .collect();
+        (digits[0], digits[1]) >= (9, 9)
+    };
+
+    // Default: post-quantum where offered, a classical exchange otherwise.
+    let preferred = negotiated_kex(&events_until_settled(&f, &host).await).expect("negotiated");
+    assert_eq!(preferred, if offers_post_quantum { tyrminal_ssh::POST_QUANTUM_KEX } else { "curve25519-sha256" });
+
+    // Compatibility: never post-quantum.
+    f.core.vault.set_host_connection(&host, key_exchange(KeyExchangeMode::Classic)).await.unwrap();
+    assert_eq!(negotiated_kex(&events_until_settled(&f, &host).await).as_deref(), Some("curve25519-sha256"));
+
+    // Required: a server without it is refused during key exchange, before trust or sign-in.
+    f.core.vault.set_host_connection(&host, key_exchange(KeyExchangeMode::RequirePostQuantum)).await.unwrap();
+    let events = events_until_settled(&f, &host).await;
+    if offers_post_quantum {
+        assert_eq!(negotiated_kex(&events).as_deref(), Some(tyrminal_ssh::POST_QUANTUM_KEX));
+    } else {
+        assert!(
+            !events.iter().any(|e| matches!(e, SessionEvent::TrustPrompt { .. } | SessionEvent::AuthPrompt { .. }))
+        );
+        let Some(SessionEvent::Closed { error: Some(error), .. }) = events.last() else {
+            panic!("expected a failed session, got {events:?}")
+        };
+        assert_eq!(error.code, ErrorCode::ProtocolError);
+        assert!(error.message.contains("post-quantum"), "{}", error.message);
+        // Key exchange failed, so the host key was never checked and no credential could be
+        // sent; kex_lab proves the same against the server's log, with no other client running.
+    }
+
+    // The setting is saved with the host and survives a lock.
+    f.core.vault.lock().await;
+    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::RequirePostQuantum);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn forwards_move_with_their_session_to_another_window() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    let echo = echo_server().await;
+    let rule = f.rule(&host, TunnelKind::Local, echo).await;
+    let session = f.connect(WINDOW, &host).await;
+    let run = f.core.sessions.start_tunnel(WINDOW, &session.id, &rule).await.unwrap();
+
+    let token = f.core.sessions.offer_handoff(WINDOW, &session.id, OTHER_WINDOW).unwrap();
+    let (tx, _events) = mpsc::unbounded_channel();
+    f.core.sessions.accept_handoff(OTHER_WINDOW, &token, Arc::new(EventSink(tx))).unwrap();
+
+    // The new window lists and controls the forward; the old one no longer can.
+    assert!(f.active(WINDOW).is_empty());
+    assert_eq!(f.active(OTHER_WINDOW).iter().map(|t| t.run_id.clone()).collect::<Vec<_>>(), vec![run.run_id.clone()]);
+    assert_eq!(f.core.sessions.stop_tunnel(WINDOW, &run.run_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // Closing the old window leaves the forward running.
+    f.core.sessions.stop_tunnels_for_owner(WINDOW);
+    assert!(echoes(loopback(run.bound_port), b"after the move").await);
+
+    f.core.sessions.stop_tunnel(OTHER_WINDOW, &run.run_id).await.unwrap();
+    assert!(!echoes(loopback(run.bound_port), b"stopped").await);
+}
+
+/// Passes output on with acknowledgements, like the renderer, so a busy session keeps flowing.
+struct AckingSink {
+    core: Core,
+    session: std::sync::Mutex<Option<String>>,
+    events: mpsc::UnboundedSender<SessionEvent>,
+}
+
+impl SessionSink for AckingSink {
+    fn output(&self, data: Vec<u8>) -> bool {
+        let session = self.session.lock().unwrap().clone();
+        if let Some(session) = session {
+            let core = self.core.clone();
+            let n = data.len() as u32;
+            tokio::spawn(async move { core.sessions.ack(WINDOW, &session, n).await });
+        }
+        true
+    }
+    fn event(&self, event: SessionEvent) -> bool {
+        self.events.send(event).is_ok()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn an_ssh_recording_gets_nothing_more_once_the_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = fixture().await;
+        let settings = tyrminal_core::contracts::RecordingSettings { enabled: true, keep_per_host: 5, max_log_mib: 64 };
+        f.core.sessions.set_recording_settings(settings).await.unwrap();
+        let host = f.host(&f.lab.str("/user")).await;
+        let (tx, mut events) = mpsc::unbounded_channel();
+        let sink = Arc::new(AckingSink { core: f.core.clone(), session: std::sync::Mutex::new(None), events: tx });
+        let opened = f.core.sessions.open_ssh(WINDOW, &host, 80, 24, sink.clone()).await.unwrap();
+        *sink.session.lock().unwrap() = Some(opened.session_id.clone());
+        loop {
+            match tokio::time::timeout(WAIT, events.recv()).await.expect("connects").unwrap() {
+                SessionEvent::TrustPrompt { prompt_id, .. } => {
+                    f.core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
+                }
+                SessionEvent::State { state: SessionState::Connected, .. } => break,
+                SessionEvent::Closed { error, .. } => panic!("closed: {error:?}"),
+                _ => {}
+            }
+        }
+        let log = f.core.sessions.list_session_logs().await.unwrap().remove(0);
+        let line = "n=0; while :; do n=$((n+1)); echo tick-$n; sleep 0.02; done\r";
+        f.core.sessions.write(WINDOW, &opened.session_id, line.as_bytes().to_vec()).await.unwrap();
+        recorded_until(&f, &log.id, "tick-20").await;
+
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            f.core.sessions.close(WINDOW, &opened.session_id).unwrap();
+        }
+        let error = loop {
+            let event = tokio::time::timeout(WAIT, events.recv()).await.expect("the session ended at once").unwrap();
+            if let SessionEvent::Closed { error, .. } = event {
+                break error.map(|e| e.code);
+            }
+        };
+        assert_eq!(error, lock.then_some(ErrorCode::VaultLocked));
+        let path = f._dir.path().join("logs").join(format!("{}.tyrlog", log.id));
+        let state = || {
+            let meta = std::fs::metadata(&path).unwrap();
+            (meta.len(), meta.modified().unwrap())
+        };
+        let ended = state();
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(state(), ended, "written after the session ended (lock: {lock})");
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let playback = f.core.sessions.open_session_log(&log.id).await.unwrap();
+        assert_eq!(playback.log.state, tyrminal_core::contracts::SessionLogState::Complete, "lock: {lock}");
+        assert_eq!(state(), ended);
+    }
+}
+
+// ---------- quick port forwards from detected listening ports (P-24) ----------
+
+/// The ports suggested in `events` until `marker` has been printed (the marker comes after the
+/// output under test, so everything before it has been seen).
+async fn suggestions_until(f: &Fixture, session: &mut Session, marker_cmd: &str) -> Vec<u16> {
+    f.core.sessions.write(WINDOW, &session.id, format!("{marker_cmd}\r").into_bytes()).await.unwrap();
+    let mut ports = Vec::new();
+    loop {
+        // The marker is printed as a suggestion of its own, on a port nobody uses.
+        let event = tokio::time::timeout(WAIT, session.events.recv()).await.expect("marker in time").unwrap();
+        if let SessionEvent::PortSuggestion { port } = event {
+            ports.push(port);
+        }
+        if ports.last() == Some(&65_001) {
+            ports.pop();
+            return ports;
+        }
+    }
+}
+
+const MARKER: &str = "echo listening on localhost:$((65000+1))";
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn output_naming_another_host_or_an_invalid_port_never_yields_a_forward() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let hostile = [
+        "listening on http://10.0.0.5:4100",
+        "listening on http://evil.localhost:4101",
+        "listening on http://localhost.evil.com:4102",
+        "listening on 127.0.0.10:4103",
+        "listening on localhost:0",
+        "listening on localhost:65536",
+        "listening on localhost:099",
+    ];
+    let mut cmd = String::new();
+    for line in hostile {
+        cmd.push_str(&format!("printf '%s\\n' '{line}'; "));
+    }
+    // A link's hidden target is not shown text either.
+    cmd.push_str("printf '\\033]8;;http://localhost:4104\\007docs\\033]8;;\\007\\n'; ");
+    cmd.push_str(MARKER);
+    assert_eq!(suggestions_until(&f, &mut session, &cmd).await, Vec::<u16>::new());
+    for port in [4100, 4101, 4102, 4103, 4104, 22, 0] {
+        let refused = f.core.sessions.quick_forward(WINDOW, &session.id, port).await.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput, "port {port}");
+    }
+    assert!(f.active(WINDOW).is_empty(), "nothing was forwarded");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_suggested_port_is_forwarded_only_when_accepted_and_reaches_the_service_on_the_server() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    // The lab server's loopback is this machine's, so this listener is "on the server".
+    let service = echo_server().await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let printed = format!("printf 'Server listening on http://localhost:%s/\\n' {service}; {MARKER}");
+    assert_eq!(suggestions_until(&f, &mut session, &printed).await, vec![service]);
+    assert!(f.active(WINDOW).is_empty(), "a suggestion alone forwards nothing");
+
+    // Another window cannot accept it.
+    let denied = f.core.sessions.quick_forward(OTHER_WINDOW, &session.id, service).await.unwrap_err();
+    assert_eq!(denied.code, ErrorCode::AccessDenied);
+
+    let run = f.core.sessions.quick_forward(WINDOW, &session.id, service).await.unwrap();
+    assert_eq!((run.bind_host.as_str(), run.dest_host.as_str(), run.dest_port), ("127.0.0.1", "127.0.0.1", service));
+    // The service holds that port here, so the listener took a free one.
+    assert_ne!(run.bound_port, service);
+    assert!(echoes(loopback(run.bound_port), b"through the quick forward").await);
+    assert_eq!(
+        f.core.sessions.quick_forward_url(WINDOW, &run.run_id).unwrap(),
+        format!("http://127.0.0.1:{}/", run.bound_port)
+    );
+    assert_eq!(f.core.sessions.quick_forward_url(OTHER_WINDOW, &run.run_id).unwrap_err().code, ErrorCode::AccessDenied);
+    let again = f.core.sessions.quick_forward(WINDOW, &session.id, service).await.unwrap_err();
+    assert_eq!(again.code, ErrorCode::Conflict, "one forward per port and session");
+
+    // It ends with the session.
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    assert_eq!(session.closed().await, None);
+    assert!(!echoes(loopback(run.bound_port), b"after close").await);
+    assert!(f.core.sessions.quick_forward_url(WINDOW, &run.run_id).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_free_port_is_reused_locally_and_the_forward_ends_when_the_vault_locks() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    // A port free on this machine: nothing listens on it, so the forward binds the same number.
+    let free = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    let mut session = f.connect(WINDOW, &host).await;
+    let printed = format!("echo listening on 127.0.0.1:{free}; {MARKER}");
+    assert_eq!(suggestions_until(&f, &mut session, &printed).await, vec![free]);
+    let run = f.core.sessions.quick_forward(WINDOW, &session.id, free).await.unwrap();
+    assert_eq!(run.bound_port, free, "same port when it is free");
+    assert!(TcpStream::connect(loopback(free)).await.is_ok(), "the listener is up");
+
+    f.core.vault.lock().await;
+    assert_eq!(session.closed().await, Some(ErrorCode::VaultLocked));
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while TcpStream::connect(loopback(free)).await.is_ok() {
+        assert!(tokio::time::Instant::now() < deadline, "the listener outlived the lock");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn suggestions_can_be_turned_off_for_a_host() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    f.core.vault.set_port_suggestions(&host, false).await.unwrap();
+    assert!(f.core.vault.host_connection(&host).await.unwrap().no_port_suggestions);
+    let mut session = f.connect(WINDOW, &host).await;
+    f.core
+        .sessions
+        .write(WINDOW, &session.id, b"echo listening on localhost:4200; echo done-$((1+1))\r".to_vec())
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    while let Ok(event) = session.events.try_recv() {
+        assert!(!matches!(event, SessionEvent::PortSuggestion { .. }), "{event:?}");
+    }
+    assert_eq!(
+        f.core.sessions.quick_forward(WINDOW, &session.id, 4200).await.unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+    f.core.vault.set_port_suggestions(&host, true).await.unwrap();
+    assert!(!f.core.vault.host_connection(&host).await.unwrap().no_port_suggestions);
 }

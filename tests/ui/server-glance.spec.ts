@@ -105,11 +105,14 @@ test("server panel: never offered for a Telnet session", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await page.getByRole("button", { name: "Add host" }).click();
-  const dialog = page.getByRole("complementary", { name: "New host" });
+  // Renamed "Host details" once autosave creates the host.
+  const dialog = page.getByTestId("host-panel");
   await dialog.getByLabel("Name", { exact: true }).fill("old-switch");
   await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("telnet");
   await dialog.getByLabel("Address").fill("192.0.2.40");
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await dialog.getByLabel("Name", { exact: true }).focus();
+  await expect(dialog).toHaveAttribute("data-autosave", "clean");
+  await expect(dialog).toHaveAttribute("data-created", "true");
   await page.getByRole("button", { name: "Connect to old-switch" }).click();
   await expect(page.getByText("Telnet is not encrypted").first()).toBeVisible();
   await expect(page.locator('.statusbar [role="status"]')).toContainText(/Connected/i);

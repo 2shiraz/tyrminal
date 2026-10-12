@@ -37,6 +37,9 @@ export type ActionId =
   | "movePaneRight"
   | "movePaneUp"
   | "movePaneDown"
+  // terminal input: jump between commands (shell integration marks)
+  | "previousCommand"
+  | "nextCommand"
   | "nextPane"
   | "prevPane"
   | "goToTab1"
@@ -110,6 +113,9 @@ const mac: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", mod: true },
+  nextCommand: { key: "ArrowDown", mod: true },
   nextPane: { key: "]", mod: true },
   prevPane: { key: "[", mod: true },
   ...GO_TO_TAB,
@@ -152,6 +158,9 @@ const other: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", ctrl: true, shift: true },
+  nextCommand: { key: "ArrowDown", ctrl: true, shift: true },
   nextPane: { key: "]", ctrl: true, shift: true },
   prevPane: { key: "[", ctrl: true, shift: true },
   ...GO_TO_TAB,

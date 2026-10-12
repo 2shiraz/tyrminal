@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useVaultData } from "../../app/vaultData";
 import { IconButton } from "../../components/ui/controls";
 import { IconChevronUp, IconX } from "../../components/ui/icons";
-import { MAX_STARTUP_SNIPPETS } from "../../lib/environment";
+import { MAX_STARTUP_SNIPPETS, overlongStartupLine } from "../../lib/environment";
 import { startup as startupApi } from "../../lib/ipc";
 import { msgEnv } from "../../lib/messages-env";
 
@@ -55,7 +55,12 @@ export function useStartup(target: SettingsTarget) {
 
   // What "inherit" currently means for a host: the group the list comes from, if any.
   const inheritedFrom = effective?.origin?.kind === "group" ? effective.origin.name : null;
-  return { ready, mode, setMode, list, setList, save, inheritedFrom, valid: mode !== "list" || list.length <= MAX_STARTUP_SNIPPETS };
+  /** Undo: puts the choice back to a stored list (the next autosave writes it). */
+  const restore = useCallback((ids: string[] | null) => {
+    setMode(ids === null ? "inherit" : ids.length === 0 ? "none" : "list");
+    setList(ids ?? []);
+  }, []);
+  return { ready, mode, setMode, list, setList, save, loaded, changed, value, restore, inheritedFrom, valid: mode !== "list" || list.length <= MAX_STARTUP_SNIPPETS };
 }
 
 export function StartupSection({ target, state }: { target: SettingsTarget; state: ReturnType<typeof useStartup> }) {
@@ -95,6 +100,8 @@ export function StartupSection({ target, state }: { target: SettingsTarget; stat
             <ol className="startup-list" aria-label={msgEnv.startup}>
               {state.list.map((id, index) => {
                 const name = nameOf(id) ?? msgEnv.startupMissing;
+                const text = all.find((s) => s.id === id)?.text;
+                const tooLong = text === undefined ? null : overlongStartupLine(text);
                 return (
                   <li key={id}>
                     <span>{name}</span>
@@ -109,6 +116,11 @@ export function StartupSection({ target, state }: { target: SettingsTarget; stat
                     <IconButton size="sm" label={msgEnv.startupRemove(name)} onClick={() => state.setList((list) => list.filter((x) => x !== id))}>
                       <IconX size={14} />
                     </IconButton>
+                    {tooLong !== null && (
+                      <p className="hint" role="alert" style={{ color: "var(--danger)", margin: 0 }}>
+                        {msgEnv.startupTooLong(tooLong)}
+                      </p>
+                    )}
                   </li>
                 );
               })}

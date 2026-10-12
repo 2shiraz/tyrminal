@@ -125,8 +125,7 @@ test("hosts: the editor's Advanced section sets a jump host and refuses loops", 
   await dialog.getByText("Show more").click();
   await dialog.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
   await expect(dialog).toContainText("Connects through api-gateway first");
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(dialog.getByTestId("host-panel-status")).toHaveText("Saved");
+  await expect(page.getByTestId("host-panel")).toHaveAttribute("data-autosave", "clean");
   expect(await page.evaluate(() => [...(window as unknown as { __mockJumps: Map<string, string> }).__mockJumps.entries()])).toHaveLength(1);
 
   // Pointing api-gateway back through db-primary would loop: refused, and the host is unchanged.
@@ -135,9 +134,9 @@ test("hosts: the editor's Advanced section sets a jump host and refuses loops", 
   await expect(again.getByLabel("Address")).toHaveValue("10.20.0.11");
   await again.getByText("Show more").click();
   await again.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "db-primary" });
-  await again.getByRole("button", { name: "Save", exact: true }).click();
   await expect(again.getByRole("alert")).toContainText("would form a loop");
-  await again.getByRole("button", { name: "Cancel" }).click();
+  await expect(again.getByTestId("host-panel-status")).toHaveText("Couldn't save –");
+  await again.getByRole("button", { name: "Close host details" }).click();
 
   // Reopening shows the saved jump host.
   await edit("db-primary");
@@ -160,8 +159,14 @@ test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials co
   await dialog.getByLabel("Proxy user name").fill("ops");
   await expect(dialog.getByText(/receives the user name and password unencrypted/)).toBeVisible();
   await dialog.getByLabel("Proxy password").fill("canary-ui-proxy-secret");
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(dialog.getByTestId("host-panel-status")).toHaveText("Saved");
+  // The route autosaves without the password; the password is written only by its button.
+  await expect(page.getByTestId("host-panel")).toHaveAttribute("data-autosave", "clean");
+  const routes = () => page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((c) => c.cmd === "host_connection_set"));
+  await expect.poll(async () => (await routes()).length).toBeGreaterThan(0);
+  expect(JSON.stringify(await routes())).not.toContain("canary-ui-proxy-secret");
+  await dialog.getByRole("button", { name: "Set proxy password" }).click();
+  await expect.poll(async () => JSON.stringify(await routes()).split("canary-ui-proxy-secret").length).toBe(2);
+  await expect(dialog.getByLabel("Proxy password")).toHaveValue("");
   await dialog.getByRole("button", { name: "Close host details" }).click();
   await expect(dialog).toHaveCount(0);
 
@@ -170,7 +175,7 @@ test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials co
   await expect(dialog.getByRole("combobox", { name: "Proxy" })).toHaveValue("http");
   await expect(dialog.getByLabel("Proxy host")).toHaveValue("proxy.lab.example");
   await expect(dialog.getByLabel("Proxy password")).toHaveValue("");
-  await expect(dialog.getByText("Leave empty to keep the stored password.")).toBeVisible();
+  await expect(dialog.getByText("A password is stored. Type a new one and press Set password to replace it.")).toBeVisible();
   expect(await page.content()).not.toContain("canary-ui-proxy-secret");
   // SOCKS5 shows no cleartext warning.
   await dialog.getByRole("combobox", { name: "Proxy" }).selectOption("socks5");
@@ -193,4 +198,36 @@ test("a direct connection's trust prompt shows no hop", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await expect(page.getByTestId("hop-notice")).toHaveCount(0);
+});
+
+test("hosts: post-quantum key exchange can be required or turned off per host", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-nav="hosts"]').click();
+  const edit = async (label: string) => {
+    await page.getByRole("button", { name: `More actions for ${label}` }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    return page.getByRole("complementary", { name: "Host details" });
+  };
+  const saved = () =>
+    page.evaluate(() => Object.fromEntries((window as unknown as { __mockKeyExchanges: Map<string, string> }).__mockKeyExchanges));
+
+  let panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  const kex = panel.getByRole("combobox", { name: "Post-quantum key exchange" });
+  await expect(kex).toHaveValue("prefer_post_quantum");
+  await expect(panel).toContainText("Servers without it use X25519");
+  await kex.selectOption("classic");
+  await expect(panel).toContainText("For servers that fail with post-quantum key exchange");
+  // Saved as you go.
+  await expect.poll(async () => Object.values(await saved())).toEqual(["classic"]);
+  await expect(page.getByTestId("host-panel")).toHaveAttribute("data-autosave", "clean");
+
+  // Reopening shows the saved setting.
+  await panel.getByRole("button", { name: "Close host details" }).click();
+  panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  await expect(panel.getByRole("combobox", { name: "Post-quantum key exchange" })).toHaveValue("classic");
+  await panel.getByRole("combobox", { name: "Post-quantum key exchange" }).selectOption("require_post_quantum");
+  await expect(panel).toContainText("Otherwise the connection stops before you sign in");
+  await expect.poll(async () => Object.values(await saved())).toEqual(["require_post_quantum"]);
 });

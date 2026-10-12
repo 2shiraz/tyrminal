@@ -166,6 +166,22 @@ pub(crate) fn snippet_text(value: &str) -> Result<String, IpcError> {
     Ok(normalized)
 }
 
+/// A note's text (P-30): line breaks normalized, at most `MAX_NOTE_LEN`, no control or invisible
+/// characters except newline and tab. `None`: the note is empty (deleting it).
+pub(crate) fn note_text(value: &str) -> Result<Option<String>, IpcError> {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.trim().is_empty() {
+        return Ok(None);
+    }
+    if normalized.len() > tyrminal_contracts::limits::MAX_NOTE_LEN {
+        return Err(invalid("The note is too long (64 KiB at most)."));
+    }
+    if normalized.chars().any(|c| is_deceptive(c) && c != '\n' && c != '\t') {
+        return Err(invalid("The note contains control or invisible characters."));
+    }
+    Ok(Some(normalized))
+}
+
 /// A link the user asked to open from terminal output: `http`/`https` only, no embedded
 /// credentials (a classic way to disguise the real destination), no whitespace or controls.
 /// Returns the URL exactly as validated, which is what the confirmation showed.
@@ -397,6 +413,16 @@ mod tests {
         for bad in ["", "  \n ", "printf '\u{1b}]52;c;AAAA\u{7}'", "echo \u{202E}evil", &"x".repeat(64 * 1024 + 1)] {
             assert!(snippet_text(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn note_text_keeps_lines_and_refuses_controls() {
+        assert_eq!(note_text("# Box\r\n\tport 22\r").unwrap().as_deref(), Some("# Box\n\tport 22\n"));
+        assert_eq!(note_text(" \n\t ").unwrap(), None);
+        for bad in ["a\u{1b}[31m", "x\u{7}", "look \u{202E}here", "zero\u{200B}width", &"x".repeat(64 * 1024 + 1)] {
+            assert!(note_text(bad).is_err(), "{bad:?}");
+        }
+        assert!(note_text(&"x".repeat(64 * 1024)).is_ok());
     }
 
     #[test]

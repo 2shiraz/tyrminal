@@ -11,7 +11,7 @@
 // suite fail: a blocked check is never counted as passing.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,14 @@ const labFile = join(root, "tests", "ssh-lab", ".run", "lab.json");
 const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win32" ? "tyrminal.exe" : "tyrminal");
 
 const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
+// OpenSSH offers mlkem768x25519-sha256 from 9.9; the container lab has 10.0.
+const needsPostQuantumLab = () => {
+  const missing = needsLab();
+  if (missing) return missing;
+  const version = JSON.parse(readFileSync(labFile, "utf8")).serverVersion ?? "";
+  const [major = 0, minor = 0] = (version.match(/\d+/g) ?? []).map(Number);
+  return major > 9 || (major === 9 && minor >= 9) ? null : `the lab's sshd (${version}) does not offer mlkem768x25519-sha256 (needs OpenSSH 9.9 or later)`;
+};
 const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
 const needsSecretStore = () => {
   if (process.platform === "darwin" || process.platform === "win32") return null;
@@ -79,10 +87,20 @@ const SUITES = {
     { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "sign-in with an OpenSSH user certificate (lab CA)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "cert_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "key exchange policy against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--skip", "negotiated_with_a_server_that_offers_it"), blockedBy: needsLab },
+    { name: "post-quantum key exchange negotiated end to end (lab sshd with ML-KEM)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--exact", "post_quantum_key_exchange_is_negotiated_with_a_server_that_offers_it"), blockedBy: needsPostQuantumLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // privilege prompts (KEY-18)
     { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    // P-33: shells in a real container. The lab images have no engine, so this runs only where the
+    // lab user can use Docker or Podman and says so; otherwise it is BLOCKED (never a silent pass).
+    {
+      name: "container shells in a running container (lab with an engine)",
+      cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
+      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
+    },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -103,11 +121,15 @@ const SUITES = {
     { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "paste safety (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/paste.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "a refused key installed by password, then used (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/key-install.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     // privilege prompts (KEY-18)
     { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    // security review (P-27)
+    { name: "security review through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/security-review.test.mjs")), blockedBy: () => needsE2e() },
     // command history and server at a glance
     { name: "command history and server panel (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/history-glance.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],

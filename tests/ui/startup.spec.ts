@@ -33,7 +33,7 @@ test("a group's startup snippets run, in order, in its hosts' new shells", async
   // Reorder: Top memory users first.
   await list.getByRole("button", { name: "Move Top memory users earlier" }).click();
   await expect(list.getByRole("listitem").first()).toContainText("Top memory users");
-  await group.getByRole("button", { name: "Save", exact: true }).click();
+  await group.getByRole("button", { name: "Done" }).click();
   await expect(group).toHaveCount(0);
   const saved = await calls(page, "startup_set");
   expect(saved.at(-1)!.args).toMatchObject({ target: { kind: "group" }, snippetIds: [expect.any(String), expect.any(String)] });
@@ -43,7 +43,7 @@ test("a group's startup snippets run, in order, in its hosts' new shells", async
   await page.getByRole("menuitem", { name: "Environment…" }).click();
   const host = page.getByRole("dialog", { name: "Environment for api-gateway" });
   await expect(host.getByTestId("startup-section")).toContainText("Currently the list from Production");
-  await host.getByRole("button", { name: "Cancel" }).click();
+  await host.getByRole("button", { name: "Done" }).click();
 
   // Connecting types both, in order, once the shell is open.
   await connect(page, "api-gateway");
@@ -80,7 +80,7 @@ test("snippets: variables a snippet uses are listed with how the session set the
     await host.getByLabel(`Name ${i + 1}`).fill(name!);
     await host.getByLabel(`Value ${i + 1}`).fill(value!);
   }
-  await host.getByRole("button", { name: "Save", exact: true }).click();
+  await host.getByRole("button", { name: "Done" }).click();
   await expect(host).toHaveCount(0);
 
   await nav(page, "Snippets");
@@ -110,4 +110,27 @@ test("snippets: variables a snippet uses are listed with how the session set the
   // A one-line snippet that uses no refused variable is sent at once, as before.
   await panel.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
   await expect.poll(async () => (await calls(page, "snippet_send")).length).toBe(2);
+});
+
+test("a startup snippet with a line too long for a terminal is flagged as skipped", async ({ page }) => {
+  await openApp(page);
+  await nav(page, "Snippets");
+  await page.getByRole("button", { name: "New snippet" }).click();
+  const editor = page.getByRole("dialog", { name: "New snippet" });
+  await editor.getByLabel("Name").fill("Huge line");
+  await editor.getByLabel("Command").fill(`echo ok\necho ${"é".repeat(500)}`);
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor).toHaveCount(0);
+  await nav(page, "Hosts");
+  await page.getByRole("button", { name: "More actions for api-gateway" }).first().click();
+  await page.getByRole("menuitem", { name: "Environment…" }).click();
+  const section = page.getByRole("dialog", { name: "Environment for api-gateway" }).getByTestId("startup-section");
+  await section.getByRole("radio", { name: /Run these snippets/ }).check();
+  await section.getByRole("combobox", { name: "Add a snippet" }).selectOption({ label: "Disk usage" });
+  await expect(section.getByRole("alert")).toHaveCount(0);
+  await section.getByRole("combobox", { name: "Add a snippet" }).selectOption({ label: "Huge line" });
+  const items = section.getByRole("list", { name: "Startup snippets" }).getByRole("listitem");
+  // 500 × "é" is 1000 bytes; with "echo " in front the second line is over the limit.
+  await expect(items.nth(1).getByRole("alert")).toHaveText(/Line 2 is longer than 1000 bytes; terminals in line mode can't take it, so this snippet is not typed at startup/);
+  await expect(items.nth(0).getByRole("alert")).toHaveCount(0);
 });

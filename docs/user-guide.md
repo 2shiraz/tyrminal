@@ -158,6 +158,10 @@ the session is open, that server (and anyone with administrator rights on it) ca
 host's key**, and only that key, to sign in to other servers as you. It is never forwarded to
 jump hosts, and the server cannot add or remove keys or see any other key.
 
+To see what happened while connecting, choose **Connection details…** in the command palette,
+or **Show connection details** on a failed connection. **Copy** puts the lines on the clipboard;
+they never contain passwords, passphrases or keys.
+
 ## Keys
 
 The **Keychain** page holds your keys. **Generate key** creates Ed25519 (recommended), ECDSA
@@ -203,7 +207,46 @@ Safety features:
 - Links open only after you confirm the real destination (http and https only).
 - A server may write to your clipboard only if you allow it for that session; reads are never
   answered.
-- Pasting several lines, or a lot of text, shows the text first.
+- Pasting several lines, a lot of text, or one line that ends in a newline (which would run at
+  once) shows the text first, with the session it goes to.
+- Control characters, invisible characters (zero-width spaces, byte-order marks) and characters
+  that reorder text (bidirectional overrides) are always shown by name, for example ␛ or
+  `<U+202E>`, with a warning. Such a paste is reviewed on every host.
+- A paste that contains the bracketed-paste end marker (`ESC [201~`) is never sent as it is.
+  It could end the paste early and run the rest as typed input. The review lets you remove the
+  marker and paste the rest, or cancel.
+- In the host editor, **Paste review** can turn off the review of several lines and of a
+  trailing newline for that host. The review of control and invisible characters stays on.
+
+**Highlighting.** Tyrminal colors addresses, numbers and sizes, links, dates and times, quoted
+text, paths, hashes and status words (error in red, warn in yellow, ok in green) in plain output,
+using your color scheme's colors. It never recolors text a program colored itself and never
+touches full-screen programs (vim, htop, tmux). Settings → Output highlighting turns each kind,
+or the whole feature, on or off, and adds your own words or patterns. A pattern is a regular
+expression; to keep matching fast, groups cannot be repeated and backreferences and lookaround
+are not available, and a pattern that takes too long is switched off with a notice.
+
+**Addresses and paths.** Point at an IP or MAC address in the output to underline it; click it
+to copy it, or to start a new host with that address (nothing connects until you save and
+connect). In a local terminal, file paths can be copied the same way.
+
+**Commands.** With shell integration on, a thin line separates commands, a red mark shows a
+command that failed, and Ctrl+Shift+↑/↓ (⌘↑/⌘↓ on macOS) jump between commands.
+
+**Side panel.** The panel beside the terminal (Ctrl+Shift+S, ⌘⇧S on macOS) has **Snippets**,
+**History** and **Appearance**. History lists the hosts you connected to and when; Tyrminal
+never records what you type. Appearance changes the scheme, font and cursor of every terminal,
+and zooms only the pane you are in.
+
+**Input methods.** Japanese, Chinese and Korean input methods work in the terminal. Text is sent
+when you commit it; keys the input method uses (Enter to choose, Escape to cancel) never reach
+the server, and shortcuts wait until the composition ends.
+
+**Mouse.** Settings → Keyboard shortcuts → **Right click** selects a word, pastes, or does
+nothing; **Middle click pastes** the clipboard when turned on. A paste from the mouse is reviewed
+like any paste. On Linux the system's middle-click paste of the selected text is never sent, so a
+middle click with the setting off sends nothing. Programs that use the mouse (vim, htop, mc) get
+the click; hold Shift to paste anyway.
 
 **Search all sessions** (command palette) finds text in the scrollback of every open terminal
 and lists the matches by tab; choosing one brings its tab to the front and selects the match.
@@ -215,8 +258,9 @@ the prompt and the command line. Saving always asks where, in the system save di
 the shell integration the action is not offered, because Tyrminal does not guess where output
 starts and ends.
 
-**Duplicate tab** (tab menu) opens the same destination again. When the shell integration
-(Suggestions → shell integration) reports the shell's current folder, the copy starts there:
+**Duplicate tab** (tab menu) copies the tab's whole arrangement; each pane opens its destination
+again. When the shell integration (Suggestions → shell integration) reports the shell's current
+folder, each copy starts there:
 
 - A local terminal starts directly in that folder (if it still exists).
 - An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only
@@ -318,10 +362,33 @@ variable a snippet uses and whether this session set it.
 **Startup snippets.** The same dialog chooses snippets to run when a session to the host opens:
 the group's list, nothing, or a list of your own, in order. They are typed into the shell only
 after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
-deleted later is skipped.
+deleted later is skipped. So is a snippet with a line longer than 1000 bytes, which the shell
+may not be ready to read yet and a terminal would cut or garble (macOS keeps about 1 KB of an
+unfinished line); the list marks such snippets, and the connection log names the line.
 
-**Broadcast** sends what you type to several sessions at once. The sessions that receive input
-are marked while broadcast is on.
+**Run on several hosts.** From a snippet's menu, **Run on hosts…** runs it without a terminal on
+the hosts you choose and shows each host's own result. Choose hosts one by one, a whole group
+(with its subgroups) at once, **Select all**, or a saved target; a target saved with a whole
+group keeps the group, so hosts added to it later are included. **Run on all open sessions**
+(snippet menu or command palette) goes straight to the review with every open SSH session of
+the window. The review shows the exact text and the exact hosts before anything runs.
+
+Hosts with an open session run on it. For the others Tyrminal connects just for the run and
+disconnects after: an unknown host key stops that host until you answer its trust question
+(one host at a time), a changed key fails it, and a host that needs a password you have not
+saved asks for it in turn, or is skipped if you tick **Skip hosts that need sign-in input**.
+Four hosts run at once unless you choose another number (1 to 8). **Cancel runs** stops
+everything and drops those connections; locking the vault does the same. Output (up to 512 KiB
+each of output and errors per host) stays in the window until you copy or save it; the
+connection log records only the host and how it ended.
+
+**Broadcast** sends what you type to several sessions at once. Before it starts, Tyrminal lists
+every pane of the tab; clear the box next to a pane to leave it out (it keeps its own input and
+receives nothing). A pane opened later is never added; start broadcast again to include it. The
+sessions that receive input are marked while broadcast is on.
+
+Every action is also in the **command palette** (Ctrl+Shift+K, ⌘K on macOS): type part of its
+name. Tab and pane actions appear when a terminal is in front.
 
 ## Tunnels, jump hosts and proxies
 
@@ -356,6 +423,20 @@ Settings → Backup **exports** the whole vault to one encrypted file, opened wi
 passphrase or recovery key at the time of the backup. **Restore** checks every item in the file
 before replacing anything; a damaged or tampered file changes nothing.
 
+## Notes on hosts and groups
+
+Every host and group can carry a note: plain text or Markdown, up to 64 KiB. Write it in the
+Notes card of the host's details panel, or in a group's editor, and press **Save note**. Notes
+are stored encrypted in your vault like every other record, are part of encrypted backups, and
+are deleted with their host or group.
+
+While a session is open, **Notes** in the status bar shows the host's note and its groups' notes
+beside the terminal. Markdown is shown as text: HTML in a note is displayed, never run, and images
+are never loaded (only their description is shown). Links open only when you click them, after
+showing where they go; only http, https and ssh links are offered, and an ssh link only offers to
+add that server as a host. A code block in a note can be pasted into the session with **Paste
+into session**, always through the paste review and without pressing Enter for you.
+
 ## Settings, privacy and diagnostics
 
 Settings has **Appearance** (theme: system, light or dark; reduce motion), **Terminal** (color
@@ -370,7 +451,16 @@ computer and sends only its first 5 characters (for example `5BAA6`) to the serv
 shown; the match is made on your computer, and passwords, full hashes and names never leave it.
 This build cannot contact a service yet, and the page says so.
 
-Apart from that check, which only runs when you ask, Tyrminal makes no network connections of
+Settings → **Security review** (also in the command palette) checks this vault on your computer
+and lists what needs attention, most serious first: DSA keys and RSA keys under 3072 bits, keys
+with no passphrase of their own, SSH hosts that sign in with a password, user certificates that
+have expired or expire within 30 days, and trusted host keys that no host uses or that are RSA
+only. It sends nothing and changes nothing. Each item has a button for the usual fix (generate a
+key, edit the host, open the keychain, or remove the trusted key with a reason), and nothing
+happens until you complete that step. Keys Tyrminal generates are kept without a passphrase of
+their own, protected by the vault's encryption, so they are listed as a note.
+
+Apart from the compromised-password check, which only runs when you ask, Tyrminal makes no network connections of
 its own. Settings → Privacy has:
 
 - **Diagnostics** (off by default): keeps, in memory only, which action failed and its error
@@ -405,6 +495,7 @@ open in your browser only when you click them.
 | Rename tab | Ctrl+Shift+R | ⌘⇧R |
 | Type the identity password (asks first) | Ctrl+Shift+P | ⌘⇧P |
 | Copy / paste in a terminal | Ctrl+Shift+C / Ctrl+Shift+V | ⌘C / ⌘V |
+| Previous / next command (shell integration) | Ctrl+Shift+↑ / Ctrl+Shift+↓ | ⌘↑ / ⌘↓ |
 
 ## Troubleshooting
 

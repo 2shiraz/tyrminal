@@ -1,81 +1,33 @@
 import type { HostSummary, RemoteEntry, SessionEvent, SessionState } from "@tyrminal/contracts";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu, type MenuEntry } from "../../components/ui/Menu";
-import { EmptyState, ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
+import { EmptyState, ErrorNotice } from "../../components/ui/controls";
 import {
   IconArrowLeftRight,
-  IconArrowUpDown,
   IconChevronDown,
-  IconChevronLeft,
-  IconChevronRight,
-  IconEllipsis,
-  IconEye,
-  IconEyeOff,
-  IconFile,
-  IconFolder,
   IconFolderOpen,
-  IconFolderPlus,
-  IconFolderUp,
   IconHardDrive,
-  IconLink2,
-  IconPencil,
   IconRefreshCw,
   IconSearch,
   IconServer,
   IconShieldAlert,
   IconShieldCheck,
-  IconSlidersHorizontal,
-  IconTrash2,
   IconTriangleAlert,
   IconUnplug,
 } from "../../components/ui/icons";
-import { AppError, files as filesApi, sessions, toAppError } from "../../lib/ipc";
+import { files as filesApi, sessions, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { FILE_DRAG, type FileDrag, FilePane, type PaneBackend, type PaneView, emptyView, localBackend, remoteBackend } from "../files/FilePane";
 import { AuthDialog, Fingerprint } from "../terminal/TerminalView";
 import { HopNotice } from "../tunnels/HopNotice";
-import {
-  NO_SELECTION,
-  type Selection,
-  clickSelect,
-  keySelect,
-  pressFeedback,
-  pruneSelection,
-  selectionSummary,
-  single,
-  toggleKey,
-} from "../files/selection";
+import { msgFiles } from "../files/messages";
 import { msgSftp } from "./messages";
-
-/** After this long, opening a folder shows a progress bar (the row shows it at once). */
-const SLOW_MS = 300;
-import {
-  type Endpoint,
-  type Folder,
-  type Loc,
-  type Sort,
-  type SortKey,
-  childLoc,
-  crumbs,
-  formatModified,
-  formatSize,
-  localFolder,
-  locText,
-  modeString,
-  octal,
-  parentLoc,
-  remoteFolder,
-  sameLoc,
-  visibleEntries,
-  visibleName,
-} from "./model";
+import type { Endpoint, Loc } from "./model";
 
 export type Side = "left" | "right";
-
-/** Drag payload between the panes of an SFTP tab. */
-export const SFTP_DRAG = "application/x-tyrminal-sftp";
 
 export type Source = { kind: "none" } | { kind: "local" } | { kind: "host"; hostId: string; label: string };
 
@@ -96,79 +48,64 @@ interface Connection {
 /** How a pane is doing, for the tab's indicator. */
 export type PaneHealth = "idle" | "busy" | "ok" | "bad" | "attention";
 
-type Prompt =
-  | { kind: "mkdir" }
-  | { kind: "rename"; entry: RemoteEntry }
-  | { kind: "chmod"; entry: RemoteEntry }
-  | { kind: "delete"; entries: RemoteEntry[] };
-
-const SORT_COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "name", label: msgSftp.columns.name },
-  { key: "modified", label: msgSftp.columns.modified },
-  { key: "size", label: msgSftp.columns.size },
-  { key: "kind", label: msgSftp.columns.kind },
-];
-
-function EntryIcon({ entry }: { entry: RemoteEntry }) {
-  if (entry.kind === "dir") return <IconFolder size={16} />;
-  if (entry.kind === "symlink") return <IconLink2 size={16} />;
-  return <IconFile size={16} />;
+/** What the tab offers a pane for moving items (it runs the transfer queue). */
+export interface PaneTransfers {
+  /** "Copy to <the other pane>", or null while the other pane shows nothing. */
+  copyLabel: string | null;
+  copy: (entries: RemoteEntry[]) => void;
+  /** Items dragged here from the other pane. */
+  dropFrom: (entries: RemoteEntry[]) => void;
+  /** Files dropped here from the desktop (a server pane only). */
+  dropFiles: (files: DataTransfer) => void;
+  download: (entries: RemoteEntry[]) => void;
+  upload: () => void;
+  uploadFolder: () => void;
+  duplicate: (entries: RemoteEntry[]) => void;
 }
 
 /**
  * One side of the SFTP tab: this computer (a folder the user chose) or a saved host over a
- * files-only connection. The connection belongs to this pane; it is closed when the pane changes
- * source or the tab closes.
+ * files-only connection, browsed with the same pane as the Files panel. The connection belongs
+ * to this pane; it is closed when the pane changes source or the tab closes.
  */
 export function SftpPane({
+  paneId,
   side,
   initial,
   hosts,
   visible,
+  active,
   refreshKey,
-  otherWhere,
+  transfers,
+  onFocusIn,
   onEndpoint,
   onHealth,
-  onTransfer,
-  onDropFrom,
   onOpenKnownHosts,
 }: {
+  /** Stays with the pane when the panes swap sides (drag payloads name it). */
+  paneId: string;
   side: Side;
   initial: Source;
   /** Saved SSH hosts, for the picker. */
   hosts: HostSummary[];
   /** Prompts appear only while the tab is in front. */
   visible: boolean;
+  /** This pane has the keyboard (or was used last): it is marked, the other one is muted. */
+  active: boolean;
   /** Bumped by the tab when a transfer into this pane's folder finished. */
   refreshKey: number;
-  /** Where "Copy to …" sends the selection (the other pane), or null when it cannot. */
-  otherWhere: string | null;
+  transfers: PaneTransfers;
+  onFocusIn: () => void;
   onEndpoint: (endpoint: Endpoint | null) => void;
   onHealth: (health: PaneHealth) => void;
-  /** Copies `entry` from this pane's folder to the other pane's folder. */
-  onTransfer: (entries: RemoteEntry[]) => void;
-  /** An entry of the other pane was dropped here: copy it into this pane's folder. */
-  onDropFrom: (entries: RemoteEntry[]) => void;
   onOpenKnownHosts: () => void;
 }) {
   const sideLabel = side === "left" ? msgSftp.left : msgSftp.right;
   const [source, setSource] = useState<Source>(initial);
   const [conn, setConn] = useState<Connection | null>(null);
-  const [folder, setFolder] = useState<Folder | null>(null);
-  const [back, setBack] = useState<Loc[]>([]);
-  const [forward, setForward] = useState<Loc[]>([]);
-  const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<Sort>({ key: "name", ascending: true });
-  const [showHidden, setShowHidden] = useState(false);
-  const [picked, setPicked] = useState<Selection>(NO_SELECTION);
-  /** The folder being opened from a row, and whether that has taken long enough for a bar. */
-  const [opening, setOpening] = useState<string | null>(null);
-  const [navigating, setNavigating] = useState(false);
-  const [slow, setSlow] = useState(false);
-  const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [root, setRoot] = useState<(Loc & { kind: "local" }) | null>(null);
+  const [view, setView] = useState<PaneView>(emptyView);
   const [sourceMenu, setSourceMenu] = useState<HTMLElement | null>(null);
-  const [actionsMenu, setActionsMenu] = useState<HTMLElement | null>(null);
-  const [dropping, setDropping] = useState(false);
   const { pending, error, run, clearError } = useAction();
   const sessionRef = useRef<string | null>(null);
   const attempt = useRef(0);
@@ -184,22 +121,11 @@ export function SftpPane({
   // The connection lives as long as this pane shows its host.
   useEffect(() => closeSession, [closeSession]);
 
-  const listRemote = useCallback(
-    async (sessionId: string, path: string | null) => {
-      const listing = await run(() => filesApi.list(sessionId, path));
-      return listing ? remoteFolder(listing) : null;
-    },
-    [run],
-  );
-
   const connect = useCallback(
     (hostId: string) => {
       closeSession();
       const mine = ++attempt.current;
-      setFolder(null);
-      setBack([]);
-      setForward([]);
-      setPicked(NO_SELECTION);
+      setView(emptyView());
       clearError();
       setConn({ sessionId: null, state: "starting", trust: null, auth: null, changed: null, banner: null, error: null });
       const patch = (change: Partial<Connection>) => {
@@ -210,12 +136,6 @@ export function SftpPane({
         switch (event.type) {
           case "state":
             patch({ state: event.state });
-            if (event.state === "connected" && sessionRef.current) {
-              const id = sessionRef.current;
-              void listRemote(id, null).then((f) => {
-                if (f && mine === attempt.current) setFolder(f);
-              });
-            }
             break;
           case "trust_prompt":
             patch({ trust: event });
@@ -236,7 +156,7 @@ export function SftpPane({
                 ? { ...c, sessionId: null, state: event.error ? "failed" : "closed", trust: null, auth: null, error: event.error }
                 : c,
             );
-            setFolder(null);
+            setView(emptyView());
             break;
           default:
             break;
@@ -257,18 +177,15 @@ export function SftpPane({
           patch({ state: "failed", error: { code: e.code, message: e.message } });
         });
     },
-    [closeSession, clearError, listRemote],
+    [closeSession, clearError],
   );
 
   function choose(next: Source) {
     attempt.current += 1;
     closeSession();
     setConn(null);
-    setFolder(null);
-    setBack([]);
-    setForward([]);
-    setPicked(NO_SELECTION);
-    setFilter("");
+    setRoot(null);
+    setView(emptyView());
     clearError();
     setSource(next);
     if (next.kind === "host") connect(next.hostId);
@@ -285,147 +202,43 @@ export function SftpPane({
     if (!pick) return;
     const listing = await run(() => filesApi.localList(pick.token, []));
     if (listing) {
-      setFolder(localFolder(listing));
-      setBack([]);
-      setForward([]);
-      setPicked(NO_SELECTION);
+      setRoot({ kind: "local", token: listing.token, rootName: listing.rootName, path: [] });
+      setView(emptyView());
     }
   }
 
-  // ---------- folders ----------
+  // ---------- what the pane browses, and what the tab sees ----------
 
-  const load = useCallback(
-    async (loc: Loc): Promise<Folder | null> => {
-      if (loc.kind === "local") {
-        const listing = await run(() => filesApi.localList(loc.token, loc.path));
-        return listing ? localFolder(listing) : null;
-      }
-      const id = sessionRef.current;
-      return id ? listRemote(id, loc.path) : null;
-    },
-    [run, listRemote],
-  );
-
-  async function go(loc: Loc, history: "push" | "back" | "forward" | "none" = "push") {
-    setNavigating(true);
-    let next: Folder | null;
-    try {
-      next = await load(loc);
-    } finally {
-      setNavigating(false);
-      setOpening(null);
-    }
-    if (!next) return;
-    const from = folder?.loc ?? null;
-    if (from && !sameLoc(from, next.loc)) {
-      if (history === "push") {
-        setBack((b) => [...b, from]);
-        setForward([]);
-      } else if (history === "back") {
-        setBack((b) => b.slice(0, -1));
-        setForward((f) => [...f, from]);
-      } else if (history === "forward") {
-        setForward((f) => f.slice(0, -1));
-        setBack((b) => [...b, from]);
-      }
-    }
-    setFolder(next);
-    const loaded = next;
-    setPicked((p) => (sameLoc(from, loaded.loc) ? pruneSelection(p, loaded.entries.map((e) => e.name)) : NO_SELECTION));
-    if (!sameLoc(from, next.loc)) setFilter("");
-  }
-
-  const refresh = useCallback(async () => {
-    if (!folder) return;
-    const next = await load(folder.loc);
-    if (next) {
-      setFolder(next);
-      setPicked((p) => pruneSelection(p, next.entries.map((e) => e.name)));
-    }
-  }, [folder, load]);
-
-  const seenRefresh = useRef(refreshKey);
-  useEffect(() => {
-    if (refreshKey === seenRefresh.current) return;
-    seenRefresh.current = refreshKey;
-    void refresh();
-  }, [refreshKey, refresh]);
-
-  // ---------- what the tab sees ----------
-
-  const endpoint: Endpoint | null = useMemo(() => {
-    if (!folder) return null;
-    if (folder.loc.kind === "local") return { kind: "local", token: folder.loc.token, rootName: folder.loc.rootName, path: folder.loc.path };
-    if (source.kind === "host" && conn?.sessionId && conn.state === "connected")
-      return { kind: "remote", sessionId: conn.sessionId, label: source.label, path: folder.loc.path };
+  const connected = source.kind === "host" && conn?.sessionId && conn.state === "connected" ? conn.sessionId : null;
+  const backend: PaneBackend | null = useMemo(() => {
+    if (source.kind === "host") return connected ? remoteBackend(connected, source.label) : null;
+    if (source.kind === "local") return root ? localBackend(root) : null;
     return null;
-  }, [folder, source, conn]);
+  }, [source, connected, root]);
+
+  const folder = view.folder;
+  const endpoint: Endpoint | null = useMemo(() => {
+    if (!folder || !backend) return null;
+    if (folder.loc.kind === "local") return { kind: "local", token: folder.loc.token, rootName: folder.loc.rootName, path: folder.loc.path };
+    if (source.kind === "host" && connected) return { kind: "remote", sessionId: connected, label: source.label, path: folder.loc.path };
+    return null;
+  }, [folder, backend, source, connected]);
 
   useEffect(() => onEndpoint(endpoint), [endpoint, onEndpoint]);
 
   const health: PaneHealth =
-    source.kind !== "host"
+    source.kind !== "host" || !conn
       ? "idle"
-      : !conn
-        ? "idle"
-        : conn.trust || conn.auth
-          ? "attention"
-          : conn.state === "connected"
-            ? "ok"
-            : conn.state === "failed"
-              ? "bad"
-              : conn.state === "closed"
-                ? "idle"
-                : "busy";
+      : conn.trust || conn.auth
+        ? "attention"
+        : conn.state === "connected"
+          ? "ok"
+          : conn.state === "failed"
+            ? "bad"
+            : conn.state === "closed"
+              ? "idle"
+              : "busy";
   useEffect(() => onHealth(health), [health, onHealth]);
-
-  const entries = useMemo(() => (folder ? visibleEntries(folder.entries, showHidden, filter, sort) : []), [folder, showHidden, filter, sort]);
-  const order = entries.map((e) => e.name);
-  const chosen = entries.filter((e) => picked.names.includes(e.name));
-  /** The one selected entry, for actions that take a single item. */
-  const selection = chosen.length === 1 ? (chosen[0] as RemoteEntry) : null;
-  const movable = chosen.filter((e) => e.kind === "file" || e.kind === "dir");
-
-  useEffect(() => {
-    if (!navigating) {
-      setSlow(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setSlow(true), SLOW_MS);
-    return () => window.clearTimeout(timer);
-  }, [navigating]);
-  const where = folder ? (folder.loc.kind === "local" ? msgSftp.localWhere(locText(folder.loc)) : msgSftp.remoteWhere(source.kind === "host" ? source.label : "", folder.loc.path)) : "";
-  const up = folder ? parentLoc(folder.loc) : null;
-
-  function activate(entry: RemoteEntry) {
-    if (!folder) return;
-    if (entry.kind === "dir" || (entry.kind === "symlink" && folder.loc.kind === "remote")) {
-      setOpening(entry.name);
-      void go(childLoc(folder.loc, entry.name));
-    } else setPicked(single(entry.name));
-  }
-
-  function onListKey(event: KeyboardEvent) {
-    if ((event.target as HTMLElement).closest("input, select, textarea")) return;
-    if (event.altKey && event.key === "ArrowLeft" && back.length > 0) {
-      event.preventDefault();
-      void go(back[back.length - 1] as Loc, "back");
-    } else if (event.altKey && event.key === "ArrowRight" && forward.length > 0) {
-      event.preventDefault();
-      void go(forward[forward.length - 1] as Loc, "forward");
-    } else if (event.altKey && event.key === "ArrowUp" && up) {
-      event.preventDefault();
-      void go(up);
-    } else if (event.key === "Delete" && chosen.length > 0) {
-      event.preventDefault();
-      setPrompt({ kind: "delete", entries: chosen });
-    } else if (event.key === "F2" && selection) {
-      event.preventDefault();
-      setPrompt({ kind: "rename", entry: selection });
-    }
-  }
-
-  // ---------- menus ----------
 
   const sshHosts = hosts.filter((h) => h.protocol.type === "ssh");
   const sourceItems: MenuEntry[] = [
@@ -433,63 +246,35 @@ export function SftpPane({
     ...(sshHosts.length > 0 ? (["separator"] as MenuEntry[]) : []),
     ...sshHosts.map((h) => ({ label: h.label, icon: <IconServer size={15} />, onSelect: () => choose({ kind: "host", hostId: h.id, label: h.label }) })),
   ];
-
-  const canChange = folder !== null && endpoint !== null;
-  const actionItems: MenuEntry[] = [
-    ...(movable.length > 0 && otherWhere
-      ? ([{ label: msgSftp.transferTo(otherWhere), icon: <IconArrowLeftRight size={15} />, onSelect: () => onTransfer(movable) }, "separator"] as MenuEntry[])
-      : []),
-    { label: msgSftp.newFolder, icon: <IconFolderPlus size={15} />, disabled: !canChange, onSelect: () => setPrompt({ kind: "mkdir" }) },
-    { label: msgSftp.rename, icon: <IconPencil size={15} />, disabled: !canChange || !selection, onSelect: () => selection && setPrompt({ kind: "rename", entry: selection }) },
-    {
-      label: msgSftp.permissions,
-      icon: <IconSlidersHorizontal size={15} />,
-      disabled: !canChange || !selection || selection.kind === "symlink",
-      onSelect: () => selection && setPrompt({ kind: "chmod", entry: selection }),
-    },
-    { label: msgSftp.delete, icon: <IconTrash2 size={15} />, tone: "danger", disabled: !canChange || chosen.length === 0, onSelect: () => setPrompt({ kind: "delete", entries: chosen }) },
-    "separator",
-    { label: msgSftp.refresh, icon: <IconRefreshCw size={15} />, disabled: !folder, onSelect: () => void refresh() },
-    {
-      label: showHidden ? msgSftp.hideHidden : msgSftp.showHidden,
-      icon: showHidden ? <IconEyeOff size={15} /> : <IconEye size={15} />,
-      onSelect: () => setShowHidden((v) => !v),
-    },
-    ...(source.kind === "local" ? (["separator", { label: msgSftp.localChange, icon: <IconFolderOpen size={15} />, onSelect: () => void chooseLocalFolder() }] as MenuEntry[]) : []),
-    ...(source.kind === "host" && conn?.sessionId
-      ? (["separator", { label: msgSftp.closeConnection, icon: <IconUnplug size={15} />, onSelect: () => choose({ kind: "none" }) }] as MenuEntry[])
-      : []),
+  const menuExtras: MenuEntry[] = [
+    ...(source.kind === "local" ? [{ label: msgSftp.localChange, icon: <IconFolderOpen size={15} />, onSelect: () => void chooseLocalFolder() }] : []),
+    ...(source.kind === "host" && conn?.sessionId ? [{ label: msgSftp.closeConnection, icon: <IconUnplug size={15} />, onSelect: () => choose({ kind: "none" }) }] : []),
   ];
-
   const sourceLabel = source.kind === "local" ? msgSftp.thisComputer : source.kind === "host" ? source.label : msgSftp.connectTitle;
+  const remote = backend?.kind === "remote";
+  const where = endpoint ? (endpoint.kind === "local" ? msgSftp.thisComputer : endpoint.label) : "";
 
   // ---------- render ----------
 
+  const placeholder = (
+    <div className="sftp-body">
+      <ErrorNotice error={error} />
+      {source.kind === "none" && <HostPicker hosts={sshHosts} onLocal={() => choose({ kind: "local" })} onHost={(h) => choose({ kind: "host", hostId: h.id, label: h.label })} />}
+      {source.kind === "local" && (
+        <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
+          <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
+            <IconFolderOpen size={15} /> {msgSftp.localChoose}
+          </button>
+        </EmptyState>
+      )}
+      {source.kind === "host" && conn && (
+        <ConnectionState label={source.label} conn={conn} onReconnect={() => connect(source.hostId)} onOther={() => choose({ kind: "none" })} onOpenKnownHosts={onOpenKnownHosts} />
+      )}
+    </div>
+  );
+
   return (
-    <section
-      className="sftp-pane"
-      aria-label={sideLabel}
-      data-drop={dropping || undefined}
-      onKeyDown={onListKey}
-      onDragOver={(event) => {
-        if (endpoint && event.dataTransfer.types.includes(SFTP_DRAG)) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-          setDropping(true);
-        }
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
-      }}
-      onDrop={(event) => {
-        setDropping(false);
-        const raw = event.dataTransfer.getData(SFTP_DRAG);
-        if (!raw) return;
-        event.preventDefault();
-        const data = JSON.parse(raw) as { side: Side; entries: RemoteEntry[] };
-        if (data.side !== side) onDropFrom(data.entries);
-      }}
-    >
+    <section className="sftp-pane" aria-label={sideLabel} data-active={active || undefined} onFocus={onFocusIn} onPointerDown={onFocusIn}>
       <header className="sftp-head">
         <button type="button" className="sftp-source" aria-haspopup="menu" aria-label={`${msgSftp.source}: ${sourceLabel}`} onClick={(e) => setSourceMenu(e.currentTarget)}>
           <span className="sftp-source-icon" data-kind={source.kind} aria-hidden="true">
@@ -501,222 +286,39 @@ export function SftpPane({
           )}
           <IconChevronDown size={14} />
         </button>
-        <span className="spacer" />
-        <IconButton size="sm" label={msgSftp.actionsFor(sideLabel)} aria-haspopup="menu" onClick={(e) => setActionsMenu(e.currentTarget)}>
-          <IconEllipsis size={16} />
-        </IconButton>
       </header>
 
-      {folder && (
-        <div className="sftp-nav">
-          <IconButton size="sm" label={msgSftp.back} disabled={back.length === 0 || pending} onClick={() => void go(back[back.length - 1] as Loc, "back")}>
-            <IconChevronLeft size={15} />
-          </IconButton>
-          <IconButton size="sm" label={msgSftp.forward} disabled={forward.length === 0 || pending} onClick={() => void go(forward[forward.length - 1] as Loc, "forward")}>
-            <IconChevronRight size={15} />
-          </IconButton>
-          <IconButton size="sm" label={msgSftp.up} disabled={!up || pending} onClick={() => up && void go(up)}>
-            <IconFolderUp size={15} />
-          </IconButton>
-          <nav className="sftp-crumbs" aria-label={msgSftp.breadcrumbs} aria-busy={navigating || undefined} data-loading={navigating || undefined}>
-            <ol>
-              {crumbs(folder.loc).map((crumb, index, all) => {
-                const last = index === all.length - 1;
-                return (
-                  // Positions identify the crumbs: the same name can appear twice in a path.
-                  <li key={`${index}-${crumb.label}`}>
-                    {last ? (
-                      <span aria-current="location" className="sftp-crumb sftp-crumb-current" title={visibleName(crumb.label)}>
-                        {visibleName(crumb.label)}
-                      </span>
-                    ) : (
-                      <button type="button" className="sftp-crumb" onClick={() => void go(crumb.loc)} title={visibleName(crumb.label)}>
-                        {visibleName(crumb.label)}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-              {opening && (
-                <li className="sftp-crumb-pending" aria-hidden="true">
-                  <span className="sftp-crumb">
-                    <span className="spinner spinner-xs" /> {visibleName(opening)}
-                  </span>
-                </li>
-              )}
-            </ol>
-          </nav>
-          <label className="sftp-filter">
-            <IconSearch size={13} aria-hidden="true" />
-            <input
-              className="input"
-              type="search"
-              aria-label={msgSftp.filter}
-              placeholder={msgSftp.filterPlaceholder}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-            />
-          </label>
-          <IconButton size="sm" label={msgSftp.refresh} disabled={pending} onClick={() => void refresh()}>
-            <IconRefreshCw size={14} />
-          </IconButton>
-        </div>
-      )}
-
-      <div className="sftp-body">
-        <ErrorNotice error={error} />
-        {source.kind === "none" && <HostPicker hosts={sshHosts} onLocal={() => choose({ kind: "local" })} onHost={(h) => choose({ kind: "host", hostId: h.id, label: h.label })} />}
-        {source.kind === "local" && !folder && (
-          <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
-            <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
-              <IconFolderOpen size={15} /> {msgSftp.localChoose}
-            </button>
-          </EmptyState>
-        )}
-        {source.kind === "host" && conn && !folder && (
-          <ConnectionState
-            label={source.label}
-            conn={conn}
-            onReconnect={() => connect(source.hostId)}
-            onOther={() => choose({ kind: "none" })}
-            onOpenKnownHosts={onOpenKnownHosts}
-          />
-        )}
-        {folder && (
-          <>
-            {folder.truncated && <Notice tone="warning">{msgSftp.truncated(folder.entries.length)}</Notice>}
-            {slow && <div className="list-progress sftp-progress" role="progressbar" aria-label={msg.files.loadingFolder} />}
-            <table
-              className="sftp-table"
-              role="grid"
-              aria-multiselectable="true"
-              aria-label={msgSftp.listLabel(where)}
-              aria-busy={navigating || undefined}
-              onKeyDown={(event) => {
-                if ((event.target as HTMLElement).closest("thead")) return;
-                const next = keySelect(picked, order, event.key, event.shiftKey);
-                if (!next) return;
-                event.preventDefault();
-                setPicked(next);
-                const table = event.currentTarget;
-                window.requestAnimationFrame(() => table.querySelector<HTMLButtonElement>(`tr[data-name="${CSS.escape(next.cursor ?? "")}"] .sftp-name`)?.focus());
-              }}
-            >
-              <thead>
-                <tr>
-                  {SORT_COLUMNS.map((column) => (
-                    <th
-                      key={column.key}
-                      scope="col"
-                      className={`sftp-col-${column.key}`}
-                      aria-sort={sort.key === column.key ? (sort.ascending ? "ascending" : "descending") : "none"}
-                    >
-                      <button
-                        type="button"
-                        className="sftp-sort"
-                        aria-label={msgSftp.sortBy(column.label)}
-                        onClick={() => setSort((s) => (s.key === column.key ? { ...s, ascending: !s.ascending } : { key: column.key, ascending: true }))}
-                      >
-                        {column.label}
-                        {sort.key === column.key ? (
-                          <IconChevronDown size={12} className={sort.ascending ? "" : "sftp-sort-desc"} />
-                        ) : (
-                          <IconArrowUpDown size={12} className="sftp-sort-idle" />
-                        )}
-                      </button>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => {
-                  const isSelected = picked.names.includes(entry.name);
-                  const isOpening = opening === entry.name;
-                  const name = visibleName(entry.name);
-                  return (
-                    <tr
-                      key={entry.name}
-                      aria-selected={isSelected}
-                      className={isSelected ? "is-selected" : undefined}
-                      data-name={entry.name}
-                      data-kind={entry.kind}
-                      data-loading={isOpening || undefined}
-                      draggable={endpoint !== null && (entry.kind === "file" || entry.kind === "dir")}
-                      onPointerDown={(event) => pressFeedback(event.currentTarget)}
-                      onDragStart={(event) => {
-                        // Dragging a selected row takes the whole selection; another row goes alone.
-                        const dragged = isSelected && movable.length > 0 ? movable : [entry];
-                        if (!isSelected) setPicked(single(entry.name));
-                        event.dataTransfer.effectAllowed = "copy";
-                        event.dataTransfer.setData(SFTP_DRAG, JSON.stringify({ side, entries: dragged }));
-                      }}
-                      onClick={(event) => setPicked(clickSelect(picked, order, entry.name, { toggle: toggleKey(event), extend: event.shiftKey }))}
-                      onDoubleClick={() => activate(entry)}
-                    >
-                      <td className="sftp-col-name">
-                        <button
-                          type="button"
-                          className="sftp-name"
-                          aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
-                          tabIndex={(picked.cursor ?? order[0]) === entry.name ? 0 : -1}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              activate(entry);
-                            }
-                          }}
-                        >
-                          <span className={`files-icon files-icon-${entry.kind}`}>
-                            {isOpening ? <span className="spinner spinner-xs" aria-hidden="true" /> : <EntryIcon entry={entry} />}
-                          </span>
-                          <span className="sftp-name-text">
-                            <span className="sftp-name-main" title={name}>
-                              {name}
-                            </span>
-                            <span className="sftp-perm mono">{modeString(entry)}</span>
-                          </span>
-                        </button>
-                      </td>
-                      <td className="sftp-col-modified">{formatModified(entry.modified)}</td>
-                      <td className="sftp-col-size mono">{entry.kind === "dir" ? "" : formatSize(entry.size)}</td>
-                      <td className="sftp-col-kind">{msgSftp.kind[entry.kind]}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {entries.length === 0 && <p className="muted sftp-empty">{folder.entries.length === 0 ? msgSftp.empty : filter.trim() ? msgSftp.noMatch : msgSftp.onlyHidden}</p>}
-          </>
-        )}
-        {dropping && endpoint && (
-          <div className="sftp-drop-hint" aria-hidden="true">
-            {msgSftp.dropHere(where)}
-          </div>
-        )}
-      </div>
-
-      {folder && (
-        <div className="sftp-footer" role="status" aria-label={msg.files.selectionStatus}>
-          {selectionSummary(entries, picked.names, (n) => formatSize(n))}
-        </div>
-      )}
+      <FilePane
+        id={paneId}
+        label={source.kind === "host" ? msgFiles.serverPane(source.label) : source.kind === "local" ? msgFiles.serverPane(msgSftp.thisComputerLower) : msgSftp.connectTitle}
+        backend={backend}
+        view={view}
+        setView={setView}
+        start={source.kind === "local" ? root : null}
+        inactive={!active}
+        refreshKey={refreshKey}
+        placeholder={placeholder}
+        menuExtras={menuExtras}
+        onDownload={remote ? (entries) => transfers.download(entries) : undefined}
+        onUpload={remote ? () => transfers.upload() : undefined}
+        onUploadFolder={remote ? () => transfers.uploadFolder() : undefined}
+        onDuplicate={remote ? (entries) => transfers.duplicate(entries) : undefined}
+        copyOther={transfers.copyLabel ? { label: transfers.copyLabel, run: (entries) => transfers.copy(entries) } : null}
+        drop={{
+          accepts: (types) => types.includes(FILE_DRAG) || (remote && types.includes("Files")),
+          onDrop: (data) => {
+            const raw = data.getData(FILE_DRAG);
+            if (raw) {
+              const dragged = JSON.parse(raw) as FileDrag;
+              if (dragged.pane !== paneId) transfers.dropFrom(dragged.entries);
+            } else if (remote) transfers.dropFiles(data);
+          },
+          hint: msgSftp.dropHere(where),
+        }}
+        emptyHint={transfers.copyLabel ? msgSftp.emptyDrop : undefined}
+      />
 
       {sourceMenu && <Menu anchor={sourceMenu} items={sourceItems} label={msgSftp.source} onClose={() => setSourceMenu(null)} />}
-      {actionsMenu && <Menu anchor={actionsMenu} items={actionItems} label={msgSftp.actions} onClose={() => setActionsMenu(null)} />}
-
-      {prompt && folder && endpoint && (
-        <ChangePrompt
-          prompt={prompt}
-          endpoint={endpoint}
-          onDone={(changed) => {
-            setPrompt(null);
-            if (changed) void refresh();
-          }}
-        />
-      )}
 
       {visible && conn?.trust && (
         <TrustDialog
@@ -864,7 +466,7 @@ function ConnectionState({
 }
 
 /** Host-key decision for a new server. The safe choice has initial focus. */
-function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
+export function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
   return (
     <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => onAnswer("cancel")}>
       <HopNotice hop={trust.hop} />
@@ -904,117 +506,3 @@ function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "
   );
 }
 
-/** New folder, rename, permissions and delete, on either kind of pane. */
-function ChangePrompt({ prompt, endpoint, onDone }: { prompt: Prompt; endpoint: Endpoint; onDone: (changed: boolean) => void }) {
-  const initial = prompt.kind === "rename" ? prompt.entry.name : prompt.kind === "chmod" ? octal(prompt.entry.permissions) : "";
-  const [text, setText] = useState(initial);
-  const [invalid, setInvalid] = useState<string | null>(null);
-  const { pending, error, run } = useAction();
-  /** Something was deleted before a later item failed: the folder needs listing again. */
-  const deleted = useRef(false);
-
-  function call(): Promise<void> | null {
-    const value = text.trim();
-    const local = endpoint.kind === "local";
-    switch (prompt.kind) {
-      case "mkdir":
-        return local ? filesApi.localMkdir(endpoint.token, endpoint.path, value) : filesApi.mkdir(endpoint.sessionId, endpoint.path, value);
-      case "rename":
-        return local
-          ? filesApi.localRename(endpoint.token, endpoint.path, prompt.entry.name, value)
-          : filesApi.rename(endpoint.sessionId, endpoint.path, prompt.entry.name, value);
-      case "chmod": {
-        if (!/^[0-7]{3,4}$/.test(value)) {
-          setInvalid(msg.files.modeInvalid);
-          return null;
-        }
-        const mode = Number.parseInt(value, 8);
-        return local
-          ? filesApi.localChmod(endpoint.token, endpoint.path, prompt.entry.name, mode)
-          : filesApi.chmod(endpoint.sessionId, endpoint.path, prompt.entry.name, mode);
-      }
-      case "delete": {
-        // One after another; a failure stops there and says which item it was.
-        const entries = prompt.entries;
-        return (async () => {
-          for (const entry of entries) {
-            try {
-              await (local ? filesApi.localRemove(endpoint.token, endpoint.path, entry.name) : filesApi.remove(endpoint.sessionId, endpoint.path, entry.name));
-            } catch (caught) {
-              const e = toAppError(caught);
-              throw entries.length > 1 ? new AppError({ code: e.code, message: `${visibleName(entry.name)}: ${e.message}` }) : e;
-            }
-            deleted.current = true;
-          }
-        })();
-      }
-    }
-  }
-
-  async function submit() {
-    setInvalid(null);
-    const action = call();
-    if (!action) return;
-    const ok = await run(() => action.then(() => true));
-    if (ok) onDone(true);
-  }
-
-  if (prompt.kind === "delete") {
-    const only = prompt.entries.length === 1 ? prompt.entries[0] : undefined;
-    return (
-      <Dialog
-        title={only ? msg.files.deleteTitle(only.name) : msgSftp.deleteMany(prompt.entries.length)}
-        role="alertdialog"
-        tone="danger"
-        icon={<IconTrash2 size={18} />}
-        onDismiss={() => onDone(deleted.current)}
-      >
-        <div className="stack">
-          <p>{endpoint.kind === "local" ? msgSftp.deleteLocalBody : msgSftp.deleteRemoteBody}</p>
-          <ErrorNotice error={error as AppError | null} />
-          <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => onDone(deleted.current)} data-autofocus>
-              {msg.common.cancel}
-            </button>
-            <button type="button" className="btn btn-danger-solid" onClick={() => void submit()} disabled={pending}>
-              {msg.files.delete}
-            </button>
-          </div>
-        </div>
-      </Dialog>
-    );
-  }
-
-  const title =
-    prompt.kind === "mkdir" ? msg.files.newFolderTitle : prompt.kind === "rename" ? msg.files.renameTitle(prompt.entry.name) : msg.files.permissionsTitle(prompt.entry.name);
-  return (
-    <Dialog title={title} icon={prompt.kind === "chmod" ? <IconSlidersHorizontal size={18} /> : <IconFolderPlus size={18} />} onDismiss={() => onDone(false)}>
-      <form
-        className="stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <TextField
-          label={prompt.kind === "chmod" ? msg.files.mode : msg.files.name}
-          hint={prompt.kind === "chmod" ? msg.files.modeHint : msg.files.nameHint}
-          value={text}
-          onChange={setText}
-          error={invalid ?? undefined}
-          autoFocus
-          className="mono"
-        />
-        <ErrorNotice error={error} />
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={() => onDone(false)}>
-            {msg.common.cancel}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={pending || text.trim() === ""}>
-            {prompt.kind === "mkdir" ? msg.files.create : msg.files.save}
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}

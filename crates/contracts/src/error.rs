@@ -35,6 +35,9 @@ pub enum ErrorCode {
     StorageFull,
     IoError,
     Internal,
+    /// The host needs sign-in input (no saved password or key) and the user chose not to be
+    /// asked: it was skipped before anything was sent.
+    NeedsSignIn,
 }
 
 /// The only error shape that crosses IPC. `message` is a fixed English sentence chosen by the

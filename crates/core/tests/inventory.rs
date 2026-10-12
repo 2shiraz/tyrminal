@@ -606,7 +606,12 @@ async fn execution_targets_keep_existing_hosts_and_snippets_move_copy_and_rename
     let v = &core.vault;
     let a = v.save_host(host("a", None)).await.unwrap();
     let b = v.save_host(host("b", None)).await.unwrap();
-    let target = |hosts: Vec<String>| ExecutionTargetInput { id: None, name: "web fleet".into(), host_ids: hosts };
+    let target = |hosts: Vec<String>| ExecutionTargetInput {
+        id: None,
+        name: "web fleet".into(),
+        host_ids: hosts,
+        group_ids: vec![],
+    };
     assert_eq!(code(v.save_execution_target(target(vec![])).await), ErrorCode::InvalidInput);
     assert_eq!(code(v.save_execution_target(target(vec!["0".repeat(32)])).await), ErrorCode::NotFound);
     let saved = v.save_execution_target(target(vec![a.id.clone(), b.id.clone(), a.id.clone()])).await.unwrap();
@@ -788,4 +793,42 @@ async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_
     core.vault.delete_group(&root.id).await.unwrap();
     assert_eq!(core.vault.list_identities().await.unwrap()[0].used_by, 0);
     assert!(core.vault.list_identity_assignments().await.unwrap().is_empty());
+}
+
+/// A saved target may name groups as well as hosts (SNP-06); the hosts of a group are worked out
+/// when the run starts, so later members are included. A deleted group drops out and is counted
+/// as missing. Unknown groups are refused, and the target survives a lock.
+#[tokio::test]
+async fn execution_targets_can_name_groups_that_stay_groups() {
+    use tyrminal_core::contracts::ExecutionTargetInput;
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let web = v.save_group(group("Web", None)).await.unwrap();
+    let edge = v.save_group(group("Edge", Some(&web.id))).await.unwrap();
+    let db = v.save_host(host("db", None)).await.unwrap();
+    let target = |hosts: Vec<String>, groups: Vec<String>| ExecutionTargetInput {
+        id: None,
+        name: "nightly".into(),
+        host_ids: hosts,
+        group_ids: groups,
+    };
+    assert_eq!(code(v.save_execution_target(target(vec![], vec![])).await), ErrorCode::InvalidInput);
+    assert_eq!(code(v.save_execution_target(target(vec![], vec!["0".repeat(32)])).await), ErrorCode::NotFound);
+    assert_eq!(code(v.save_execution_target(target(vec![], vec!["../x".into()])).await), ErrorCode::InvalidInput);
+    // A group alone is a valid target, even while it has no hosts yet.
+    let saved = v
+        .save_execution_target(target(vec![db.id.clone()], vec![web.id.clone(), edge.id.clone(), web.id.clone()]))
+        .await
+        .unwrap();
+    assert_eq!(saved.group_ids, [web.id.clone(), edge.id.clone()], "duplicates are dropped");
+    assert_eq!(saved.host_ids, std::slice::from_ref(&db.id));
+
+    v.delete_group(&edge.id).await.unwrap();
+    v.lock().await;
+    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let listed = v.list_execution_targets().await.unwrap();
+    assert_eq!(listed[0].group_ids, std::slice::from_ref(&web.id));
+    assert_eq!(listed[0].host_ids, std::slice::from_ref(&db.id));
+    assert_eq!(listed[0].missing, 1, "the deleted group is counted as missing");
 }

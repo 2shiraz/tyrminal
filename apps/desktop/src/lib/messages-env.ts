@@ -2,7 +2,6 @@
 // (SNP-14), kept apart from messages.ts so parallel branches never edit the same object.
 
 export const msgEnv = {
-  save: "Save",
   startup: "Startup snippets",
   startupHint: "Typed into the shell once it opens, in this order, each followed by Enter. Never before the server's host key is trusted. Each one is noted in the connection log.",
   startupInherit: "Use the group's list",
@@ -15,6 +14,7 @@ export const msgEnv = {
   startupRemove: (name: string) => `Remove ${name} from startup`,
   startupUp: (name: string) => `Move ${name} earlier`,
   startupTooMany: "16 snippets at most",
+  startupTooLong: (line: number) => `Line ${line} is longer than 1000 bytes; terminals in line mode can't take it, so this snippet is not typed at startup.`,
   noSnippets: "Save a snippet first to run it at startup.",
   // Variables referenced by snippets.
   refs: "Variables this snippet uses",

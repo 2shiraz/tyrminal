@@ -5,6 +5,7 @@
 import type { ConflictChoice, StreamUpload } from "@tyrminal/contracts";
 
 import { files as filesApi, toAppError } from "../../lib/ipc";
+import type { TransferJob } from "./useTransferQueue";
 
 /** Size of each piece sent to the core (the core accepts at most 4 MiB). */
 export const DROP_CHUNK = 1024 * 1024;
@@ -46,6 +47,48 @@ export async function sendUpload(started: StreamUpload, file: File, options: Str
     await filesApi.uploadAbort(started.uploadId).catch(() => undefined);
     throw error;
   }
+}
+
+/** Dropped-file uploads asked to stop (checked before their next piece). */
+const stops = new Set<string>();
+
+/**
+ * A file dropped from the desktop onto a server folder, as a transfer-queue job: it asks before
+ * replacing like any upload, reports progress per piece and stops between pieces when cancelled.
+ */
+export function droppedFileJob(sessionId: string, dir: string, file: File, onDone?: () => void): TransferJob {
+  return {
+    name: file.name,
+    direction: "upload",
+    folder: false,
+    remote: true,
+    ...(onDone ? { onDone } : {}),
+    cancel: (transferId) => stops.add(transferId),
+    start: async (choice, onEvent) => {
+      const started = await beginUpload(sessionId, dir, file, choice);
+      const transferId = `drop-${started.uploadId}`;
+      void sendUpload(started, file, { onProgress: (done) => onEvent({ type: "progress", done }), shouldStop: () => stops.delete(transferId) }).then(
+        (completed) => onEvent(completed ? { type: "done", bytes: file.size, files: 1, skipped: 0 } : { type: "cancelled" }),
+        (caught) => {
+          const e = toAppError(caught);
+          onEvent({ type: "failed", error: { code: e.code, message: e.message } });
+        },
+      );
+      return { transferId, name: started.name, direction: "upload", total: file.size };
+    },
+  };
+}
+
+/** Files dropped from the desktop; a dropped folder arrives as an empty "file" and is named. */
+export function droppedFiles(data: DataTransfer): { files: File[]; folders: string[] } {
+  const items = Array.from(data.items ?? []);
+  const files: File[] = [];
+  const folders: string[] = [];
+  Array.from(data.files).forEach((file, i) => {
+    if (items[i]?.webkitGetAsEntry?.()?.isDirectory) folders.push(file.name);
+    else files.push(file);
+  });
+  return { files, folders };
 }
 
 /**

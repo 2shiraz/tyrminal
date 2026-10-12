@@ -1,5 +1,5 @@
 import type { IpcError, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
-import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
@@ -8,17 +8,13 @@ import { IconButton, Notice, SecretField, TextField } from "../../components/ui/
 import {
   IconChevronDown,
   IconChevronLeft,
-  IconClipboardPaste,
   IconCopy,
   IconExternalLink,
   IconFolder,
   IconKeyRound,
   IconPlug,
-  IconRefreshCw,
   IconSearch,
   IconShieldAlert,
-  IconShieldCheck,
-  IconTriangleAlert,
   IconX,
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
@@ -27,15 +23,23 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
+import { ConnectionDetails } from "../connection/ConnectionDetails";
+import { TokenMenu } from "../tokens/TokenMenu";
+import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
+import { ConnectionSheet, type TimelineEntry, timelineEntry } from "./ConnectionSheet";
+import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import { QuickForwardBar } from "../tunnels/QuickForward";
 import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
+import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
 import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
 
 const encodingLabel = (id: string) => encodingById(id).label;
-import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -71,6 +75,11 @@ export interface PaneHandle {
   setEncoding(id: string): void;
   /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
   release(on: boolean): void;
+  // terminal input: palette copy and paste
+  copy(): Promise<boolean>;
+  paste(): void;
+  /** Scrolls to the previous (-1) or next (+1) command, when the shell marks them. */
+  jumpCommand(direction: -1 | 1): boolean;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
@@ -81,6 +90,8 @@ export interface PaneHandle {
   commands(): CommandRecord[];
   /** P-29: the output of one finished command, or null when it is gone. */
   commandOutput(id: number): string | null;
+  /** P-30: offers text for pasting, always through the paste review; never sent without it. */
+  reviewPaste(text: string): void;
 }
 
 export interface SessionEnvironment {
@@ -126,6 +137,10 @@ interface TerminalViewProps {
   pending?: boolean | undefined;
   onConnect?: (() => void) | undefined;
   onConnectAll?: (() => void) | undefined;
+  /** P-25: the paste checks this host keeps (all of them unless the host lowers some). */
+  pasteChecks?: PasteChecks | undefined;
+  /** P-25: extra labels for this session in the paste review (an environment label, for one). */
+  targetLabels?: ReactNode;
 }
 
 export function Fingerprint({ value }: { value: string }) {
@@ -143,8 +158,6 @@ export function Fingerprint({ value }: { value: string }) {
   );
 }
 
-const STEPS: SessionState[] = ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"];
-
 export function TerminalView(props: TerminalViewProps) {
   const { target, identity, label, visible, focused, prefs } = props;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -152,14 +165,24 @@ export function TerminalView(props: TerminalViewProps) {
   const notify = useToast();
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<SessionState>("connecting");
+  // What the session reported while connecting, with arrival times, for the connection sheet.
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [startedAt, setStartedAt] = useState(() => Date.now());
   const [trust, setTrust] = useState<TrustPrompt | null>(null);
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  // Quick port forwards (P-24): ports the output named, waiting for the user.
+  const [portOffers, setPortOffers] = useState<number[]>([]);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  // The Keychain key the destination refused in this attempt, to offer installing it.
+  const [rejectedKey, setRejectedKey] = useState<{ keyId: string; label: string } | null>(null);
+  const [installing, setInstalling] = useState(false);
   const [link, setLink] = useState<string | null>(null);
-  const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
+  const [token, setToken] = useState<Token | null>(null);
+  const [paste, setPaste] = useState<{ text: string; check: PasteCheck; bracketed: boolean; send: (text: string) => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
   const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -169,7 +192,6 @@ export function TerminalView(props: TerminalViewProps) {
   const everConnected = useRef(false);
   const autoAttempts = useRef(0);
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const unreadReported = useRef(false);
   // The return-to-directory offer is made at most once per restored pane.
   const [directoryOffer, setDirectoryOffer] = useState<"waiting" | "shown" | "done">(props.restoreDirectory ? "waiting" : "done");
@@ -198,11 +220,15 @@ export function TerminalView(props: TerminalViewProps) {
       return;
     }
     setState("connecting");
+    setTimeline([]);
+    setStartedAt(Date.now());
     setTrust(null);
     setAuth(null);
     setChanged(null);
     setBanner(null);
+    setPortOffers([]);
     setClosed(null);
+    setRejectedKey(null);
     environment.current = null;
     clipboardAllowed.current = false;
     publish({ state: "connecting", clipboardAllowed: false });
@@ -210,6 +236,8 @@ export function TerminalView(props: TerminalViewProps) {
     const controller = new TerminalController(container, handlers.current.prefs, {
       onTitle: (title) => handlers.current.onTitle(title),
       onLink: (url) => setLink(url),
+      // terminal input: actions on addresses and paths in the output
+      onToken: (token) => setToken(token),
       onClipboardWrite: (text) => {
         if (clipboardAllowed.current) {
           void navigator.clipboard
@@ -220,7 +248,7 @@ export function TerminalView(props: TerminalViewProps) {
           setClipboardAsk(text);
         }
       },
-      onPasteReview: (text, bracketed, confirm) => setPaste({ text, bracketed, confirm }),
+      onPasteReview: (text, check, bracketed, send) => setPaste({ text, check, bracketed, send }),
       onRenderer: (kind, fellBack) => {
         publish({ renderer: kind });
         if (fellBack && handlers.current.prefs.renderer === "auto" && kind === "dom" && controllerRef.current) {
@@ -243,6 +271,8 @@ export function TerminalView(props: TerminalViewProps) {
         handlers.current.onUnread?.();
       },
       onEvent: (event) => {
+        const entry = timelineEntry(event, Date.now());
+        if (entry) setTimeline((current) => [...current, entry]);
         switch (event.type) {
           case "state":
             setState(event.state);
@@ -264,6 +294,9 @@ export function TerminalView(props: TerminalViewProps) {
           case "banner":
             setBanner(event.text);
             break;
+          case "port_suggestion":
+            setPortOffers((list) => (list.includes(event.port) ? list : [...list, event.port]));
+            break;
           // Environment variables the server refused are always reported (SNP-13).
           case "environment":
             environment.current = { sent: event.sent, rejected: event.rejected };
@@ -271,6 +304,11 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "notice":
             notify("danger", event.text);
+            break;
+          case "key_rejected":
+            // Only the destination's key can be installed from here; a jump host's is named in
+            // the error.
+            if (!event.hop || event.hop.index === event.hop.total) setRejectedKey({ keyId: event.keyId, label: event.label });
             break;
           case "negotiated":
             // Sent for every hop of a jump chain; the status bar shows the destination's.
@@ -307,20 +345,36 @@ export function TerminalView(props: TerminalViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, pending]);
 
+  // The host's paste checks can change while the session is open (the user edits the host).
+  const skipMultiline = props.pasteChecks?.multiline === false;
+  const skipNewline = props.pasteChecks?.trailingNewline === false;
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (controller) controller.pasteChecks = { multiline: !skipMultiline, trailingNewline: !skipNewline };
+  }, [attempt, skipMultiline, skipNewline]);
+
   // Counts down to the next automatic attempt; cancelled by unmount, Cancel or Reconnect now.
   useEffect(() => {
     if (!autoRetry) return;
-    setNow(Date.now());
-    const tick = window.setInterval(() => setNow(Date.now()), 250);
     const fire = window.setTimeout(() => {
       setAutoRetry(null);
       setAttempt((n) => n + 1);
     }, Math.max(0, autoRetry.dueAt - Date.now()));
-    return () => {
-      window.clearInterval(tick);
-      window.clearTimeout(fire);
-    };
+    return () => window.clearTimeout(fire);
   }, [autoRetry]);
+
+  /** Stops a connection in progress: answers an open prompt with no, then closes the session. */
+  function cancelConnect() {
+    const id = sessionId();
+    if (id && trust) void sessions.answerTrust(id, trust.promptId, "cancel").catch(() => undefined);
+    if (id && auth) void sessions.answerAuth(id, auth.promptId, null).catch(() => undefined);
+    setTrust(null);
+    setAuth(null);
+    setAutoRetry(null);
+    if (id) void sessions.close(id).catch(() => undefined);
+    setClosed((current) => current ?? { error: null, exitStatus: null });
+    publish({ state: "closed" });
+  }
 
   function reconnectNow() {
     setAutoRetry(null);
@@ -348,6 +402,9 @@ export function TerminalView(props: TerminalViewProps) {
       },
       encoding: () => encodingRef.current,
       release: (on) => controllerRef.current?.release(on),
+      copy: () => controllerRef.current?.copy() ?? Promise.resolve(false),
+      paste: () => controllerRef.current?.paste(),
+      jumpCommand: (direction) => controllerRef.current?.jumpCommand(direction) ?? false,
       setEncoding: (id) => {
         encodingRef.current = encodingById(id).id;
         setEncodingId(encodingRef.current);
@@ -358,6 +415,9 @@ export function TerminalView(props: TerminalViewProps) {
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
       commands: () => controllerRef.current?.commandOutputs.list() ?? [],
       commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
+      reviewPaste: (text) => {
+        if (status.current.state === "connected") controllerRef.current?.reviewPaste(text);
+      },
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);
@@ -405,8 +465,6 @@ export function TerminalView(props: TerminalViewProps) {
     "--pane-fg": scheme.foreground,
     "--term-padding": `${prefs.padding}px`,
   } as CSSProperties;
-  const connecting = !pending && !closed && state !== "connected" && !needsAttention;
-  const stepIndex = Math.max(0, STEPS.indexOf(state));
   const showPrompts = visible;
 
   return (
@@ -484,6 +542,15 @@ export function TerminalView(props: TerminalViewProps) {
         </div>
       )}
 
+      {/* Quick port forwards (P-24) */}
+      <QuickForwardBar
+        sessionId={controllerRef.current?.id ?? null}
+        hostId={target.kind === "ssh" ? target.hostId : null}
+        ports={portOffers}
+        connected={state === "connected" && !closed}
+        onDone={(port) => setPortOffers((list) => (port === "all" ? [] : list.filter((p) => p !== port)))}
+      />
+
       {findOpen && (
         <FindBar
           count={findCount}
@@ -496,23 +563,37 @@ export function TerminalView(props: TerminalViewProps) {
         />
       )}
 
-      {connecting && (
-        <div className="connecting" role="status" aria-live="polite">
-          <div className="connecting-card">
-            <span className="spinner" aria-hidden="true" />
-            <span>
-              {target.kind === "ssh" ? msg.terminal.connectingTo(identity) : msg.terminal.state.connecting}
-              <span className="faint"> · {msg.terminal.state[state]}</span>
-            </span>
-            {target.kind === "ssh" && (
-              <span className="connect-steps" aria-hidden="true">
-                {STEPS.slice(0, 4).map((step, index) => (
-                  <span key={step} data-done={index <= stepIndex} />
-                ))}
-              </span>
-            )}
-          </div>
-        </div>
+      {!pending && (closed !== null || state !== "connected" || needsAttention) && (
+        <ConnectionSheet
+          ssh={target.kind === "ssh"}
+          label={label}
+          identity={identity}
+          timeline={timeline}
+          startedAt={startedAt}
+          trust={showPrompts ? trust : null}
+          auth={showPrompts && !trust ? auth : null}
+          changed={changed}
+          closed={closed}
+          everConnected={everConnected.current}
+          autoRetry={autoRetry}
+          banner={banner}
+          interactive={visible && focused}
+          onTrust={answerTrust}
+          onAuth={(secret) => {
+            const id = sessionId();
+            if (id && auth) void sessions.answerAuth(id, auth.promptId, secret).catch(() => undefined);
+            setAuth(null);
+          }}
+          onCancel={cancelConnect}
+          onReconnect={reconnectNow}
+          onStopRetry={() => setAutoRetry(null)}
+          onCloseTab={() => handlers.current.onClose()}
+          onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
+          onOpenLog={target.kind === "ssh" ? () => setLogOpen(true) : null}
+          onOpenDetails={target.kind === "ssh" ? () => setDetailsFor(controllerRef.current?.id ?? null) : null}
+          onInstallKey={target.kind === "ssh" && rejectedKey && closed?.error?.code === "AUTH_FAILED" ? () => setInstalling(true) : null}
+          canReconnect={props.canReconnect !== false}
+        />
       )}
 
       {clipboardAsk !== null && visible && (
@@ -546,138 +627,22 @@ export function TerminalView(props: TerminalViewProps) {
         </div>
       )}
 
-      {closed && (
-        <div className="terminal-overlay">
-          <div className="overlay-card" role={closed.error ? "alert" : "status"}>
-            <div className="dialog-head">
-              <span className="dialog-icon" data-tone={changed ? "danger" : closed.error ? "warning" : "accent"} aria-hidden="true">
-                {changed ? <IconShieldAlert size={18} /> : closed.error ? <IconTriangleAlert size={18} /> : <IconRefreshCw size={18} />}
-              </span>
-              <h2>{changed ? msg.terminal.changedTitle : closed.error ? msg.terminal.failedTitle : msg.terminal.endedTitle}</h2>
-            </div>
-            {changed ? (
-              <>
-                {/* agent B: tunnels and history */}
-                <HopNotice hop={changed.hop} />
-                <p>{msg.terminal.changedIntro}</p>
-                <div className="stack-xs">
-                  <span className="label">{msg.terminal.changedPresented}</span>
-                  <Fingerprint value={changed.presentedFingerprint} />
-                </div>
-                <div className="stack-xs">
-                  <span className="label">{msg.terminal.changedTrusted}</span>
-                  {changed.trustedFingerprints.map((fingerprint) => (
-                    <Fingerprint key={fingerprint} value={fingerprint} />
-                  ))}
-                </div>
-                <Notice tone="warning">{msg.terminal.changedNext}</Notice>
-              </>
-            ) : closed.error ? (
-              <>
-                <p>{closed.error.message}</p>
-                {autoRetry && (
-                  <p role="status" data-testid="auto-reconnect">
-                    {msg.terminal.autoReconnect(Math.max(0, Math.ceil((autoRetry.dueAt - now) / 1000)), autoRetry.attempt, RECONNECT_MAX_ATTEMPTS)}
-                  </p>
-                )}
-                <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-                  {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
-                </p>
-              </>
-            ) : (
-              <p className="muted">{closed.exitStatus !== null ? msg.terminal.endedExit(closed.exitStatus) : msg.terminal.endedClean}</p>
-            )}
-            <div className="dialog-actions">
-              <button type="button" className="btn" onClick={() => handlers.current.onClose()}>
-                {msg.terminal.closeTab}
-              </button>
-              {props.canReconnect === false ? (
-                <span className="faint" style={{ fontSize: "var(--text-sm)" }}>
-                  {msgC.detach.reconnectInMain}
-                </span>
-              ) : changed ? (
-                <button type="button" className="btn btn-primary" onClick={() => handlers.current.onOpenKnownHosts()}>
-                  {msg.terminal.openKnownHosts}
-                </button>
-              ) : (
-                <>
-                  {autoRetry && (
-                    <button type="button" className="btn" onClick={() => setAutoRetry(null)}>
-                      {msg.terminal.cancelAutoReconnect}
-                    </button>
-                  )}
-                  {target.kind === "ssh" && controllerRef.current?.id && (
-                    <button type="button" className="btn" onClick={() => setLogOpen(true)}>
-                      {msgD.connectionLog.open}
-                    </button>
-                  )}
-                  <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
-                    <IconRefreshCw size={15} />
-                    {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {token && (
+        <TokenMenu
+          token={token}
+          onClose={() => {
+            setToken(null);
+            controllerRef.current?.focus();
+          }}
+        />
+      )}
+      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
+      {installing && target.kind === "ssh" && rejectedKey && (
+        <InstallKeyDialog hostId={target.hostId} keyId={rejectedKey.keyId} onClose={() => setInstalling(false)} />
       )}
 
       {logOpen && controllerRef.current?.id && (
         <ConnectionLogDialog sessionId={controllerRef.current.id} title={props.label} onClose={() => setLogOpen(false)} />
-      )}
-
-      {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}
-      {showPrompts && trust && (
-        <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => answerTrust("cancel")}>
-          {/* agent B: tunnels and history */}
-          <HopNotice hop={trust.hop} />
-          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msg.terminal.trustIntro}
-          </p>
-          <dl className="kv">
-            <dt>{msg.terminal.host}</dt>
-            <dd>
-              {trust.host} : {trust.port}
-            </dd>
-            {trust.resolvedAddress && trust.resolvedAddress !== trust.host && (
-              <>
-                <dt>{msg.terminal.resolved}</dt>
-                <dd>{trust.resolvedAddress}</dd>
-              </>
-            )}
-            <dt>{msg.terminal.algorithm}</dt>
-            <dd>{trust.algorithm}</dd>
-          </dl>
-          <div className="stack-xs">
-            <span className="label">{msg.terminal.fingerprint}</span>
-            <Fingerprint value={trust.fingerprint} />
-          </div>
-          <div className="dialog-actions">
-            {/* The safe choice has initial focus, so Enter never grants trust by accident. */}
-            <button type="button" className="btn" onClick={() => answerTrust("cancel")} autoFocus data-autofocus>
-              {msg.terminal.trustCancel}
-            </button>
-            <button type="button" className="btn" onClick={() => answerTrust("once")}>
-              {msg.terminal.trustOnce}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => answerTrust("always")}>
-              {msg.terminal.trustAlways}
-            </button>
-          </div>
-        </Dialog>
-      )}
-
-      {showPrompts && auth && !trust && (
-        <AuthDialog
-          key={auth.promptId}
-          prompt={auth}
-          banner={banner}
-          onAnswer={(secret) => {
-            const id = sessionId();
-            if (id) void sessions.answerAuth(id, auth.promptId, secret).catch(() => undefined);
-            setAuth(null);
-          }}
-        />
       )}
 
       {link !== null && (
@@ -692,28 +657,17 @@ export function TerminalView(props: TerminalViewProps) {
       )}
 
       {paste && (
-        <Dialog title={msg.terminal.pasteTitle} icon={<IconClipboardPaste size={18} />} tone="warning" wide onDismiss={() => setPaste(null)}>
-          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msg.terminal.pasteBody(lineCount(paste.text))}
-          </p>
-          <pre className="code-block">{paste.text}</pre>
-          {paste.bracketed && <Notice tone="info">{msg.terminal.pasteBracketed}</Notice>}
-          <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => setPaste(null)} autoFocus data-autofocus>
-              {msg.common.cancel}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                paste.confirm();
-                setPaste(null);
-              }}
-            >
-              {msg.terminal.pasteSend}
-            </button>
-          </div>
-        </Dialog>
+        <PasteReviewDialog
+          text={paste.text}
+          check={paste.check}
+          bracketed={paste.bracketed}
+          target={{ name: label, identity, labels: props.targetLabels }}
+          onCancel={() => setPaste(null)}
+          onSend={(text) => {
+            paste.send(text);
+            setPaste(null);
+          }}
+        />
       )}
     </div>
   );

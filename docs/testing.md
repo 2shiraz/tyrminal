@@ -12,7 +12,7 @@ All commands run from the repository root. Only the commands listed here exist.
 | `pnpm test:ui` | Browser UI behavior and visual regression (Playwright, mock backend; never native evidence) | Chromium for Playwright 1.56.1 |
 | `pnpm test:ui:container` / `pnpm test:ui:update:container` | The same inside the pinned Playwright image CI uses; the only place visual baselines are recorded | Docker |
 | `node scripts/check-contrast.mjs` | WCAG 2.2 AA contrast for every theme token pair and terminal scheme | Node |
-| `pnpm test:integration` | SSH adapter and core session flows against the lab; LAN discovery against a DNS-SD responder on loopback; OS secret store round trip | lab |
+| `pnpm test:integration` | SSH adapter and core session flows against the lab; LAN discovery against a DNS-SD responder on loopback; OS secret store round trip; container shells in a running container (P-33) only with `TYRMINAL_LAB_CONTAINERS=1`, otherwise BLOCKED | lab; for P-33 also Docker or Podman usable by the lab user, with `alpine:3.22` |
 | `pnpm test:security` | Vault, storage and core negative tests; host-trust and session-ownership lab tests; release-policy check | lab |
 | `pnpm build:e2e` | Test build of the application with the embedded WebDriver server (`target/e2e`) | — |
 | `pnpm test:native` | Drives the real application end to end | lab, e2e build |
@@ -20,6 +20,7 @@ All commands run from the repository root. Only the commands listed here exist.
 | `pnpm build:desktop` | Unsigned release build for the current platform | — |
 | `pnpm contracts` / `pnpm contracts:check` | Regenerate / verify generated TypeScript contracts | — |
 | `node tests/performance/measure.mjs` | Launch, unlock, idle and stream measurements | `node scripts/build-e2e.mjs --release` |
+| `node --experimental-strip-types tests/performance/highlight-bench.mjs` | Output highlighting cost on a full screen of adversarial rows (budget) | Node 22+ |
 
 A suite prints each step with its command, exit code and duration, and writes
 `docs/reports/raw/verify-<suite>.json`. A step whose prerequisite is missing is `BLOCKED` and

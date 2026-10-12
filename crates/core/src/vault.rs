@@ -40,8 +40,18 @@ use crate::records::{
 };
 use crate::validate;
 // agent B: tunnels and history
-use crate::records::{KIND_TUNNEL, TunnelRecord};
-use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
+use crate::records::{
+    KIND_RECORDING_SETTINGS, KIND_SESSION_LOG, KIND_TUNNEL, LogEnd, RecordingSettingsRecord, SessionLogRecord,
+    TunnelRecord,
+};
+use tyrminal_contracts::{
+    ChainHop, HostConnection, HostConnectionInput, RecordingSettings, TunnelInput, TunnelSummary,
+};
+
+/// Bounds of the recording settings and of a recording's comment.
+const MAX_KEEP_PER_HOST: u32 = 100;
+const MAX_LOG_MIB: u32 = 512;
+pub(crate) const MAX_LOG_COMMENT_LEN: usize = 2000;
 // agent C: workspaces
 use crate::layouts::{self, LayoutRecord};
 use crate::records::KIND_LAYOUT;
@@ -55,7 +65,7 @@ use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
 use crate::records::StoredProxy;
 use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
-    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
+    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, StoredNote, WorkflowRecord,
 };
 use tyrminal_contracts::{
     EffectiveEnvVar, EnvVar, ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment,
@@ -63,6 +73,7 @@ use tyrminal_contracts::{
     KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
 use tyrminal_contracts::{EffectiveStartup, GroupDefaults, GroupDefaultsInput, InheritedRoute, StartupSnippet};
+use tyrminal_contracts::{HostNote, Note, NoteInput};
 
 struct Stored<T> {
     revision: u64,
@@ -80,6 +91,9 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent B: tunnels and history
     tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
+    session_logs: BTreeMap<Id, Stored<SessionLogRecord>>,
+    /// The one settings record, if the user ever saved settings.
+    recording_settings: Option<(Id, Stored<RecordingSettingsRecord>)>,
     // agent C: workspaces
     layouts: BTreeMap<Id, Stored<LayoutRecord>>,
     // agent D: inventory and snippets
@@ -106,6 +120,8 @@ impl Open {
             groups: BTreeMap::new(),
             // agent B: tunnels and history
             tunnels: BTreeMap::new(),
+            session_logs: BTreeMap::new(),
+            recording_settings: None,
             // agent C: workspaces
             layouts: BTreeMap::new(),
             // agent D: inventory and snippets
@@ -149,10 +165,13 @@ pub(crate) struct ConnectionPlan {
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
     /// The host's saved label.
     pub label: String,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     /// Environment variables to request for the shell (the host's own, with inherited ones).
     pub env: Vec<(String, Zeroizing<String>)>,
+    /// Offer quick forwards for ports the session's output names (P-24).
+    pub port_suggestions: bool,
     pub generation: u32,
 }
 
@@ -166,12 +185,19 @@ pub(crate) struct HopPlan {
     pub auth: PlanAuth,
     /// How to leave this computer when this host is the first hop.
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
 }
 
 pub(crate) enum PlanAuth {
     Ask,
     Password(Zeroizing<String>),
-    Key { private_key: Zeroizing<String>, passphrase: Option<Zeroizing<String>> },
+    /// `key_id` and `label` name the key when the server refuses it; neither is secret.
+    Key {
+        private_key: Zeroizing<String>,
+        passphrase: Option<Zeroizing<String>>,
+        key_id: String,
+        label: String,
+    },
 }
 
 pub struct VaultService {
@@ -559,6 +585,15 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
+                KIND_SESSION_LOG => load!(SessionLogRecord, open.session_logs),
+                KIND_RECORDING_SETTINGS => match decode::<RecordingSettingsRecord>(&payload)? {
+                    // There is only ever one: a second live one means the store was altered.
+                    Decoded::Live(record) if !row.deleted && open.recording_settings.is_none() => {
+                        open.recording_settings = Some((row.record_id, Stored { revision: row.revision, record }));
+                    }
+                    Decoded::Tombstone if row.deleted => {}
+                    _ => return Err(damaged()),
+                },
                 // agent C: workspaces
                 KIND_LAYOUT => load!(LayoutRecord, open.layouts),
                 // agent D: inventory and snippets
@@ -1395,7 +1430,12 @@ impl VaultService {
                 terminal: tyrminal_contracts::HostTerminal::default(),
                 forward_agent: false,
                 // agent B: tunnels and history
-                connection: crate::records::StoredConnection { jump_host, proxy: None, own: false },
+                connection: crate::records::StoredConnection {
+                    jump_host,
+                    proxy: None,
+                    own: false,
+                    ..Default::default()
+                },
             };
             new_hosts.push((id, record));
         }
@@ -1859,6 +1899,20 @@ impl VaultService {
         Ok(())
     }
 
+    /// Turns quick forward suggestions on or off for one host (P-24); nothing else changes.
+    pub async fn set_port_suggestions(&self, host_id: &str, enabled: bool) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
+        let mut record = copy_host(&current.record);
+        record.connection.no_port_suggestions = !enabled;
+        let revision = current.revision + 1;
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
     // ---------- sessions ----------
 
     /// Snapshot of what a session needs, taken under the mutex at one generation. Later edits to
@@ -1895,6 +1949,8 @@ impl VaultService {
             auth: target.auth,
             proxy: target.proxy,
             label: target.label,
+            key_exchange: target.key_exchange,
+            port_suggestions: !host.connection.no_port_suggestions,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -1922,6 +1978,8 @@ impl VaultService {
             Ok(PlanAuth::Key {
                 private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
                 passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                key_id: key_id.to_owned(),
+                label: key.record.label.clone(),
             })
         };
         let auth = match (identity, &effective.auth) {
@@ -1947,6 +2005,16 @@ impl VaultService {
             // agent B: tunnels and history
             // A host without its own route uses its nearest group's (HST-05).
             proxy: Self::effective_route(open, id, host).1.map(|p| crate::tunnels::proxy_spec(&p)),
+            // The key exchange setting is the host's own; groups do not set it.
+            key_exchange: match host.connection.key_exchange {
+                tyrminal_contracts::KeyExchangeMode::PreferPostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::PreferPostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::RequirePostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::Classic => tyrminal_ssh::KeyExchangePolicy::Classic,
+            },
         })
     }
 
@@ -1995,6 +2063,8 @@ impl VaultService {
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_summary),
             own: Self::own_route(host),
             inherited: Self::inherited_route(open, &id, host),
+            key_exchange: host.connection.key_exchange,
+            no_port_suggestions: host.connection.no_port_suggestions,
         })
     }
 
@@ -2025,6 +2095,8 @@ impl VaultService {
         record.connection.jump_host = jump.map(|j| validate::id_text(&j));
         record.connection.proxy = proxy;
         record.connection.own = !input.inherit;
+        record.connection.key_exchange = input.key_exchange;
+        record.connection.no_port_suggestions = input.no_port_suggestions;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = if input.inherit {
@@ -2372,11 +2444,14 @@ impl VaultService {
     fn target_summary(open: &Open, id: &Id, record: &ExecutionTargetRecord) -> ExecutionTarget {
         let (live, missing): (Vec<&String>, Vec<&String>) =
             record.host_ids.iter().partition(|h| validate::id(h).ok().is_some_and(|id| open.hosts.contains_key(&id)));
+        let (groups, gone): (Vec<&String>, Vec<&String>) =
+            record.group_ids.iter().partition(|g| validate::id(g).ok().is_some_and(|id| open.groups.contains_key(&id)));
         ExecutionTarget {
             id: validate::id_text(id),
             name: record.name.clone(),
             host_ids: live.into_iter().cloned().collect(),
-            missing: missing.len() as u32,
+            group_ids: groups.into_iter().cloned().collect(),
+            missing: (missing.len() + gone.len()) as u32,
         }
     }
 
@@ -2388,16 +2463,17 @@ impl VaultService {
         Ok(list)
     }
 
-    /// Saves a host selection. Every host must exist now; duplicates are dropped.
+    /// Saves a selection of hosts and groups. Every one must exist now; duplicates are dropped.
     pub async fn save_execution_target(&self, input: ExecutionTargetInput) -> Result<ExecutionTarget, IpcError> {
         let name = validate::label(&input.name)?;
-        if input.host_ids.is_empty() {
-            return Err(invalid("Choose at least one host."));
+        if input.host_ids.is_empty() && input.group_ids.is_empty() {
+            return Err(invalid("Choose at least one host or group."));
         }
-        if input.host_ids.len() > MAX_BULK_HOSTS {
-            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one target."));
+        if input.host_ids.len() > MAX_BULK_HOSTS || input.group_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts or groups for one target."));
         }
         let ids: Vec<Id> = input.host_ids.iter().map(|h| validate::id(h)).collect::<Result<_, _>>()?;
+        let group_ids: Vec<Id> = input.group_ids.iter().map(|g| validate::id(g)).collect::<Result<_, _>>()?;
         let existing = input.id.as_deref().map(validate::id).transpose()?;
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
@@ -2411,6 +2487,16 @@ impl VaultService {
                 host_ids.push(text);
             }
         }
+        let mut groups: Vec<String> = Vec::with_capacity(group_ids.len());
+        for id in &group_ids {
+            if !open.groups.contains_key(id) {
+                return Err(not_found("A selected group no longer exists."));
+            }
+            let text = validate::id_text(id);
+            if !groups.contains(&text) {
+                groups.push(text);
+            }
+        }
         let (id, revision) = match existing {
             Some(id) => {
                 (id, open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1)
@@ -2422,8 +2508,10 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1)
             }
         };
-        let record = ExecutionTargetRecord { name, host_ids };
-        let content_len = record.name.len() + record.host_ids.iter().map(String::len).sum::<usize>();
+        let record = ExecutionTargetRecord { name, host_ids, group_ids: groups };
+        let content_len = record.name.len()
+            + record.host_ids.iter().map(String::len).sum::<usize>()
+            + record.group_ids.iter().map(String::len).sum::<usize>();
         self.write(open, id, KIND_EXECUTION_TARGET, revision, Some((&record, content_len))).await?;
         let summary = Self::target_summary(open, &id, &record);
         open.targets.insert(id, Stored { revision, record });
@@ -2888,6 +2976,61 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    // ---------- notes (P-30) ----------
+
+    fn note_view(stored: &StoredNote) -> Note {
+        Note { text: stored.text.clone(), format: stored.format, updated_at: stored.updated_at }
+    }
+
+    /// The note a host or group carries itself.
+    pub async fn note(&self, target: SettingsTarget) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::workflow_of(open, &target).and_then(|(_, w)| w.record.note.as_ref().map(Self::note_view)))
+    }
+
+    /// Replaces the note of a host or group; empty text (or `None`) deletes it.
+    pub async fn set_note(&self, target: SettingsTarget, input: Option<NoteInput>) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let note = match input {
+            Some(input) => validate::note_text(&input.text)?.map(|text| StoredNote {
+                text,
+                format: input.format,
+                updated_at: now_unix(),
+            }),
+            None => None,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        let view = note.as_ref().map(Self::note_view);
+        self.update_workflow(open, &target, |w| WorkflowRecord { note, ..w }).await?;
+        Ok(view)
+    }
+
+    /// The notes that apply to a host: its own first, then its groups' (nearest group first).
+    pub async fn host_notes(&self, host_id: &str) -> Result<Vec<HostNote>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let mut out = Vec::new();
+        if let Some(note) =
+            Self::workflow_of_host(open, &validate::id_text(&id)).and_then(|(_, w)| w.record.note.as_ref())
+        {
+            out.push(HostNote { note: Self::note_view(note), origin: SettingOrigin::Host });
+        }
+        for (group_id, group) in Self::group_chain(open, host) {
+            if let Some(note) = Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.note.as_ref()) {
+                let origin = SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() };
+                out.push(HostNote { note: Self::note_view(note), origin });
+            }
+        }
+        Ok(out)
     }
 
     // ---------- startup snippets (SNP-08) ----------
@@ -3785,6 +3928,258 @@ impl VaultService {
         open.glance_settings.clear();
         open.glance_settings.insert(record_id, Stored { revision, record });
         Ok(enabled)
+    }
+}
+
+// security review (P-27)
+impl VaultService {
+    /// Reviews keys, sign-in methods, certificates and known hosts as of `now` (Unix seconds).
+    /// Reads public facts only; nothing is changed and no secret leaves this function.
+    pub async fn security_review(&self, now: u64) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        use crate::security_review::{CertificateFacts, HostFacts, KeyFacts, KnownHostFacts, SignIn, review};
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let keys: Vec<_> = open
+            .ssh_keys
+            .iter()
+            .map(|(id, s)| KeyFacts {
+                id: validate::id_text(id),
+                label: s.record.label.clone(),
+                algorithm: s.record.algorithm.clone(),
+                public_key: s.record.public_key.clone(),
+                passphrase_protected: s.record.passphrase_protected,
+                passphrase_stored: s.record.passphrase.is_some(),
+            })
+            .collect();
+        let certificates: Vec<_> = open
+            .certificates
+            .values()
+            .map(|c| CertificateFacts { key_id: c.record.key_id.clone(), valid_before: c.record.valid_before })
+            .collect();
+        let groups = group_index(open);
+        let hosts: Vec<_> = open
+            .hosts
+            .iter()
+            .map(|(id, s)| {
+                let host = &s.record;
+                let effective = inventory::effective(&groups, host);
+                // The same resolution a connection uses (see `hop_plan`), without reading secrets.
+                let sign_in = match Self::identity_for_host(open, id, host).map(|(_, record, _)| record) {
+                    Some(identity) => match (&identity.key_id, &identity.password) {
+                        (Some(key_id), _) => SignIn::Key(key_id.clone()),
+                        (None, Some(_)) => SignIn::StoredPassword,
+                        (None, None) => SignIn::AskPassword,
+                    },
+                    None => match &effective.auth {
+                        EffectiveAuth::Own(StoredAuth::Password { .. }) => SignIn::StoredPassword,
+                        EffectiveAuth::Own(StoredAuth::Key { key_id }) | EffectiveAuth::GroupKey(key_id) => {
+                            SignIn::Key(key_id.clone())
+                        }
+                        EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => {
+                            SignIn::AskPassword
+                        }
+                    },
+                };
+                HostFacts {
+                    id: validate::id_text(id),
+                    label: host.label.clone(),
+                    ssh: host.protocol.is_ssh(),
+                    endpoint: (tyrminal_ssh::canonical_host(&host.address), effective.port),
+                    sign_in,
+                }
+            })
+            .collect();
+        let known_hosts: Vec<_> = open
+            .known_hosts
+            .iter()
+            .map(|(id, s)| KnownHostFacts {
+                id: validate::id_text(id),
+                host: s.record.host.clone(),
+                port: s.record.port,
+                algorithm: s.record.algorithm.clone(),
+                fingerprint: s.record.fingerprint.clone(),
+            })
+            .collect();
+        Ok(review(&keys, &certificates, &hosts, &known_hosts, now))
+    }
+
+    /// The review as of the current time.
+    pub async fn security_review_now(&self) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        self.security_review(now_unix()).await
+    }
+}
+
+// Session recordings
+/// What the recorder needs to write one recording, read under one generation.
+pub(crate) struct RecordingContext {
+    pub logs_key: SecretKey,
+    pub vault_id: Id,
+    pub key_version: u32,
+    pub settings: RecordingSettings,
+}
+
+fn recording_settings_of(open: &Open) -> RecordingSettings {
+    open.recording_settings.as_ref().map_or_else(RecordingSettings::default, |(_, s)| RecordingSettings {
+        enabled: s.record.enabled,
+        keep_per_host: s.record.keep_per_host,
+        max_log_mib: s.record.max_log_mib,
+    })
+}
+
+fn session_log_content_len(record: &SessionLogRecord) -> usize {
+    record.title.len() + record.host_id.as_ref().map_or(0, String::len) + record.comment.len()
+}
+
+impl VaultService {
+    pub async fn recording_settings(&self) -> Result<RecordingSettings, IpcError> {
+        let inner = self.inner.lock().await;
+        Ok(recording_settings_of(inner.open.as_ref().ok_or_else(locked)?))
+    }
+
+    pub async fn set_recording_settings(&self, settings: RecordingSettings) -> Result<RecordingSettings, IpcError> {
+        if !(1..=MAX_KEEP_PER_HOST).contains(&settings.keep_per_host) {
+            return Err(invalid("Keep between 1 and 100 recordings per host."));
+        }
+        if !(1..=MAX_LOG_MIB).contains(&settings.max_log_mib) {
+            return Err(invalid("A recording's size limit must be between 1 and 512 MiB."));
+        }
+        let record = RecordingSettingsRecord {
+            enabled: settings.enabled,
+            keep_per_host: settings.keep_per_host,
+            max_log_mib: settings.max_log_mib,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match &open.recording_settings {
+            Some((id, stored)) => (*id, stored.revision + 1),
+            None => (random_id().map_err(from_vault)?, 1),
+        };
+        self.write(open, id, KIND_RECORDING_SETTINGS, revision, Some((&record, 0))).await?;
+        open.recording_settings = Some((id, Stored { revision, record }));
+        Ok(settings)
+    }
+
+    /// The key and settings for a new recording, or `None` when recording is off.
+    pub(crate) async fn recording_context(&self, generation: u32) -> Result<Option<RecordingContext>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let settings = recording_settings_of(open);
+        if !settings.enabled {
+            return Ok(None);
+        }
+        Ok(Some(RecordingContext {
+            logs_key: open.keys.logs_key().map_err(from_vault)?,
+            vault_id: open.keys.vault_id(),
+            key_version: open.keys.key_version(),
+            settings,
+        }))
+    }
+
+    /// `K_logs` and the identity fields a recording's header must carry, for reading.
+    pub(crate) async fn logs_key(&self) -> Result<(SecretKey, Id, u32), IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok((open.keys.logs_key().map_err(from_vault)?, open.keys.vault_id(), open.keys.key_version()))
+    }
+
+    pub(crate) async fn create_session_log(&self, generation: u32, record: SessionLogRecord) -> Result<Id, IpcError> {
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if open.session_logs.len() >= MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of recordings."));
+        }
+        let id = random_id().map_err(from_vault)?;
+        self.write(open, id, KIND_SESSION_LOG, 1, Some((&record, session_log_content_len(&record)))).await?;
+        open.session_logs.insert(id, Stored { revision: 1, record });
+        Ok(id)
+    }
+
+    /// Records how a recording ended. A no-op when the record is gone (deleted meanwhile).
+    pub(crate) async fn finish_session_log(
+        &self,
+        id: Id,
+        ended_at: u64,
+        size_bytes: u64,
+        end: LogEnd,
+    ) -> Result<(), IpcError> {
+        self.update_session_log(id, |record| {
+            record.ended_at = Some(ended_at);
+            record.size_bytes = size_bytes;
+            record.end = Some(end);
+        })
+        .await
+    }
+
+    pub(crate) async fn update_session_log(
+        &self,
+        id: Id,
+        change: impl FnOnce(&mut SessionLogRecord),
+    ) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let Some(stored) = open.session_logs.get(&id) else {
+            return Ok(());
+        };
+        let mut record = stored.record.clone();
+        change(&mut record);
+        if record.comment.len() > MAX_LOG_COMMENT_LEN {
+            return Err(invalid("A comment can be at most 2,000 characters."));
+        }
+        let revision = stored.revision + 1;
+        self.write(open, id, KIND_SESSION_LOG, revision, Some((&record, session_log_content_len(&record)))).await?;
+        open.session_logs.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    /// Every recording's record, newest first.
+    pub(crate) async fn session_logs(&self) -> Result<Vec<(Id, SessionLogRecord)>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.session_logs.iter().map(|(id, s)| (*id, s.record.clone())).collect();
+        list.sort_by(|a, b| b.1.started_at.cmp(&a.1.started_at).then_with(|| a.0.cmp(&b.0)));
+        Ok(list)
+    }
+
+    pub(crate) async fn session_log(&self, id: Id) -> Result<SessionLogRecord, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(open.session_logs.get(&id).ok_or_else(|| not_found("That recording no longer exists."))?.record.clone())
+    }
+
+    /// Removes recordings' records; the caller deletes their files.
+    pub(crate) async fn delete_session_logs(&self, ids: &[Id]) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        for id in ids {
+            let Some(stored) = open.session_logs.get(id) else { continue };
+            let revision = stored.revision + 1;
+            self.write::<SessionLogRecord>(open, *id, KIND_SESSION_LOG, revision, None).await?;
+            open.session_logs.remove(id);
+        }
+        Ok(())
+    }
+
+    /// The unbookmarked recordings of `host_id` (local terminals: `None`) beyond the newest
+    /// `keep`. Bookmarked recordings are kept on top of that; `active` ones are never chosen.
+    pub(crate) async fn session_logs_beyond(
+        &self,
+        host_id: Option<&str>,
+        keep: u32,
+        active: &[Id],
+    ) -> Result<Vec<Id>, IpcError> {
+        let logs = self.session_logs().await?;
+        Ok(logs
+            .into_iter()
+            .filter(|(id, r)| r.host_id.as_deref() == host_id && !r.bookmarked && !active.contains(id))
+            .skip(keep as usize)
+            .map(|(id, _)| id)
+            .collect())
     }
 }
 

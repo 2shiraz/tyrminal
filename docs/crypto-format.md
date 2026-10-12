@@ -199,3 +199,82 @@ Vector: `tests/fixtures/vault-vectors/generate_backup.py` (Python standard libra
 §9 vector vault into `backup.json`; `crates/vault/tests/known_answer.rs` checks that the Rust code
 verifies it and re-encodes it byte for byte.
 
+
+## 11. Session recording (version 1)
+
+A recording is what one terminal session **printed**, in one file. Typed input is never part of
+it: the recorder only sees the output stream (`crates/core/src/recording.rs` wraps the session's
+output sink), so keystrokes, and passwords typed at prompts that do not echo them, cannot be
+recorded. Implemented by `crates/session-log`.
+
+### 11.1 Keys
+
+```
+K_logs   = HKDF-SHA-256(ikm = VRK, salt = vault_id, info = "tyrminal.subkey.v1.logs")   (§2)
+K_file   = HKDF-SHA-256(ikm = K_logs, salt = log_id, info = "tyrminal.log.v1.file")
+```
+
+Every recording has its own random 16-byte `log_id` and so its own key.
+
+### 11.2 File layout
+
+```
+magic          8   "TYRSLOG\0"
+format_version 2   0x0001
+vault_id      16
+log_id        16
+key_version    4   the VRK generation K_logs came from
+nonce_prefix  19   random
+frame × n:
+    flags      1   0 = ordinary chunk, 1 = final chunk
+    ct_len     4   1,040 ≤ ct_len ≤ 66,576
+    ciphertext ct_len
+```
+
+Chunks use STREAM-BE32 (Hoang, Reyhanitabar, Rogaway and Vizár, "Online Authenticated-Encryption
+and its Nonce-Reuse Misuse-Resistance") over XChaCha20-Poly1305 with key `K_file`, the 19-byte
+`nonce_prefix`, a 32-bit big-endian chunk counter and the last-block flag, as implemented by the
+RustCrypto `aead-stream` 0.6.0 crate. The associated data of every chunk is the 65-byte header, so
+each chunk is bound to its file, its position, and whether it is the final one.
+
+Chunk plaintext: `payload_len(4) || payload || zero padding to a multiple of 1,024 bytes`, with
+`payload_len ≤ 65,536`. The payload is a sequence of events:
+
+```
+kind(1) || at_ms(4) || body_len(4) || body
+  1 start   body = started_unix_ms(8) || cols(2) || rows(2); at_ms = 0; first event of chunk 0 only
+  2 output  body = bytes the terminal printed
+  3 resize  body = cols(2) || rows(2)
+  4 end     body = reason(1): 0 closed, 1 size limit reached, 2 vault locked, 3 stopped
+```
+
+`at_ms` counts milliseconds from the start. The first chunk holds only the start event and is
+written immediately. The end event is the last event of the final chunk and nowhere else.
+
+### 11.3 Writing
+
+Events are buffered and written as a chunk when the buffer would exceed 65,536 bytes or the caller
+flushes (the recorder flushes every few seconds and on close). The writer keeps room for the final
+chunk under its size limit: when an event would not fit, it writes the final chunk with reason
+"size limit reached" instead, and the session continues unrecorded.
+
+### 11.4 Reading
+
+Parse the header strictly; a wrong magic is `NotALog`, another version `UnsupportedVersion`, and a
+header whose `vault_id`, `log_id` or `key_version` differs from the record that points at the file
+is `WrongLog`. Open chunks in order. If the first chunk does not authenticate (or does not start
+with the start event) the file is `Unreadable`. After that, the reader returns every event that
+authenticated, plus one of:
+
+- **Complete** — the final chunk authenticated, ended with the end event, and nothing follows it.
+- **Incomplete** — the file stops before a final chunk (at a chunk boundary or inside a chunk), as
+  after a crash while recording.
+- **Damaged** — a chunk failed authentication or was malformed, a final-chunk flag was changed, an
+  end event appears early, or bytes follow the final chunk. Nothing after that point is trusted.
+
+What this protects: a changed byte anywhere, reordered, dropped, repeated or foreign chunks, a cut
+anywhere, and trailing data are all detected; a damaged recording never shows altered content, only
+an authenticated prefix. What it does not: the header is cleartext (vault id, log id, key version),
+and the file's size and write times show roughly how much the session printed and when (sizes are
+rounded up to 1,024 bytes per chunk). Which host a recording belongs to, when it started and its
+title are in an encrypted record (`SessionLog`), not in the file.
