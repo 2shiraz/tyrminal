@@ -9,6 +9,16 @@ import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
+import {
+  DEFAULT_SERIAL,
+  DEFAULT_TERMINAL,
+  type ProtocolKind,
+  ProtocolSelect,
+  SerialFields,
+  TelnetWarning,
+  AgentForwarding,
+  TerminalFields,
+} from "./ProtocolFields";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -78,6 +88,11 @@ export function HostEditor({
   const [password, setPassword] = useState("");
   const [keyId, setKeyId] = useState(sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : (keys[0]?.id ?? ""));
   const { pending, error, run } = useAction();
+  // agent A: protocols
+  const [protocol, setProtocol] = useState<ProtocolKind>(host?.protocol.type ?? "ssh");
+  const [serial, setSerial] = useState(host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL);
+  const [terminal, setTerminal] = useState(host?.terminal ?? DEFAULT_TERMINAL);
+  const [forwardAgent, setForwardAgent] = useState(host?.forwardAgent ?? false);
 
   const inherited = useMemo(() => groupDefaults(groups, groupId), [groups, groupId]);
   const inheritedKey = inherited.keyId ? keys.find((k) => k.id === inherited.keyId) : undefined;
@@ -91,7 +106,12 @@ export function HostEditor({
     (authKind === "inherit" && groupId !== null) ||
     (authKind === "stored_password" && (password.length > 0 || hadStoredPassword)) ||
     (authKind === "key" && keyId !== "");
-  const ready = label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid;
+  const ready =
+    protocol === "serial"
+      ? label.trim() !== "" && serial.path.trim() !== ""
+      : protocol === "telnet"
+        ? label.trim() !== "" && address.trim() !== "" && (port === "" || portValid)
+        : label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -108,10 +128,39 @@ export function HostEditor({
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t !== "");
+    // Telnet and serial hosts sign in at the device's own prompt: no stored credentials, and the
+    // advanced connection settings (jump host, proxy) apply to SSH only.
     const saved = await run(async () => {
+      if (protocol !== "ssh") {
+        return hostsApi.save({
+          id: host?.id ?? null,
+          label,
+          address: protocol === "serial" ? serial.path : address,
+          port: protocol === "serial" ? null : portNumber,
+          username: "",
+          auth: { kind: "ask_password" },
+          groupId,
+          tags: tagList,
+          protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
+          terminal,
+          forwardAgent: false,
+        });
+      }
       // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
       await advanced.saveBefore();
-      const result = await hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList });
+      const result = await hostsApi.save({
+        id: host?.id ?? null,
+        label,
+        address,
+        port: portNumber,
+        username,
+        auth,
+        groupId,
+        tags: tagList,
+        protocol: { type: "ssh" },
+        terminal,
+        forwardAgent: forwardAgent && authKind === "key",
+      });
       await advanced.saveAfter(result.id);
       return result;
     });
@@ -123,6 +172,18 @@ export function HostEditor({
     <Dialog title={host ? msg.hosts.editorEdit : msg.hosts.editorNew} icon={<IconServer size={18} />} onDismiss={onClose}>
       <form className="stack" onSubmit={submit} aria-busy={pending}>
         <TextField label={msg.hosts.label} value={label} onChange={setLabel} autoFocus maxLength={256} />
+        <ProtocolSelect
+          value={protocol}
+          onChange={(next) => {
+            // Follow the protocol's usual port unless the user chose another.
+            if (next === "telnet" && port === "22") setPort("23");
+            if (next === "ssh" && port === "23") setPort("22");
+            setProtocol(next);
+          }}
+        />
+        {protocol === "telnet" && <TelnetWarning />}
+        {protocol === "serial" && <SerialFields value={serial} onChange={setSerial} />}
+        <TerminalFields value={terminal} onChange={setTerminal} showTerm={protocol !== "serial"} />
         {groups.length > 0 && (
           <label className="field">
             <span className="label">{msg.hosts.group}</span>
@@ -144,6 +205,7 @@ export function HostEditor({
             </select>
           </label>
         )}
+        {protocol !== "serial" && (
         <div className="split">
           <TextField label={msg.hosts.address} value={address} onChange={setAddress} hint={msg.hosts.addressHint} maxLength={253} />
           <TextField
@@ -157,6 +219,8 @@ export function HostEditor({
             error={port !== "" && !portValid ? "1–65535" : undefined}
           />
         </div>
+        )}
+        {protocol === "ssh" && (
         <TextField
           label={msg.hosts.username}
           value={username}
@@ -171,8 +235,10 @@ export function HostEditor({
               : undefined
           }
         />
+        )}
         <TextField label={msg.hosts.tags} value={tags} onChange={setTags} hint={msg.hosts.tagsHint} maxLength={600} />
 
+        {protocol === "ssh" && (
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="label" style={{ marginBottom: 6 }}>
             {msg.hosts.auth}
@@ -232,11 +298,15 @@ export function HostEditor({
             />
           )}
         </fieldset>
+        )}
 
+        {protocol === "ssh" && authKind === "key" && (
+          <AgentForwarding checked={forwardAgent} onChange={setForwardAgent} />
+        )}
         {/* agent B: tunnels and history */}
-        <HostAdvancedSection host={host} state={advanced} />
+        {protocol === "ssh" && <HostAdvancedSection host={host} state={advanced} />}
 
-        {ready && (
+        {ready && protocol === "ssh" && (
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
             {msg.hosts.effective(effectiveUser, address.trim(), effectivePort)}
           </p>

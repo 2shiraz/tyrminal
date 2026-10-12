@@ -24,6 +24,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        # A stalled cache download fails the step instead of the whole job limit.
+        timeout-minutes: 15
         with:
           cache-key: security
       - name: Install cargo-deny (pinned)

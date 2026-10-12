@@ -27,7 +27,7 @@ PerSourcePenalties no
 AllowTcpForwarding yes
 GatewayPorts no
 X11Forwarding no
-AllowAgentForwarding no
+AllowAgentForwarding yes
 PermitUserEnvironment no
 AcceptEnv TYR_*
 PrintMotd no

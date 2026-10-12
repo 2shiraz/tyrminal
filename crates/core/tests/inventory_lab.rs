@@ -80,6 +80,9 @@ fn host(label: &str, port: u16) -> HostInput {
         auth: HostAuthInput::AskPassword,
         group_id: None,
         tags: Vec::new(),
+        protocol: tyrminal_core::contracts::HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent: false,
     }
 }
 

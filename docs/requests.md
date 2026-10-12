@@ -6,3 +6,4 @@ agent (see `docs/work-split.md`); a request with no matching row gets a new `P-`
 | Date | Request | Matrix row | Phase | Owner agent | Status |
 |---|---|---|---|---|---|
 | 2026-10-12 | Import a private key from a key file (not only pasted text) | KEY-01 (key import: file or pasted text) | 04 | D | requested |
+| 2026-10-12 | Terminal output highlighting like Termius (IPs, numbers, keywords) | TRM-07 (output highlighting) | 05 | terminal input | first priority |

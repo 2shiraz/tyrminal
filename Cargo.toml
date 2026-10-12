@@ -23,6 +23,11 @@ unimplemented = "deny"
 unwrap_used = "warn"
 expect_used = "warn"
 
+# Line tables keep panics and backtraces readable while making debug builds and test binaries
+# much faster to compile and link (and CI caches smaller) than full debug info.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

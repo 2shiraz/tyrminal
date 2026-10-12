@@ -15,6 +15,9 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// A step that hangs fails after this long instead of holding a CI runner until its job limit.
+const STEP_TIMEOUT_MS = 30 * 60 * 1000;
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const labFile = join(root, "tests", "ssh-lab", ".run", "lab.json");
 const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win32" ? "tyrminal.exe" : "tyrminal");
@@ -26,6 +29,8 @@ const needsSecretStore = () => {
   if (process.platform === "linux") return process.env.DBUS_SESSION_BUS_ADDRESS ? null : "no D-Bus session bus for the Secret Service (run under dbus-run-session with gnome-keyring)";
   return "no OS secret store adapter for this platform";
 };
+
+const needsSocat = () => (spawnSync("socat", ["-V"], { stdio: "ignore" }).status === 0 ? null : "socat is not installed (a pseudo-terminal pair plays the serial device)");
 
 const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
@@ -55,11 +60,20 @@ const SUITES = {
       cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--exact", "two_gib_round_trip_is_byte_for_byte_with_bounded_memory"),
       blockedBy: () => needsLab() ?? (process.env.TYRMINAL_BIG_TRANSFER ? null : "moves 4 GiB; set TYRMINAL_BIG_TRANSFER=1 to run"),
     },
+    {
+      name: "download onto a full local disk fails cleanly",
+      cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--exact", "full_disk_download_fails_cleanly_and_leaves_nothing_behind"),
+      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_SMALL_FS ? null : "needs a tiny filesystem; set TYRMINAL_SMALL_FS to a folder on one"),
+    },
   ],
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
+    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
+    // Pseudo-terminals stand in for serial devices on Unix only; Windows serial is untested.
+    ...(process.platform === "win32"
+      ? []
+      : [{ name: "serial host over a pseudo-terminal pair", cmd: cargo("test", "-p", "tyrminal-core", "--test", "protocols", "--quiet", "--", "--ignored"), blockedBy: needsSocat }]),
     // agent B: tunnels and history
     { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
@@ -72,20 +86,20 @@ const SUITES = {
     { name: "vault service: canary scan, tampering, lock races", cmd: cargo("test", "-p", "tyrminal-core", "--test", "vault_service", "--quiet") },
     { name: "storage: permissions, foreign/newer files, atomicity", cmd: cargo("test", "-p", "tyrminal-storage", "--quiet") },
     { name: "host trust and credentials ordering (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored", "host_key", "credentials"), blockedBy: needsLab },
-    { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
+    { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
     // agent B: tunnels and history
     { name: "listener exposure, denied forwarding, link-loss cleanup (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored", "never_bind", "denies", "lost_link", "limit"), blockedBy: needsLab },
     { name: "changed bastion key, proxy auth rejection, impostor proxy (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored", "bastion", "proxy", "scoped"), blockedBy: needsLab },
   ],
   native: [
-    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
-    { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
-    { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 
@@ -107,9 +121,10 @@ for (const step of suite) {
     continue;
   }
   const started = Date.now();
-  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024 });
+  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024, timeout: STEP_TIMEOUT_MS });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const ok = run.status === 0;
+  if (run.error?.code === "ETIMEDOUT") run.stderr = `${run.stderr ?? ""}\nstep timed out after ${STEP_TIMEOUT_MS / 60000} minutes`;
   console.log(`${ok ? "ok     " : "FAILED "}  ${step.name}  (${seconds}s, exit ${run.status})\n         $ ${line}`);
   if (!ok) {
     const lines = `${run.stdout}${run.stderr}`.trim().split("\n");

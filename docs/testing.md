@@ -77,3 +77,28 @@ No retries and no blind sleeps. Every intermittent failure so far was investigat
 cause, and each is recorded in `docs/progress.md`. Suites were then run repeatedly: the lab suite
 12 times, the PTY suite 30 times, the core session suite 6 times and the native suite 25 times,
 all passing.
+
+## CI cost
+
+- `ci.yml` runs on pull requests and on `main` (not on every branch push, which ran it twice).
+- `native.yml` skips `verify:fast` on Linux (the CI workflow runs it) and, on pull requests,
+  checks the release policy statically instead of building the optimized release binary. `main`,
+  manual runs and the release workflow still build and inspect the real binary.
+- Debug builds keep line tables only (`[profile.dev] debug = "line-tables-only"`): readable
+  panics and backtraces with much faster compiling and linking.
+- A pull request that changes only documentation (`docs/`, `.claude/`, Markdown) skips the native
+  suites; the job still reports success. Any other file runs everything.
+- The integration, security, transfer and end-to-end steps have their own timeouts (15–25 min), so
+  a hang fails within minutes instead of holding the runner for the 2-hour job limit.
+- The release workflow packages installers alongside its test workflows; publishing waits for
+  packaging and every test workflow.
+
+## Upgrades and installers (Phase 09)
+
+- `crates/core/tests/upgrade.rs` opens vaults written by earlier releases
+  (`tests/fixtures/upgrade/`, synthetic data) and checks everything is still there; it runs
+  with the normal Rust tests. Add a fixture whenever a release changes the schema, a record
+  format or the preferences file.
+- `scripts/ci/installer-smoke.mjs` runs in the native workflow on `main`, manual runs and releases, on each platform: install the
+  package as a user would, start the app, uninstall, and check the user's data folder is kept.
+  It refuses to run outside CI.
