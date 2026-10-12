@@ -34,6 +34,7 @@ import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
+import { flashSaved, useFlip } from "../../lib/motion";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -107,6 +108,8 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
 
 export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
   const { hosts, keys, recent, groups } = useVaultData();
+  const listRef = useRef<HTMLUListElement>(null);
+  useFlip(listRef);
   const notify = useToast();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
@@ -510,11 +513,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
 
           {layout === "grid" ? (
-            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list">
+            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
               {filtered.map((host) => {
                 const isConnected = connected.has(host.id);
                 return (
-                  <li key={host.id}>
+                  <li key={host.id} data-flip-key={host.id}>
                     <article
                       className="host-card"
                       data-connected={isConnected}
@@ -605,9 +608,9 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               })}
             </ul>
           ) : (
-            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list">
+            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
               {filtered.map((host) => (
-                <li key={host.id} data-active={panelHostId === host.id}>
+                <li key={host.id} data-flip-key={host.id} data-active={panelHostId === host.id}>
                   <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onClick={(event) => toggle(host.id, event)} readOnly />
                   {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                   <div className="row-main">
@@ -664,6 +667,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             const mine = panel.version;
             setPanel((current) => (current && current.version === mine ? { ...current, target: { kind: "edit", host: saved } } : current));
             reload();
+            // The saved row tints once, so the change is seen in the list as well as the panel.
+            requestAnimationFrame(() => flashSaved(listRef.current?.querySelector<HTMLElement>(`[data-flip-key="${CSS.escape(saved.id)}"]`)));
           }}
           onConnect={(host) => guard(() => onConnect(host))}
           onDuplicate={(host) => void duplicate(host)}
