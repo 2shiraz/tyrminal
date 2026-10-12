@@ -2330,7 +2330,21 @@ button.home-row:focus-visible {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   font-weight: var(--weight-medium);
+  text-align: start;
+  cursor: default;
+}
+
+.home-host:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .home-hosts td:first-child {
@@ -3186,26 +3200,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
-.host-select {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 1;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-out);
-}
-
-.host-card:hover .host-select,
-.host-card:focus-within .host-select,
-.host-select:checked,
-.host-select[data-visible="true"] {
-  opacity: 1;
-}
-
 .host-card-tags {
   display: flex;
   flex-wrap: wrap;
@@ -3246,8 +3240,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip,
-  .host-select {
+  .chip {
     transition: none;
   }
 }
@@ -3869,13 +3862,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .os-icon {
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.toolbar .select-all {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
 }
 
 .connect-all-list {
@@ -4821,4 +4807,46 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .list > li[data-pending] {
   cursor: progress;
   opacity: 0.75;
+}
+
+/* Multi-select on Hosts: selected rows and cards take the accent fill; the active (details)
+   host keeps its own marker on top. */
+.host-card[data-selected="true"],
+.tile[data-selected="true"],
+.list > li[data-selected="true"] {
+  /* The row tint plus the accent edge on the left: selection reads without any checkbox. */
+  background: var(--bg-selected);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: var(--edge-select);
+}
+
+.list > li[data-selected="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* The selection strip (two or more hosts): one compact line above the list. */
+.bulk-bar.box-strip {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: var(--space-2);
+  padding-block: var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-radius: var(--radius-panel);
+  background: var(--bg-selected);
+  font-size: var(--text-sm);
+}
+
+.bulk-bar > strong {
+  flex: none;
+  padding-inline: var(--space-1);
+}
+
+.bulk-bar .btn {
+  flex: none;
+}
+
+.host-open:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

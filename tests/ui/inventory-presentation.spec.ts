@@ -16,6 +16,7 @@ async function openHosts(page: Page) {
   await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
 }
 
+const name = (page: Page, label: string) => page.getByTestId("host-list").getByRole("button", { name: label, exact: true });
 const hostCards = (page: Page) => page.getByTestId("host-list").getByRole("article");
 const labels = (page: Page) => hostCards(page).evaluateAll((cards) => cards.map((c) => c.getAttribute("aria-label")));
 
@@ -80,31 +81,34 @@ test("Hosts opens as a list by default; Cards, once chosen, stays after other vi
 test("select all shown hosts and shift-click a range", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
-  const all = page.getByRole("checkbox", { name: "Select all shown hosts" });
-  await all.check();
+  // No checkboxes: the selection is the row tint and edge, and the strip counts it.
+  await expect(page.getByTestId("host-list").getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: "Select all shown hosts" })).toHaveCount(0);
+  await name(page, "api-gateway").focus();
+  await page.keyboard.press("ControlOrMeta+a");
   await expect(page.getByTestId("bulk-bar")).toContainText("6 selected");
-  await all.uncheck();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
 
-  await page.getByRole("checkbox", { name: "Select build-runner-03" }).click();
-  await page.getByRole("checkbox", { name: "Select Home lab" }).click({ modifiers: ["Shift"] });
+  await name(page, "build-runner-03").click();
+  await name(page, "Home lab").click({ modifiers: ["Shift"] });
   await expect(page.getByTestId("bulk-bar")).toContainText("4 selected");
-  await expect(all).not.toBeChecked();
-  expect(await all.evaluate((el) => (el as HTMLInputElement).indeterminate)).toBe(true);
 
   // Search narrows what "all shown" means.
   await page.getByRole("button", { name: "Clear selection" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Search hosts" }).fill("tag:prod");
   await expect(hostCards(page)).toHaveCount(2);
-  await all.check();
+  await name(page, "api-gateway").focus();
+  await page.keyboard.press("ControlOrMeta+a");
   await expect(page.getByTestId("bulk-bar")).toContainText("2 selected");
 });
 
 test("set the OS of selected hosts: the tile shows its icon", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
-  await page.getByRole("checkbox", { name: "Select edge-cache" }).check();
-  await page.getByRole("checkbox", { name: "Select staging-web" }).check();
+  await name(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await name(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Set OS" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Operating system").selectOption({ label: "Debian" });
@@ -154,14 +158,16 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
   // Twelve sessions open (six hosts, twice), so four more fit.
   for (let round = 0; round < 2; round++) {
     await openHosts(page);
-    await page.getByRole("checkbox", { name: "Select all shown hosts" }).check();
+    await name(page, "api-gateway").focus();
+    await page.keyboard.press("ControlOrMeta+a");
     await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
   // As above: the first terminals take a few seconds to start on the test runner's emulated GPU.
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length, { timeout: 15_000 }).toBe(12);
   await openHosts(page);
-  await page.getByRole("checkbox", { name: "Select all shown hosts" }).check();
+  await name(page, "api-gateway").focus();
+  await page.keyboard.press("ControlOrMeta+a");
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("alert")).toContainText("Only 4 more sessions can be open at once");

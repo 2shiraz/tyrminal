@@ -12,6 +12,8 @@ import { BoxEmpty, relativeTime } from "../../components/ui/controls";
 import { IconPlay, IconServer, IconX } from "../../components/ui/icons";
 import { securityReview as reviewApi, tunnels as tunnelsApi, vault as vaultApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgSelect } from "../../lib/messages-select";
+import { isMac } from "../../lib/platform";
 import { msgC } from "../../lib/messages-c";
 import { severityOf } from "../security-review/SecurityReviewSection";
 import type { PaneStatus } from "../terminal/TerminalView";
@@ -69,7 +71,19 @@ export function SessionsBox({
  * Saved hosts, most recently used first. A click selects a row and a double-click connects; the
  * Connect button in each row is the keyboard and assistive-technology path.
  */
-export function HostsBox({ onConnect, onAllHosts }: { onConnect: (host: HostSummary) => void; onAllHosts: () => void }) {
+export function HostsBox({
+  onConnect,
+  onConnectSplit,
+  onSftpHost,
+  onAllHosts,
+}: {
+  onConnect: (host: HostSummary) => void;
+  /** Cmd/Ctrl+Enter on a host. */
+  onConnectSplit?: ((host: HostSummary) => void) | undefined;
+  /** Shift+Enter on a host (SSH hosts). */
+  onSftpHost?: ((host: HostSummary) => void) | undefined;
+  onAllHosts: () => void;
+}) {
   const { hosts } = useVaultData();
   const [selected, setSelected] = useState<string | null>(null);
   const all = hosts.value ?? [];
@@ -96,28 +110,34 @@ export function HostsBox({ onConnect, onAllHosts }: { onConnect: (host: HostSumm
                 <th scope="col">{msg.home.colAddress}</th>
                 <th scope="col">{msg.home.colSignIn}</th>
                 <th scope="col">{msg.home.colWhen}</th>
-                <th scope="col">
-                  <span className="visually-hidden">{msg.home.connect}</span>
-                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((host) => (
+                // Like rows on Hosts: a click selects, double-click or Enter connects (no Connect button).
                 <tr key={host.id} className={selected === host.id ? "is-selected" : undefined} onClick={() => setSelected(host.id)} onDoubleClick={() => onConnect(host)}>
                   <td>
-                    <span className="home-host">
+                    <button
+                      type="button"
+                      className="home-host"
+                      title={msgSelect.doubleClickHint}
+                      onFocus={() => setSelected(host.id)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        if ((isMac ? event.metaKey : event.ctrlKey) && onConnectSplit) onConnectSplit(host);
+                        else if (event.shiftKey) {
+                          if (onSftpHost && host.protocol.type === "ssh") onSftpHost(host);
+                        } else onConnect(host);
+                      }}
+                    >
                       <IconServer size={14} className="faint" />
                       <span className="truncate">{host.label}</span>
-                    </span>
+                    </button>
                   </td>
                   <td className="mono muted">{msg.hosts.destination(host.username, host.address, host.port)}</td>
                   <td className="muted">{msg.home.signIn[host.auth.kind]}</td>
                   <td className="muted">{host.lastConnectedAt ? relativeTime(host.lastConnectedAt) : msg.home.never}</td>
-                  <td className="dt-action">
-                    <button type="button" className="btn btn-ghost btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
-                      {msg.home.connect}
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>

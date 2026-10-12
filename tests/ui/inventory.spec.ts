@@ -47,8 +47,9 @@ test("search goes through the core and understands tag: and group:", async ({ pa
 
 test("bulk: select hosts, add a tag and move them, all in one call each", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("checkbox", { name: "Select edge-cache" }).check();
-  await page.getByRole("checkbox", { name: "Select staging-web" }).check();
+  const name = (label: string) => page.getByTestId("host-list").getByRole("button", { name: label, exact: true });
+  await name("edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await name("staging-web").click({ modifiers: ["ControlOrMeta"] });
   const bar = page.getByTestId("bulk-bar");
   await expect(bar).toContainText("2 selected");
 
@@ -60,12 +61,16 @@ test("bulk: select hosts, add a tag and move them, all in one call each", async 
   expect(add?.args).toMatchObject({ change: { kind: "add_tag", tag: "legacy" } });
   await expect(hostCards(page).filter({ hasText: "legacy" })).toHaveCount(2);
 
-  await page.getByRole("checkbox", { name: "Select edge-cache" }).check();
+  // The strip shows from two hosts on: move both tagged hosts to Lab, which holds Home lab.
+  await name("edge-cache").click();
+  await name("staging-web").click({ modifiers: ["ControlOrMeta"] });
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Move to group" }).click();
   await page.getByRole("dialog").getByRole("combobox").selectOption({ label: "Lab" });
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  const [move] = (await calls(page, "host_bulk")).slice(-1);
+  expect(move?.args).toMatchObject({ change: { kind: "move_to_group" } });
   await page.getByTestId("group-bar").getByRole("button", { name: "Lab", exact: true }).click();
-  await expect(hostCards(page)).toHaveCount(2);
+  await expect(hostCards(page)).toHaveCount(3);
 });
 
 test("duplicate creates a full copy through the core", async ({ page }) => {

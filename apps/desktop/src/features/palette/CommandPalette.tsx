@@ -47,7 +47,8 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 import { msgRuns } from "../../lib/messages-runs";
 import { msgOutput } from "../../lib/messages-output";
-import { keyLabels } from "../../lib/platform";
+import { msgSelect } from "../../lib/messages-select";
+import { isMac, keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 // privilege prompts (KEY-18)
 import { msgP } from "../../lib/messages-privilege";
@@ -68,6 +69,9 @@ interface Item {
   shortcut?: ActionId | undefined;
   keywords?: string | undefined;
   run: () => void;
+  /** Hosts: Cmd/Ctrl+Enter opens in a split, Shift+Enter in SFTP. */
+  runSplit?: (() => void) | undefined;
+  runSftp?: (() => void) | undefined;
 }
 
 /**
@@ -112,6 +116,7 @@ export function CommandPalette({
   terminalConnected,
   onClose,
   onConnect,
+  onConnectSplit,
   onNavigate,
   onAction,
   onToggleTheme,
@@ -140,6 +145,8 @@ export function CommandPalette({
   terminalConnected: boolean;
   onClose: () => void;
   onConnect: (host: HostSummary) => void;
+  /** Cmd/Ctrl+Enter on a host: beside the focused pane. */
+  onConnectSplit?: ((host: HostSummary) => void) | undefined;
   onNavigate: (d: Destination) => void;
   onAction: (a: ActionId) => void;
   onToggleTheme: () => void;
@@ -219,6 +226,10 @@ export function CommandPalette({
   }, []);
 
   const items = useMemo<Item[]>(() => {
+    const hostAlternatives = (host: HostSummary) => ({
+      runSplit: onConnectSplit ? () => onConnectSplit(host) : undefined,
+      runSftp: onSftpHost && host.protocol.type === "ssh" ? () => onSftpHost(host) : undefined,
+    });
     const list: Item[] = [];
     if (pick) {
       for (const host of hosts.value ?? []) {
@@ -258,6 +269,7 @@ export function CommandPalette({
         keywords: `${host.address} ${host.username}`,
         icon: <Avatar label={host.label} size="sm" />,
         run: () => onConnect(host),
+        ...hostAlternatives(host),
       });
     }
     for (const host of hosts.value ?? []) {
@@ -270,6 +282,7 @@ export function CommandPalette({
         keywords: `${host.address} ${host.username}`,
         icon: <Avatar label={host.label} size="sm" />,
         run: () => onConnect(host),
+        ...hostAlternatives(host),
       });
     }
     if (hasTerminal && terminalConnected) {
@@ -426,7 +439,7 @@ export function CommandPalette({
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;
-  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onRunAllOpen, onLocal, onSftp, onSftpHost, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onConnectSplit, onSnippet, onRunAllOpen, onLocal, onSftp, onSftpHost, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items
@@ -474,11 +487,13 @@ export function CommandPalette({
     onClose();
   }
 
-  function choose(index: number) {
+  function choose(index: number, how: "run" | "split" | "sftp" = "run") {
     const result = results[index];
     if (!result) return;
+    const run = how === "split" ? result.item.runSplit : how === "sftp" ? result.item.runSftp : result.item.run;
+    if (!run) return;
     dismiss();
-    result.item.run();
+    run();
   }
 
   let lastGroup = "";
@@ -517,7 +532,7 @@ export function CommandPalette({
               setSelected((s) => Math.max(0, s - 1));
             } else if (event.key === "Enter") {
               event.preventDefault();
-              choose(selected);
+              choose(selected, (isMac ? event.metaKey : event.ctrlKey) ? "split" : event.shiftKey ? "sftp" : "run");
             }
           }}
         />
@@ -565,6 +580,16 @@ export function CommandPalette({
         <span>
           <IconCornerDownLeft size={12} /> {msg.palette.run}
         </span>
+        {results[selected]?.item.runSplit && (
+          <span>
+            <Keys caps={[isMac ? "⌘" : "Ctrl", "↵"]} /> {msgSelect.inSplit}
+          </span>
+        )}
+        {results[selected]?.item.runSftp && (
+          <span>
+            <Keys caps={["⇧", "↵"]} /> {msgSelect.inSftp}
+          </span>
+        )}
         <span>
           <Keys caps={[keyLabels.esc]} /> {msg.palette.close}
         </span>
