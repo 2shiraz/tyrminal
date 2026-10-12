@@ -327,3 +327,58 @@ test.describe("glides and lists", () => {
     expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
   });
 });
+
+// Host details (owner request): opened by a click, the content slides in while the cards glide to
+// the narrower list; switching hosts only crossfades; keyboard and reduced motion are instant.
+test.describe("host details", () => {
+  const panelContent = (page: Page) =>
+    page.getByTestId("host-panel").evaluate((el) =>
+      [...el.children]
+        .filter((c) => !c.classList.contains("resize-handle"))
+        .flatMap((c) => c.getAnimations().map((a) => Object.keys((a.effect as KeyframeEffect).getKeyframes()[0] ?? {}).filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)).sort().join("+"))),
+    );
+  async function toHosts(page: Page) {
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+    await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
+  }
+
+  test("a click slides the content in; switching hosts only crossfades; closing by pointer fades a copy", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    const list = page.getByTestId("host-list");
+    await list.getByRole("button", { name: "staging-web", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(new Set(await panelContent(page))).toEqual(new Set(["opacity+transform"]));
+    await expect.poll(() => panelContent(page)).toEqual([]);
+
+    await list.getByRole("button", { name: "edge-cache", exact: true }).click();
+    await expect(page.getByTestId("host-panel-location")).toBeVisible();
+    await expect.poll(async () => new Set(await panelContent(page))).toEqual(new Set(["opacity"]));
+
+    await page.getByTestId("host-panel").getByRole("button", { name: "Close host details" }).click();
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(1);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(0);
+  });
+
+  test("opened from the keyboard, or under reduced motion, the panel is simply there", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    await page.getByRole("button", { name: "New host", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    expect(await page.locator("[data-exit-ghost]").count()).toBe(0);
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await page.getByRole("button", { name: "New host", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
+  });
+});
