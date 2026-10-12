@@ -60,6 +60,9 @@ import { msgC } from "../lib/messages-c";
 // quick connect
 import { msgQuick } from "../lib/messages-quick";
 import { type QuickTarget, forgetQuick, formatTarget, startQuick } from "../lib/quickConnect";
+// new-tab page
+import type { StartHandlers } from "../components/layout/PaneGrid";
+import { msgStart } from "../lib/messages-start";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
@@ -395,6 +398,25 @@ function Shell() {
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
   // An SFTP tab: two file panes (this computer and a host picker); never split.
   const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
+  // The new-tab page: what is picked in it opens in that same tab, in place of the page.
+  const openStart = useCallback(() => open({ kind: "start" }, msgStart.tabTitle, msgStart.identity), [open]);
+  const startHandlers = useMemo<StartHandlers>(() => {
+    const replace = (paneId: number, seed: { target: PaneTarget; label: string; identity: string }) => setWs((current) => retargetPane(current, paneId, seed));
+    return {
+      hostIdentity,
+      onHost: (paneId, host) => {
+        replace(paneId, { target: { kind: "ssh", hostId: host.id }, label: host.label, identity: hostIdentity(host) });
+        window.setTimeout(() => void reloadRecent(), 3_000);
+      },
+      onQuick: (paneId, target) => replace(paneId, { target: { kind: "quick", token: startQuick(target) }, label: target.address, identity: formatTarget(target) }),
+      onLocal: (paneId) => replace(paneId, { target: { kind: "local" }, label: msg.nav.localTerminal, identity: msg.terminal.local }),
+      onSftp: (paneId) => replace(paneId, { target: { kind: "sftp" }, label: msgSftp.tabTitle, identity: msgSftp.view }),
+      onHosts: (paneId) => {
+        setWs((current) => closePane(current, paneId));
+        navigate("hosts");
+      },
+    };
+  }, [reloadRecent, navigate]);
   /**
    * Open in SFTP: focuses the SFTP tab in front (or the first one; a new one when there is none)
    * and shows `host` in its right pane, at `path` when given.
@@ -527,6 +549,10 @@ function Shell() {
         notify("danger", msgQuick.noDetach);
         return;
       }
+      if (ids.some((id) => wsRef.current.panes[id]?.target.kind === "start")) {
+        notify("danger", msgStart.noDetach);
+        return;
+      }
       const live = ids.map((id) => handles.current.get(id)).filter((h) => h?.connected() && h.sessionId());
       if (live.length !== ids.length) {
         notify("danger", msgC.detach.notConnected);
@@ -616,6 +642,9 @@ function Shell() {
           break;
         case "newLocal":
           openLocal();
+          break;
+        case "newTabPage":
+          openStart();
           break;
         case "closePane":
           closeFocused();
@@ -777,7 +806,7 @@ function Shell() {
           break;
       }
     },
-    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate, notify, seedFor],
+    [openLocal, openStart, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate, notify, seedFor],
   );
 
   // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys
@@ -807,8 +836,9 @@ function Shell() {
   }, [runAction]);
 
   const terminalVisible = tab !== null;
-  const sftpVisible = pane?.target.kind === "sftp";
-  const showPanel = sidePanel !== null && terminalVisible && !sftpVisible;
+  // A tab that is not a terminal (SFTP, the new-tab page): no terminal status bar or side panels.
+  const pageVisible = pane?.target.kind === "sftp" || pane?.target.kind === "start";
+  const showPanel = sidePanel !== null && terminalVisible && !pageVisible;
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
   // server at a glance: SSH sessions only (a negotiated SSH connection; never Telnet or serial).
@@ -1025,6 +1055,7 @@ function Shell() {
           onDetach={detachById}
           onNewLocal={openLocal}
           onNewSftp={openSftp}
+          onNewTab={openStart}
           onOpenPalette={openPalette}
           finished={finished}
           recent={recentItems}
@@ -1076,6 +1107,7 @@ function Shell() {
                 onConnect={onConnectPanes}
                 onClose={onClosePane}
                 onQuickSaved={onQuickSaved}
+                start={startHandlers}
                 onSplit={onSplitPane}
                 onRatio={onRatio}
                 onOpenKnownHosts={openKnownHosts}
@@ -1090,16 +1122,16 @@ function Shell() {
         </main>
 
         <StatusBar
-          pane={terminalVisible && !sftpVisible ? pane : null}
-          status={terminalVisible && !sftpVisible ? paneStatus : undefined}
+          pane={terminalVisible && !pageVisible ? pane : null}
+          status={terminalVisible && !pageVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible && !sftpVisible ? toggleSnippets : undefined}
+          onTogglePanel={terminalVisible && !pageVisible ? toggleSnippets : undefined}
           filesOpen={sidePanel === "files"}
-          onToggleFiles={terminalVisible && !sftpVisible ? toggleFiles : undefined}
+          onToggleFiles={terminalVisible && !pageVisible ? toggleFiles : undefined}
           serverOpen={sidePanel === "server"}
-          onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? toggleServer : undefined}
+          onToggleServer={terminalVisible && !pageVisible && (glanceTarget || sidePanel === "server") ? toggleServer : undefined}
           notesOpen={sidePanel === "notes"}
-          onToggleNotes={terminalVisible && !sftpVisible ? toggleNotes : undefined}
+          onToggleNotes={terminalVisible && !pageVisible ? toggleNotes : undefined}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
@@ -1137,7 +1169,7 @@ function Shell() {
       {paletteOpen && (
         <CommandPalette
           onSftpHost={(host) => openSftpHost(host)}
-          hasTerminal={terminalVisible && pane !== null && !sftpVisible}
+          hasTerminal={terminalVisible && pane !== null && !pageVisible}
           terminalConnected={paneStatus?.state === "connected"}
           onClose={() => {
             setPaletteOpen(false);
