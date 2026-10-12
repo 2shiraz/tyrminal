@@ -249,8 +249,19 @@ test("closing with the pointer narrows the tab to nothing, then removes it", asy
   await page.waitForTimeout(400);
   const target = terminalTabs(page).nth(1);
   await target.hover();
-  const frames = await sampleWidths(page, 1, 2, () => target.locator(".tab-close").click(), 120);
-  const widths = frames.map((f) => f[0]);
+  // Sample the closing tab itself, by reference, until it leaves the page: sampling by position
+  // would read the next tab once this one is gone.
+  await target.evaluate((el) => {
+    const w = window as unknown as { __closing: number[]; __closingSampler: number };
+    w.__closing = [el.getBoundingClientRect().width];
+    w.__closingSampler = window.setInterval(() => {
+      if (el.isConnected) w.__closing.push(el.getBoundingClientRect().width);
+      else window.clearInterval(w.__closingSampler);
+    }, 8);
+  });
+  await target.locator(".tab-close").click();
+  await expect(terminalTabs(page)).toHaveCount(2);
+  const widths = await page.evaluate(() => (window as unknown as { __closing: number[] }).__closing);
   expect(widths[0]).toBeGreaterThan(100);
   expect(widths.filter((w) => w > 1 && w < widths[0]! - 1).length).toBeGreaterThanOrEqual(2);
   for (let k = 1; k < widths.length; k += 1) expect(widths[k]!).toBeLessThanOrEqual(widths[k - 1]! + 0.5);
