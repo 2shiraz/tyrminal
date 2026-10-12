@@ -125,11 +125,34 @@ pub(crate) struct StoredConnection {
     /// Host id of the jump host (`ProxyJump`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jump_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<StoredProxy>,
+}
+
+/// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub(crate) struct StoredProxy {
+    pub kind: tyrminal_contracts::ProxyType,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
 }
 
 impl StoredConnection {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Bytes of strings this adds to a host record (for the record's size reservation).
+    pub fn content_len(&self) -> usize {
+        self.jump_host.as_ref().map_or(0, String::len)
+            + self
+                .proxy
+                .as_ref()
+                .map_or(0, |p| p.host.len() + p.username.len() + p.password.as_ref().map_or(0, |s| s.len()))
     }
 }
 

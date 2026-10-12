@@ -498,7 +498,7 @@ async fn next_decision(events: &mut mpsc::UnboundedReceiver<SessionEvent>) -> Se
 }
 
 async fn jump_to(f: &Fixture, host: &str, via: &str) {
-    let connection = tyrminal_core::contracts::HostConnection { jump_host_id: Some(via.into()) };
+    let connection = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(via.into()) };
     f.core.vault.set_host_connection(host, connection).await.unwrap();
 }
 
@@ -615,12 +615,14 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
     let a = f.host_at(&user, "a", f.lab.port_of("a")).await;
     let b = f.host_at(&user, "b", f.lab.port_of("b")).await;
     jump_to(&f, &b, &a).await;
-    let looped = tyrminal_core::contracts::HostConnection { jump_host_id: Some(b.clone()) };
+    let looped = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(b.clone()) };
     assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
-    let itself = tyrminal_core::contracts::HostConnection { jump_host_id: Some(a.clone()) };
+    let itself = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(a.clone()) };
     assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
-    let missing =
-        tyrminal_core::contracts::HostConnection { jump_host_id: Some("00000000000000000000000000000000".into()) };
+    let missing = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some("00000000000000000000000000000000".into()),
+    };
     assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
 
     // Editing the host's basics keeps its jump host; the setting survives a lock.
@@ -643,4 +645,116 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
     // Duplicates keep the route.
     let copy = f.core.vault.duplicate_host(&b).await.unwrap();
     assert_eq!(f.core.vault.host_connection(&copy.id).await.unwrap().jump_host_id, Some(a));
+}
+
+// ---------- proxies ----------
+
+const PROXY_USER: &str = "proxy-user";
+const PROXY_PASSWORD: &str = "canary-proxy-pass-91c2";
+
+/// A minimal HTTP CONNECT proxy with Basic authentication; counts the tunnels it opened.
+async fn http_proxy() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let tunnels = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&tunnels);
+    // base64("proxy-user:canary-proxy-pass-91c2"), computed independently of the client.
+    let expected = "Proxy-Authorization: Basic cHJveHktdXNlcjpjYW5hcnktcHJveHktcGFzcy05MWMy\r\n";
+    tokio::spawn(async move {
+        while let Ok((mut client, _)) = listener.accept().await {
+            let count = Arc::clone(&count);
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if client.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8(head).unwrap();
+                if !head.contains(expected) {
+                    let _ = client.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n").await;
+                    return;
+                }
+                let target = head.split(' ').nth(1).unwrap().to_owned();
+                let mut upstream = TcpStream::connect(target.as_str()).await.unwrap();
+                count.fetch_add(1, Ordering::SeqCst);
+                client.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n").await.unwrap();
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+            });
+        }
+    });
+    (port, tunnels)
+}
+
+fn proxy_input(port: u16, password: Option<&str>) -> tyrminal_core::contracts::HostConnectionInput {
+    tyrminal_core::contracts::HostConnectionInput {
+        jump_host_id: None,
+        proxy: Some(tyrminal_core::contracts::ProxyInput {
+            kind: tyrminal_core::contracts::ProxyType::Http,
+            host: "127.0.0.1".into(),
+            port,
+            username: PROXY_USER.into(),
+            password: password.map(Into::into),
+        }),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_behind_an_authenticated_proxy_connects_and_a_wrong_password_is_refused() {
+    use std::sync::atomic::Ordering;
+    let f = fixture().await;
+    let (proxy_port, tunnels) = http_proxy().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    f.core.vault.set_host_connection(&host, proxy_input(proxy_port, Some(PROXY_PASSWORD))).await.unwrap();
+
+    // The password is write-only: the settings say one is stored, never what it is.
+    let settings = f.core.vault.host_connection(&host).await.unwrap();
+    let proxy = settings.proxy.clone().unwrap();
+    assert!(proxy.password_stored);
+    assert!(!format!("{settings:?}").contains(PROXY_PASSWORD));
+
+    let mut session = f.connect(WINDOW, &host).await;
+    assert_eq!(tunnels.load(Ordering::SeqCst), 1, "the session went through the proxy");
+    // A tunnel on the proxied session (FWD-09): its traffic rides the same proxied link.
+    let echo = echo_server().await;
+    let rule = f.rule(&host, TunnelKind::Local, echo).await;
+    let run = f.core.sessions.start_tunnel(WINDOW, &session.id, &rule).await.unwrap();
+    assert!(echoes(loopback(run.bound_port), b"through the proxy").await);
+    assert_eq!(tunnels.load(Ordering::SeqCst), 1, "a forward opens no new proxy connection");
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    session.closed().await;
+
+    // Saving without a password keeps the stored one.
+    f.core.vault.set_host_connection(&host, proxy_input(proxy_port, None)).await.unwrap();
+    let mut session = f.connect(WINDOW, &host).await;
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    session.closed().await;
+    assert_eq!(tunnels.load(Ordering::SeqCst), 2);
+
+    // A wrong password: refused by the proxy, reported as such, and the secret is in no message.
+    f.core.vault.set_host_connection(&host, proxy_input(proxy_port, Some("wrong-password"))).await.unwrap();
+    let (tx, mut events) = mpsc::unbounded_channel();
+    f.core.sessions.open_ssh(WINDOW, &host, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
+    let error = loop {
+        match tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap() {
+            SessionEvent::Closed { error, .. } => break error.expect("an error"),
+            SessionEvent::TrustPrompt { .. } => panic!("no server may be reached through a refused proxy"),
+            _ => {}
+        }
+    };
+    assert_eq!(error.code, ErrorCode::AuthFailed);
+    assert_eq!(error.message, "The proxy did not accept the user name and password.");
+    assert_eq!(tunnels.load(Ordering::SeqCst), 2);
+
+    // Changing the user name drops the stored password rather than sending it to a new identity.
+    let mut other_user = proxy_input(proxy_port, None);
+    if let Some(p) = other_user.proxy.as_mut() {
+        p.username = "someone-else".into();
+    }
+    f.core.vault.set_host_connection(&host, other_user).await.unwrap();
+    assert!(!f.core.vault.host_connection(&host).await.unwrap().proxy.unwrap().password_stored);
 }

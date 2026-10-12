@@ -13,15 +13,20 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tyrminal_contracts::limits::{MAX_ACTIVE_TUNNELS, MAX_CHAIN_HOPS, MAX_ENDED_TUNNELS, MAX_TUNNEL_CONNECTIONS};
-use tyrminal_contracts::{ActiveTunnel, ErrorCode, IpcError, TunnelInput, TunnelKind, TunnelState, TunnelSummary};
+use tyrminal_contracts::{
+    ActiveTunnel, ErrorCode, IpcError, ProxyInput, ProxySummary, ProxyType, TunnelInput, TunnelKind, TunnelState,
+    TunnelSummary,
+};
 use tyrminal_ssh::{
     BindScope, DynamicForward, ForwardEnd, ForwardError, ForwardHandle, LocalForward, RemoteForward, StatsSnapshot,
     VerifiedConnection, local_bind_addr, local_bind_scope, remote_bind_scope,
 };
+use tyrminal_ssh::{ProxyError, ProxyKind, ProxySpec};
 use tyrminal_vault::Id;
+use zeroize::Zeroizing;
 
 use crate::error::{err, invalid, not_found};
-use crate::records::TunnelRecord;
+use crate::records::{StoredProxy, TunnelRecord};
 use crate::sessions::{Sessions, random_token};
 use crate::validate;
 
@@ -106,6 +111,88 @@ pub(crate) fn normalize(input: &TunnelInput) -> Result<TunnelRecord, IpcError> {
         auto_start: input.auto_start,
         updated_at: 0,
     })
+}
+
+// ---------- proxies ----------
+
+/// How long reaching a proxy, and its handshake, may take.
+const PROXY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+pub(crate) fn proxy_summary(proxy: &StoredProxy) -> ProxySummary {
+    ProxySummary {
+        kind: proxy.kind,
+        host: proxy.host.clone(),
+        port: proxy.port,
+        username: proxy.username.clone(),
+        password_stored: proxy.password.is_some(),
+    }
+}
+
+pub(crate) fn proxy_spec(proxy: &StoredProxy) -> ProxySpec {
+    let credentials = if proxy.username.is_empty() {
+        None
+    } else {
+        let password = proxy.password.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())).unwrap_or_default();
+        Some((proxy.username.clone(), password))
+    };
+    ProxySpec {
+        kind: match proxy.kind {
+            ProxyType::Http => ProxyKind::Http,
+            ProxyType::Socks5 => ProxyKind::Socks5,
+        },
+        host: proxy.host.clone(),
+        port: proxy.port,
+        credentials,
+        timeout: PROXY_TIMEOUT,
+    }
+}
+
+/// Validates proxy settings. A `None` password keeps the stored one (same user name only), so
+/// the renderer never needs to hold it; an empty user name means no authentication.
+pub(crate) fn normalize_proxy(input: &ProxyInput, existing: Option<&StoredProxy>) -> Result<StoredProxy, IpcError> {
+    let host =
+        validate::address(&input.host).map_err(|_| invalid("Enter the proxy as a host name or an IP address."))?;
+    if input.port == 0 {
+        return Err(invalid("Enter the proxy's port (1-65535)."));
+    }
+    let username = input.username.trim().to_owned();
+    if username.len() > 255 || username.contains(':') || username.chars().any(char::is_control) {
+        return Err(invalid("The proxy user name must be at most 255 bytes, without colons or control characters."));
+    }
+    let password = if username.is_empty() {
+        None
+    } else {
+        match &input.password {
+            Some(p) if p.is_empty() => None,
+            Some(p) => {
+                validate::secret(p)?;
+                if p.len() > 255 {
+                    return Err(invalid("The proxy password must be at most 255 bytes."));
+                }
+                Some(Zeroizing::new(p.clone()))
+            }
+            None => existing
+                .filter(|e| e.username == username)
+                .and_then(|e| e.password.as_ref())
+                .map(|p| Zeroizing::new(p.as_str().to_owned())),
+        }
+    };
+    Ok(StoredProxy { kind: input.kind, host, port: input.port, username, password })
+}
+
+/// User-facing errors for a proxy failure; never proxy-supplied text.
+pub(crate) fn proxy_error(e: ProxyError) -> IpcError {
+    match e {
+        ProxyError::Unreachable => err(ErrorCode::Unreachable, "The proxy could not be reached."),
+        ProxyError::Timeout => err(ErrorCode::Timeout, "The proxy did not answer in time."),
+        ProxyError::AuthRequired => err(ErrorCode::AuthFailed, "The proxy requires a user name and password."),
+        ProxyError::AuthRejected => err(ErrorCode::AuthFailed, "The proxy did not accept the user name and password."),
+        ProxyError::Refused => err(ErrorCode::Unreachable, "The proxy refused the connection to the server."),
+        ProxyError::Protocol => {
+            err(ErrorCode::ProtocolError, "The proxy answered with something that is not a proxy response.")
+        }
+        ProxyError::Invalid => invalid("The proxy settings are not valid."),
+    }
 }
 
 // ---------- jump host chains ----------

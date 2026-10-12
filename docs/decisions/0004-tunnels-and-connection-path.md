@@ -44,10 +44,27 @@ forwarding uses `russh` 0.64.1 (ADR 0002) and `tokio`, both already in the works
    the connection, so a side operation requested on that event (a tunnel, a key install) could
    be refused as "not connected". The connection is now registered first.
 
+7. **Jump hosts.** A host names a saved jump host; chains form by pointing hosts at each other
+   (at most 8 hosts, loops refused before anything is written). Each hop's SSH session runs over a
+   `direct-tcpip` channel of the previous hop, with its own key exchange, host-key decision and
+   authentication, strictly in order (INV-02/03 per hop). The settings are saved by their own
+   command so editing a host's basics keeps them.
+
+8. **Proxies.** HTTP `CONNECT` (Basic) and SOCKS5 (RFC 1929 username/password), for the
+   connection that leaves this computer (the first hop's own setting). The destination name goes
+   to the proxy unresolved. With credentials, a SOCKS5 client offers only username/password, so a
+   proxy cannot downgrade to "no authentication"; an HTTP response head is read byte by byte and
+   bounded to 8 KiB, so no tunnel byte is consumed. The proxy password is a vault secret, write-
+   only towards the renderer (a summary says only whether one is stored), dropped when the user
+   name changes, and never in an error, log or `Debug` output. The server's host key is still
+   verified end to end, so a proxy cannot impersonate the server (lab test). No new dependency:
+   base64 for Basic is twelve lines, checked against RFC 4648 vectors.
+
 ## Limits, stated plainly
 
 - A loopback listener is reachable by other accounts on the same computer, as with OpenSSH's
   `-L`/`-D`. The SOCKS proxy has no credentials (common clients cannot send SOCKS5 passwords).
 - Counters are live; the byte counts are of data read from each side.
+- An HTTP proxy receives its credentials in base64, which is not encryption; the UI warns.
 - Remote-forward tests need the container-free lab (the server's listener must be on this
   machine's loopback); the container lab cannot run them.

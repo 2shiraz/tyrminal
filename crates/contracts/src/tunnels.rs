@@ -125,6 +125,74 @@ pub struct HostConnection {
     /// A saved host to connect through first (`ProxyJump`). That host's own jump host, if it has
     /// one, comes before it, so chains are built by pointing hosts at each other.
     pub jump_host_id: Option<String>,
+    /// Outbound proxy for the connection that leaves this computer. Used when this host is the
+    /// first hop (for a host behind a jump host, set it on the jump host).
+    pub proxy: Option<ProxySummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProxyType {
+    /// HTTP `CONNECT`, optionally with Basic authentication.
+    Http,
+    /// SOCKS5, optionally with username/password authentication.
+    Socks5,
+}
+
+/// A host's proxy as shown to the user. The password itself never leaves the vault.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProxySummary {
+    pub kind: ProxyType,
+    pub host: String,
+    pub port: u16,
+    /// Empty: no authentication.
+    pub username: String,
+    pub password_stored: bool,
+}
+
+/// What the host editor sends. Contains a secret: `Debug` is redacted.
+#[derive(Clone, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HostConnectionInput {
+    pub jump_host_id: Option<String>,
+    pub proxy: Option<ProxyInput>,
+}
+
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProxyInput {
+    pub kind: ProxyType,
+    pub host: String,
+    pub port: u16,
+    /// Empty: no authentication (the password is then dropped).
+    pub username: String,
+    /// `None` keeps the stored password; the UI never receives it to resend.
+    pub password: Option<String>,
+}
+
+impl core::fmt::Debug for HostConnectionInput {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HostConnectionInput")
+            .field("jump_host_id", &self.jump_host_id)
+            .field("proxy", &self.proxy)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ProxyInput {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ProxyInput")
+            .field("kind", &self.kind)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish_non_exhaustive()
+    }
 }
 
 /// One hop of a host's connection chain, first hop first; the host itself is last.
@@ -136,4 +204,25 @@ pub struct ChainHop {
     pub label: String,
     pub address: String,
     pub port: u16,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxy_input_debug_never_prints_the_password() {
+        let input = HostConnectionInput {
+            jump_host_id: None,
+            proxy: Some(ProxyInput {
+                kind: ProxyType::Http,
+                host: "proxy.lab".into(),
+                port: 3128,
+                username: "u".into(),
+                password: Some("canary-proxy-secret".into()),
+            }),
+        };
+        let text = format!("{input:?}");
+        assert!(!text.contains("canary-proxy-secret"), "{text}");
+    }
 }

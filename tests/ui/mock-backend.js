@@ -266,7 +266,9 @@ export function installMockBackend(options) {
       const rules = [];
       const runs = new Map();
       const jumps = new Map();
+      const proxies = new Map();
       window.__mockJumps = jumps;
+      window.__mockProxies = proxies;
       let nextRule = 1;
       let nextRun = 1;
       const loopback = (h) => /^(localhost|::1|\[::1\]|127\.\d+\.\d+\.\d+)$/i.test(h.trim());
@@ -357,7 +359,7 @@ export function installMockBackend(options) {
         tunnel_clear_ended: () => {
           for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
         },
-        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null }),
+        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null }),
         host_connection_set: (a) => {
           // Loops are refused as natively; the chain is returned first hop first.
           const next = a.connection.jumpHostId;
@@ -366,6 +368,12 @@ export function installMockBackend(options) {
           }
           if (next) jumps.set(a.hostId, next);
           else jumps.delete(a.hostId);
+          const p = a.connection.proxy;
+          if (p) {
+            const before = proxies.get(a.hostId);
+            const keep = p.password === null && before?.passwordStored && before.username === p.username.trim();
+            proxies.set(a.hostId, { kind: p.kind, host: p.host, port: p.port, username: p.username.trim(), passwordStored: p.username.trim() !== "" && (keep || !!p.password) });
+          } else proxies.delete(a.hostId);
           const chain = [];
           for (let at = a.hostId; at; at = jumps.get(at)) chain.unshift(at);
           return chain.map((hostId) => {

@@ -41,7 +41,7 @@ use crate::records::{
 use crate::validate;
 // agent B: tunnels and history
 use crate::records::{KIND_TUNNEL, TunnelRecord};
-use tyrminal_contracts::{ChainHop, HostConnection, TunnelInput, TunnelSummary};
+use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
 
 struct Stored<T> {
     revision: u64,
@@ -92,6 +92,8 @@ pub(crate) struct ConnectionPlan {
     // agent B: tunnels and history
     /// Jump hosts to go through first, first hop first; empty for a direct connection.
     pub jumps: Vec<HopPlan>,
+    /// The host's own proxy, used when it is reached directly (no jump host).
+    pub proxy: Option<tyrminal_ssh::ProxySpec>,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     pub generation: u32,
@@ -103,6 +105,8 @@ pub(crate) struct HopPlan {
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
+    /// How to leave this computer when this host is the first hop.
+    pub proxy: Option<tyrminal_ssh::ProxySpec>,
 }
 
 pub(crate) enum PlanAuth {
@@ -226,6 +230,8 @@ fn host_content_len(record: &HostRecord) -> usize {
         + secret_len
         + record.group.as_ref().map_or(0, String::len)
         + record.tags.iter().map(|t| t.len() + 4).sum::<usize>()
+        // agent B: tunnels and history
+        + record.connection.content_len()
 }
 
 fn group_content_len(record: &GroupRecord) -> usize {
@@ -1629,6 +1635,7 @@ impl VaultService {
             endpoint: target.endpoint,
             username: target.username,
             auth: target.auth,
+            proxy: target.proxy,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -1664,6 +1671,8 @@ impl VaultService {
             endpoint: Endpoint::new(host.address.clone(), effective.port),
             username: effective.username.clone(),
             auth,
+            // agent B: tunnels and history
+            proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_spec),
         })
     }
 
@@ -1685,12 +1694,19 @@ impl VaultService {
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
-        Ok(HostConnection { jump_host_id: host.connection.jump_host.clone() })
+        Ok(HostConnection {
+            jump_host_id: host.connection.jump_host.clone(),
+            proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_summary),
+        })
     }
 
     /// Replaces a host's advanced connection settings. The jump host must exist, and the chain it
     /// makes must end (no loops) within `MAX_CHAIN_HOPS` hosts.
-    pub async fn set_host_connection(&self, host_id: &str, input: HostConnection) -> Result<Vec<ChainHop>, IpcError> {
+    pub async fn set_host_connection(
+        &self,
+        host_id: &str,
+        input: HostConnectionInput,
+    ) -> Result<Vec<ChainHop>, IpcError> {
         let id = validate::id(host_id)?;
         let jump = input.jump_host_id.as_deref().map(validate::id).transpose()?;
         let mut inner = self.inner.lock().await;
@@ -1701,8 +1717,13 @@ impl VaultService {
         {
             return Err(not_found("That jump host no longer exists. Choose another."));
         }
+        let proxy = match &input.proxy {
+            Some(proxy) => Some(crate::tunnels::normalize_proxy(proxy, current.record.connection.proxy.as_ref())?),
+            None => None,
+        };
         let mut record = copy_host(&current.record);
         record.connection.jump_host = jump.map(|j| validate::id_text(&j));
+        record.connection.proxy = proxy;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = jump;

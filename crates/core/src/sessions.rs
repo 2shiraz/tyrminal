@@ -941,13 +941,11 @@ async fn connect_ssh(
     // Jump hosts first, then the host. Every hop gets its own key exchange, host-key decision and
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
-    let hops = plan.jumps.into_iter().map(|hop| (hop.endpoint, hop.username, hop.auth)).chain(std::iter::once((
-        plan.endpoint,
-        plan.username,
-        plan.auth,
-    )));
+    // A proxy applies to the connection that leaves this computer: the first hop's own setting.
+    let first = (plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let hops = plan.jumps.into_iter().map(|hop| (hop.endpoint, hop.username, hop.auth, hop.proxy));
     let mut chain: Vec<VerifiedConnection> = Vec::new();
-    for (endpoint, username, auth) in hops {
+    for (endpoint, username, auth, proxy) in hops.chain(std::iter::once(first)) {
         if !chain.is_empty() {
             ctx.state(SessionState::Connecting);
         }
@@ -959,9 +957,15 @@ async fn connect_ssh(
             sink: Arc::clone(&ctx.sink),
         };
         let options = ConnectOptions::new(endpoint.clone());
-        let mut conn = match chain.last() {
-            None => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
-            Some(via) => {
+        let mut conn = match (chain.last(), proxy) {
+            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
+            (None, Some(proxy)) => {
+                let stream = tyrminal_ssh::connect_via_proxy(&proxy, &endpoint.host, endpoint.port)
+                    .await
+                    .map_err(crate::tunnels::proxy_error)?;
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+            }
+            (Some(via), _) => {
                 let stream = via.open_hop(&endpoint.host, endpoint.port).await.map_err(|e| hop_error(&e))?;
                 tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
             }

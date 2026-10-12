@@ -2,7 +2,9 @@
 //! started them and to one of its connected SSH sessions.
 
 use tauri::{State, WebviewWindow};
-use tyrminal_core::contracts::{ActiveTunnel, ChainHop, HostConnection, IpcError, TunnelInput, TunnelSummary};
+use tyrminal_core::contracts::{
+    ActiveTunnel, ChainHop, HostConnection, HostConnectionInput, IpcError, TunnelInput, TunnelSummary,
+};
 
 use crate::state::AppState;
 
@@ -65,7 +67,7 @@ pub async fn host_connection_get(state: State<'_, AppState>, host_id: String) ->
 pub async fn host_connection_set(
     state: State<'_, AppState>,
     host_id: String,
-    connection: HostConnection,
+    connection: HostConnectionInput,
 ) -> Result<Vec<ChainHop>, IpcError> {
     state.core()?.vault.set_host_connection(&host_id, connection).await
 }

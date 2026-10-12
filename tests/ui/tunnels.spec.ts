@@ -141,3 +141,34 @@ test("hosts: the editor's Advanced section sets a jump host and refuses loops", 
   await edit("db-primary");
   await expect(page.getByRole("dialog", { name: /Edit host/ }).getByRole("combobox", { name: "Jump host" })).toHaveValue(/.+/);
 });
+
+test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials come with a warning", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-nav="hosts"]').click();
+  const edit = async () => {
+    await page.getByRole("button", { name: "More actions for staging-web" }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    return page.getByRole("dialog", { name: /Edit host/ });
+  };
+  let dialog = await edit();
+  await dialog.getByText("Advanced").click();
+  await dialog.getByRole("combobox", { name: "Proxy" }).selectOption("http");
+  await dialog.getByLabel("Proxy host").fill("proxy.lab.example");
+  await dialog.getByLabel("Proxy port").fill("3128");
+  await dialog.getByLabel("Proxy user name").fill("ops");
+  await expect(dialog.getByText(/receives the user name and password unencrypted/)).toBeVisible();
+  await dialog.getByLabel("Proxy password").fill("canary-ui-proxy-secret");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // Reopened: settings shown, the password field empty with a "kept" hint, never prefilled.
+  dialog = await edit();
+  await expect(dialog.getByRole("combobox", { name: "Proxy" })).toHaveValue("http");
+  await expect(dialog.getByLabel("Proxy host")).toHaveValue("proxy.lab.example");
+  await expect(dialog.getByLabel("Proxy password")).toHaveValue("");
+  await expect(dialog.getByText("Leave empty to keep the stored password.")).toBeVisible();
+  expect(await page.content()).not.toContain("canary-ui-proxy-secret");
+  // SOCKS5 shows no cleartext warning.
+  await dialog.getByRole("combobox", { name: "Proxy" }).selectOption("socks5");
+  await expect(dialog.getByText(/unencrypted/)).toHaveCount(0);
+});

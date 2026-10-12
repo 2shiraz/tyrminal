@@ -112,8 +112,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B |
 |---|---|---|
-| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | Proxies (CON-10), then agent forwarding (CON-11) |
-| Done since split | — | Port forwarding: local/remote/SOCKS5 adapter, saved rules, session-scoped runs, Tunnels page (FWD-01..08); jump-host chains with per-hop verification (CON-09). IMPLEMENTED_UNVERIFIED on Linux; see `docs/progress-b.md` |
+| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs |
+| Done since split | — | Port forwarding: local/remote/SOCKS5 adapter, saved rules, session-scoped runs, Tunnels page (FWD-01..08); jump-host chains with per-hop verification (CON-09); authenticated HTTP/SOCKS5 proxies (CON-10). IMPLEMENTED_UNVERIFIED on Linux; see `docs/progress-b.md` |
 | Blocked | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
@@ -139,7 +139,14 @@ Never merge these by hand; regenerate them after resolving the sources:
    (for example `via: Option<String>`, the saved label of the hop) and show it in the trust dialog,
    so the prompt names the specific jump-chain hop (BUILD_SPEC §4.5). B will fill it in
    `run_ssh`. Until then the prompt shows the hop's own address and port.
-7. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
-   `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`), and
+7. **Observation (A's tests):** `sessions_lab::deploying_a_public_key_appends_one_line_and_keeps_the_others`
+   passes only on a fresh lab account: it ends with `authorized_keys` at mode 600 and its next run
+   writes the file with `printf >`, which keeps that mode, so the `-rw-r--r--` assertion fails.
+   Setting the mode explicitly (`chmod 644`) after the `printf` would make it re-runnable. Also,
+   `behavior.spec.ts` "broadcast: typed input reaches every pane…" failed once in 3 full UI runs
+   on this branch (passed in isolation 3/3 and in the other two full runs); no log was kept.
+8. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
+   `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`),
+   `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
