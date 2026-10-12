@@ -61,6 +61,7 @@ import { msg } from "../../lib/messages";
 import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgProduction } from "../../lib/messages-production";
+import { useWindowedList } from "../../components/ui/useWindowedList";
 import { flashSaved, useFlip } from "../../lib/motion";
 import { msgBulk, msgHv } from "../../lib/messages-hostsview";
 import { msgSelect } from "../../lib/messages-select";
@@ -427,6 +428,15 @@ function HostsViewImpl({
   // click of a double-click must not shrink what the double-click opens.
   const replaced = useRef<{ id: string; ids: Set<string> } | null>(null);
   const shownIds = filtered.map((h) => h.id);
+  // Long lists are windowed: only the hosts near the visible part are in the DOM. Their rows come
+  // and go as the list scrolls, so they carry no FLIP key while windowed (nothing animates in).
+  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef);
+  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef);
+  const listWindow = layout === "grid" ? gridWindow : rowWindow;
+  const windowItem = (host: HostSummary, i: number) =>
+    listWindow.windowed
+      ? { "data-window-item": true, "aria-setsize": filtered.length, "aria-posinset": listWindow.start + i + 1 }
+      : { "data-window-item": true, "data-flip-key": host.id };
   const selectWith = (id: string, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const additive = toggleKey(event);
     const from = anchor.current;
@@ -490,7 +500,16 @@ function HostsViewImpl({
     else if (how === "split" && onConnectSplit) onConnectSplit(host);
     else onConnect(host);
   };
-  const focusHost = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-host-id="${CSS.escape(id)}"] .host-open`)?.focus();
+  const hostButton = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-host-id="${CSS.escape(id)}"] .host-open`);
+  /** Focuses a host; in a windowed list it is scrolled into the DOM first, then focused once drawn. */
+  const focusHost = (id: string) => {
+    if (!listWindow.windowed) {
+      hostButton(id)?.focus();
+      return;
+    }
+    listWindow.scrollToIndex(shownIds.indexOf(id));
+    requestAnimationFrame(() => hostButton(id)?.focus());
+  };
   /** Hosts per row in the card grid (1 in the list), from where the cards are laid out. */
   const perRow = () => {
     const items = [...(listRef.current?.children ?? [])] as HTMLElement[];
@@ -985,11 +1004,19 @@ function HostsViewImpl({
               {msgSelect.selectedNote}
             </span>
             {layout === "grid" ? (
-              <ul className="tile-grid host-grid" aria-label={searching ? msgHv.results : msgHv.hosts} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
-                {filtered.map((host) => {
+              <ul
+                className="tile-grid host-grid"
+                aria-label={searching ? msgHv.results : msgHv.hosts}
+                data-testid="host-list"
+                ref={listRef}
+                style={gridWindow.style}
+                data-windowed={gridWindow.windowed || undefined}
+                onKeyDown={onListKey}
+              >
+                {filtered.slice(gridWindow.start, gridWindow.end).map((host, i) => {
                   const isConnected = connected.has(host.id);
                   return (
-                    <li key={host.id} data-flip-key={host.id}>
+                    <li key={host.id} {...windowItem(host, i)}>
                       <article
                         className="host-card"
                         data-connected={isConnected}
@@ -1081,11 +1108,19 @@ function HostsViewImpl({
                 })}
               </ul>
             ) : (
-              <ul className="list host-rows" aria-label={searching ? msgHv.results : msgHv.hosts} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
-                {filtered.map((host) => (
+              <ul
+                className="list host-rows"
+                aria-label={searching ? msgHv.results : msgHv.hosts}
+                data-testid="host-list"
+                ref={listRef}
+                style={rowWindow.style}
+                data-windowed={rowWindow.windowed || undefined}
+                onKeyDown={onListKey}
+              >
+                {filtered.slice(rowWindow.start, rowWindow.end).map((host, i) => (
                   <li
                     key={host.id}
-                    data-flip-key={host.id}
+                    {...windowItem(host, i)}
                     data-active={panelHostId === host.id}
                     data-pending={pendingIds.has(host.id) || undefined}
                     data-selected={selected.has(host.id) || undefined}
