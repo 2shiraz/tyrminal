@@ -263,6 +263,10 @@ Never merge these by hand; regenerate them after resolving the sources:
   one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
   shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
   Files without the field load as before.
+- **C → A (done, owner request "settings to set keybinds"):** `SettingsViews.tsx` gets one more
+  entry in its section list (`shortcuts`, labelled "Keyboard shortcuts", plus the `msgC` import), so
+  the nav scrolls to the shortcuts section. The section itself, with every action grouped, search,
+  recording, swap on conflict, resets and reserved system chords, stays in `WorkspaceSettings.tsx`.
 - **C → A (done):** the two axe findings in `TabStrip.tsx`: the tablist now holds only tabs (new-tab
   and layout buttons sit beside it), and the close control is a non-focusable pointer target
   (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in

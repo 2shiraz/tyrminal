@@ -271,7 +271,8 @@ export class TerminalController {
     this.term.parser.registerOscHandler(7, (data) => {
       const path = parseOsc7(data);
       if (path !== null) this.callbacks.onDirectory?.(path);
-      return true;
+      // Observe only: shell integration (autocomplete/shellContext.ts) reads the same report.
+      return false;
     });
 
     this.term.attachCustomKeyEventHandler((event) => this.onKey(event));

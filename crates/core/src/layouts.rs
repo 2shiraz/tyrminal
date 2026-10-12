@@ -297,6 +297,38 @@ fn key_ok(key: &str) -> bool {
     }
 }
 
+/// Chords the operating system takes before the application sees them, and Cmd/Alt+1-9, which
+/// switch tabs (the same table as the settings screen). Modifiers: c Ctrl, a Alt, s Shift, m Cmd.
+fn reserved(key: &str, b: &tyrminal_contracts::KeyBindingPreference) -> bool {
+    let mods: String = [(b.ctrl, 'c'), (b.alt, 'a'), (b.shift, 's'), (b.meta, 'm')]
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, c)| *c)
+        .collect();
+    let mac = cfg!(target_os = "macos");
+    let digit = key.len() == 1 && matches!(key.as_bytes()[0], b'1'..=b'9');
+    if digit && mods == if mac { "m" } else { "a" } {
+        return true;
+    }
+    const MAC: &[(&str, &str)] = &[
+        ("q", "m"),
+        ("h", "m"),
+        ("h", "am"),
+        ("m", "m"),
+        ("Tab", "m"),
+        ("Tab", "sm"),
+        ("`", "m"),
+        ("`", "sm"),
+        ("q", "cm"),
+        ("f", "cm"),
+        ("3", "sm"),
+        ("4", "sm"),
+        ("5", "sm"),
+    ];
+    const OTHER: &[(&str, &str)] = &[("F4", "a"), ("Tab", "a"), ("Tab", "as"), ("l", "ca")];
+    (if mac { MAC } else { OTHER }).iter().any(|(k, m)| *k == key && *m == mods)
+}
+
 /// Validates workspace preferences. Bindings must keep the terminal's own keys: a binding needs a
 /// modifier other than Shift, and outside macOS a plain Ctrl+key (interrupt, kill line, ...) is
 /// never taken by the application.
@@ -337,6 +369,9 @@ pub(crate) fn sanitize_workspace(mut prefs: WorkspacePreferences) -> Result<Work
             }
         }
     }
+    // A chord the system keeps never reaches the application; such a binding is dropped (the
+    // action keeps its default) rather than failing, so an older preferences file still loads.
+    prefs.bindings.retain(|b| b.key.as_deref().is_none_or(|key| !reserved(key, b)));
     Ok(prefs)
 }
 
@@ -498,6 +533,21 @@ mod tests {
             binding("", Some("p"), true, false, true, false),
         ] {
             assert!(sanitize_workspace(with(bad.clone())).is_err(), "{bad:?}");
+        }
+        // Dropped: chords the system keeps, and the tab-number keys.
+        let system = if cfg!(target_os = "macos") {
+            [
+                binding("palette", Some("q"), false, false, false, true),
+                binding("palette", Some("3"), false, false, false, true),
+            ]
+        } else {
+            [
+                binding("palette", Some("F4"), false, true, false, false),
+                binding("palette", Some("3"), false, true, false, false),
+            ]
+        };
+        for bad in system {
+            assert!(sanitize_workspace(with(bad.clone())).unwrap().bindings.is_empty(), "{bad:?}");
         }
         let twice = WorkspacePreferences {
             bindings: vec![

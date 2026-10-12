@@ -230,20 +230,84 @@ export function applyBindingOverrides(overrides: readonly KeyBindingPreference[]
 const same = (a: Binding, b: Binding) =>
   a.key === b.key && Boolean(a.mod) === Boolean(b.mod) && Boolean(a.ctrl) === Boolean(b.ctrl) && Boolean(a.alt) === Boolean(b.alt) && Boolean(a.shift) === Boolean(b.shift);
 
+/** Keys a shortcut can use (the same list is checked natively). */
+const NAMED_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End", "PageUp", "PageDown"]);
+for (let i = 1; i <= 12; i++) NAMED_KEYS.add(`F${i}`);
+
+function bindableKey(key: string): boolean {
+  if ([...key].length === 1) return /^[\x21-\x7e]$/.test(key) && !/[A-Z]/.test(key);
+  return NAMED_KEYS.has(key);
+}
+
+export type ReservedReason = "quit" | "hide" | "minimize" | "switchApps" | "switchWindows" | "lockScreen" | "fullScreen" | "screenshot" | "closeWindow" | "tabNumber";
+
+type Chord = [key: string, mods: string, reason: ReservedReason];
+
+// Chords the operating system (or the window manager) takes before the application sees them,
+// and Cmd/Alt+1–9, which switch tabs. Modifiers: c = Ctrl, a = Alt/Option, s = Shift, m = Cmd.
+const RESERVED: readonly Chord[] = isMac
+  ? [
+      ["q", "m", "quit"],
+      ["h", "m", "hide"],
+      ["h", "am", "hide"],
+      ["m", "m", "minimize"],
+      ["Tab", "m", "switchApps"],
+      ["Tab", "sm", "switchApps"],
+      ["`", "m", "switchWindows"],
+      ["`", "sm", "switchWindows"],
+      ["q", "cm", "lockScreen"],
+      ["f", "cm", "fullScreen"],
+      ["3", "sm", "screenshot"],
+      ["4", "sm", "screenshot"],
+      ["5", "sm", "screenshot"],
+    ]
+  : [
+      ["F4", "a", "closeWindow"],
+      ["Tab", "a", "switchWindows"],
+      ["Tab", "as", "switchWindows"],
+      ["l", "ca", "lockScreen"],
+    ];
+
+function mods(b: Binding): string {
+  return `${b.ctrl ? "c" : ""}${b.alt ? "a" : ""}${b.shift ? "s" : ""}${b.mod ? "m" : ""}`;
+}
+
+/** Why the system or the tab-number keys keep `b`, or null. */
+export function reservedReason(b: Binding): ReservedReason | null {
+  const m = mods(b);
+  if (/^[1-9]$/.test(b.key) && m === (isMac ? "m" : "a")) return "tabNumber";
+  return RESERVED.find(([key, chordMods]) => key === b.key && chordMods === m)?.[2] ?? null;
+}
+
+export type BindingProblem =
+  | { kind: "terminal" }
+  | { kind: "key" }
+  | { kind: "reserved"; reason: ReservedReason }
+  | { kind: "conflict"; other: ActionId };
+
 /**
  * Why `candidate` cannot be the shortcut for `action`, or null. The terminal keeps its keys: a
- * shortcut needs Ctrl, Alt or Cmd, and outside macOS Ctrl with a single key (Ctrl+C interrupt,
- * Ctrl+D end of input, ...) is never taken. The same rules are enforced natively.
+ * shortcut needs Ctrl, Alt or Cmd, and Ctrl with a single key (Ctrl+C interrupt, Ctrl+D end of
+ * input, ...) is never taken. Chords the system keeps are refused with the reason. The same
+ * rules are enforced natively; a conflict is reported so the caller can offer a swap.
  */
-export function bindingProblem(action: ActionId, candidate: Binding): { kind: "terminal" | "conflict"; other?: ActionId } | null {
+export function bindingProblem(action: ActionId, candidate: Binding): BindingProblem | null {
   if (isUnbound(candidate)) return null;
+  if (!bindableKey(candidate.key)) return { kind: "key" };
   const hasMod = Boolean(candidate.mod) || Boolean(candidate.ctrl) || Boolean(candidate.alt);
   if (!hasMod) return { kind: "terminal" };
   if (candidate.ctrl && !candidate.alt && !candidate.shift && !candidate.mod) return { kind: "terminal" };
+  const reason = reservedReason(candidate);
+  if (reason) return { kind: "reserved", reason };
   for (const other of Object.keys(bindings) as ActionId[]) {
     if (other !== action && same(bindings[other], candidate)) return { kind: "conflict", other };
   }
   return null;
+}
+
+/** True when `a` and `b` are the same chord. */
+export function sameBinding(a: Binding, b: Binding): boolean {
+  return same(a, b);
 }
 
 /** The binding a key press describes (for recording a new shortcut). */
