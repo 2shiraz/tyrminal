@@ -119,6 +119,49 @@ impl AuthOutcome {
     }
 }
 
+/// Upper bounds for a keyboard-interactive exchange. The server controls how many rounds and
+/// prompts it sends, so both are capped; exceeding either ends authentication.
+pub const MAX_KBD_ROUNDS: usize = 8;
+pub const MAX_KBD_PROMPTS: usize = 8;
+/// Longest server-supplied name, instruction or prompt kept, in bytes.
+pub const MAX_SERVER_TEXT: usize = 512;
+
+/// One prompt of a keyboard-interactive round. `text` is server-supplied and untrusted: it has
+/// been sanitized for display (no control characters) and must still be rendered as plain text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KbdPrompt {
+    pub text: String,
+    /// Whether the server says the answer may be shown while typed (false for secrets).
+    pub echo: bool,
+}
+
+/// One keyboard-interactive information request, sanitized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KbdRound {
+    /// 1-based round number.
+    pub round: usize,
+    pub name: String,
+    pub instructions: String,
+    pub prompts: Vec<KbdPrompt>,
+}
+
+/// Makes server text safe to display: drops control characters (keeping line breaks), Unicode
+/// bidi controls, trims, and truncates to `max` bytes on a character boundary.
+pub fn sanitize_server_text(text: &str, max: usize) -> String {
+    let mut out = String::new();
+    for ch in text.replace("\r\n", "\n").chars() {
+        let bidi = matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}');
+        if bidi || (ch.is_control() && ch != '\n') {
+            continue;
+        }
+        if out.len() + ch.len_utf8() > max {
+            break;
+        }
+        out.push(ch);
+    }
+    out.trim().to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +196,14 @@ mod tests {
         );
         let huge = "A".repeat(MAX_KEY_TEXT_LEN + 1);
         assert_eq!(ClientKey::from_openssh(&huge, None).err(), Some(KeyError::TooLarge));
+    }
+
+    #[test]
+    fn server_text_is_sanitized_and_bounded() {
+        assert_eq!(sanitize_server_text("  Password: ", 64), "Password:");
+        assert_eq!(sanitize_server_text("a\x1b[31mred\x07\r\nnext", 64), "a[31mred\nnext");
+        assert_eq!(sanitize_server_text("ok\u{202e}evil", 64), "okevil");
+        assert_eq!(sanitize_server_text("éééé", 5), "éé");
+        assert_eq!(sanitize_server_text(&"x".repeat(2000), MAX_SERVER_TEXT).len(), MAX_SERVER_TEXT);
     }
 }

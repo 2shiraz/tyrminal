@@ -331,6 +331,8 @@ pub enum TrustDecision {
 pub enum AuthPromptKind {
     Password,
     KeyPassphrase,
+    /// A keyboard-interactive (RFC 4256) prompt; `message` carries the server's question.
+    KeyboardInteractive,
 }
 
 /// Events for one session, delivered only on that session's own channel (never broadcast).
@@ -370,6 +372,22 @@ pub enum SessionEvent {
         /// 1-based attempt number.
         attempt: u32,
         max_attempts: u32,
+        /// Keyboard-interactive only: the server's instructions and question, sanitized but
+        /// untrusted (render as plain text, never as markup). `None` for other kinds.
+        message: Option<String>,
+        /// Keyboard-interactive only: the server allows the answer to be shown while typed.
+        echo: bool,
+    },
+    /// The algorithms the connection uses, after key exchange. Values come from the client's
+    /// own offer list, never from server text.
+    #[serde(rename_all = "camelCase")]
+    Negotiated {
+        kex: String,
+        host_key: String,
+        cipher: String,
+        /// Empty for AEAD ciphers.
+        mac: String,
+        strict_kex: bool,
     },
     /// Pre-authentication banner from the server. Untrusted.
     Banner {

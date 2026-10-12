@@ -58,6 +58,17 @@ mod windows {
             .arg(format!("*{sid}:(OI)(CI)F"))
             .args(["/grant:r", "*S-1-5-18:(OI)(CI)F", "/q"])
             .status()?;
+        if !status.success() {
+            return Err(io::Error::other("icacls failed"));
+        }
+        // An elevated process can get explicit (non-inherited) entries for Administrators or
+        // CREATOR OWNER on a new directory, which /inheritance:r does not remove. Remove the
+        // broad well-known groups explicitly: Administrators, Users, Authenticated Users,
+        // Everyone, CREATOR OWNER.
+        let status = Command::new(system32().join("icacls.exe"))
+            .arg(dir)
+            .args(["/remove:g", "*S-1-5-32-544", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "*S-1-3-0", "/q"])
+            .status()?;
         if status.success() { Ok(()) } else { Err(io::Error::other("icacls failed")) }
     }
 
@@ -81,7 +92,8 @@ mod windows {
                 assert_eq!(entries.len(), 2, "{text}");
                 assert!(text.contains("NT AUTHORITY\\SYSTEM"), "{text}");
                 assert!(
-                    !text.contains("BUILTIN\\Users")
+                    !text.contains("BUILTIN\\Administrators")
+                        && !text.contains("BUILTIN\\Users")
                         && !text.contains("Everyone")
                         && !text.contains("Authenticated Users"),
                     "{text}"

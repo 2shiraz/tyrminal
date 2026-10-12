@@ -469,14 +469,18 @@ async fn session_channel_denied_by_the_server_is_reported() {
 // ---------- flow control ----------
 
 /// A producer far faster than the consumer: the consumer stalls, then drains. Every byte must
-/// arrive, in order, with no error. `seq` output makes any loss or reordering detectable.
+/// arrive, in order, with no error. An awk counter makes any loss or reordering detectable (not
+/// `seq`, which prints large numbers in scientific notation on macOS).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn large_output_survives_a_stalled_consumer_without_loss_or_reordering() {
     let lab = Lab::load();
     let conn = connected(&lab).await;
     const LAST: u64 = 3_000_000; // ~22.9 MiB of text
-    let (mut reader, _writer) = conn.open_command(&format!("seq 1 {LAST}")).await.unwrap();
+    let (mut reader, _writer) = conn
+        .open_command(&format!("awk 'BEGIN {{ for (i = 1; i <= {LAST}; i++) printf \"%d\\n\", i }}'"))
+        .await
+        .unwrap();
 
     let mut expected: u64 = 1;
     let mut partial = String::new();

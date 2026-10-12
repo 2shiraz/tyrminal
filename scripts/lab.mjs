@@ -188,7 +188,9 @@ async function dockerUp() {
     keys: material.keys,
     servers: {},
   };
-  for (const name of SERVERS) {
+  // Windows OpenSSH has no PAM, so it cannot serve keyboard-interactive; tests that need the
+  // "kbd" server report BLOCKED there.
+  for (const name of isWindows ? SERVERS : [...SERVERS, "kbd"]) {
     const inDir = serverHostKeys(name);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
     writeFileSync(join(inDir, "password"), material.password, { mode: 0o600 });
@@ -303,7 +305,7 @@ function removeLocalUser(name) {
 
 const toConfigPath = (p) => (isWindows ? p.replaceAll("\\", "/") : p);
 
-function sshdConfig({ port, inDir, version }) {
+function sshdConfig({ port, inDir, version, kbdOnly = false }) {
   const lines = [
     "# Tyrminal local lab sshd (generated per run by scripts/lab.mjs). Never use outside tests.",
     `Port ${port}`,
@@ -313,9 +315,11 @@ function sshdConfig({ port, inDir, version }) {
     `HostKey ${toConfigPath(join(inDir, "hostkeys", "ssh_host_rsa_key"))}`,
     "PermitRootLogin no",
     `AllowUsers ${Object.values(LOCAL_USERS).join(" ")}`,
-    "PasswordAuthentication yes",
-    "KbdInteractiveAuthentication no",
-    "PubkeyAuthentication yes",
+    // The "kbd" server takes keyboard-interactive only (answered through PAM), like servers that
+    // use one-time codes; the others take passwords and keys.
+    `PasswordAuthentication ${kbdOnly ? "no" : "yes"}`,
+    `KbdInteractiveAuthentication ${kbdOnly ? "yes" : "no"}`,
+    `PubkeyAuthentication ${kbdOnly ? "no" : "yes"}`,
     `AuthorizedKeysFile ${toConfigPath(join(inDir, "authorized_keys"))}`,
     // Lab only: the generated files live in the checkout, owned by the CI user rather than the
     // lab accounts, so the ownership walk would refuse them. Never copy this to a real server.
@@ -334,7 +338,7 @@ function sshdConfig({ port, inDir, version }) {
     "Subsystem sftp internal-sftp",
     "LogLevel VERBOSE",
   ];
-  if (!isWindows) lines.push(`UsePAM ${process.platform === "darwin" ? "yes" : "no"}`);
+  if (!isWindows) lines.push(`UsePAM ${process.platform === "darwin" || kbdOnly ? "yes" : "no"}`);
   // macOS: sessions get the compiled-in PATH; add Homebrew so the lab applications are found.
   if (process.platform === "darwin") lines.push("SetEnv PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin");
   // Lab only, as in the container image: all clients share one source address and the suite
@@ -426,13 +430,15 @@ async function localUp() {
   };
   const pids = [];
   const services = [];
-  for (const name of SERVERS) {
+  // Windows OpenSSH has no PAM, so it cannot serve keyboard-interactive; tests that need the
+  // "kbd" server report BLOCKED there.
+  for (const name of isWindows ? SERVERS : [...SERVERS, "kbd"]) {
     const inDir = serverHostKeys(name);
     if (!isWindows) chmodSync(inDir, 0o711);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
     const port = await freePort();
     const config = join(inDir, "sshd_config");
-    writeFileSync(config, sshdConfig({ port, inDir, version }), { mode: 0o644 });
+    writeFileSync(config, sshdConfig({ port, inDir, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
     const logFile = join(inDir, "sshd.log");
     writeFileSync(logFile, "", { mode: 0o644 });
     if (isWindows) {

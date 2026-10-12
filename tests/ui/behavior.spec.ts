@@ -37,6 +37,10 @@ test("keyboard only: palette connects, tabs rename, move and close, focus return
   await page.keyboard.press("Enter");
   await waitForTerminalText(page, "uptime: synthetic output");
 
+  // The status bar reports the negotiated encryption for the SSH session.
+  await expect(page.getByTestId("negotiated")).toHaveText("chacha20-poly1305");
+  await expect(page.getByTestId("negotiated")).toHaveAttribute("aria-label", /Key exchange: mlkem768x25519-sha256 \(strict\)/);
+
   await page.keyboard.press("Control+Shift+T");
   await expect(page.getByRole("tab")).toHaveCount(3);
   // Rename the local terminal tab from the keyboard.

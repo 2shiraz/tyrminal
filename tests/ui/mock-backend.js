@@ -115,6 +115,7 @@ export function installMockBackend(options) {
         : ["connected"];
     let delay = 10;
     for (const step of steps) {
+      if (step === "connected" && kind === "ssh") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
     }
@@ -156,6 +157,15 @@ export function installMockBackend(options) {
     setTimeout(() => channelSend(s.output, new TextEncoder().encode(banner(s)).buffer), delay + 10);
     return { sessionId };
   }
+
+  const NEGOTIATED = {
+    type: "negotiated",
+    kex: "mlkem768x25519-sha256",
+    hostKey: "ssh-ed25519",
+    cipher: "chacha20-poly1305@openssh.com",
+    mac: "",
+    strictKex: true,
+  };
 
   function write(sessionId, bytes) {
     const s = state.sessions.get(sessionId);
@@ -253,6 +263,7 @@ export function installMockBackend(options) {
     session_trust_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (s && a.decision !== "cancel") {
+        channelSend(s.events, NEGOTIATED);
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
       }

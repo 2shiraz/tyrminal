@@ -388,6 +388,18 @@ impl TaskContext {
 
     /// Asks the user for a secret and waits, bounded. `None` means cancelled or timed out.
     async fn ask_secret(&self, kind: AuthPromptKind, username: &str, attempt: u32) -> Option<Zeroizing<String>> {
+        self.ask(kind, username, attempt, None, false).await
+    }
+
+    /// `message` is sanitized server text for keyboard-interactive prompts.
+    async fn ask(
+        &self,
+        kind: AuthPromptKind,
+        username: &str,
+        attempt: u32,
+        message: Option<String>,
+        echo: bool,
+    ) -> Option<Zeroizing<String>> {
         let prompt_id = random_token().ok()?;
         let (reply, answer) = oneshot::channel();
         self.entry.prompts().auth = Some((prompt_id.clone(), reply));
@@ -397,6 +409,8 @@ impl TaskContext {
             username: username.to_owned(),
             attempt,
             max_attempts: MAX_AUTH_ATTEMPTS,
+            message,
+            echo,
         });
         let result = tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), answer).await;
         self.entry.prompts().auth = None;
@@ -523,9 +537,52 @@ async fn authenticate(
 }
 
 async fn ask_password(ctx: &TaskContext, conn: &mut VerifiedConnection, username: &str) -> Result<(), IpcError> {
+    // Servers that take only keyboard-interactive (PAM, one-time codes) get its prompts instead.
+    let methods = match conn.auth_methods(username).await.map_err(|e| from_ssh(&e))? {
+        AuthOutcome::Success => return Ok(()),
+        AuthOutcome::Failure { remaining_methods, .. } => remaining_methods,
+    };
+    let offers = |m: &str| methods.iter().any(|x| x == m);
+    if !offers("password") && offers("keyboard-interactive") {
+        return ask_keyboard_interactive(ctx, conn, username).await;
+    }
     for attempt in 1..=MAX_AUTH_ATTEMPTS {
         let password = ctx.ask_secret(AuthPromptKind::Password, username, attempt).await.ok_or_else(cancelled)?;
         if conn.authenticate_password(username, password).await.map_err(|e| from_ssh(&e))?.is_success() {
+            return Ok(());
+        }
+    }
+    Err(auth_failed())
+}
+
+/// Keyboard-interactive: each server prompt is shown to the user on its own, with the server's
+/// sanitized text. Nothing is answered automatically, and no stored secret is ever sent here.
+async fn ask_keyboard_interactive(
+    ctx: &TaskContext,
+    conn: &mut VerifiedConnection,
+    username: &str,
+) -> Result<(), IpcError> {
+    for attempt in 1..=MAX_AUTH_ATTEMPTS {
+        let outcome = conn
+            .authenticate_keyboard_interactive(username, |round| async move {
+                let mut answers = Vec::with_capacity(round.prompts.len());
+                for prompt in &round.prompts {
+                    let message = [round.name.as_str(), round.instructions.as_str(), prompt.text.as_str()]
+                        .iter()
+                        .filter(|t| !t.is_empty())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let answer = ctx
+                        .ask(AuthPromptKind::KeyboardInteractive, username, attempt, Some(message), prompt.echo)
+                        .await?;
+                    answers.push(answer);
+                }
+                Some(answers)
+            })
+            .await
+            .map_err(|e| from_ssh(&e))?;
+        if outcome.is_success() {
             return Ok(());
         }
     }
@@ -542,6 +599,15 @@ async fn run_ssh(
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     match connect_ssh(ctx, plan, cols, rows).await {
         Ok((conn, reader, writer)) => {
+            if let Some(n) = conn.negotiated() {
+                ctx.sink.event(SessionEvent::Negotiated {
+                    kex: n.kex,
+                    host_key: n.host_key,
+                    cipher: n.cipher,
+                    mac: n.mac,
+                    strict_kex: n.strict_kex,
+                });
+            }
             ctx.state(SessionState::Connected);
             // Recent connections. Best effort: failing to record must not end a working session.
             // Its own task, because closing the session drops this future: cancelled between the

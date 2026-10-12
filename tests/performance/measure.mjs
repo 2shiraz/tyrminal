@@ -24,6 +24,7 @@ const only = (process.argv.find((a) => a.startsWith("--only="))?.slice(7) ?? "la
 const LAUNCH_RUNS = 20;
 const IDLE_SECONDS = 60;
 const LATENCY_SAMPLES = 200;
+const STREAM_LINES = Number(process.env.TYRMINAL_PERF_STREAM_LINES ?? 1_000_000);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const heading = (s) => s.execute(`return document.querySelector("h1")?.textContent ?? null`);
@@ -110,6 +111,12 @@ async function latency(t, s, where) {
   return { where, ...stats(samples), samples };
 }
 
+const out = join(root, "docs", "reports", "raw");
+mkdirSync(out, { recursive: true });
+const name = `performance-${process.platform}-${process.arch}.json`;
+/** Written after every section, so a later failure never loses earlier measurements. */
+const save = () => writeFileSync(join(out, name), `${JSON.stringify(results, null, 2)}\n`);
+
 const dataDir = mkdtempSync(join(os.tmpdir(), "tyrminal-perf-"));
 try {
   // ---------- launch ----------
@@ -131,6 +138,7 @@ try {
       await app.quit({ keepData: true });
     }
     results.warmLaunchToLockedMs = { ...stats(launches), samples: launches };
+    save();
   }
 
   const before = new Set(ps().map((p) => p.pid));
@@ -151,6 +159,7 @@ try {
       await s.until(async () => (await heading(s)) === "Unlock your vault");
     }
     results.unlockThroughUiMs = { ...stats(unlocks), samples: unlocks, note: "includes typing the passphrase over WebDriver" };
+    save();
   }
   await unlock(s);
 
@@ -192,6 +201,7 @@ try {
       const sample = await latency(t, s, `SSH lab over loopback (${lab.serverVersion})`);
       results.inputToEcho.push(sample);
     }
+    save();
     results.inputToEchoMethod =
       "in-page: an `input` event on xterm's textarea to the echoed character appearing in the DOM renderer's rows (MutationObserver); excludes OS input and compositor; 25 ms between keystrokes";
   }
@@ -199,8 +209,8 @@ try {
   // ---------- stream ----------
   if (only.includes("stream") && process.platform !== "win32") {
     results.terminalStream = [];
+    await app.quit({ keepData: true });
     for (const renderer of ["compatibility", "gpu"]) {
-      await app.quit({ keepData: true });
       const run = await timedLaunch(dataDir, { theme: "dark", terminal: { renderer: renderer === "gpu" ? "auto" : "compatibility", cursorBlink: false } });
       const rs = run.app.session;
       const rt = ui(rs);
@@ -208,10 +218,12 @@ try {
       await rs.click(await rs.waitFor('nav.sidebar [data-nav="local"]'));
       await rs.until(async () => /Connected/.test(await rt.statusText()), { describe: "local terminal" });
       const status = await rt.statusText();
-      const LINES = 1_000_000;
+      const LINES = STREAM_LINES;
       const bytes = LINES * 80;
       const line = "0123456789abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789abcd";
       // The end marker is a window title, so completion is observable with either renderer.
+      // Many default prompts set the window title on every prompt; keep ours.
+      await rt.type("PROMPT_COMMAND=; PS1='$ '\n");
       await rt.type(`clear; yes '${line}' | head -n ${LINES}; printf '\\033]0;stream-%s\\007' $((40+2))\n`);
       const started = performance.now();
       await rs.until(
@@ -227,6 +239,7 @@ try {
         mibPerSecond: Number((bytes / 1048576 / seconds).toFixed(2)),
       });
       await run.app.quit({ keepData: true });
+      save();
     }
     results.terminalStreamNote =
       "end to end: PTY -> core -> IPC -> xterm parse and render, with acknowledgement flow control; the rate is bounded by parsing and rendering";
@@ -237,10 +250,7 @@ try {
   rmSync(dataDir, { recursive: true, force: true });
 }
 
-const out = join(root, "docs", "reports", "raw");
-mkdirSync(out, { recursive: true });
-const name = `performance-${process.platform}-${process.arch}.json`;
-writeFileSync(join(out, name), `${JSON.stringify(results, null, 2)}\n`);
+save();
 const strip = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "samples")) : v);
 const summary = Object.fromEntries(
   Object.entries(results).map(([k, v]) => [k, Array.isArray(v) ? v.map(strip) : strip(v)]),

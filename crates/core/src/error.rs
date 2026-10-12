@@ -108,6 +108,7 @@ pub(crate) fn from_ssh(e: &SshError) -> IpcError {
             err(ErrorCode::ProtocolError, "The server only offers encryption methods that Tyrminal considers unsafe.")
         }
         SshError::Disconnected(_) => err(ErrorCode::Disconnected, "The server closed the connection."),
+        SshError::Cancelled => err(ErrorCode::Cancelled, "The connection was cancelled."),
         SshError::ChannelDenied | SshError::RequestDenied => {
             err(ErrorCode::ChannelDenied, "The server signed you in but refused to open a terminal.")
         }

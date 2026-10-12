@@ -126,6 +126,8 @@ export const msg = {
   },
   status: {
     noSession: "No terminal selected",
+    securityDetail: (s: { cipher: string; kex: string; mac: string; hostKey: string; strictKex: boolean }) =>
+      `Encryption: ${s.cipher}${s.mac ? ` with ${s.mac}` : ""}. Key exchange: ${s.kex}${s.strictKex ? " (strict)" : ""}. Server key: ${s.hostKey}.`,
     renderer: (name: string) => `Renderer: ${name}`,
     webgl: "GPU",
     dom: "Compatibility",
@@ -377,6 +379,10 @@ export const msg = {
     openKnownHosts: "Open Known hosts",
     passwordTitle: (user: string) => `Password for ${user}`,
     passphraseTitle: "Passphrase for your key",
+    kbdTitle: (user: string) => `Sign-in for ${user}`,
+    kbdBody: "The server's identity has been verified. It asks the question below; your answer is sent only to that server.",
+    kbdQuestion: "Question from the server (unverified)",
+    kbdAnswer: "Answer",
     passwordBody: "The server's identity has been verified. The password is sent only to that server.",
     passphraseBody: "The passphrase unlocks your private key on this device. It is not sent to the server.",
     attempt: (n: number, max: number) => `Attempt ${n} of ${max}`,

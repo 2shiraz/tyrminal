@@ -11,7 +11,9 @@ use tokio::sync::watch;
 use zeroize::Zeroizing;
 
 use crate::algorithms;
-use crate::auth::{AuthOutcome, ClientKey};
+use crate::auth::{
+    AuthOutcome, ClientKey, KbdPrompt, KbdRound, MAX_KBD_PROMPTS, MAX_KBD_ROUNDS, MAX_SERVER_TEXT, sanitize_server_text,
+};
 use crate::channels::{ExecOutput, PtyRequest, ShellReader, ShellWriter, clamp_dimension};
 use crate::host_trust::{Endpoint, HostKeyRequest, HostKeyVerifier, PresentedHostKey, RejectReason, TrustVerdict};
 use crate::{SshError, Stage};
@@ -55,6 +57,20 @@ struct TrustRecord {
     accepted: Option<PresentedHostKey>,
     /// Untrusted pre-authentication banner text, bounded.
     banner: Option<String>,
+    /// What the last key exchange settled on (updated on every re-key).
+    negotiated: Option<Negotiated>,
+}
+
+/// The algorithms a connection actually uses, from the completed key exchange. Every value is
+/// one this client offered (see `algorithms.rs`), so none of it is server-controlled text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Negotiated {
+    pub kex: String,
+    pub host_key: String,
+    pub cipher: String,
+    /// Empty for AEAD ciphers, whose integrity is built in.
+    pub mac: String,
+    pub strict_kex: bool,
 }
 
 const MAX_BANNER_LEN: usize = 8 * 1024;
@@ -119,6 +135,18 @@ impl<V: HostKeyVerifier> Handler<V> {
         }
         self.with_record(|r| r.banner = Some(banner[..end].to_owned()));
     }
+
+    fn store_negotiated(&self, names: &russh::Names) {
+        let aead = names.cipher.as_ref().contains("gcm") || names.cipher.as_ref().contains("poly1305");
+        let negotiated = Negotiated {
+            kex: names.kex.as_ref().to_owned(),
+            host_key: names.key.as_str().to_owned(),
+            cipher: names.cipher.as_ref().to_owned(),
+            mac: if aead { String::new() } else { names.client_mac.as_ref().to_owned() },
+            strict_kex: names.strict_kex(),
+        };
+        self.with_record(|r| r.negotiated = Some(negotiated));
+    }
 }
 
 fn config(options: &ConnectOptions) -> Arc<client::Config> {
@@ -160,6 +188,7 @@ trait ErasedCheck: Send {
         key: &'a PublicKeyOrCertificate,
     ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
     fn banner(&mut self, banner: &str);
+    fn negotiated(&mut self, names: &russh::Names);
 }
 
 impl<V: HostKeyVerifier> ErasedCheck for Handler<V> {
@@ -173,6 +202,10 @@ impl<V: HostKeyVerifier> ErasedCheck for Handler<V> {
     fn banner(&mut self, banner: &str) {
         self.store_banner(banner);
     }
+
+    fn negotiated(&mut self, names: &russh::Names) {
+        self.store_negotiated(names);
+    }
 }
 
 impl client::Handler for ErasedHandler {
@@ -184,6 +217,16 @@ impl client::Handler for ErasedHandler {
 
     async fn auth_banner(&mut self, banner: &str, _session: &mut client::Session) -> Result<(), Self::Error> {
         self.0.banner(banner);
+        Ok(())
+    }
+
+    async fn kex_done(
+        &mut self,
+        _shared_secret: Option<&[u8]>,
+        names: &russh::Names,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        self.0.negotiated(names);
         Ok(())
     }
 }
@@ -299,6 +342,11 @@ impl VerifiedConnection {
         self.record.lock().unwrap_or_else(|p| p.into_inner()).banner.clone()
     }
 
+    /// The algorithms the last key exchange settled on.
+    pub fn negotiated(&self) -> Option<Negotiated> {
+        self.record.lock().unwrap_or_else(|p| p.into_inner()).negotiated.clone()
+    }
+
     pub fn is_authenticated(&self) -> bool {
         self.authenticated
     }
@@ -380,6 +428,76 @@ impl VerifiedConnection {
             Ok(Ok(result)) => result,
         };
         self.outcome(result)
+    }
+
+    /// Asks the server which methods it accepts, with an SSH "none" request. A server that lets
+    /// the user in without credentials returns `Success`.
+    pub async fn auth_methods(&mut self, username: &str) -> Result<AuthOutcome, SshError> {
+        let limit = self.request_timeout;
+        let result = within(limit, Stage::Authenticating, self.handle.authenticate_none(username)).await?;
+        self.outcome(result)
+    }
+
+    /// Keyboard-interactive authentication (RFC 4256). `respond` is called once per round that
+    /// has prompts, with sanitized server text, and returns one answer per prompt or `None` to
+    /// cancel. Rounds without prompts are answered with no responses and never reach `respond`.
+    /// The number of rounds and prompts is bounded. Answers are copied once into the SSH library,
+    /// which does not zeroize them; the same documented limit as passwords.
+    pub async fn authenticate_keyboard_interactive<F, Fut>(
+        &mut self,
+        username: &str,
+        mut respond: F,
+    ) -> Result<AuthOutcome, SshError>
+    where
+        F: FnMut(KbdRound) -> Fut,
+        Fut: Future<Output = Option<Vec<Zeroizing<String>>>>,
+    {
+        use russh::client::KeyboardInteractiveAuthResponse as R;
+        let limit = self.request_timeout;
+        let started = self.handle.authenticate_keyboard_interactive_start(username, None::<String>);
+        let mut reply = within(limit, Stage::Authenticating, started).await?;
+        let mut round = 0;
+        loop {
+            match reply {
+                R::Success => {
+                    self.authenticated = true;
+                    return Ok(AuthOutcome::Success);
+                }
+                R::Failure { remaining_methods, partial_success } => {
+                    return self.outcome(russh::client::AuthResult::Failure { remaining_methods, partial_success });
+                }
+                R::InfoRequest { name, instructions, prompts } => {
+                    round += 1;
+                    if round > MAX_KBD_ROUNDS || prompts.len() > MAX_KBD_PROMPTS {
+                        return Err(SshError::LimitExceeded);
+                    }
+                    let answers: Vec<String> = if prompts.is_empty() {
+                        Vec::new()
+                    } else {
+                        let request = KbdRound {
+                            round,
+                            name: sanitize_server_text(&name, MAX_SERVER_TEXT),
+                            instructions: sanitize_server_text(&instructions, MAX_SERVER_TEXT),
+                            prompts: prompts
+                                .iter()
+                                .map(|p| KbdPrompt {
+                                    text: sanitize_server_text(&p.prompt, MAX_SERVER_TEXT),
+                                    echo: p.echo,
+                                })
+                                .collect(),
+                        };
+                        let expected = request.prompts.len();
+                        let answers = respond(request).await.ok_or(SshError::Cancelled)?;
+                        if answers.len() != expected {
+                            return Err(SshError::Internal);
+                        }
+                        answers.iter().map(|a| a.as_str().to_owned()).collect()
+                    };
+                    let next = self.handle.authenticate_keyboard_interactive_respond(answers);
+                    reply = within(limit, Stage::Authenticating, next).await?;
+                }
+            }
+        }
     }
 
     /// Opens an interactive shell with a PTY.
@@ -466,5 +584,18 @@ impl VerifiedConnection {
         let _ =
             tokio::time::timeout(Duration::from_secs(2), self.handle.disconnect(Disconnect::ByApplication, "", "en"))
                 .await;
+    }
+}
+
+/// Bounds one request/response exchange with the server.
+async fn within<T>(
+    limit: Duration,
+    stage: Stage,
+    fut: impl Future<Output = Result<T, russh::Error>>,
+) -> Result<T, SshError> {
+    match tokio::time::timeout(limit, fut).await {
+        Err(_) => Err(SshError::Timeout(stage)),
+        Ok(Err(err)) => Err(SshError::from_russh(&err, stage)),
+        Ok(Ok(value)) => Ok(value),
     }
 }

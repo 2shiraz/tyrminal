@@ -11,4 +11,17 @@ export type SessionEvent = { "type": "state", state: SessionState, } | { "type":
 /**
  * 1-based attempt number.
  */
-attempt: number, maxAttempts: number, } | { "type": "banner", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
+attempt: number, maxAttempts: number, 
+/**
+ * Keyboard-interactive only: the server's instructions and question, sanitized but
+ * untrusted (render as plain text, never as markup). `None` for other kinds.
+ */
+message: string | null, 
+/**
+ * Keyboard-interactive only: the server allows the answer to be shown while typed.
+ */
+echo: boolean, } | { "type": "negotiated", kex: string, hostKey: string, cipher: string, 
+/**
+ * Empty for AEAD ciphers.
+ */
+mac: string, strictKex: boolean, } | { "type": "banner", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };

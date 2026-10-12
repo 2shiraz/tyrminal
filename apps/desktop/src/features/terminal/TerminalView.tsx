@@ -3,7 +3,7 @@ import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 
 
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
-import { IconButton, Notice, SecretField } from "../../components/ui/controls";
+import { IconButton, Notice, SecretField, TextField } from "../../components/ui/controls";
 import {
   IconChevronDown,
   IconChevronLeft,
@@ -37,6 +37,8 @@ export interface PaneStatus {
   cols: number;
   rows: number;
   clipboardAllowed: boolean;
+  /** SSH only: the negotiated cipher and key exchange, from the client's own offer list. */
+  security?: { cipher: string; kex: string; mac: string; hostKey: string; strictKex: boolean };
 }
 
 /** Imperative handle the shell uses for actions on a pane (find, zoom, snippets). */
@@ -166,6 +168,9 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "banner":
             setBanner(event.text);
+            break;
+          case "negotiated":
+            publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;
           case "closed":
             setTrust(null);
@@ -616,6 +621,7 @@ function LinkDialog({ url, onClose, onOpened }: { url: string; onClose: () => vo
 function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
   const [secret, setSecret] = useState("");
   const isPassword = prompt.kind === "password";
+  const isKbd = prompt.kind === "keyboard_interactive";
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -625,21 +631,30 @@ function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: 
     onAnswer(value);
   }
 
+  const title = isKbd ? msg.terminal.kbdTitle(prompt.username) : isPassword ? msg.terminal.passwordTitle(prompt.username) : msg.terminal.passphraseTitle;
+  const body = isKbd ? msg.terminal.kbdBody : isPassword ? msg.terminal.passwordBody : msg.terminal.passphraseBody;
+  const label = isKbd ? msg.terminal.kbdAnswer : isPassword ? msg.hosts.password : msg.keys.passphrase;
+
   return (
-    <Dialog
-      title={isPassword ? msg.terminal.passwordTitle(prompt.username) : msg.terminal.passphraseTitle}
-      icon={<IconKeyRound size={18} />}
-      onDismiss={() => onAnswer(null)}
-    >
+    <Dialog title={title} icon={<IconKeyRound size={18} />} onDismiss={() => onAnswer(null)}>
       <form className="stack" onSubmit={submit}>
         <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-          {isPassword ? msg.terminal.passwordBody : msg.terminal.passphraseBody}
+          {body}
         </p>
-        {banner && isPassword && (
+        {banner && (isPassword || isKbd) && (
           <div className="stack-xs">
             <span className="label">{msg.terminal.banner}</span>
             {/* Server-supplied text: rendered as plain text, never as markup. */}
             <pre className="banner-text">{banner}</pre>
+          </div>
+        )}
+        {isKbd && prompt.message && (
+          <div className="stack-xs">
+            <span className="label">{msg.terminal.kbdQuestion}</span>
+            {/* Server-supplied, sanitized by the core, still untrusted: plain text only. */}
+            <pre className="banner-text" data-testid="kbd-question">
+              {prompt.message}
+            </pre>
           </div>
         )}
         {prompt.attempt > 1 && (
@@ -647,7 +662,11 @@ function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: 
             {msg.terminal.retryHint} {msg.terminal.attempt(prompt.attempt, prompt.maxAttempts)}
           </Notice>
         )}
-        <SecretField label={isPassword ? msg.hosts.password : msg.keys.passphrase} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
+        {isKbd && prompt.echo ? (
+          <TextField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} autoComplete="off" spellCheck={false} />
+        ) : (
+          <SecretField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
+        )}
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={() => onAnswer(null)}>
             {msg.common.cancel}

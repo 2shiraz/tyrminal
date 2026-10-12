@@ -2,7 +2,7 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconScrollText, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 export function StatusBar({
@@ -46,6 +46,22 @@ export function StatusBar({
               <span className="status-item" data-renderer={status.renderer}>
                 <IconCpu size={13} />
                 {msg.status.renderer(status.renderer === "webgl" ? msg.status.webgl : msg.status.dom)}
+              </span>
+            </>
+          )}
+          {status?.security && (
+            <>
+              <span className="status-sep" aria-hidden="true" />
+              <span
+                className="status-item"
+                data-testid="negotiated"
+                data-tooltip={msg.status.securityDetail(status.security)}
+                data-tooltip-side="top"
+                tabIndex={0}
+                aria-label={msg.status.securityDetail(status.security)}
+              >
+                <IconShieldCheck size={13} />
+                {status.security.cipher.replace("@openssh.com", "")}
               </span>
             </>
           )}
