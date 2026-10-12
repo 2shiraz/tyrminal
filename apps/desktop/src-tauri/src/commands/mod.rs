@@ -5,6 +5,7 @@ pub mod backup;
 pub mod discovery;
 pub mod files;
 pub mod inventory;
+pub mod output;
 pub mod sessions;
 pub mod settings;
 pub mod snippets;
@@ -12,3 +13,5 @@ pub mod vault;
 // agent B: tunnels and history
 pub mod history;
 pub mod tunnels;
+// command history
+pub mod command_history;

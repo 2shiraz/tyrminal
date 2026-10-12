@@ -314,6 +314,40 @@ impl WorkflowRecord {
     }
 }
 
+// command history
+// Kinds 60–69 belong to command history.
+/// The commands of one host, or of local terminals (one record each).
+pub(crate) const KIND_HISTORY: u16 = 60;
+/// Whether history is on (one record).
+pub(crate) const KIND_HISTORY_SETTINGS: u16 = 61;
+
+/// Remembered commands of one scope, least recently used first.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct HistoryRecord {
+    /// A host id, or `local` for local terminals.
+    pub scope: String,
+    pub commands: Vec<HistoryEntryRecord>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct HistoryEntryRecord {
+    pub command: String,
+    pub last_used: u64,
+    pub uses: u32,
+}
+
+impl HistoryRecord {
+    pub fn content_len(&self) -> usize {
+        self.scope.len() + self.commands.iter().map(|c| c.command.len() + 48).sum::<usize>()
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+pub(crate) struct HistorySettingsRecord {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 // Session recordings
 pub(crate) const KIND_SESSION_LOG: u16 = 101;
 pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;

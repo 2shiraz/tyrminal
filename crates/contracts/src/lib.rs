@@ -19,6 +19,8 @@ mod tunnels;
 // agent D: inventory and snippets
 mod defaults;
 mod inventory;
+// command history
+mod command_history;
 
 pub use discovery::*;
 pub use dto::*;
@@ -29,3 +31,5 @@ pub use tunnels::*;
 // agent D: inventory and snippets
 pub use defaults::*;
 pub use inventory::*;
+// command history
+pub use command_history::*;

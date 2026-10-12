@@ -340,6 +340,11 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** P-29: saves one command's output through the system save dialog; the file name, or null if cancelled. */
+export const terminalOutput = {
+  save: (text: string) => call<string | null>("terminal_output_save", { text }),
+};
+
 /** Group defaults for route and appearance (HST-05). */
 export const groupDefaults = {
   get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
@@ -479,4 +484,20 @@ export const discovery = {
   start: (networkId: string) => call<DiscoveryStatus>("discovery_start", { networkId }),
   status: () => call<DiscoveryStatus>("discovery_status"),
   stop: () => call<DiscoveryStatus>("discovery_stop"),
+};
+
+// command history
+type HistorySettingsDto = import("@tyrminal/contracts").HistorySettings;
+type HistoryEntryDto = import("@tyrminal/contracts").HistoryEntry;
+
+/** Command history for suggestions: opt-in, local to the vault, fed only from shell-integration marks. */
+export const history = {
+  settings: () => call<HistorySettingsDto>("history_settings_get"),
+  /** Off stops remembering and suggesting and keeps what was remembered. */
+  setSettings: (settings: HistorySettingsDto) => call<HistorySettingsDto>("history_settings_set", { settings }),
+  add: (sessionId: string, command: string) => call<void>("history_add", { sessionId, command }),
+  suggest: (sessionId: string, query: string) => call<string[]>("history_suggest", { sessionId, query }),
+  list: () => call<HistoryEntryDto[]>("history_list"),
+  remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
+  clear: () => call<number>("history_clear"),
 };

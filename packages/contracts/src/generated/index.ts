@@ -25,6 +25,8 @@ export type { GroupDefaults } from "./GroupDefaults";
 export type { GroupDefaultsInput } from "./GroupDefaultsInput";
 export type { GroupInput } from "./GroupInput";
 export type { GroupSummary } from "./GroupSummary";
+export type { HistoryEntry } from "./HistoryEntry";
+export type { HistorySettings } from "./HistorySettings";
 export type { HostAppearance } from "./HostAppearance";
 export type { HostAuth } from "./HostAuth";
 export type { HostAuthInput } from "./HostAuthInput";

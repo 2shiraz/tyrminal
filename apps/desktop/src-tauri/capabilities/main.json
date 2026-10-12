@@ -80,6 +80,7 @@
     "allow-terminal-choices",
     "allow-editor-pick-app",
     "allow-diagnostics-report",
+    "allow-terminal-output-save",
     "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
@@ -143,6 +144,13 @@
     "allow-discovery-networks",
     "allow-discovery-start",
     "allow-discovery-status",
-    "allow-discovery-stop"
+    "allow-discovery-stop",
+    "allow-history-settings-get",
+    "allow-history-settings-set",
+    "allow-history-add",
+    "allow-history-suggest",
+    "allow-history-list",
+    "allow-history-delete",
+    "allow-history-clear"
   ]
 }
