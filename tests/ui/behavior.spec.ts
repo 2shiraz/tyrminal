@@ -493,3 +493,29 @@ test("a shortcut hint is one text string, not a row of key caps", async ({ page 
   await expect(hint).toHaveAttribute("aria-hidden", "true");
   await expect(hint.locator("kbd")).toHaveCount(0);
 });
+
+test("toasts sit beside an open side panel, not over its footer", async ({ page }) => {
+  await openApp(page);
+  await page.keyboard.press("Control+Shift+K");
+  await page.keyboard.type("api-gateway");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await page.keyboard.press("Control+Shift+S");
+  const panel = page.locator(".side-panel");
+  await expect(panel).toBeVisible();
+  await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
+  const toast = page.locator(".toasts .toast");
+  await expect(toast).toBeVisible();
+  const panelLeft = (await panel.boundingBox())!.x;
+  const toastBox = (await toast.boundingBox())!;
+  expect(toastBox.x + toastBox.width).toBeLessThanOrEqual(panelLeft);
+  // Closing the panel gives the stack its corner back.
+  await page.keyboard.press("Control+Shift+S");
+  await expect(panel).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const box = (await toast.boundingBox())!;
+      return Math.round(page.viewportSize()!.width - (box.x + box.width));
+    })
+    .toBe(16);
+});
