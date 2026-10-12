@@ -9,6 +9,8 @@ paths = [
   '''tests/fixtures/vault-vectors/vectors\.json''',
   '''tests/fixtures/vault-vectors/backup\.json''',
   '''docs/crypto-format\.md''',
+  # A throwaway DSA key that authorizes nothing (tests/fixtures/review/README.md).
+  '''tests/fixtures/review/dsa-throwaway\.key''',
 ]
 # Algorithm names in prose match the generic-api-key entropy rule.
 regexes = [
