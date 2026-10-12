@@ -105,7 +105,14 @@ describe("shell integration in the real application", { concurrency: false }, ()
       await s.clickButton("Close", { within: "dialog" });
       return;
     }
-    await s.click(await s.waitFor('dialog select option[value="bash"]'));
+    // Chosen like a user's pick, without clicking an <option>: macOS WebKit opens a native menu
+    // for a select, and a WebDriver click on one of its options does not choose it.
+    await s.waitFor('dialog select option[value="bash"]');
+    await s.execute(
+      `const select = document.querySelector('dialog select option[value="bash"]').closest("select");
+       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, "bash");
+       select.dispatchEvent(new Event("change", { bubbles: true }));`,
+    );
     await s.until(async () => /Startup file: ~\/\.bashrc · Not installed\./.test(await s.text(await s.waitFor("dialog"))), { describe: "bash status" });
     assert.ok(!existsSync(join(home, ".bashrc")), "looking writes nothing");
     await s.clickButton("Install", { within: "dialog" });
