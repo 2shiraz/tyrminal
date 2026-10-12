@@ -54,7 +54,7 @@ test("malformed or unsafe marks are ignored", async ({ page }) => {
   await connected(page);
   await output(page, `${ESC}]7;file://api-gateway/home/deploy${ST}`);
   // Control characters (encoded or raw), relative paths, non-file schemes and broken encoding.
-  for (const bad of ["file://h/tmp/%1Bevil", "file://h/tmp/%E2%80%AEgnp", "file://hrelative", "https://h/tmp", "file://h/tmp/%zz", `file://h/${"a".repeat(5000)}`]) {
+  for (const bad of ["file://h/tmp/%1Bevil", "file://h/tmp/%E2%80%AEgnp", "file://hrelative", "https://h/tmp", "file://h/tmp/%zz", "file://h/tmp/%FFFFFFFFFFFFFFC3%FFFFFFFFFFFFFFBC", `file://h/${"a".repeat(5000)}`]) {
     await output(page, `${ESC}]7;${bad}${ST}`);
   }
   // A status without a started command, and an out-of-range status, are not reported.

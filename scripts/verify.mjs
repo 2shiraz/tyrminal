@@ -15,6 +15,9 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// A step that hangs fails after this long instead of holding a CI runner until its job limit.
+const STEP_TIMEOUT_MS = 30 * 60 * 1000;
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const labFile = join(root, "tests", "ssh-lab", ".run", "lab.json");
 const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win32" ? "tyrminal.exe" : "tyrminal");
@@ -81,15 +84,15 @@ const SUITES = {
     { name: "changed bastion key, proxy auth rejection, impostor proxy (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored", "bastion", "proxy", "scoped"), blockedBy: needsLab },
   ],
   native: [
-    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
-    { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
-    { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
-    { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     // privilege prompts (KEY-18)
-    { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 
@@ -111,9 +114,10 @@ for (const step of suite) {
     continue;
   }
   const started = Date.now();
-  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024 });
+  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024, timeout: STEP_TIMEOUT_MS });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const ok = run.status === 0;
+  if (run.error?.code === "ETIMEDOUT") run.stderr = `${run.stderr ?? ""}\nstep timed out after ${STEP_TIMEOUT_MS / 60000} minutes`;
   console.log(`${ok ? "ok     " : "FAILED "}  ${step.name}  (${seconds}s, exit ${run.status})\n         $ ${line}`);
   if (!ok) {
     const lines = `${run.stdout}${run.stderr}`.trim().split("\n");

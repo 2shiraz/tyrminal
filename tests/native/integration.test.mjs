@@ -69,16 +69,16 @@ describe("shell integration in the real application", { concurrency: false }, ()
     await s.until(async () => /Folder: \/tmp/.test(await s.text(context)), { describe: "folder from OSC 7" });
     await s.until(async () => /Last command: echo marks-\$\(\(20\+22\)\) \(succeeded\)/.test(await s.text(context)), { describe: "command from OSC 133" });
     await app.screenshot("i02-shell-context");
-    await s.chord([KEYS.escape]);
-    await s.waitGone("dialog");
-    await t.type("exit\n");
-
-    await integrationDialogFromSuggestions();
+    // Straight on to the setup from the same dialog (pressing Escape is not reliable through
+    // WebDriver on every platform, and nothing here depends on it).
+    await s.clickButton("Shell integration…", { within: "dialog" });
+    await s.until(async () => /Installed \(version 1\)\./.test(await s.text(await s.waitFor("dialog"))), { describe: "integration status" });
     await s.clickButton("Remove", { within: "dialog" });
     await s.until(async () => /Not installed\./.test(await s.text(await s.waitFor("dialog"))), { describe: "removed" });
     await s.clickButton("Close", { within: "dialog" });
     await s.waitGone("dialog");
-    // Leave the lab account as it was: no backup, and no empty startup file.
+    // Leave Bash, then leave the lab account as it was: no backup, and no empty startup file.
+    await t.type("exit\n");
     await t.type("rm -f ~/.bashrc.tyrminal-backup; [ -s ~/.bashrc ] || rm -f ~/.bashrc; echo cleaned-$((1+1))\n");
     await t.waitForText(/^cleaned-2\s*$/m, "cleanup ran");
   });
