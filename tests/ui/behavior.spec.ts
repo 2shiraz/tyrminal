@@ -437,6 +437,8 @@ test("broadcast: typed input reaches every pane of the tab, terminal replies do 
 
   // A terminal query answered by the focused pane's terminal is not copied to the other pane.
   await output(page, "\u001b[6n");
+  // Wait for the terminal's reply to reach its session first, so it cannot land inside the typed text.
+  await page.waitForFunction(() => /\u001b\[\d+;\d+R/.test((window as unknown as { __mockReceived?: string }).__mockReceived ?? ""));
   await page.keyboard.type("hostname");
   await page.keyboard.press("Enter");
   await expect.poll(() => paneText(0)).toContain("hostname: synthetic output");

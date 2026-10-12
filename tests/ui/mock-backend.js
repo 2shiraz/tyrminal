@@ -192,6 +192,8 @@ export function installMockBackend(options) {
     const s = state.sessions.get(sessionId);
     if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
     const text = new TextDecoder().decode(bytes);
+    // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
+    window.__mockReceived = (window.__mockReceived ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
