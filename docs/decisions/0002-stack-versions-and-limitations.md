@@ -21,7 +21,7 @@ only; nothing has been built or run on Windows (blocker B-01).
 | Contracts | `ts-rs` | 12.0.1 | MIT | Rust → TypeScript types |
 | UI | React, Vite, TypeScript | 19.3.0, 8.3.3, 7.0.2 | MIT, MIT, Apache-2.0 | 30 npm packages in total |
 | Terminal | `@xterm/xterm`, `@xterm/addon-fit` | 6.0.0, 0.11.0 | MIT | No WebGL, clipboard or web-links addon is loaded. |
-| Native E2E | `tauri-plugin-wdio-webdriver` | 1.4.0 | MIT | Optional, non-default `e2e` feature only |
+| Native E2E | `tauri-plugin-wdio-webdriver` | 1.5.0 | MIT | Optional, non-default `e2e` feature only. 1.4.0 did not compile on Windows against Tauri 2.12 (webview2-com 0.38 vs 0.39); 1.5.0 matches |
 
 ## Supply-chain policy
 
