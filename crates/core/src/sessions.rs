@@ -22,8 +22,9 @@ use tyrminal_contracts::limits::{
     TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing, SessionEvent, SessionOpened,
-    SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision, VaultStatus,
+    AuthPromptKind, ConflictChoice, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing,
+    SessionEvent, SessionOpened, SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision,
+    VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -392,8 +393,9 @@ impl Sessions {
     }
 
     /// Downloads `dir/name` (a file, or a folder with everything in it) into `local_dir` (a
-    /// folder the user chose natively) under the same name. Folders are never merged into an
-    /// existing one, so `overwrite` applies to files only. Checks run before the transfer starts; progress and the result arrive on `sink`.
+    /// folder the user chose natively). A taken name is resolved by `choice`; folders are never
+    /// merged or replaced. Checks run before the transfer starts; progress and the result
+    /// arrive on `sink`, and the result's name is the one actually used.
     #[allow(clippy::too_many_arguments)]
     pub async fn download(
         &self,
@@ -402,12 +404,19 @@ impl Sessions {
         dir: &str,
         name: &str,
         local_dir: PathBuf,
-        overwrite: bool,
+        choice: ConflictChoice,
         sink: Arc<dyn TransferSink>,
     ) -> Result<TransferStarted, IpcError> {
         let remote = files::join(files::remote_dir(dir)?, name)?;
         let (_, sftp) = self.sftp(owner, session_id).await?;
         let token = random_token()?;
+        let overwrite = choice == ConflictChoice::Replace;
+        let local_name = if choice == ConflictChoice::KeepBoth {
+            files::free_local_name(&local_dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let name = local_name.as_str();
         // A folder is copied as a whole tree; anything else must be a regular file.
         if sftp.stat(&remote).await.map_err(from_file)?.kind == tyrminal_ssh::RemoteKind::Dir {
             let job = folders::prepare_download(sftp, remote, local_dir, name, token).await?;
@@ -434,7 +443,7 @@ impl Sessions {
     }
 
     /// Uploads a local file or folder (chosen natively) into the remote folder `dir` under
-    /// `name`. Folders are never merged into an existing one.
+    /// `name`; a taken name is resolved by `choice` (folders are never merged or replaced).
     #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
@@ -443,12 +452,20 @@ impl Sessions {
         local: PathBuf,
         dir: &str,
         name: &str,
-        overwrite: bool,
+        choice: ConflictChoice,
         sink: Arc<dyn TransferSink>,
     ) -> Result<TransferStarted, IpcError> {
         let dir = files::remote_dir(dir)?.to_owned();
+        files::remote_name(name)?;
         let (_, sftp) = self.sftp(owner, session_id).await?;
         let token = random_token()?;
+        let overwrite = choice == ConflictChoice::Replace;
+        let remote_name = if choice == ConflictChoice::KeepBoth {
+            files::free_remote_name(&sftp, &dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let name = remote_name.as_str();
         let is_dir = tokio::fs::metadata(&local).await.is_ok_and(|m| m.is_dir());
         if is_dir {
             files::remote_name(name)?;

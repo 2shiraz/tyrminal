@@ -47,14 +47,18 @@ const SUITES = {
     { name: "frontend build", cmd: pnpm("--filter", "@tyrminal/desktop", "build") },
     { name: "feature matrix", cmd: node("scripts/feature-matrix.mjs", "--check") },
   ],
-  integration: [
-    { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
+  // Large-transfer gate (Phase 06): moves 2 GiB each way, so it is a suite of its own that CI runs
+  // on Linux and macOS. Without TYRMINAL_BIG_TRANSFER it is BLOCKED (never a silent pass).
+  transfer: [
     {
-      name: "2 GiB SFTP round trip, bounded memory (opt-in)",
+      name: "2 GiB SFTP round trip, bounded memory",
       cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--exact", "two_gib_round_trip_is_byte_for_byte_with_bounded_memory"),
       blockedBy: () => needsLab() ?? (process.env.TYRMINAL_BIG_TRANSFER ? null : "moves 4 GiB; set TYRMINAL_BIG_TRANSFER=1 to run"),
     },
+  ],
+  integration: [
+    { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
   ],
   security: [

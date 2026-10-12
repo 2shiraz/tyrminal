@@ -21,6 +21,7 @@
     "test:native": "node scripts/verify.mjs native",
     "verify:fast": "node scripts/verify.mjs fast",
     "test:integration": "node scripts/verify.mjs integration",
+    "test:transfer": "node scripts/verify.mjs transfer",
     "test:security": "node scripts/verify.mjs security",
     "check:release": "node scripts/check-release.mjs",
     "test:ui": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests test",

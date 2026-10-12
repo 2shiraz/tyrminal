@@ -677,6 +677,19 @@ pub struct LocalPick {
     pub size: Option<u64>,
 }
 
+/// What a transfer does when its target name is taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConflictChoice {
+    /// Refuse with a conflict, so the user can decide.
+    Ask,
+    /// Replace the existing file (files only; folders are never merged or replaced).
+    Replace,
+    /// Keep the existing one and use the first free name like `name (1).ext`.
+    KeepBoth,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -728,4 +741,17 @@ pub struct EditStatus {
     pub edit_id: String,
     pub name: String,
     pub changed: bool,
+}
+
+/// A folder inside a local folder the user chose (`token`), listed for the two-pane view. `path`
+/// is the list of names below the chosen folder; the chosen folder itself is `[]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LocalListing {
+    pub token: String,
+    pub root_name: String,
+    pub path: Vec<String>,
+    pub entries: Vec<RemoteEntry>,
+    pub truncated: bool,
 }

@@ -134,6 +134,12 @@ jobs:
           fi
       - name: Security suite
         run: pnpm run test:security
+      - name: Large transfer (2 GiB each way over SFTP)
+        # Windows runs the lab inside WSL 1, where 4 GiB of file I/O takes too long for every run.
+        if: runner.os != 'Windows'
+        env:
+          TYRMINAL_BIG_TRANSFER: "1"
+        run: pnpm run test:transfer
 
       - name: Build test application (e2e feature)
         run: pnpm run build:e2e

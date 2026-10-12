@@ -9,7 +9,7 @@ phases 02–09 implemented and verified; phases 10+ are out of scope for now.
 | | Agent A (integrator) | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
 | Branch | `claude/blissful-brown-7h9l18` (PR 2shiraz/tyrminal#2) | `claude/agent-b-tunnels-logs` | `claude/agent-c-workspaces` | `claude/agent-d-inventory-snippets` |
-| Started from | — | `ed76320` | `f404100` | `f404100` |
+| Started from | — | `ed76320` | `79c22d7` | `79c22d7` |
 | Scope | Phase 06 remainder (SFTP), Phase 02/03 leftovers (vault, secret store, recovery, formats, local terminal, escape permissions), Phase 09 release candidate, merging everyone's work | Phase 07 tunnels, jump hosts, proxies, agent forwarding, advanced auth; Phase 08 history, logs, recording | Phase 05: tabs (duplicate/detach), workspaces, split/focus layouts, pane reorder, named layout templates and restore, status indicators, shortcuts and keyboard customization, encodings/emulation, output highlighting, command palette and recent connections, broadcast target review | Phase 04 remainder (protocol settings, inherited workflow settings, group-wide connect, inventory presentation, key import/generation incl. formats and certificates, PuTTY/MobaXterm/SecureCRT importers, known-host conversion), Phase 08 snippets (multi-host, saved targets, startup scripts, organization, environment variables), post-quantum/algorithm controls |
 | Matrix rows | `FIL-*`, `VLT-*`, `SEC-*` except D's, `P-*` except others', `CON-02..06`, `CON-08`, `CON-12..14`, `UX-01`, `UX-02`, `UX-05`, `UX-06` | `FWD-*`, `LOG-*`, `AUT-*`, `CON-09`, `CON-10`, `CON-11`, `CON-15`, `P-14`, `P-16` | `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13` | `HST-*`, `KEY-*`, `IMP-*`, `SNP-*`, `SEC-03`, `SEC-08`, `SEC-09`, `SEC-10` |
 

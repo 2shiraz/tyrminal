@@ -18,7 +18,7 @@ mod sessions;
 mod validate;
 mod vault;
 
-pub use files::TransferSink;
+pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
