@@ -42,6 +42,7 @@ import {
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 
@@ -112,6 +113,8 @@ export function CommandPalette({
   openTabs,
   extra,
   onShellIntegration,
+  onSearchSessions,
+  onCommandOutput,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -160,6 +163,10 @@ export function CommandPalette({
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  /** P-28: search every open terminal's scrollback; present while any terminal is open. */
+  onSearchSessions?: (() => void) | undefined;
+  /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
+  onCommandOutput?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -264,6 +271,7 @@ export function CommandPalette({
       // agent D: inventory and snippets
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
+      if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
     // agent C: workspaces
     if (workspace) {
@@ -321,6 +329,7 @@ export function CommandPalette({
         });
       }
     }
+    if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));

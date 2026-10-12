@@ -43,6 +43,7 @@ import type {
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
+import type { DiscoveryNetwork, DiscoveryStatus } from "@tyrminal/contracts";
 
 /** An error from the native side: a stable code plus a safe, fixed message. */
 export class AppError extends Error {
@@ -339,6 +340,11 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** P-29: saves one command's output through the system save dialog; the file name, or null if cancelled. */
+export const terminalOutput = {
+  save: (text: string) => call<string | null>("terminal_output_save", { text }),
+};
+
 /** Group defaults for route and appearance (HST-05). */
 export const groupDefaults = {
   get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
@@ -468,4 +474,13 @@ export const startup = {
   set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
     call<string[] | null>("startup_set", { target, snippetIds }),
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
+};
+
+/** LAN discovery (HST-14): user-started, time-limited browsing for SSH servers on one network. */
+export const discovery = {
+  /** Local network interfaces to choose from; sends nothing. */
+  networks: () => call<DiscoveryNetwork[]>("discovery_networks"),
+  start: (networkId: string) => call<DiscoveryStatus>("discovery_start", { networkId }),
+  status: () => call<DiscoveryStatus>("discovery_status"),
+  stop: () => call<DiscoveryStatus>("discovery_stop"),
 };

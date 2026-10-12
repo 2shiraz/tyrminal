@@ -33,7 +33,9 @@ import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { encodingById } from "./encoding";
+import type { CommandRecord } from "./commandOutput";
 import { schemeById } from "./schemes";
+import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
 
 const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -79,6 +81,14 @@ export interface PaneHandle {
   jumpCommand(direction: -1 | 1): boolean;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
+  /** P-28: matches in this pane's scrollback (in memory only). */
+  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  /** P-28: scrolls a match into view and selects it. */
+  revealMatch(match: ScrollbackMatch): void;
+  /** P-29: commands the shell integration marked, newest first (empty without it). */
+  commands(): CommandRecord[];
+  /** P-29: the output of one finished command, or null when it is gone. */
+  commandOutput(id: number): string | null;
 }
 
 export interface SessionEnvironment {
@@ -270,6 +280,9 @@ export function TerminalView(props: TerminalViewProps) {
             environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
+          case "notice":
+            notify("danger", event.text);
+            break;
           case "negotiated":
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;
@@ -353,6 +366,10 @@ export function TerminalView(props: TerminalViewProps) {
         controllerRef.current?.setEncoding(encodingRef.current);
       },
       environment: () => environment.current,
+      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      revealMatch: (match) => controllerRef.current?.revealMatch(match),
+      commands: () => controllerRef.current?.commandOutputs.list() ?? [],
+      commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

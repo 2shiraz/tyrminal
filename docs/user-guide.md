@@ -177,8 +177,19 @@ the server, and shortcuts wait until the composition ends.
 nothing; **Middle click pastes** can be turned on. A paste from the mouse is reviewed like any
 paste. Programs that use the mouse (vim, htop, mc) get the click; hold Shift to paste anyway.
 
-**Duplicate tab** (tab menu) copies the tab's whole arrangement; each pane opens its destination again. When the shell integration
-(Suggestions → shell integration) reports the shell's current folder, each copy starts there:
+**Search all sessions** (command palette) finds text in the scrollback of every open terminal
+and lists the matches by tab; choosing one brings its tab to the front and selects the match.
+The search runs in memory only: nothing is saved or logged.
+
+**Copy or save a command's output** (command palette) lists the commands the shell integration
+marked in the focused terminal, newest first. Copy or save the output of one of them, without
+the prompt and the command line. Saving always asks where, in the system save dialog. Without
+the shell integration the action is not offered, because Tyrminal does not guess where output
+starts and ends.
+
+**Duplicate tab** (tab menu) copies the tab's whole arrangement; each pane opens its destination
+again. When the shell integration (Suggestions → shell integration) reports the shell's current
+folder, each copy starts there:
 
 - A local terminal starts directly in that folder (if it still exists).
 - An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only

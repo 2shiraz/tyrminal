@@ -80,6 +80,7 @@
     "allow-terminal-choices",
     "allow-editor-pick-app",
     "allow-diagnostics-report",
+    "allow-terminal-output-save",
     "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
@@ -135,6 +136,10 @@
     "allow-startup-set",
     "allow-startup-effective",
     "allow-group-defaults-get",
-    "allow-group-defaults-set"
+    "allow-group-defaults-set",
+    "allow-discovery-networks",
+    "allow-discovery-start",
+    "allow-discovery-status",
+    "allow-discovery-stop"
   ]
 }

@@ -23,6 +23,8 @@ import { shellContexts } from "../features/autocomplete/shellContext";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
+import { CommandOutputDialog } from "../features/terminal/CommandOutputDialog";
+import { SearchSessionsDialog } from "../features/terminal/SearchSessionsDialog";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
 import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
@@ -144,6 +146,9 @@ function Shell() {
   // terminal input: the connection details dialog (CON-15)
   const [details, setDetails] = useState<{ sessionId: string; label: string } | null>(null);
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
+  // P-28 and P-29: search across sessions, and the command-output dialog for one pane.
+  const [searchingSessions, setSearchingSessions] = useState(false);
+  const [outputFor, setOutputFor] = useState<number | null>(null);
   // Tabs in broadcast mode with the panes the user confirmed. Kept in memory only: never saved,
   // and switched off as soon as a confirmed pane stops being connected (a reconnect never
   // resumes broadcasting silently). Panes left out in the review neither send nor receive.
@@ -856,6 +861,8 @@ function Shell() {
                 }
               : undefined
           }
+          onSearchSessions={ws.tabs.length > 0 ? () => setSearchingSessions(true) : undefined}
+          onCommandOutput={pane && focusedHandle()?.commands().length ? () => setOutputFor(pane.id) : undefined}
           onShellIntegration={
             pane && paneStatus?.state === "connected"
               ? () => {
@@ -937,6 +944,47 @@ function Shell() {
           label={details.label}
           onClose={() => {
             setDetails(null);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {searchingSessions && (
+        <SearchSessionsDialog
+          tabs={ws.tabs.map((t) => ({
+            tabId: t.id,
+            title: tabTitle(ws, t),
+            panes: panesOf(t.layout).flatMap((paneId) => {
+              const handle = handles.current.get(paneId);
+              const p = ws.panes[paneId];
+              return handle && p ? [{ paneId, label: p.label, handle }] : [];
+            }),
+          }))}
+          onReveal={(paneId, match) => {
+            setSearchingSessions(false);
+            setWs((current) => focusPane(current, paneId));
+            // After the tab is in front and laid out.
+            window.requestAnimationFrame(() =>
+              window.requestAnimationFrame(() => {
+                const handle = handles.current.get(paneId);
+                handle?.revealMatch(match);
+                handle?.focus();
+              }),
+            );
+          }}
+          onClose={() => {
+            setSearchingSessions(false);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {outputFor !== null && handles.current.get(outputFor) && (
+        <CommandOutputDialog
+          handle={handles.current.get(outputFor) as PaneHandle}
+          label={ws.panes[outputFor]?.label ?? ""}
+          onClose={() => {
+            setOutputFor(null);
             focusedHandle()?.focus();
           }}
         />

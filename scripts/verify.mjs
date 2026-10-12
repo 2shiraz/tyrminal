@@ -69,6 +69,7 @@ const SUITES = {
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
+    { name: "LAN discovery against a DNS-SD responder (loopback)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "discovery_lab", "--quiet", "--", "--ignored") },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
     // Pseudo-terminals stand in for serial devices on Unix only; Windows serial is untested.
     ...(process.platform === "win32"
@@ -99,6 +100,7 @@ const SUITES = {
     { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
