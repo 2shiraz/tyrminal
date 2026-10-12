@@ -21,8 +21,16 @@ export interface Pane {
   identity: string;
   /** Title requested by the remote side, already sanitized. Shown after the label. */
   remoteTitle: string;
-  indicator: "busy" | "ok" | "bad" | "attention" | "idle";
+  indicator: Indicator;
+  /** Output arrived while this pane's tab was in the background. Cleared when the tab is shown. */
+  unread: boolean;
 }
+
+/**
+ * Session state shown beside a pane or tab: connecting (busy), connected (ok), dropped or failed
+ * (bad), waiting for the user to answer a prompt (attention), ended normally (idle).
+ */
+export type Indicator = "busy" | "ok" | "bad" | "attention" | "idle";
 
 export interface Tab {
   id: number;
@@ -67,7 +75,7 @@ type PaneSeed = Pick<Pane, "target" | "label" | "identity">;
 
 function newPane(ws: Workspace, seed: PaneSeed): [Workspace, number] {
   const id = ws.nextId;
-  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: "busy" };
+  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: "busy", unread: false };
   return [{ ...ws, panes: { ...ws.panes, [id]: pane }, nextId: id + 1 }, id];
 }
 
@@ -127,6 +135,7 @@ function removeTab(ws: Workspace, tabId: number): Workspace {
   if (active === tabId) {
     // Focus moves to the neighbour, as in browsers; with no tabs left, the page shows.
     active = (tabs[Math.min(index, tabs.length - 1)] ?? null)?.id ?? null;
+    return activate({ ...ws, tabs }, active);
   }
   return { ...ws, tabs, active };
 }
@@ -157,21 +166,33 @@ export function moveTab(ws: Workspace, from: number, to: number): Workspace {
   return { ...ws, tabs };
 }
 
+/** Makes `tabId` the tab in front and marks its panes' output as seen. */
+function activate(ws: Workspace, tabId: number | null): Workspace {
+  const tab = ws.tabs.find((t) => t.id === tabId);
+  if (!tab) return { ...ws, active: null };
+  const ids = panesOf(tab.layout).filter((id) => ws.panes[id]?.unread);
+  if (ids.length === 0) return { ...ws, active: tab.id };
+  const panes = { ...ws.panes };
+  for (const id of ids) panes[id] = { ...(panes[id] as Pane), unread: false };
+  return { ...ws, panes, active: tab.id };
+}
+
 export function selectTab(ws: Workspace, tabId: number | null): Workspace {
-  return { ...ws, active: tabId === null || ws.tabs.some((t) => t.id === tabId) ? tabId : ws.active };
+  if (tabId === null) return { ...ws, active: null };
+  return ws.tabs.some((t) => t.id === tabId) ? activate(ws, tabId) : ws;
 }
 
 export function cycleTab(ws: Workspace, delta: 1 | -1): Workspace {
   if (ws.tabs.length === 0) return ws;
   const index = ws.tabs.findIndex((t) => t.id === ws.active);
   const next = index < 0 ? (delta > 0 ? 0 : ws.tabs.length - 1) : (index + delta + ws.tabs.length) % ws.tabs.length;
-  return { ...ws, active: (ws.tabs[next] as Tab).id };
+  return activate(ws, (ws.tabs[next] as Tab).id);
 }
 
 export function focusPane(ws: Workspace, pane: number): Workspace {
   const tab = tabOfPane(ws, pane);
   if (!tab) return ws;
-  return { ...ws, active: tab.id, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) };
+  return activate({ ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) }, tab.id);
 }
 
 /**
@@ -183,6 +204,64 @@ export function focusPaneInActiveTab(ws: Workspace, pane: number): Workspace {
   const tab = tabOfPane(ws, pane);
   if (!tab || tab.id !== ws.active || tab.focused === pane) return ws;
   return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) };
+}
+
+/** Output arrived in `pane`: marked unread unless its tab is the one in front. */
+export function markUnread(ws: Workspace, pane: number): Workspace {
+  const current = ws.panes[pane];
+  if (!current || current.unread || tabOfPane(ws, pane)?.id === ws.active) return ws;
+  return { ...ws, panes: { ...ws.panes, [pane]: { ...current, unread: true } } };
+}
+
+const PRIORITY: Indicator[] = ["attention", "bad", "busy", "ok", "idle"];
+
+/**
+ * What a tab shows for all of its panes: the most urgent pane state (a prompt waiting for an
+ * answer first, then a dropped connection), whether any pane has unseen output, and how many
+ * panes are in each state that needs the user.
+ */
+export function tabStatus(ws: Workspace, tab: Tab): { indicator: Indicator; unread: boolean; attention: number; bad: number } {
+  const panes = panesOf(tab.layout)
+    .map((id) => ws.panes[id])
+    .filter((p): p is Pane => p !== undefined);
+  let best = PRIORITY.length - 1;
+  for (const p of panes) best = Math.min(best, PRIORITY.indexOf(p.indicator));
+  return {
+    indicator: PRIORITY[best] as Indicator,
+    unread: panes.some((p) => p.unread),
+    attention: panes.filter((p) => p.indicator === "attention").length,
+    bad: panes.filter((p) => p.indicator === "bad").length,
+  };
+}
+
+function remapLayout(layout: Layout, map: Map<number, number>): Layout {
+  if (layout.kind === "leaf") return { kind: "leaf", pane: map.get(layout.pane) as number };
+  return { ...layout, a: remapLayout(layout.a, map), b: remapLayout(layout.b, map) };
+}
+
+/**
+ * Opens a copy of a tab right after it: the same arrangement and destinations, each pane with a
+ * new session of its own (nothing typed in the original is repeated). Refused (unchanged) when the
+ * copy would exceed MAX_PANES.
+ */
+export function duplicateTab(ws: Workspace, tabId: number): Workspace {
+  const index = ws.tabs.findIndex((t) => t.id === tabId);
+  const tab = ws.tabs[index];
+  if (!tab) return ws;
+  const ids = panesOf(tab.layout);
+  if (paneCount(ws) + ids.length > MAX_PANES) return ws;
+  let next = ws;
+  const map = new Map<number, number>();
+  for (const id of ids) {
+    const source = ws.panes[id] as Pane;
+    const [after, created] = newPane(next, { target: source.target, label: source.label, identity: source.identity });
+    next = after;
+    map.set(id, created);
+  }
+  const copy: Tab = { id: next.nextId, customTitle: tab.customTitle, layout: remapLayout(tab.layout, map), focused: map.get(tab.focused) as number };
+  const tabs = [...next.tabs];
+  tabs.splice(index + 1, 0, copy);
+  return { ...next, tabs, active: copy.id, nextId: copy.id + 1 };
 }
 
 export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>): Workspace {

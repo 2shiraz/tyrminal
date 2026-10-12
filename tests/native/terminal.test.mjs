@@ -309,3 +309,77 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
     }
   });
 });
+
+describe("workspaces with real sessions", { concurrency: false }, () => {
+  /** @type {App} */ let app;
+  let s;
+  let t;
+
+  before(async () => {
+    app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    s = app.session;
+    t = ui(s);
+    await t.createVault();
+    await t.importKey(lab.keys.ed25519);
+    await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+    await t.connect("Lab");
+    await t.type("export PS1='tyr$ '; clear\n");
+    await t.waitForText("tyr$");
+  });
+
+  after(async () => {
+    await app?.quit();
+  });
+
+  const tabState = (name) =>
+    s.execute(
+      `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+       return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
+    );
+  /** Clicks a terminal tab with a real pointer (button 2 opens its menu). */
+  const clickTab = async (name, button = 0) => {
+    const rect = await s.until(
+      () =>
+        s.execute(
+          `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+           if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2 };`,
+        ),
+      { describe: `tab ${name}` },
+    );
+    await s.clickAt(rect.x, rect.y, button);
+  };
+  const selectTab = (name) => clickTab(name);
+
+  test("output from a background SSH session marks its tab unread until it is shown", async () => {
+    await t.type("sleep 2; echo LATE-$((40+2))\n");
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    assert.equal((await tabState("Lab")).unread, null, "nothing unseen yet");
+    await s.until(async () => (await tabState("Lab"))?.unread === "true", { describe: "Lab tab marked unread", timeout: 10_000 });
+    await selectTab("Lab");
+    await t.waitForText("LATE-42");
+    await s.until(async () => (await tabState("Lab"))?.unread === null, { describe: "unread cleared" });
+    await app.screenshot("w01-unread-cleared");
+  });
+
+  test("duplicating a tab opens a new, separate session to the same host", async () => {
+    await selectTab("Lab");
+    await t.type("echo ORIGINAL-$((1+1))\n");
+    await t.waitForText("ORIGINAL-2");
+    await clickTab("Lab", 2);
+    await s.clickButton("Duplicate tab", { within: "[role='menu']" });
+    // A new session is a new server connection: the host key is confirmed again ("Trust once").
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the copy" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "copy connected" });
+    const tabs = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].map((e) => e.textContent)`);
+    assert.equal(tabs.filter((x) => x.includes("Lab")).length, 2, JSON.stringify(tabs));
+    // Its screen starts fresh: nothing from the original tab is replayed into it.
+    await t.waitForText(/\$ ?$/m, "a prompt in the copy");
+    assert.doesNotMatch(await t.terminalText(), /ORIGINAL-2/);
+    await t.type("echo COPY-$((2+2))\n");
+    await t.waitForText("COPY-4");
+    await app.screenshot("w02-duplicate");
+  });
+});

@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
-import { type Direction, type Workspace, panesOf, tabTitle } from "../../app/workspace";
+import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
 import {
@@ -148,6 +149,7 @@ export function TabStrip({
         const title = tabTitle(ws, tab);
         const selected = ws.active === tab.id;
         const paneCount = panesOf(tab.layout).length;
+        const status = tabStatus(ws, tab);
         return (
           <div
             key={tab.id}
@@ -162,6 +164,8 @@ export function TabStrip({
             draggable={renaming !== tab.id}
             data-dragging={drag?.from === index}
             data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
+            data-status={status.indicator}
+            data-unread={status.unread || undefined}
             onClick={() => onSelect(tab.id)}
             onDoubleClick={() => onRenaming(tab.id)}
             onAuxClick={(event) => {
@@ -195,7 +199,7 @@ export function TabStrip({
             }}
             onDragEnd={() => setDrag(null)}
           >
-            <span className="status-dot" data-tone={pane?.indicator ?? "idle"} aria-hidden="true" />
+            <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
             {renaming === tab.id ? (
               <input
                 className="tab-rename"
@@ -228,7 +232,7 @@ export function TabStrip({
                 {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
               </span>
             )}
-            {pane?.indicator === "attention" && <span className="visually-hidden"> (needs your input)</span>}
+            <span className="visually-hidden">{msgC.status.describe(status)}</span>
             <button
               type="button"
               className="tab-close"

@@ -19,6 +19,7 @@ import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
+import { msgC } from "../lib/messages-c";
 import { actionFor, tabIndexFor } from "../lib/shortcuts";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
@@ -31,9 +32,11 @@ import {
   closePane,
   closeTab,
   cycleTab,
+  duplicateTab,
   emptyWorkspace,
   focusPane,
   focusPaneInActiveTab,
+  markUnread,
   moveTab,
   neighbour,
   openTab,
@@ -342,9 +345,11 @@ function Shell() {
             if (t) setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
           }}
           onDuplicate={(id) => {
-            const t = wsRef.current.tabs.find((x) => x.id === id);
-            const p = t ? wsRef.current.panes[t.focused] : undefined;
-            if (p) open(p.target, p.label, p.identity);
+            const current = wsRef.current;
+            const next = duplicateTab(current, id);
+            const t = current.tabs.find((x) => x.id === id);
+            if (next === current && t) notify("danger", msgC.tabs.duplicateFull(panesOf(t.layout).length));
+            else setWs(next);
           }}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}
@@ -389,6 +394,7 @@ function Shell() {
                 onPatch={(paneId, patch) => setWs((current) => patchPane(current, paneId, patch))}
                 onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
                 onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
+                onUnread={(paneId) => setWs((current) => markUnread(current, paneId))}
                 onClose={(paneId) => {
                   setWs((current) => closePane(current, paneId));
                   setStatuses((current) => {

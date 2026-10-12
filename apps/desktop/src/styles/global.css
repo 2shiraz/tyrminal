@@ -3057,3 +3057,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--danger);
   white-space: normal;
 }
+
+/* agent C: workspaces */
+
+/* Unseen output in a background tab: a ring around the session dot (shape, not color alone). */
+.status-dot[data-unread] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -44,6 +44,8 @@ export interface TerminalCallbacks {
   onSearchResults(index: number, total: number): void;
   /** Bytes the user typed or pasted here (never the terminal's own replies), for broadcast. */
   onUserInput?(bytes: Uint8Array): void;
+  /** Output arrived (no content: only that something was received). */
+  onOutput?(): void;
 }
 
 const INPUT_CHUNK = 32 * 1024;
@@ -478,6 +480,7 @@ export class TerminalController {
     if (this.disposed) return;
     this.counters.rx += bytes.length;
     this.publishCounters();
+    this.callbacks.onOutput?.();
     this.term.write(bytes, () => {
       this.counters.parsed += bytes.length;
       this.publishCounters();

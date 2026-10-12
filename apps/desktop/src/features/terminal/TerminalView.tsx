@@ -1,6 +1,7 @@
 import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
 
+import type { Indicator } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
 import { IconButton, Notice, SecretField, TextField } from "../../components/ui/controls";
@@ -28,7 +29,7 @@ type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
 type KeyChanged = Extract<SessionEvent, { type: "host_key_changed" }>;
 
-export type TabIndicator = "busy" | "ok" | "bad" | "attention" | "idle";
+export type TabIndicator = Indicator;
 
 /** What the shell's status bar shows for the focused pane. */
 export interface PaneStatus {
@@ -75,6 +76,8 @@ interface TerminalViewProps {
   register: (handle: PaneHandle | null) => void;
   /** User input typed in this pane (for broadcast). */
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
+  /** Output arrived while this pane's tab was hidden (reported once until it is shown again). */
+  onUnread?: (() => void) | undefined;
 }
 
 function Fingerprint({ value }: { value: string }) {
@@ -117,6 +120,8 @@ export function TerminalView(props: TerminalViewProps) {
   const autoAttempts = useRef(0);
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const unreadReported = useRef(false);
+  if (visible) unreadReported.current = false;
   const status = useRef<PaneStatus>({ state: "connecting", renderer: "dom", cols: 0, rows: 0, clipboardAllowed: false });
 
   // Callbacks change identity every render; the controller needs stable ones.
@@ -163,6 +168,11 @@ export function TerminalView(props: TerminalViewProps) {
       onResize: (cols, rows) => publish({ cols, rows }),
       onSearchResults: (index, total) => setFindCount({ index, total }),
       onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
+      onOutput: () => {
+        if (handlers.current.visible || unreadReported.current) return;
+        unreadReported.current = true;
+        handlers.current.onUnread?.();
+      },
       onEvent: (event) => {
         switch (event.type) {
           case "state":

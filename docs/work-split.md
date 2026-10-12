@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Slice 2: layouts (multi-host splits, grid/focus, pane reorder) | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slice 1: tab duplicate (whole arrangement), session status indicators (unread, input needed, disconnected) | — |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)

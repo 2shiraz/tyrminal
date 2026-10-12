@@ -20,6 +20,7 @@ export function PaneGrid({
   onPatch,
   onStatus,
   onFocus,
+  onUnread,
   onClose,
   onSplit,
   onRatio,
@@ -34,6 +35,7 @@ export function PaneGrid({
   onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>) => void;
   onStatus: (pane: number, status: PaneStatus) => void;
   onFocus: (pane: number) => void;
+  onUnread: (pane: number) => void;
   onClose: (pane: number) => void;
   onSplit: (pane: number, dir: Direction) => void;
   onRatio: (tab: number, path: ("a" | "b")[], ratio: number) => void;
@@ -98,6 +100,7 @@ export function PaneGrid({
                         onTitle={(remoteTitle) => onPatch(id, { remoteTitle })}
                         onStatus={(status) => onStatus(id, status)}
                         onFocus={() => onFocus(id)}
+                        onUnread={() => onUnread(id)}
                         onClose={() => onClose(id)}
                         onOpenKnownHosts={onOpenKnownHosts}
                         register={(handle) => register(id, handle)}
