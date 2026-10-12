@@ -1,5 +1,15 @@
-import type { ConflictChoice, EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  ConflictChoice,
+  EditStatus,
+  LocalListing,
+  RemoteEntry,
+  RemoteListing,
+  StreamUpload,
+  TransferDirection,
+  TransferEvent,
+  TransferStarted,
+} from "@tyrminal/contracts";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, Notice, Shortcut, Switch, TextField } from "../../components/ui/controls";
@@ -24,7 +34,12 @@ import {
 import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { beginUpload, sendUpload } from "./dropUpload";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
+import { KeyedMemory, useMemory } from "./memory";
+
+/** Transfer ids of dropped-file uploads (cancelled in the page, not by the core's transfer id). */
+const DROP_PREFIX = "drop-";
 
 export interface FilesTarget {
   sessionId: string;
@@ -45,6 +60,44 @@ interface Transfer {
   /** Remote folder the transfer touches (refreshed when an upload finishes there). */
   dir: string;
 }
+
+type Edit = EditStatus & { saved?: boolean | undefined };
+
+/** What the panel shows for one session; it stays while the session lives (see `panelMemory`). */
+export interface PanelMemory {
+  listing: RemoteListing | null;
+  pathText: string;
+  selected: string | null;
+  showHidden: boolean;
+  twoPane: boolean;
+  scrollTop: number;
+  local: LocalListing | null;
+  localSelection: RemoteEntry | null;
+  transfers: Transfer[];
+  edits: Edit[];
+}
+
+const emptyMemory = (): PanelMemory => ({
+  listing: null,
+  pathText: "",
+  selected: null,
+  showHidden: false,
+  twoPane: false,
+  scrollTop: 0,
+  local: null,
+  localSelection: null,
+  transfers: [],
+  edits: [],
+});
+
+const NO_SESSION = emptyMemory();
+
+/**
+ * Per-session panel state. Switching tabs unmounts the panel; coming back shows the same folder,
+ * selection, scroll position and transfers without listing again. The shell drops a session's
+ * entry when the session ends.
+ */
+export const panelMemory = new KeyedMemory<PanelMemory>(emptyMemory);
 
 type Prompt =
   | { kind: "mkdir" }
@@ -100,44 +153,56 @@ export function FilesPanel({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
-  const [listing, setListing] = useState<RemoteListing | null>(null);
-  const [pathText, setPathText] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [prompt, setPrompt] = useState<Prompt | null>(null);
-  const [twoPane, setTwoPane] = useState(false);
-  const [localSelection, setLocalSelection] = useState<RemoteEntry | null>(null);
-  const [localLocation, setLocalLocation] = useState<LocalLocation | null>(null);
-  const [localRefresh, setLocalRefresh] = useState(0);
-  const [remoteDrop, setRemoteDrop] = useState(false);
-  const [edits, setEdits] = useState<(EditStatus & { saved?: boolean | undefined })[]>([]);
-  const { pending, error, run } = useAction();
+  const bodyRef = useRef<HTMLDivElement>(null);
   const sessionId = target?.sessionId ?? null;
-  const listingRef = useRef<RemoteListing | null>(null);
-  listingRef.current = listing;
+  const [memory, change] = useMemory(panelMemory, sessionId, NO_SESSION);
+  const { listing, pathText, selected, showHidden, twoPane, transfers, edits, local, localSelection } = memory;
+  const set = useCallback(
+    <K extends keyof PanelMemory>(key: K, value: PanelMemory[K] | ((previous: PanelMemory[K]) => PanelMemory[K])) =>
+      change((m) => ({ ...m, [key]: typeof value === "function" ? (value as (p: PanelMemory[K]) => PanelMemory[K])(m[key]) : value })),
+    [change],
+  );
+  const setTransfers = (value: (list: Transfer[]) => Transfer[]) => set("transfers", value);
+  const setEdits = (value: (list: Edit[]) => Edit[]) => set("edits", value);
+  const setSelected = (name: string | null) => set("selected", name);
+  const setPathText = (text: string) => set("pathText", text);
+  const setShowHidden = (on: boolean) => set("showHidden", on);
+  const setTwoPane = (on: boolean) => set("twoPane", on);
+  const setLocalSelection = (entry: RemoteEntry | null) => set("localSelection", entry);
+  const localLocation: LocalLocation | null = local ? { token: local.token, path: local.path } : null;
+  const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [remoteDrop, setRemoteDrop] = useState(false);
+  /** Dropped-file uploads the user cancelled (stopped before their next piece). */
+  const stopped = useRef(new Set<string>());
+  const { pending, error, run } = useAction();
 
   const load = useCallback(
     async (path: string | null) => {
       if (!sessionId) return;
       const result = await run(() => filesApi.list(sessionId, path));
       if (result) {
-        // Refreshing the same folder keeps the selection while the entry is still there.
-        const same = listingRef.current?.path === result.path;
-        setListing(result);
-        setPathText(result.path);
-        setSelected((name) => (same && result.entries.some((e) => e.name === name) ? name : null));
+        change((m) => {
+          // Refreshing the same folder keeps the selection (while the entry is still there) and
+          // the scroll position; another folder starts at the top.
+          const same = m.listing?.path === result.path;
+          const selected = same && result.entries.some((e) => e.name === m.selected) ? m.selected : null;
+          return { ...m, listing: result, pathText: result.path, selected, scrollTop: same ? m.scrollTop : 0 };
+        });
       }
     },
-    [sessionId, run],
+    [sessionId, run, change],
   );
 
-  // A different session starts at its login folder (a new listing also clears any error).
+  // A session seen for the first time starts at its login folder. One seen before shows what it
+  // showed then: switching tabs never lists again, only Refresh or moving to a folder does.
   useEffect(() => {
-    setListing(null);
-    setSelected(null);
-    if (sessionId) void load(null);
+    if (sessionId && panelMemory.get(sessionId).listing === null) void load(null);
   }, [sessionId, load]);
+
+  // The scroll position comes back with the listing.
+  useLayoutEffect(() => {
+    if (bodyRef.current && sessionId) bodyRef.current.scrollTop = panelMemory.get(sessionId).scrollTop;
+  }, [sessionId, listing]);
 
   useEffect(() => {
     ref.current?.querySelector<HTMLInputElement>('input[name="remote-path"]')?.focus();
@@ -212,7 +277,15 @@ export function FilesPanel({
       }),
     );
     // An upload changes the folder it went to; a download changes nothing on the server.
-    if (event.type === "done" && upload && listingRef.current?.path === dir) void load(dir);
+    if (event.type === "done" && upload && sessionId && panelMemory.get(sessionId).listing?.path === dir) void load(dir);
+  }
+
+  /** Lists the local pane's folder again (a download into it finished). */
+  async function refreshLocal() {
+    const shown = sessionId ? panelMemory.get(sessionId).local : null;
+    if (!shown) return;
+    const result = await filesApi.localList(shown.token, shown.path).catch(() => null);
+    if (result) change((m) => (m.local === shown ? { ...m, local: result } : m));
   }
 
   /**
@@ -224,8 +297,8 @@ export function FilesPanel({
     const early: TransferEvent[] = [];
     return {
       onEvent: (event: TransferEvent) => {
+        if (intoLocalPane && event.type === "done") void refreshLocal();
         if (bound) apply(bound, dir, upload, event);
-        if (intoLocalPane && event.type === "done") setLocalRefresh((n) => n + 1);
         else early.push(event);
       },
       bind: (started: TransferStarted) => {
@@ -277,6 +350,57 @@ export function FilesPanel({
         failNow(entry.name, "download", dir, e);
       }
     }
+  }
+
+  /**
+   * Files dropped from the desktop: the webview gives the page their content but not their
+   * paths, so the page sends it to the core in ordered pieces. Only a complete upload is renamed
+   * into place on the server; anything else removes the partial file.
+   */
+  async function uploadDropped(file: File, dir: string, choice: ConflictChoice) {
+    if (!sessionId) return;
+    let started: StreamUpload;
+    try {
+      started = await beginUpload(sessionId, dir, file, choice);
+    } catch (caught) {
+      const e = toAppError(caught);
+      if (e.code === "CONFLICT" && choice === "ask") {
+        setPrompt({
+          kind: "replace",
+          name: file.name,
+          remote: true,
+          retry: () => void uploadDropped(file, dir, "replace"),
+          keepBoth: () => void uploadDropped(file, dir, "keep_both"),
+        });
+      } else {
+        failNow(file.name, "upload", dir, e);
+      }
+      return;
+    }
+    const id = `${DROP_PREFIX}${started.uploadId}`;
+    track({ transferId: id, name: started.name, direction: "upload", total: file.size }, dir);
+    try {
+      const completed = await sendUpload(started, file, {
+        onProgress: (done) => apply(id, dir, true, { type: "progress", done }),
+        shouldStop: () => stopped.current.delete(id),
+      });
+      apply(id, dir, true, completed ? { type: "done", bytes: file.size, files: 1, skipped: 0 } : { type: "cancelled" });
+    } catch (caught) {
+      const e = toAppError(caught);
+      apply(id, dir, true, { type: "failed", error: { code: e.code, message: e.message } });
+    }
+  }
+
+  function droppedFiles(transfer: DataTransfer) {
+    if (!current) return;
+    const items = Array.from(transfer.items ?? []);
+    const list = Array.from(transfer.files);
+    list.forEach((file, i) => {
+      // A dropped folder arrives as an empty "file"; folders go through Upload folder instead.
+      const entry = items[i]?.webkitGetAsEntry?.();
+      if (entry?.isDirectory) failNow(file.name, "upload", current, new AppError({ code: "INVALID_INPUT", message: msg.files.dropFolder }));
+      else void uploadDropped(file, current, "ask");
+    });
   }
 
   /** A transfer refused before it started still shows up in the list, with the reason. */
@@ -475,10 +599,10 @@ export function FilesPanel({
           {twoPane && (
             <div className="files-local-col">
               <LocalPane
-                refreshKey={localRefresh}
                 selected={localSelection?.name ?? null}
+                listing={local}
+                onListing={(listing) => change((m) => ({ ...m, local: listing, localSelection: null }))}
                 onSelect={setLocalSelection}
-                onLocation={setLocalLocation}
                 onDropRemote={(name) => {
                   const entry = listing?.entries.find((e) => e.name === name);
                   if (entry) void downloadToLocal(entry);
@@ -494,10 +618,16 @@ export function FilesPanel({
             </div>
           )}
           <div
+            ref={bodyRef}
             className="panel-body files-body"
+            onScroll={(event) => {
+              // Kept without re-rendering; read back when the panel shows this session again.
+              if (sessionId && panelMemory.has(sessionId)) panelMemory.get(sessionId).scrollTop = event.currentTarget.scrollTop;
+            }}
             data-drop={remoteDrop || undefined}
             onDragOver={(event) => {
-              if (twoPane && event.dataTransfer.types.includes(DRAG_TYPE)) {
+              const types = event.dataTransfer.types;
+              if ((twoPane && types.includes(DRAG_TYPE)) || (listing && types.includes("Files"))) {
                 event.preventDefault();
                 setRemoteDrop(true);
               }
@@ -505,6 +635,11 @@ export function FilesPanel({
             onDragLeave={() => setRemoteDrop(false)}
             onDrop={(event) => {
               setRemoteDrop(false);
+              if (event.dataTransfer.files.length > 0 && !event.dataTransfer.types.includes(DRAG_TYPE)) {
+                event.preventDefault();
+                droppedFiles(event.dataTransfer);
+                return;
+              }
               const raw = event.dataTransfer.getData(DRAG_TYPE);
               if (!raw) return;
               event.preventDefault();
@@ -614,7 +749,10 @@ export function FilesPanel({
                     {t.state === "running" && (
                       <>
                         <progress max={t.total ?? undefined} value={t.total ? t.done : undefined} aria-label={t.name} />
-                        <IconButton label={msg.files.cancelTransfer(t.name)} onClick={() => void filesApi.cancel(t.id).catch(() => undefined)}>
+                        <IconButton label={msg.files.cancelTransfer(t.name)} onClick={() => {
+                          if (t.id.startsWith(DROP_PREFIX)) stopped.current.add(t.id);
+                          else void filesApi.cancel(t.id).catch(() => undefined);
+                        }}>
                           <IconX size={14} />
                         </IconButton>
                       </>

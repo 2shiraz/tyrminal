@@ -1,0 +1,18 @@
+{
+  "keyFingerprint": "SHA256:oDLdxHRh5BoSPBm7TsZb6uzwv/MiQJJxZDNjKJbuja8",
+  "keyPublic": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICBLBMpEOmjmp7w0YC4TZvyoH5xNwF260ep657JoeHbF fixture-key",
+  "passphrase": "fixture passphrase, synthetic",
+  "recoveryGroups": [
+    "W89TH",
+    "XRJ8T",
+    "85NDG",
+    "5072C",
+    "TWGW9",
+    "S2ZA3",
+    "6E7DW",
+    "CTJ9A",
+    "PCR01",
+    "DY3MZ",
+    "BKVAG"
+  ]
+}

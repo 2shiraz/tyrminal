@@ -151,36 +151,6 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Note for tests: xterm's DOM renderer draws decorated cells one element per cell, so tests find
   terminal text by position in its row (`tests/ui/highlight-helpers.ts` `pointOf`), not by span.
 
-## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
+## User guide
 
-- Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
-  a pane to leave it out: it keeps its own input and receives nothing. A pane you open later is
-  never added; start broadcast again to include it."
-- Input methods: "Japanese, Chinese and Korean input methods work in the terminal. Text is sent
-  when you commit it; keys the input method uses (Enter to choose, Escape to cancel) never reach
-  the server, and shortcuts wait until the composition ends."
-- Highlighting: "Choose Word or Pattern when adding a rule. A pattern is a regular expression; to
-  keep matching fast, groups cannot be repeated and backreferences and lookaround are not
-  available. A pattern that takes too long is switched off and named in a notice; edit the rules
-  to try it again. Rules higher in the list win where matches overlap."
-- Command palette: "Every action is in the palette (Ctrl+Shift+K, ⌘K on macOS): type part of
-  its name. Tab and pane actions appear when a terminal is in front."
-- Connection details: "To see what happened while connecting, choose Connection details… in the
-  palette, or Show connection details on a failed connection. Copy puts the lines on the
-  clipboard; they never contain passwords, passphrases or keys."
-- Side panel: "The panel beside the terminal (Ctrl+Shift+S, ⌘⇧S on macOS) has Snippets, History
-  and Appearance. History lists the hosts you connected to and when; Tyrminal never records what
-  you type. Appearance changes the scheme, font and cursor of every terminal, and zooms only the
-  pane you are in."
-- Mouse: "Settings → Shortcuts and input → Right click chooses between selecting a word, pasting
-  and nothing; Middle click pastes can be turned on. A paste from the mouse is reviewed like any
-  paste. Programs that use the mouse (vim, htop, mc) get the click; hold Shift to paste anyway."
-- Highlighting: "Tyrminal colors addresses, numbers, links, dates, quoted text, paths, hashes and
-  status words in plain output, in your color scheme's colors. It never recolors text a program
-  colored itself, and never touches full-screen programs. Turn kinds on or off, or the whole
-  feature, in Settings → Output highlighting."
-- Addresses in output: "Point at an IP or MAC address in the output to underline it; click it to
-  copy it or to start a new host with that address (Tyrminal does not connect until you save
-  and connect). In a local terminal, file paths can be copied the same way."
-- Commands: "With shell integration turned on, a thin line separates commands, a red mark shows
-  a command that failed, and Ctrl+Shift+↑/↓ (⌘↑/⌘↓ on macOS) jump between commands."
+Applied to `docs/user-guide.md` (Terminals, Connecting, Snippets and broadcast, shortcuts).

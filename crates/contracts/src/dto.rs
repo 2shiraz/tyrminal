@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::IpcError;
+use crate::{ErrorCode, IpcError};
 
 // ---------- vault ----------
 
@@ -123,6 +123,9 @@ pub struct HostSummary {
     /// Unix seconds of the last connection that reached the shell, if any (recent connections).
     #[ts(type = "number | null")]
     pub last_connected_at: Option<u64>,
+    pub protocol: HostProtocol,
+    pub terminal: HostTerminal,
+    pub forward_agent: bool,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -265,6 +268,35 @@ pub struct HostInput {
     pub group_id: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// How the host is reached (SSH unless chosen otherwise).
+    #[serde(default)]
+    pub protocol: HostProtocol,
+    /// Encoding and terminal type (UTF-8 and xterm-256color unless chosen otherwise).
+    #[serde(default)]
+    pub terminal: HostTerminal,
+    /// Let the server use this host's sign-in key while the session is open (agent forwarding).
+    #[serde(default)]
+    pub forward_agent: bool,
+}
+
+/// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a
+/// device on this computer (its address and port are not used).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[ts(export)]
+pub enum HostProtocol {
+    #[default]
+    Ssh,
+    Telnet,
+    Serial {
+        settings: SerialSettings,
+    },
+}
+
+impl HostProtocol {
+    pub fn is_ssh(&self) -> bool {
+        *self == Self::Ssh
+    }
 }
 
 // ---------- keys ----------
@@ -473,6 +505,21 @@ pub struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub workspace: Option<crate::WorkspacePreferences>,
+    /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
+    /// separate from session recording and command history.
+    pub diagnostics: bool,
+}
+
+/// One failure for a diagnostic report: which command failed and how, never with what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DiagnosticEntry {
+    pub command: String,
+    pub code: ErrorCode,
+    /// Unix seconds.
+    #[ts(type = "number")]
+    pub at: u64,
 }
 
 /// An application used to edit remote files with a given extension. Added only through the
@@ -731,6 +778,16 @@ pub enum TransferDirection {
     Copy,
 }
 
+/// An upload whose content the window sends in pieces (a file dropped from the desktop).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StreamUpload {
+    pub upload_id: String,
+    /// The name it will have on the server (differs from the dropped file's with Keep both).
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -787,4 +844,115 @@ pub struct LocalListing {
     pub path: Vec<String>,
     pub entries: Vec<RemoteEntry>,
     pub truncated: bool,
+}
+
+// ---------- serial connections (CON-06) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SerialParity {
+    #[default]
+    None,
+    Odd,
+    Even,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SerialFlowControl {
+    #[default]
+    None,
+    Software,
+    Hardware,
+}
+
+/// How to open a serial port: the device (`/dev/ttyUSB0`, `COM3`) and its line settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SerialSettings {
+    pub path: String,
+    pub baud: u32,
+    /// 5 to 8.
+    pub data_bits: u8,
+    pub parity: SerialParity,
+    /// 1 or 2.
+    pub stop_bits: u8,
+    pub flow_control: SerialFlowControl,
+}
+
+impl Default for SerialSettings {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            baud: 115_200,
+            data_bits: 8,
+            parity: SerialParity::None,
+            stop_bits: 1,
+            flow_control: SerialFlowControl::None,
+        }
+    }
+}
+
+// ---------- terminal settings per host (TRM-05, TRM-06) ----------
+
+/// Character encoding a host's programs use. Output is converted to UTF-8 natively and typed
+/// text back; characters the encoding cannot represent are sent as `?`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TerminalEncoding {
+    #[default]
+    Utf8,
+    Iso8859_1,
+    Iso8859_15,
+    Windows1252,
+    Koi8R,
+    ShiftJis,
+    EucJp,
+    EucKr,
+    Gbk,
+    Gb18030,
+    Big5,
+}
+
+/// The terminal type reported to the server (`TERM`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TerminalType {
+    #[default]
+    Xterm256color,
+    Xterm,
+    Linux,
+    Vt220,
+    Vt100,
+}
+
+impl TerminalType {
+    pub fn term(self) -> &'static str {
+        match self {
+            Self::Xterm256color => "xterm-256color",
+            Self::Xterm => "xterm",
+            Self::Linux => "linux",
+            Self::Vt220 => "vt220",
+            Self::Vt100 => "vt100",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct HostTerminal {
+    pub encoding: TerminalEncoding,
+    pub term: TerminalType,
+}
+
+impl HostTerminal {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }

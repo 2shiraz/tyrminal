@@ -3560,3 +3560,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   background: var(--cmd-failed);
   pointer-events: none;
 }
+
+/* Connection details (CON-15): the core's lines, aligned as they come, scrollable. */
+.connection-details {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  list-style: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

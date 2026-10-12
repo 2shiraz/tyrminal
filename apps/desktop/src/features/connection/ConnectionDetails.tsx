@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
 import { IconCopy, IconInfo } from "../../components/ui/icons";
-import { connectionDetails, toAppError } from "../../lib/ipc";
+import { sessions, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
 
@@ -18,7 +18,7 @@ export function ConnectionDetails({ sessionId, label, onClose }: { sessionId: st
 
   useEffect(() => {
     let live = true;
-    connectionDetails.lines(sessionId).then(
+    sessions.diagnostics(sessionId).then(
       (result) => {
         if (live) setLines(result.map((line) => line.replace(CONTROL, "�")));
       },

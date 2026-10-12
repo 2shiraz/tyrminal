@@ -123,6 +123,10 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 4. The broadcast UI test typed while the focused terminal was still answering a cursor-position
    query; after the focus fix the typing pane is the answering one and, under load, the reply
    landed between keys (`h[11;23Rostname`). The test now waits for the reply (`data-tx`).
+11. Windows lab tests sometimes timed out waiting for PowerShell. ConPTY sends `ESC[6n` at
+    start-up and waits for the reply; the lab test client counted the query per output chunk, so
+    a query split across chunks went unanswered. It now counts over all output received
+    (8962011; windows-x64 green). The handoff relay was not involved.
 
 ## Next
 

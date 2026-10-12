@@ -105,13 +105,13 @@ test("connection details: from the palette and from a failed connection; lines a
   await paletteRun(page, "Connection details");
   const dialog = page.getByRole("dialog", { name: "Connection details: api-gateway" });
   const list = dialog.getByRole("list", { name: "Connection steps" });
-  await expect(list.getByRole("listitem")).toHaveCount(5);
-  await expect(list).toContainText("matches the saved key");
+  await expect(list.getByRole("listitem")).toHaveCount(4);
+  await expect(list).toContainText("key exchange mlkem768x25519-sha256");
   await dialog.getByRole("button", { name: "Copy" }).click();
   await expect(page.getByText("Copied the connection details.")).toBeVisible();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied.split("\n")).toHaveLength(5);
-  expect(copied).toContain("Authenticated as deploy with public key");
+  expect(copied.split("\n")).toHaveLength(4);
+  expect(copied).toContain("signed in");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".pane[data-focused=true] .xterm-helper-textarea")).toBeFocused();

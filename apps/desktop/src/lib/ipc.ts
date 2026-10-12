@@ -12,6 +12,7 @@ import type {
   BackupPreview,
   BulkHostChange,
   ConflictChoice,
+  DiagnosticEntry,
   EditStatus,
   ErrorCode,
   GroupInput,
@@ -36,6 +37,7 @@ import type {
   SnippetInput,
   SnippetSendMode,
   SnippetSummary,
+  StreamUpload,
   TransferEvent,
   TransferStarted,
   TrustDecision,
@@ -69,13 +71,40 @@ export function toAppError(error: unknown): AppError {
   return new AppError({ code: "INTERNAL", message: "Something went wrong inside Tyrminal. Your data has not been changed." });
 }
 
+/**
+ * Recent failures for a diagnostic report: command name and error code only, kept in memory
+ * while the user has diagnostics on (P-22). Never sent anywhere; saved to a file on request.
+ */
+const failures: DiagnosticEntry[] = [];
+let keepFailures = false;
+const MAX_FAILURES = 200;
+
+function recordFailure(command: string, error: AppError) {
+  if (!keepFailures) return;
+  failures.push({ command, code: error.code, at: Math.floor(Date.now() / 1000) });
+  if (failures.length > MAX_FAILURES) failures.splice(0, failures.length - MAX_FAILURES);
+}
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    throw toAppError(error);
+    const appError = toAppError(error);
+    recordFailure(command, appError);
+    throw appError;
   }
 }
+
+export const diagnostics = {
+  /** Turning diagnostics off forgets everything kept so far. */
+  setEnabled(enabled: boolean) {
+    keepFailures = enabled;
+    if (!enabled) failures.length = 0;
+  },
+  count: () => failures.length,
+  /** Saves a report (a native save dialog); returns the file name, or null if cancelled. */
+  saveReport: () => call<string | null>("diagnostics_report", { entries: [...failures] }),
+};
 
 export const vault = {
   status: () => call<VaultStatus>("vault_status"),
@@ -180,6 +209,8 @@ export const sessions = {
   resize: (sessionId: string, cols: number, rows: number) => call<void>("session_resize", { sessionId, cols, rows }),
   ack: (sessionId: string, bytes: number) => call<void>("session_ack", { sessionId, bytes }),
   close: (sessionId: string) => call<void>("session_close", { sessionId }),
+  /** What happened while the session connected (no secrets), also shortly after it ended. */
+  diagnostics: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
   answerTrust: (sessionId: string, promptId: string, decision: TrustDecision) =>
     call<void>("session_trust_answer", { sessionId, promptId, decision }),
   /** `secret: null` dismisses the prompt. */
@@ -235,6 +266,18 @@ export const files = {
   /** Lists a folder inside a local folder the user chose. */
   localList: (token: string, path: string[]) => call<LocalListing>("files_local_list", { token, path }),
   cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
+  /** Uploads of files dropped from the desktop: the page sends the content in ordered pieces. */
+  uploadBegin: (sessionId: string, dir: string, name: string, size: number, choice: ConflictChoice) =>
+    call<StreamUpload>("files_upload_begin", { sessionId, dir, name, size, choice }),
+  async uploadChunk(uploadId: string, offset: number, bytes: Uint8Array): Promise<void> {
+    try {
+      await invoke("files_upload_chunk", bytes, { headers: { "x-upload": uploadId, "x-offset": String(offset) } });
+    } catch (error) {
+      throw toAppError(error);
+    }
+  },
+  uploadFinish: (uploadId: string) => call<string>("files_upload_finish", { uploadId }),
+  uploadAbort: (uploadId: string) => call<void>("files_upload_abort", { uploadId }),
   /** Opens a remote file in the default local application; nothing is uploaded until save. */
   editOpen: (sessionId: string, dir: string, name: string) => call<EditStatus>("files_edit_open", { sessionId, dir, name }),
   editStatus: (editId: string) => call<EditStatus>("files_edit_status", { editId }),
@@ -261,6 +304,8 @@ export const preferences = {
   set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
   /** Installed shells that can be chosen for local terminals. */
   shells: () => call<string[]>("terminal_choices"),
+  /** Serial ports this computer reports (for serial hosts). */
+  serialPorts: () => call<string[]>("serial_ports"),
   /** Chooses (natively) the app that edits remote files with `extension`; null if cancelled. */
   pickEditor: (extension: string) => call<Preferences | null>("editor_pick_app", { extension }),
 };
@@ -330,10 +375,4 @@ export const detach = {
   /** Detached window: takes over one handed-over session with this window's own channels. */
   attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
-};
-
-// terminal input: connection details (CON-15)
-/** The core's connection diagnostics for a session of this window: plain lines, no secrets. */
-export const connectionDetails = {
-  lines: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
 };
