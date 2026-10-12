@@ -171,6 +171,8 @@ pub struct VerifiedConnection {
     // agent B: tunnels and history
     /// Server-side listeners this connection asked for (`forward.rs`).
     pub(crate) routes: Arc<crate::forward::Routes>,
+    /// Agent forwarding for this connection (off unless `forward_agent` was called).
+    agent: AgentSlot,
 }
 
 impl core::fmt::Debug for VerifiedConnection {
@@ -183,7 +185,10 @@ impl core::fmt::Debug for VerifiedConnection {
 }
 
 /// Type-erased handler so `VerifiedConnection` is not generic over the verifier.
-pub(crate) struct ErasedHandler(Box<dyn ErasedCheck>, Arc<crate::forward::Routes>);
+pub(crate) struct ErasedHandler(Box<dyn ErasedCheck>, Arc<crate::forward::Routes>, AgentSlot);
+
+/// The agent offered to this connection's server, if the user turned forwarding on (CON-11).
+pub(crate) type AgentSlot = Arc<Mutex<Option<crate::agent::ForwardedAgent>>>;
 
 trait ErasedCheck: Send {
     fn check<'a>(
@@ -268,13 +273,21 @@ impl client::Handler for ErasedHandler {
         Ok(())
     }
 
+    // Agent channels are accepted only on a connection the user turned forwarding on for.
     async fn server_channel_open_agent_forward(
         &mut self,
-        _channel: russh::Channel<client::Msg>,
+        channel: russh::Channel<client::Msg>,
         reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        let agent = self.2.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        match agent {
+            Some(agent) => {
+                reply.accept().await;
+                tokio::spawn(crate::agent::serve(channel.into_stream(), agent));
+            }
+            None => reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await,
+        }
         Ok(())
     }
 
@@ -374,8 +387,12 @@ where
     };
 
     let routes = Arc::new(crate::forward::Routes::default());
-    let handshake =
-        client::connect_stream(config(options), stream, ErasedHandler(Box::new(handler), Arc::clone(&routes)));
+    let agent: AgentSlot = Arc::new(Mutex::new(None));
+    let handshake = client::connect_stream(
+        config(options),
+        stream,
+        ErasedHandler(Box::new(handler), Arc::clone(&routes), Arc::clone(&agent)),
+    );
     tokio::pin!(handshake);
 
     // The handshake deadline restarts on each phase change and is suspended while the verifier
@@ -407,6 +424,7 @@ where
             request_timeout: options.request_timeout,
             authenticated: false,
             routes,
+            agent,
         }),
         // A handle without a recorded acceptance must never be usable.
         (Ok(handle), _, _) => {
@@ -588,6 +606,11 @@ impl VerifiedConnection {
     }
 
     /// Opens an interactive shell with a PTY.
+    /// Offers `agent` to this server from the next shell on (agent forwarding, CON-11).
+    pub fn forward_agent(&self, agent: crate::agent::ForwardedAgent) {
+        *self.agent.lock().unwrap_or_else(|p| p.into_inner()) = Some(agent);
+    }
+
     pub async fn open_shell(&self, pty: &PtyRequest) -> Result<(ShellReader, ShellWriter), SshError> {
         if !self.authenticated {
             return Err(SshError::NotAuthenticated);
@@ -601,6 +624,10 @@ impl VerifiedConnection {
         )
         .await?;
         self.await_reply(&mut channel).await?;
+        if self.agent.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+            // `auth-agent-req@openssh.com`; a server that refuses simply has no agent.
+            let _ = self.bounded(Stage::OpeningChannel, channel.agent_forward(false)).await;
+        }
         self.bounded(Stage::OpeningChannel, channel.request_shell(true)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();

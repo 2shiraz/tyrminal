@@ -151,3 +151,13 @@ pub async fn session_attach(
     let sink = Arc::new(ChannelSink { output, events });
     state.core()?.sessions.accept_handoff(window.label(), &token, sink)
 }
+
+/// What happened while a session this window owns connected (no secrets; CON-15).
+#[tauri::command]
+pub async fn session_diagnostics(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<String>, IpcError> {
+    state.core()?.sessions.diagnostics(window.label(), &session_id)
+}

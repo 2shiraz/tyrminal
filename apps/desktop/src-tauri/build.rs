@@ -47,6 +47,7 @@ const COMMANDS: &[&str] = &[
     "session_auth_answer",
     "session_handoff_offer",
     "session_attach",
+    "session_diagnostics",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
@@ -59,6 +60,10 @@ const COMMANDS: &[&str] = &[
     "files_upload",
     "files_download",
     "files_cancel",
+    "files_upload_begin",
+    "files_upload_chunk",
+    "files_upload_finish",
+    "files_upload_abort",
     "files_local_list",
     "files_copy",
     "files_edit_open",
@@ -75,6 +80,8 @@ const COMMANDS: &[&str] = &[
     "prefs_set",
     "terminal_choices",
     "editor_pick_app",
+    "diagnostics_report",
+    "serial_ports",
     "host_recent",
     "link_open",
     // backup and restore

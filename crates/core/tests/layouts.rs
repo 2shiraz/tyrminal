@@ -6,7 +6,7 @@
 use tempfile::TempDir;
 use tyrminal_core::Core;
 use tyrminal_core::contracts::{
-    ErrorCode, HostAuthInput, HostInput, IpcError, LayoutDirection, LayoutNode, LayoutTab, LayoutTarget,
+    ErrorCode, HostAuthInput, HostInput, HostProtocol, IpcError, LayoutDirection, LayoutNode, LayoutTab, LayoutTarget,
     LayoutTemplateInput,
 };
 
@@ -26,6 +26,9 @@ fn host(label: &str) -> HostInput {
         auth: HostAuthInput::AskPassword,
         group_id: None,
         tags: Vec::new(),
+        protocol: HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent: false,
     }
 }
 
