@@ -13,6 +13,8 @@ PasswordAuthentication yes
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile /etc/ssh/lab/authorized_keys
+# Per-run lab CA (user certificates, KEY-07).
+TrustedUserCAKeys /etc/ssh/lab/trusted_user_ca
 StrictModes yes
 MaxAuthTries 6
 MaxStartups 200:30:400

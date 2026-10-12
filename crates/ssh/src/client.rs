@@ -538,6 +538,30 @@ impl VerifiedConnection {
         self.outcome(result)
     }
 
+    /// Public-key authentication with an OpenSSH user certificate for `key`
+    /// (`<type>-cert-v01@openssh.com <base64> [comment]`). The server decides whether it trusts
+    /// the certificate's CA, principals and validity; a certificate for a different key is
+    /// refused here without contacting the server.
+    pub async fn authenticate_key_with_certificate(
+        &mut self,
+        username: &str,
+        key: &ClientKey,
+        certificate: &str,
+    ) -> Result<AuthOutcome, SshError> {
+        let cert = russh::keys::Certificate::from_openssh(certificate.trim()).map_err(|_| SshError::Protocol)?;
+        if cert.public_key() != key.private_key().public_key().key_data() {
+            return Err(SshError::Protocol);
+        }
+        let timeout = self.request_timeout;
+        let fut = self.handle.authenticate_openssh_cert(username, Arc::new(key.private_key().clone()), cert);
+        let result = match tokio::time::timeout(timeout, fut).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
+            Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
+            Ok(Ok(result)) => result,
+        };
+        self.outcome(result)
+    }
+
     /// Asks the server which methods it accepts, with an SSH "none" request. A server that lets
     /// the user in without credentials returns `Success`.
     pub async fn auth_methods(&mut self, username: &str) -> Result<AuthOutcome, SshError> {

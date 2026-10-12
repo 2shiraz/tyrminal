@@ -86,6 +86,7 @@ const SUITES = {
     { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "sign-in with an OpenSSH user certificate (lab CA)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "cert_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "key exchange policy against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--skip", "negotiated_with_a_server_that_offers_it"), blockedBy: needsLab },
     { name: "post-quantum key exchange negotiated end to end (lab sshd with ML-KEM)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--exact", "post_quantum_key_exchange_is_negotiated_with_a_server_that_offers_it"), blockedBy: needsPostQuantumLab },
   ],
