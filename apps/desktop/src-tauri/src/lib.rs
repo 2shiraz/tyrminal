@@ -210,6 +210,7 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::settings::app_info,
             commands::discovery::discovery_networks,
             commands::discovery::discovery_start,
             commands::discovery::discovery_status,
