@@ -62,12 +62,19 @@ describe("shell integration in the real application", { concurrency: false }, ()
     // The lab account's login shell is sh; an interactive Bash reads ~/.bashrc.
     await t.type("bash -i\n");
     await t.type("cd /tmp\n");
-    await t.type("echo marks-$((20+22))\n");
-    await t.waitForText(/^marks-42\s*$/m, "bash ran the command");
+    await t.type("echo marks-$((20+22)) bash-${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}\n");
+    const screen = await t.waitForText(/^marks-42 bash-\d+\.\d+\s*$/m, "bash ran the command");
+    const [major, minor] = /^marks-42 bash-(\d+)\.(\d+)/m.exec(screen).slice(1).map(Number);
     await s.chord(suggestChord);
     const context = await s.waitFor('[data-testid="shell-context"]');
     await s.until(async () => /Folder: \/tmp/.test(await s.text(context)), { describe: "folder from OSC 7" });
-    await s.until(async () => /Last command: echo marks-\$\(\(20\+22\)\) \(succeeded\)/.test(await s.text(context)), { describe: "command from OSC 133" });
+    // The command marks come from PS0, which needs Bash 4.4 or newer; macOS's system Bash 3.2
+    // reports the folder and prompt only (documented in ADR 0006).
+    if (major > 4 || (major === 4 && minor >= 4)) {
+      await s.until(async () => /Last command: echo marks-\$\(\(20\+22\)\) bash-.* \(succeeded\)/.test(await s.text(context)), { describe: "command from OSC 133" });
+    } else {
+      assert.doesNotMatch(await s.text(context), /Last command/);
+    }
     await app.screenshot("i02-shell-context");
     // Straight on to the setup from the same dialog (pressing Escape is not reliable through
     // WebDriver on every platform, and nothing here depends on it).

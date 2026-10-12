@@ -16,6 +16,8 @@ export interface MockOptions {
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
+  /** Add a trusted server that no saved host points at. */
+  orphanKnownHost?: boolean;
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;

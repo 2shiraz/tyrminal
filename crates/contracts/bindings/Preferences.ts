@@ -18,6 +18,11 @@ localShell: string | null,
  */
 editorApps: Array<EditorApp>, 
 /**
+ * Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
+ * separate from session recording and command history.
+ */
+diagnostics: boolean, 
+/**
  * Off by default; see `PasswordCheckPreferences`.
  */
 passwordCheck: PasswordCheckPreferences, };

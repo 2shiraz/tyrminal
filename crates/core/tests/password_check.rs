@@ -135,6 +135,9 @@ async fn vault_with_passwords(dir: &TempDir) -> Core {
             auth: HostAuthInput::StoredPassword { password: Some(password.into()) },
             group_id: None,
             tags: Vec::new(),
+            protocol: tyrminal_core::contracts::HostProtocol::Ssh,
+            terminal: Default::default(),
+            forward_agent: false,
         })
         .await
         .unwrap();

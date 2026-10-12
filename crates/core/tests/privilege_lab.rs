@@ -157,6 +157,9 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
             auth: HostAuthInput::Inherit,
             group_id: None,
             tags: Vec::new(),
+            protocol: tyrminal_core::contracts::HostProtocol::Ssh,
+            terminal: Default::default(),
+            forward_agent: false,
         })
         .await
         .unwrap();

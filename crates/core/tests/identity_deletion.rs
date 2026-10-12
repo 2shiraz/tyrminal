@@ -50,6 +50,9 @@ fn host(label: &str, auth: HostAuthInput, group_id: Option<&str>) -> HostInput {
         auth,
         group_id: group_id.map(Into::into),
         tags: Vec::new(),
+        protocol: tyrminal_core::contracts::HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent: false,
     }
 }
 

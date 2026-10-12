@@ -30,6 +30,8 @@ const needsSecretStore = () => {
   return "no OS secret store adapter for this platform";
 };
 
+const needsSocat = () => (spawnSync("socat", ["-V"], { stdio: "ignore" }).status === 0 ? null : "socat is not installed (a pseudo-terminal pair plays the serial device)");
+
 const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
 const node = (...args) => ["node", args];
@@ -58,11 +60,20 @@ const SUITES = {
       cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--exact", "two_gib_round_trip_is_byte_for_byte_with_bounded_memory"),
       blockedBy: () => needsLab() ?? (process.env.TYRMINAL_BIG_TRANSFER ? null : "moves 4 GiB; set TYRMINAL_BIG_TRANSFER=1 to run"),
     },
+    {
+      name: "download onto a full local disk fails cleanly",
+      cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--exact", "full_disk_download_fails_cleanly_and_leaves_nothing_behind"),
+      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_SMALL_FS ? null : "needs a tiny filesystem; set TYRMINAL_SMALL_FS to a folder on one"),
+    },
   ],
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
+    { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
+    // Pseudo-terminals stand in for serial devices on Unix only; Windows serial is untested.
+    ...(process.platform === "win32"
+      ? []
+      : [{ name: "serial host over a pseudo-terminal pair", cmd: cargo("test", "-p", "tyrminal-core", "--test", "protocols", "--quiet", "--", "--ignored"), blockedBy: needsSocat }]),
     // agent B: tunnels and history
     { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
@@ -77,7 +88,7 @@ const SUITES = {
     { name: "vault service: canary scan, tampering, lock races", cmd: cargo("test", "-p", "tyrminal-core", "--test", "vault_service", "--quiet") },
     { name: "storage: permissions, foreign/newer files, atomicity", cmd: cargo("test", "-p", "tyrminal-storage", "--quiet") },
     { name: "host trust and credentials ordering (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored", "host_key", "credentials"), blockedBy: needsLab },
-    { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
+    { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib", "--skip", "full_disk"), blockedBy: needsLab },
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
     // agent B: tunnels and history
     { name: "listener exposure, denied forwarding, link-loss cleanup (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored", "never_bind", "denies", "lost_link", "limit"), blockedBy: needsLab },
