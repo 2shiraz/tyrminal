@@ -392,7 +392,8 @@ test("templates: Connect all, and a restore that would pass 16 panes is refused"
 });
 
 test("broadcast target review: the exact receiving panes are listed and confirmed first", async ({ page }) => {
-  await openApp(page);
+  // The production confirmation (P-26) is covered in production.spec.ts; the tag is off here.
+  await openApp(page, { productionTag: "" });
   await connectFromPalette(page, "api-gateway");
   await paletteRun(page, "Split right with");
   await page.getByRole("combobox", { name: /Open in a new pane/ }).fill("db-primary");
@@ -505,7 +506,7 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
   // The command jumps (shell integration) are listed with the terminal actions.
   await expect(list.getByRole("list", { name: "Terminal" })).toContainText("Jump to the previous command");
-  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(46);
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(47);
 
   // Search filters by name and by keys; no match says so.
   await search.fill("zoom");

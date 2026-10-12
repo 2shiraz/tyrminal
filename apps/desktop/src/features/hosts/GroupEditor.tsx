@@ -7,12 +7,13 @@ import type { GroupDefaults, GroupInput, GroupSummary, KeySummary } from "@tyrmi
 import { type FormEvent, type KeyboardEvent, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
-import { ErrorNotice, TextField } from "../../components/ui/controls";
+import { ErrorNotice, Switch, TextField } from "../../components/ui/controls";
 import { IconFolder } from "../../components/ui/icons";
 import { AutosaveStatus, type SaveResult, handleUndoKey, useAutosave } from "../../lib/autosave";
 import { groupDefaults as groupDefaultsApi, groups as groupsApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { discardWording, msgAutosave } from "../../lib/messages-autosave";
+import { msgProduction } from "../../lib/messages-production";
 import { validGroupName, validPort, validUsername } from "./fieldRules";
 import { NoteCard } from "../notes/NoteCard";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
@@ -24,6 +25,7 @@ interface GroupFields {
   username: string;
   port: string;
   keyId: string;
+  production: boolean;
 }
 
 /** Valid fields from `fields`, the rest from `stored`; `null` while a new group has no valid name. */
@@ -36,6 +38,7 @@ export function groupDraft(fields: GroupFields, stored: GroupFields | null): Gro
     username: validUsername(fields.username.trim()) ? fields.username : from.username,
     port: validPort(fields.port, true) ? fields.port : stored ? stored.port : "",
     keyId: fields.keyId,
+    production: fields.production,
   };
 }
 
@@ -47,6 +50,7 @@ function groupInput(d: GroupFields, id: string | null): GroupInput {
     username: d.username.trim() === "" ? null : d.username.trim(),
     port: d.port === "" ? null : Number(d.port),
     keyId: d.keyId === "" ? null : d.keyId,
+    production: d.production,
   };
 }
 
@@ -95,17 +99,19 @@ export function GroupEditor({
     username: group?.username ?? "",
     port: group?.port ? String(group.port) : "",
     keyId: group?.keyId ?? "",
+    production: group?.production ?? false,
   }));
   const [name, setName] = useState(start.name);
   const [parent, setParent] = useState<string | null>(start.parent);
   const [username, setUsername] = useState(start.username);
   const [port, setPort] = useState(start.port);
   const [keyId, setKeyId] = useState(start.keyId);
+  const [production, setProduction] = useState(start.production);
   // Leaving with what is not autosaved (a typed proxy password, note edits) asks first.
   const [confirming, setConfirming] = useState<NonNullable<ReturnType<typeof discardWording>> | null>(null);
   const [noteDirty, setNoteDirty] = useState(false);
   const defaults = useGroupDefaults(group?.id ?? null);
-  const fields: GroupFields = { name, parent, username, port, keyId };
+  const fields: GroupFields = { name, parent, username, port, keyId, production };
   const idRef = useRef<string | null>(group?.id ?? null);
   const created = useRef<GroupSummary | null>(null);
   const stored = useRef<GroupFields | null>(group ? start : null);
@@ -168,6 +174,7 @@ export function GroupEditor({
       setUsername(prev.username);
       setPort(prev.port);
       setKeyId(prev.keyId);
+      setProduction(prev.production);
       if (p.defaultsChanged) live.current.defaults.restore(prevDefaults);
     };
   }
@@ -268,6 +275,7 @@ export function GroupEditor({
             remove: () => void autosave.commit(async () => void (await write({ releaseProxy: true }))),
           }}
         />
+        <Switch label={msgProduction.groupSwitch} hint={msgProduction.groupHint} checked={production} onChange={setProduction} />
         {exists && idRef.current !== null && <NoteCard target={{ kind: "group", groupId: idRef.current }} onDirty={setNoteDirty} />}
         <ErrorNotice error={autosave.state === "error" && autosave.error ? toAppError(autosave.error) : null} />
         <div className="dialog-actions">

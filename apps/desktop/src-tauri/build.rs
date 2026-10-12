@@ -194,6 +194,8 @@ const COMMANDS: &[&str] = &[
     "glance_get",
     "glance_host_get",
     "glance_host_set",
+    // tmux and screen session awareness (P-31)
+    "multiplexer_list",
 ];
 
 /// Short hash of the commit being built: CI's `GITHUB_SHA`, else the local checkout, else `dev`.

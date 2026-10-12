@@ -31,6 +31,15 @@ async function connectRight(page: Page, host: string) {
   await right(page).getByRole("group", { name: "Select host" }).getByRole("button", { name: new RegExp(`^${host}`) }).click();
 }
 
+/** Adds a location to a pane with "+" and picks `host` in it. */
+async function addLocation(pane: ReturnType<typeof left>, host: string) {
+  await pane.getByRole("button", { name: "Add location" }).click();
+  await pane.getByRole("group", { name: "Select host" }).getByRole("button", { name: new RegExp(`^${host}`) }).click();
+}
+
+/** The location tab named `name` in a pane is the one shown. */
+const shows = (pane: ReturnType<typeof left>, name: string) => expect(pane.getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveAttribute("aria-selected", "true");
+
 async function chooseLocal(page: Page) {
   await left(page).getByRole("button", { name: "Choose folder…" }).click();
   await expect(table(left(page))).toBeVisible();
@@ -40,7 +49,7 @@ test("sftp: opens from the palette with this computer on the left and a host pic
   await openApp(page);
   await openSftp(page);
   await expect(page.getByRole("tab", { name: /SFTP/ })).toBeVisible();
-  await expect(left(page).getByRole("button", { name: "Location: This computer" })).toBeVisible();
+  await shows(left(page), "This computer");
   await expect(left(page)).toContainText("Choose a folder on this computer");
   await expect(right(page).getByRole("heading", { name: "Connect to host" })).toBeVisible();
   // Only SSH hosts can be picked, and "This computer" is offered too.
@@ -49,7 +58,7 @@ test("sftp: opens from the palette with this computer on the left and a host pic
   await expect(picker.getByRole("button", { name: /^api-gateway/ })).toBeVisible();
 
   await connectRight(page, "api-gateway");
-  await expect(right(page).getByRole("button", { name: "Location: api-gateway" })).toBeVisible();
+  await shows(right(page), "api-gateway");
   const remote = table(right(page));
   await expect(remote).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
   // A files-only connection: no terminal session was opened and nothing was typed anywhere.
@@ -187,9 +196,8 @@ test("sftp: both panes can be hosts, and a copy between them runs server to serv
   await openApp(page);
   await openSftp(page);
   await connectRight(page, "api-gateway");
-  await left(page).getByRole("button", { name: "Location: This computer" }).click();
-  await page.getByRole("menuitem", { name: "build-runner-03" }).click();
-  await expect(left(page).getByRole("button", { name: "Location: build-runner-03" })).toBeVisible();
+  await addLocation(left(page), "build-runner-03");
+  await shows(left(page), "build-runner-03");
   await expect(table(left(page))).toBeVisible();
   await expect(table(right(page))).toBeVisible();
 
@@ -213,8 +221,7 @@ test("sftp: the host key is checked as for a terminal; a changed key is refused"
   await trust.getByRole("button", { name: "Trust once" }).click();
   await expect(table(right(page))).toBeVisible();
 
-  await left(page).getByRole("button", { name: "Location: This computer" }).click();
-  await page.getByRole("menuitem", { name: "build-runner-03" }).click();
+  await addLocation(left(page), "build-runner-03");
   const alert = left(page).getByRole("alert");
   await expect(alert).toContainText("The host's identity changed");
   await expect(alert.getByRole("button", { name: "Open Known hosts" })).toBeVisible();
@@ -366,8 +373,8 @@ test("sftp: the pane in use is marked, Swap exchanges sides without reconnecting
   // Swap: the host moves to the left and keeps its connection, folder and selection.
   const opened = (await calls(page)).filter((c) => c.cmd === "session_open_files").length;
   await view(page).getByRole("button", { name: "Swap panes" }).click();
-  await expect(left(page).getByRole("button", { name: "Location: api-gateway" })).toBeVisible();
-  await expect(right(page).getByRole("button", { name: "Location: This computer" })).toBeVisible();
+  await shows(left(page), "api-gateway");
+  await shows(right(page), "This computer");
   await expect(table(left(page)).getByRole("row", { name: /README\.md/ })).toHaveAttribute("aria-selected", "true");
   expect((await calls(page)).filter((c) => c.cmd === "session_open_files")).toHaveLength(opened);
   expect((await calls(page)).filter((c) => c.cmd === "session_close")).toHaveLength(0);

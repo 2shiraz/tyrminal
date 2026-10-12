@@ -1,5 +1,5 @@
 // UI strings for terminal input and connection tools: broadcast target choice, highlighting
-// rules, the connection side panel, connection details and palette additions.
+// rules, the connection side panel and palette additions.
 
 export const msgI = {
   broadcast: {
@@ -39,18 +39,6 @@ export const msgI = {
       "warn  disk /dev/sda1 is 91% full (3.4GiB left); see https://example.com/runbook",
       "error deploy a1f3c2e failed: \"permission denied\" on aa:bb:cc:00:11:22",
     ],
-  },
-  details: {
-    action: "Connection details…",
-    link: "Show connection details",
-    title: (label: string) => `Connection details: ${label}`,
-    listLabel: "Connection steps",
-    loading: "Loading…",
-    empty: "No details were recorded for this connection.",
-    copy: "Copy",
-    copied: "Copied the connection details.",
-    copyFailed: "The clipboard is not available. Select the lines to copy them.",
-    note: "What happened while connecting, step by step. Passwords, passphrases and keys are never included.",
   },
   palette: {
     nextTab: "Next tab",

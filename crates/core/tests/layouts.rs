@@ -29,6 +29,7 @@ fn host(label: &str) -> HostInput {
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 

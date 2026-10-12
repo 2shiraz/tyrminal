@@ -7,9 +7,10 @@ import { type FormEvent, type KeyboardEvent, type MutableRefObject, useEffect, u
 
 import { Menu } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
-import { IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
 import { AutosaveStatus, handleUndoKey } from "../../lib/autosave";
 import { toAppError } from "../../lib/ipc";
+import { msgSftp } from "../sftp/messages";
 import { msg } from "../../lib/messages";
 import type { Unsaved } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
@@ -30,6 +31,7 @@ export function HostPanel({
   onRequestClose,
   onSaved,
   onConnect,
+  onOpenSftp,
   onDuplicate,
   onCopyAddress,
   onDelete,
@@ -48,6 +50,8 @@ export function HostPanel({
   /** After every write of the host itself (the first one creates it). */
   onSaved: (saved: HostSummary) => void;
   onConnect: (host: HostSummary) => void;
+  /** Open in SFTP (SSH hosts). */
+  onOpenSftp?: ((host: HostSummary) => void) | undefined;
   onDuplicate: (host: HostSummary) => void;
   onCopyAddress: (host: HostSummary) => void;
   onDelete: (host: HostSummary) => void;
@@ -174,6 +178,7 @@ export function HostPanel({
           anchor={menu}
           onClose={() => setMenu(null)}
           items={[
+            ...(onOpenSftp && host.protocol.type === "ssh" ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(host) }] : []),
             { label: msg.hosts.duplicate, icon: <IconCopy size={15} />, onSelect: () => onDuplicate(host) },
             { label: msgD.hostPanel.copyAddress, icon: <IconCopy size={15} />, onSelect: () => onCopyAddress(host) },
             "separator",

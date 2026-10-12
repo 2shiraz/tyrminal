@@ -177,6 +177,7 @@ export const msgC = {
       focusSidebar: "Focus sidebar",
       suggest: "Command suggestions",
       insertPassword: "Type identity password",
+      searchSessions: "Search all sessions",
     } as Record<string, string>,
   },
   highlight: {

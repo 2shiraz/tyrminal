@@ -46,6 +46,10 @@ impl Lab {
     fn port(&self, server: &str) -> u16 {
         self.0.pointer(&format!("/servers/{server}/port")).and_then(Value::as_u64).unwrap() as u16
     }
+    /// The lab server's operating system (`process.platform` naming; Linux in the container lab).
+    fn server_os(&self) -> &str {
+        self.0.pointer("/serverOs").and_then(Value::as_str).unwrap_or("linux")
+    }
     fn addr(&self, server: &str) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], self.port(server)))
     }
@@ -382,6 +386,7 @@ impl Fixture {
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -1961,6 +1966,67 @@ fn attached(f: &Fixture, window: &'static str, session: String, inbox: mpsc::Unb
     }
 }
 
+/// The SFTP tab with several locations: files-only connections to two servers open at once (each
+/// with its own trust prompt), a copy from one to the other streamed through the app, and closing
+/// one connection leaving the other usable.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn two_files_only_connections_at_once_copy_between_their_servers() {
+    let f = fixture().await;
+    let _b = SERVER_B.lock().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let auth = || HostAuthInput::Key { key_id: key_id.clone() };
+    let host_a = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), auth()).await;
+    let host_b = f.host("lab b files", f.lab.port("b"), &f.lab.str("/user"), auth()).await;
+
+    // Both open before either is used: two trust prompts, two connections.
+    let mut a = Client::open_files(&f.core, &host_a).await;
+    let mut b = Client::open_files(&f.core, &host_b).await;
+    for client in [&mut a, &mut b] {
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+        client.until_connected().await;
+    }
+    assert_ne!(a.session, b.session);
+    let s = &f.core.sessions;
+    let (a_home, b_home) = (
+        s.list_files(WINDOW, &a.session, None).await.unwrap().path,
+        s.list_files(WINDOW, &b.session, None).await.unwrap().path,
+    );
+    let tag = std::process::id();
+    let (src_name, dst_name) = (format!("tyr-multi-src-{tag}"), format!("tyr-multi-dst-{tag}"));
+    s.make_dir(WINDOW, &a.session, &a_home, &src_name).await.unwrap();
+    s.make_dir(WINDOW, &b.session, &b_home, &dst_name).await.unwrap();
+    let src = format!("{}/{src_name}", a_home.trim_end_matches('/'));
+    let dst = format!("{}/{dst_name}", b_home.trim_end_matches('/'));
+
+    let local = TempDir::new().unwrap();
+    let data = pattern(2 * 1024 * 1024 + 5, 41);
+    std::fs::write(local.path().join("data.bin"), &data).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &a.session, local.path().join("data.bin"), &src, "data.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+
+    // Server A to server B, byte for byte (read back through B).
+    let (sink, mut rx) = transfer_sink();
+    s.copy_between(WINDOW, &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &b.session, &dst, "data.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    transfer_end(&mut rx).await;
+    assert!(std::fs::read(back.path().join("data.bin")).unwrap() == data);
+
+    // Closing one location's connection leaves the other one working.
+    s.close(WINDOW, &a.session).unwrap();
+    assert!(s.list_files(WINDOW, &a.session, None).await.is_err());
+    assert_eq!(s.list_files(WINDOW, &b.session, Some(&dst)).await.unwrap().entries.len(), 1);
+}
+
 /// Duplicate in the file browser: a copy within one server folder through one session, which
 /// always keeps both (the next free name) and never touches the original.
 #[tokio::test(flavor = "multi_thread")]
@@ -2304,6 +2370,7 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent,
+        production: false,
     };
     let hop = format!(
         "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {} {user}@127.0.0.1 echo HOP-$((40+2))",
@@ -2522,6 +2589,7 @@ async fn a_files_only_connection_is_refused_for_a_telnet_host() {
         protocol: HostProtocol::Telnet,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     let host = f.core.vault.save_host(input).await.unwrap().id;
     let (tx, _inbox) = mpsc::unbounded_channel();
@@ -2550,6 +2618,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();
@@ -2566,6 +2635,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         })
         .await
         .unwrap()
@@ -2891,42 +2961,58 @@ async fn a_startup_snippet_with_a_line_too_long_for_the_terminal_is_skipped_and_
 }
 
 // server at a glance
-fn glance_stats(glance: tyrminal_core::contracts::ServerGlance) -> tyrminal_core::contracts::ServerStats {
-    match glance {
-        tyrminal_core::contracts::ServerGlance::Available { stats } => stats,
-        other => panic!("expected values from the Linux lab server, got {other:?}"),
+/// What the panel gets from the lab server: values from a Linux server, "not Linux" from any
+/// other (the macOS lab runs the Mac's own sshd). `None` for the latter.
+fn glance_stats(
+    lab: &Lab,
+    glance: tyrminal_core::contracts::ServerGlance,
+) -> Option<tyrminal_core::contracts::ServerStats> {
+    use tyrminal_core::contracts::{GlanceUnavailable, ServerGlance};
+    match (lab.server_os(), glance) {
+        ("linux", ServerGlance::Available { stats }) => Some(stats),
+        (os, ServerGlance::NotAvailable { reason: GlanceUnavailable::NotLinux }) if os != "linux" => None,
+        (os, other) => panic!("unexpected answer from the {os} lab server: {other:?}"),
     }
 }
 
-/// Server at a glance (P-32) reads a real Linux server over its own channel, asks it at most every
-/// 5 s, stays within the owning window, and can be turned off for the host.
+/// Server at a glance (P-32) reads a real server over its own channel, asks it at most every
+/// 5 s, stays within the owning window, and can be turned off for the host. A Linux lab server
+/// gives values; another system is reported as not Linux, with nothing guessed.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn server_glance_reads_the_lab_server_at_most_every_five_seconds() {
     use tyrminal_core::contracts::ServerGlance;
     let f = fixture().await;
     let key_id = f.import("ed25519", None, false).await;
-    let client = connected(&f, "a", &key_id).await;
+    let mut client = connected(&f, "a", &key_id).await;
     let s = &f.core.sessions;
 
-    let first = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    let uptime = first.uptime_seconds.expect("uptime");
-    assert!(uptime > 0);
-    let load = first.load.expect("load");
-    assert!(load.iter().all(|v| v.is_finite() && *v >= 0.0));
-    let memory = first.memory.expect("memory");
-    assert!(memory.available_kib <= memory.total_kib && memory.total_kib > 0);
-    let disks = first.disks.expect("disks");
-    assert!(disks.iter().any(|d| d.mount == "/"), "{disks:?}");
-    assert!(disks.iter().all(|d| d.used_kib <= d.total_kib && d.mount.starts_with('/')));
+    if let Some(first) = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()) {
+        let uptime = first.uptime_seconds.expect("uptime");
+        assert!(uptime > 0);
+        let load = first.load.expect("load");
+        assert!(load.iter().all(|v| v.is_finite() && *v >= 0.0));
+        match first.memory {
+            Some(memory) => assert!(memory.available_kib <= memory.total_kib && memory.total_kib > 0),
+            // Unavailable only when the server has no MemAvailable line (WSL 1 has none): the
+            // panel does not estimate it.
+            None => {
+                client.send("echo mem-available-$(grep -c '^MemAvailable:' /proc/meminfo)\n").await;
+                client.output_until("mem-available-0").await;
+            }
+        }
+        let disks = first.disks.expect("disks");
+        assert!(disks.iter().any(|d| d.mount == "/"), "{disks:?}");
+        assert!(disks.iter().all(|d| d.used_kib <= d.total_kib && d.mount.starts_with('/')));
 
-    // Asked again within 5 s, the server is not asked again: the answer is the same, to the second.
-    tokio::time::sleep(Duration::from_millis(1_500)).await;
-    let cached = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    assert_eq!(cached.uptime_seconds, Some(uptime));
-    tokio::time::sleep(Duration::from_millis(4_000)).await;
-    let fresh = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    assert!(fresh.uptime_seconds.unwrap() >= uptime + 5, "{fresh:?}");
+        // Asked again within 5 s, the server is not asked again: the answer is the same, to the second.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        let cached = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()).unwrap();
+        assert_eq!(cached.uptime_seconds, Some(uptime));
+        tokio::time::sleep(Duration::from_millis(4_000)).await;
+        let fresh = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()).unwrap();
+        assert!(fresh.uptime_seconds.unwrap() >= uptime + 5, "{fresh:?}");
+    }
 
     // Another window learns nothing, the same as for a guessed session.
     let foreign = s.server_glance("detached-1", &client.session).await.unwrap_err();
@@ -2939,7 +3025,7 @@ async fn server_glance_reads_the_lab_server_at_most_every_five_seconds() {
     assert!(!f.core.vault.glance_enabled(&host_id).await.unwrap());
     assert_eq!(s.server_glance(WINDOW, &client.session).await.unwrap(), ServerGlance::Off);
     f.core.vault.set_glance_enabled(&host_id, true).await.unwrap();
-    glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+    glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap());
 }
 
 /// Nothing is read for a session that is not SSH, after it closes, or once the vault locks.
@@ -2957,7 +3043,7 @@ async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
 
     let key_id = f.import("ed25519", None, false).await;
     let mut closing = connected(&f, "a", &key_id).await;
-    glance_stats(s.server_glance(WINDOW, &closing.session).await.unwrap());
+    glance_stats(&f.lab, s.server_glance(WINDOW, &closing.session).await.unwrap());
     s.close(WINDOW, &closing.session).unwrap();
     closing.until_closed().await;
     assert_eq!(s.server_glance(WINDOW, &closing.session).await.unwrap_err().code, ErrorCode::AccessDenied);
@@ -2975,7 +3061,7 @@ async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
     };
     f.core.vault.lock().await;
     match racing.await.unwrap() {
-        Ok(glance) => drop(glance_stats(glance)),
+        Ok(glance) => drop(glance_stats(&f.lab, glance)),
         Err(e) => {
             assert!([ErrorCode::VaultLocked, ErrorCode::Cancelled, ErrorCode::AccessDenied].contains(&e.code), "{e:?}")
         }
@@ -3164,4 +3250,102 @@ async fn a_snippet_runs_on_an_open_session_and_on_a_closed_host_alike() {
     closed.until_closed().await;
     f.core.sessions.close(WINDOW, &open.session).unwrap();
     open.until_closed().await;
+}
+
+// tmux and screen session awareness (P-31)
+fn multiplexer_sessions(
+    list: tyrminal_core::contracts::MultiplexerList,
+) -> (bool, bool, Vec<tyrminal_core::contracts::MultiplexerSession>) {
+    match list {
+        tyrminal_core::contracts::MultiplexerList::Listed { tmux_installed, screen_installed, sessions, .. } => {
+            (tmux_installed, screen_installed, sessions)
+        }
+        other => panic!("expected a listing from the lab server, got {other:?}"),
+    }
+}
+
+/// The server's tmux (and, where installed, screen) sessions are listed over an exec channel;
+/// a strict name gets an attach command that works when typed, a hostile one gets none.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn multiplexer_sessions_are_listed_and_only_strict_names_are_attachable() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let mut client = connected(&f, "a", &key_id).await;
+    let s = &f.core.sessions;
+    let tag = format!("{:08x}", rand_tag());
+    let work = format!("p31work{tag}");
+    let odd = format!("p31 odd;$(id){tag}");
+    let screen_name = format!("p31scr{tag}");
+
+    let (tmux, screen, _) = multiplexer_sessions(s.multiplexer_sessions(WINDOW, &client.session).await.unwrap());
+    assert!(tmux, "the lab server has tmux");
+
+    // Sessions made by the user in their own shell.
+    let start = format!(
+        "tmux new-session -d -s {work}; tmux new-session -d -s '{odd}'; {}echo ma''de{tag}\n",
+        if screen { format!("screen -dmS {screen_name} sleep 300; ") } else { String::new() }
+    );
+    client.send(&start).await;
+    client.output_until(&format!("made{tag}")).await;
+
+    let (_, _, sessions) = multiplexer_sessions(s.multiplexer_sessions(WINDOW, &client.session).await.unwrap());
+    let ours: Vec<_> = sessions.iter().filter(|x| x.name.contains(&tag)).collect();
+    let find = |name: &str| {
+        ours.iter().find(|x| x.name.ends_with(name)).copied().unwrap_or_else(|| panic!("{name} in {ours:?}"))
+    };
+    let w = find(&work);
+    assert_eq!(w.attach_command.as_deref(), Some(format!("tmux attach-session -t '={work}'").as_str()));
+    assert!(!w.attached);
+    assert_eq!(w.windows, Some(1));
+    assert!(w.created_at.unwrap() > 1_600_000_000);
+    let o = find(&odd);
+    assert_eq!(o.name, odd, "shown exactly as text");
+    assert_eq!(o.attach_command, None, "a name with shell syntax is never offered");
+    if screen {
+        let sc = find(&screen_name);
+        let cmd = sc.attach_command.as_deref().expect("screen attach");
+        assert!(cmd.starts_with("screen -r '") && cmd.ends_with(&format!(".{screen_name}'")), "{cmd}");
+    }
+
+    // Typing the built command (what the renderer does after a click) attaches to that session.
+    client.send(&format!("{}\n", w.attach_command.as_deref().unwrap())).await;
+    let attached = async {
+        loop {
+            let (_, _, now) = multiplexer_sessions(s.multiplexer_sessions(WINDOW, &client.session).await.unwrap());
+            if now.iter().any(|x| x.name == work && x.attached) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(15), attached).await.expect("attached after typing the command");
+
+    // Another window learns nothing, the same as for a guessed session.
+    let foreign = s.multiplexer_sessions("detached-1", &client.session).await.unwrap_err();
+    let guessed = s.multiplexer_sessions("detached-1", &"f".repeat(32)).await.unwrap_err();
+    assert_eq!(foreign, guessed);
+
+    // Clean up from inside the attached session, then the rest.
+    client.send(&format!("tmux kill-session -t '={odd}'; tmux kill-session -t ={work}\n")).await;
+    client.output_until("[exited]").await;
+    if screen {
+        client.send(&format!("screen -S {screen_name} -X quit; echo go''ne{tag}\n")).await;
+        client.output_until(&format!("gone{tag}")).await;
+    }
+
+    // A local terminal has no verified SSH connection; a closed session is unknown.
+    let mut local = Client::open_local(&f.core).await;
+    local.until_connected().await;
+    assert_eq!(s.multiplexer_sessions(WINDOW, &local.session).await.unwrap_err().code, ErrorCode::InvalidInput);
+    s.close(WINDOW, &local.session).unwrap();
+    s.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+    assert_eq!(s.multiplexer_sessions(WINDOW, &client.session).await.unwrap_err().code, ErrorCode::AccessDenied);
+}
+
+fn rand_tag() -> u32 {
+    let mut b = [0u8; 4];
+    getrandom::fill(&mut b).unwrap();
+    u32::from_le_bytes(b)
 }

@@ -3696,6 +3696,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   overflow-x: auto;
 }
 
+/* Highlighted links (TRM-07) are underlined, in the link color, just below the text. */
+.term-highlight[data-tone="url"] {
+  box-shadow: inset 0 -1px 0 var(--highlight-color, currentColor);
+}
+
 /* Command boundaries from shell integration (OSC 133): a hairline above each prompt, and a
    short bar in the gutter of a command that failed. Display only. */
 .cmd-separator {
@@ -3710,22 +3715,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   border-radius: 2px;
   background: var(--cmd-failed);
   pointer-events: none;
-}
-
-/* Connection details (CON-15): the core's lines, aligned as they come, scrollable. */
-.connection-details {
-  max-height: 50vh;
-  overflow: auto;
-  margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-inset);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  list-style: none;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* Session recording playback */
@@ -4352,6 +4341,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   list-style: none;
 }
 
+/* tmux and screen session awareness (P-31) */
+.mux-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mux-sessions li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .glance-disks li,
 .glance-usage {
   display: flex;
@@ -4367,6 +4373,81 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 .glance-usage .muted {
   font-size: var(--text-xs);
+}
+
+/* Production hosts (P-26): a coloured edge together with the text "Production", never colour
+   alone. Red keeps it apart from broadcast (amber). */
+/* Resolved on the root, so the badge keeps the app theme's colours inside chrome drawn in the
+   terminal scheme's colours (tab, pane header), and opaque, so it keeps its contrast on tinted
+   rows. */
+:root {
+  --production-fg: var(--danger);
+  --production-bg: color-mix(in srgb, var(--danger) 12%, var(--bg-raised));
+}
+
+.badge-production {
+  background: var(--production-bg);
+  color: var(--production-fg);
+  font-weight: 600;
+}
+
+.tab[data-production="true"] {
+  box-shadow: inset 0 2px 0 var(--danger);
+}
+
+.tab-production {
+  flex: none;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--text-xs);
+}
+
+.pane[data-production="true"],
+.panes[data-split="true"] .pane[data-production="true"]:not([data-focused="true"]) {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent);
+}
+
+/* Focus in a split keeps the production edge and adds the accent inside it. */
+.panes[data-split="true"] .pane[data-production="true"][data-focused="true"] {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent),
+    inset 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.pane[data-production="true"][data-broadcast="true"] {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent),
+    inset 0 0 0 4px color-mix(in srgb, var(--warning) 70%, transparent);
+}
+
+.pane-production {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--danger));
+}
+
+.btn-warning {
+  --btn-bg: var(--warning);
+  --btn-fg: #ffffff;
+  --btn-border: transparent;
+}
+
+:root:not([data-theme="light"]) .btn-warning {
+  --btn-fg: #1a1200;
+}
+
+.production-list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: var(--text-sm);
 }
 
 /* P-30: host and group notes. Plain token styling. */

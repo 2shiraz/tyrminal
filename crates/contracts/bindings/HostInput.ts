@@ -27,4 +27,8 @@ terminal: HostTerminal,
 /**
  * Let the server use this host's sign-in key while the session is open (agent forwarding).
  */
-forwardAgent: boolean, };
+forwardAgent: boolean, 
+/**
+ * Mark the host as a production host (P-26); groups above it can also set it.
+ */
+production: boolean, };

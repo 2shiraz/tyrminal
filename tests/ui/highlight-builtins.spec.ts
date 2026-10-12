@@ -6,6 +6,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { openApp } from "./fixtures";
 import { marksOnRow } from "./highlight-helpers";
 import { inputs, sentSince } from "./input-helpers";
+import { MOTD_ADDRESSES, MOTD_LINES } from "./motd-fixture";
 
 async function connect(page: Page) {
   await page.keyboard.press("Control+Shift+K");
@@ -57,6 +58,36 @@ test("on by default: addresses, numbers, links, dates, quotes, paths, hashes and
   ]);
   // Display only: the text on screen is what arrived, and nothing was sent.
   for (const line of lines) await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
+  expect((await sentSince(page, before)).join("").replace(/\u001b\[[\d;]*R/g, "")).toBe("");
+});
+
+test("an Ubuntu login message: every IPv4 and IPv6 address is highlighted and the links are links", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connect(page);
+  const before = await inputs(page);
+  const found: string[] = [];
+  const links: string[] = [];
+  // Half a message per screen, so every line is in view (only visible rows are highlighted).
+  const half = Math.ceil(MOTD_LINES.length / 2);
+  for (const part of [MOTD_LINES.slice(0, half), MOTD_LINES.slice(half)]) {
+    await output(page, `\u001b[2J\u001b[H${part.join("\r\n")}\r\n`);
+    const shown = part.filter((l) => l.trim() !== "");
+    // Each half ends in an address; the whole screen is decorated in one pass.
+    await expect.poll(async () => ((await marksOnRow(page, (shown.at(-1) as string).trim())) ?? []).some(([kind]) => kind === "address")).toBe(true);
+    for (const line of shown) {
+      // Display only: the text on screen is what arrived.
+      await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line.trim());
+      const marks = (await marksOnRow(page, line.trim())) ?? [];
+      found.push(...marks.filter(([kind]) => kind === "address").map(([, text]) => text));
+      links.push(...marks.filter(([kind]) => kind === "url").map(([, text]) => text));
+    }
+  }
+  expect(found).toEqual(MOTD_ADDRESSES);
+  expect(links).toEqual(["https://help.ubuntu.com", "https://landscape.example.com"]);
+  // Links are underlined.
+  await output(page, `\u001b[2J\u001b[H${MOTD_LINES.slice(0, 4).join("\r\n")}\r\n`);
+  await expect(page.locator('.pane:not([hidden]) .term-highlight[data-tone="url"]').first()).toHaveCSS("box-shadow", /inset/);
+  // Nothing was sent.
   expect((await sentSince(page, before)).join("").replace(/\u001b\[[\d;]*R/g, "")).toBe("");
 });
 

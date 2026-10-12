@@ -416,7 +416,8 @@ test("an uninitialized vault shows onboarding even when a status event beats the
 });
 
 test("broadcast: typed input reaches every pane of the tab, terminal replies do not, and it stops when a pane drops", async ({ page }) => {
-  await openApp(page, { renderer: "compatibility" });
+  // The production confirmation (P-26) is covered in production.spec.ts; the tag is off here.
+  await openApp(page, { renderer: "compatibility", productionTag: "" });
   await connectFromPalette(page, "api-gateway");
   const paneText = (n: number) => page.locator(".pane .xterm-rows").nth(n).innerText();
   // Not offered with a single pane.

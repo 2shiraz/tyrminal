@@ -41,6 +41,7 @@ export function hostDraft(fields: HostFields, base: HostFields, stored: HostFiel
   d.groupId = fields.groupId;
   d.terminal = fields.terminal;
   d.forwardAgent = fields.forwardAgent;
+  d.production = fields.production;
   d.identityId = fields.identityId;
   // Protocol (and a serial host's device, its address).
   if (!serial || fields.serial.path.trim() !== "") {
@@ -90,6 +91,7 @@ export function hostInput(d: HostFields, id: string | null, password?: string): 
       protocol: d.protocol === "serial" ? { type: "serial", settings: d.serial } : { type: "telnet" },
       terminal: d.terminal,
       forwardAgent: false,
+      production: d.production,
     };
   }
   const auth: HostAuthInput =
@@ -112,6 +114,7 @@ export function hostInput(d: HostFields, id: string | null, password?: string): 
     protocol: { type: "ssh" },
     terminal: d.terminal,
     forwardAgent: d.forwardAgent && d.authKind === "key",
+    production: d.production,
   };
 }
 

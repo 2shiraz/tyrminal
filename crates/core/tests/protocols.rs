@@ -53,6 +53,7 @@ async fn host(core: &Core, address: &str, port: Option<u16>, protocol: HostProto
         protocol,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     core.vault.save_host(input).await.unwrap().id
 }
@@ -171,6 +172,7 @@ async fn serial_settings_are_checked_when_saved_and_when_opened() {
         protocol: serial("/dev/ttyUSB0", 0),
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     assert!(core.vault.save_host(bad).await.is_err(), "a zero baud rate is refused at save");
     // A file that is not a device is never opened as a port.
@@ -281,6 +283,7 @@ async fn a_host_encoding_and_terminal_type_apply_both_ways() {
             ..HostTerminal::default()
         },
         forward_agent: false,
+        production: false,
     };
     let saved = core.vault.save_host(input).await.unwrap();
     assert_eq!(saved.terminal.encoding, TerminalEncoding::Koi8R);

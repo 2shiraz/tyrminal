@@ -1,4 +1,4 @@
-import type { IpcError, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
@@ -13,6 +13,7 @@ import {
   IconFolder,
   IconKeyRound,
   IconPlug,
+  IconRefreshCw,
   IconSearch,
   IconShieldAlert,
   IconX,
@@ -21,10 +22,11 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+// tmux and screen session awareness (P-31)
+import { msgMx } from "../../lib/messages-multiplexers";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
-import { ConnectionDetails } from "../connection/ConnectionDetails";
 import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
@@ -36,7 +38,7 @@ import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
-import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
+import type { ScrollbackMatch, ScrollbackResult, SearchSlice } from "./scrollbackSearch";
 
 const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -83,7 +85,7 @@ export interface PaneHandle {
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
-  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  searchScrollback(query: string, caseSensitive: boolean, slice?: SearchSlice): ScrollbackResult;
   /** P-28: scrolls a match into view and selects it. */
   revealMatch(match: ScrollbackMatch): void;
   /** P-29: commands the shell integration marked, newest first (empty without it). */
@@ -92,6 +94,9 @@ export interface PaneHandle {
   commandOutput(id: number): string | null;
   /** P-30: offers text for pasting, always through the paste review; never sent without it. */
   reviewPaste(text: string): void;
+  // tmux and screen session awareness (P-31)
+  /** Types the core-built attach command of a session the user chose; remembered for a reattach offer. */
+  attachMultiplexer(session: MultiplexerSession): boolean;
 }
 
 export interface SessionEnvironment {
@@ -172,7 +177,6 @@ export function TerminalView(props: TerminalViewProps) {
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   // Quick port forwards (P-24): ports the output named, waiting for the user.
   const [portOffers, setPortOffers] = useState<number[]>([]);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
@@ -195,6 +199,11 @@ export function TerminalView(props: TerminalViewProps) {
   const unreadReported = useRef(false);
   // The return-to-directory offer is made at most once per restored pane.
   const [directoryOffer, setDirectoryOffer] = useState<"waiting" | "shown" | "done">(props.restoreDirectory ? "waiting" : "done");
+  // tmux and screen session awareness (P-31): the session last attached from the server panel,
+  // offered again (never attached without a click) once a reconnect of this pane is connected.
+  const lastMultiplexer = useRef<MultiplexerSession | null>(null);
+  const reattachOfferedFor = useRef(0);
+  const [reattachOffer, setReattachOffer] = useState<MultiplexerSession | null>(null);
   const [encodingId, setEncodingId] = useState("utf-8");
   const encodingRef = useRef("utf-8");
   const lastUnencodable = useRef(0);
@@ -411,17 +420,36 @@ export function TerminalView(props: TerminalViewProps) {
         controllerRef.current?.setEncoding(encodingRef.current);
       },
       environment: () => environment.current,
-      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      searchScrollback: (query, caseSensitive, slice) =>
+        controllerRef.current?.searchScrollback(query, caseSensitive, slice) ?? { matches: [], truncated: false, next: 0, length: 0 },
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
       commands: () => controllerRef.current?.commandOutputs.list() ?? [],
       commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
       reviewPaste: (text) => {
         if (status.current.state === "connected") controllerRef.current?.reviewPaste(text);
       },
+      attachMultiplexer: (session) => {
+        if (status.current.state !== "connected" || !session.attachCommand || !controllerRef.current) return false;
+        controllerRef.current.sendConfirmedCommand(session.attachCommand);
+        lastMultiplexer.current = session;
+        return true;
+      },
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);
   }, []);
+
+  // tmux and screen session awareness (P-31): offered once per reconnect, only while connected.
+  useEffect(() => {
+    if (state !== "connected") {
+      setReattachOffer(null);
+      return;
+    }
+    if (attempt > 0 && reattachOfferedFor.current !== attempt && lastMultiplexer.current) {
+      reattachOfferedFor.current = attempt;
+      setReattachOffer(lastMultiplexer.current);
+    }
+  }, [state, attempt]);
 
   // Offered once the restored session is connected; never sent without a click.
   useEffect(() => {
@@ -551,6 +579,41 @@ export function TerminalView(props: TerminalViewProps) {
         onDone={(port) => setPortOffers((list) => (port === "all" ? [] : list.filter((p) => p !== port)))}
       />
 
+      {/* tmux and screen session awareness (P-31) */}
+      {reattachOffer?.attachCommand && state === "connected" && visible && (
+        <div className="term-banner" role="group" aria-label={msgMx.reattachTitle}>
+          <IconRefreshCw size={16} />
+          <span className="stack-xs" style={{ minWidth: 0 }}>
+            {/* The name came from the server; shown as text. The command was built by the core. */}
+            <span>{msgMx.reattachBody(reattachOffer.kind, reattachOffer.name)}</span>
+            <code className="mono truncate" data-testid="reattach-command">
+              {reattachOffer.attachCommand}
+            </code>
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              controllerRef.current?.sendConfirmedCommand(reattachOffer.attachCommand as string);
+              setReattachOffer(null);
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgMx.reattach}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              setReattachOffer(null);
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgMx.dismiss}
+          </button>
+        </div>
+      )}
+
       {findOpen && (
         <FindBar
           count={findCount}
@@ -590,7 +653,6 @@ export function TerminalView(props: TerminalViewProps) {
           onCloseTab={() => handlers.current.onClose()}
           onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
           onOpenLog={target.kind === "ssh" ? () => setLogOpen(true) : null}
-          onOpenDetails={target.kind === "ssh" ? () => setDetailsFor(controllerRef.current?.id ?? null) : null}
           onInstallKey={target.kind === "ssh" && rejectedKey && closed?.error?.code === "AUTH_FAILED" ? () => setInstalling(true) : null}
           canReconnect={props.canReconnect !== false}
         />
@@ -636,7 +698,6 @@ export function TerminalView(props: TerminalViewProps) {
           }}
         />
       )}
-      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {installing && target.kind === "ssh" && rejectedKey && (
         <InstallKeyDialog hostId={target.hostId} keyId={rejectedKey.keyId} onClose={() => setInstalling(false)} />
       )}

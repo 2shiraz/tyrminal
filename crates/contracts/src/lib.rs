@@ -31,6 +31,8 @@ mod command_history;
 mod server_glance;
 // security review (P-27)
 mod security_review;
+// tmux and screen session awareness (P-31)
+mod multiplexers;
 
 pub use discovery::*;
 pub use dto::*;
@@ -57,3 +59,5 @@ pub use command_history::*;
 pub use server_glance::*;
 // security review (P-27)
 pub use security_review::*;
+// tmux and screen session awareness (P-31)
+pub use multiplexers::*;
