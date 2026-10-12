@@ -14,6 +14,8 @@ mod client;
 mod error;
 mod host_trust;
 mod sftp;
+// agent B: tunnels and history
+mod forward;
 
 pub use algorithms::negotiation_summary;
 pub use auth::{
@@ -28,3 +30,9 @@ pub use host_trust::{
     canonical_host, evaluate,
 };
 pub use sftp::{FileError, RemoteAttrs, RemoteDirEntry, RemoteKind, RemoteReader, RemoteWriter, SFTP_CHUNK, Sftp};
+// agent B: tunnels and history
+pub use forward::{
+    BindScope, DynamicForward, FORWARD_HANDSHAKE_TIMEOUT, ForwardEnd, ForwardError, ForwardHandle, ForwardStats,
+    LocalForward, RemoteForward, SocksRefusal, SocksTarget, StatsSnapshot, local_bind_addr, local_bind_scope,
+    remote_bind_scope, socks5_accept, start_dynamic, start_local, start_remote,
+};
