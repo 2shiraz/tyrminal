@@ -18,7 +18,6 @@ import {
   IconCopy,
   IconFingerprint,
   IconHistory,
-  IconHouse,
   IconKeyRound,
   IconLayoutTemplate,
   IconPencil,
@@ -32,8 +31,7 @@ import {
 } from "../ui/icons";
 import { msgSftp } from "../../features/sftp/messages";
 
-const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
-  home: IconHouse,
+const PAGE_ICONS: Record<Destination, typeof IconServer> = {
   hosts: IconServer,
   snippets: IconScrollText,
   keychain: IconKeyRound,

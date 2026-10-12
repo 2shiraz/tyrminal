@@ -31,18 +31,6 @@ for (const theme of ["dark", "light"] as const) {
       await shot(page, `${theme}-03-unlock.png`);
     });
 
-    test(`home, empty (${theme})`, async ({ page }) => {
-      await openApp(page, { scenario: "empty", theme });
-      await expect(page.getByRole("heading", { name: "Welcome to Tyrminal" })).toBeVisible();
-      await shot(page, `${theme}-04-home-empty.png`);
-    });
-
-    test(`home with data (${theme})`, async ({ page }) => {
-      await openApp(page, { theme });
-      await expect(page.getByRole("heading", { name: "Hosts", exact: true })).toBeVisible();
-      await shot(page, `${theme}-05-home.png`);
-    });
-
     test(`hosts grid, list and editor (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();

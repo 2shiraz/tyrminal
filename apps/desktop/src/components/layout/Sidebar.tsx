@@ -11,7 +11,6 @@ import {
   IconRoute,
   IconArrowLeftRight,
   IconFingerprint,
-  IconHouse,
   IconKeyRound,
   IconLock,
   IconScrollText,
@@ -43,7 +42,6 @@ export function BrandMark({ size = 26 }: { size?: number }) {
 }
 
 const PRIMARY: { id: Destination; icon: ReactNode }[] = [
-  { id: "home", icon: <IconHouse size={17} /> },
   { id: "hosts", icon: <IconServer size={17} /> },
   { id: "snippets", icon: <IconScrollText size={17} /> },
   // agent B: tunnels and history

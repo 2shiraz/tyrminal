@@ -128,6 +128,10 @@ inside a box with `overflow: hidden` use `outline-offset: -2px` so it is never c
 
 ## 5. Home
 
+**Removed.** The owner removed Home after #74 landed (2026-10-12): Hosts is the first page after
+unlock, and the Hosts redesign takes over quick connect; favourites go to Hosts and the last backup
+time to Settings. The rest of this section is kept as the record of what was built.
+
 ### 5.1 What is there now (`features/home/HomeView.tsx`, `.home-grid`, `.tile`, `.tips`)
 
 - Title "Home" + a subtitle sentence; a 19 px search icon quick-connect field with `Shortcut` key caps.

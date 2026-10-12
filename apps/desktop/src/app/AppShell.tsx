@@ -6,7 +6,6 @@ import { StatusBar } from "../components/layout/StatusBar";
 import { TabStrip } from "../components/layout/TabStrip";
 import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
-import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
 import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
@@ -106,7 +105,6 @@ import {
 } from "./workspace";
 
 export type Destination =
-  | "home"
   | "hosts"
   | "snippets"
   | "keychain"
@@ -138,7 +136,7 @@ function Shell() {
   const data = useVaultData();
   const notify = useToast();
   useSlowPatternNotice();
-  const [destination, setDestination] = useState<Destination>("home");
+  const [destination, setDestination] = useState<Destination>("hosts");
   // command history: remembers commands from shell-integration marks while history is on.
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
@@ -820,21 +818,6 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "home" && (
-            <HomeView
-              ws={ws}
-              statuses={statuses}
-              onConnect={connect}
-              onLocal={openLocal}
-              onSftp={openSftp}
-              onNavigate={navigate}
-              onSelectTab={(id) => setWs((c) => selectTab(c, id))}
-              onOpenSettings={(section) => {
-                navigate("settings");
-                setSettingsAt((current) => ({ section, n: (current?.n ?? 0) + 1 }));
-              }}
-            />
-          )}
           {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onOpenSftp={(host) => openSftpHost(host)} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}

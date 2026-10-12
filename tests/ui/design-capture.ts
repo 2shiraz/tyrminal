@@ -32,12 +32,10 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { scenario: "locked", theme });
     await shot(page, `${theme}-unlock`);
     await openApp(page, { scenario: "empty", theme });
-    await shot(page, `${theme}-home-empty`);
-    await t("hosts-empty", () => nav(page, /^Hosts/));
+    await shot(page, `${theme}-hosts-empty`);
     await t("tunnels-empty", () => page.locator('[data-nav="tunnels"]').click());
     await openApp(page, { theme });
-    await shot(page, `${theme}-home`);
-    await t("hosts-grid", () => nav(page, /^Hosts/));
+    await shot(page, `${theme}-hosts-grid`);
     await t("hosts-list", () => page.locator(".segmented label", { hasText: "List" }).click());
     await t("host-editor", async () => { await page.getByRole("button", { name: "Add host" }).click(); await expect(page.getByRole("dialog")).toBeVisible(); });
     await page.keyboard.press("Escape");
