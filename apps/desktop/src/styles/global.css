@@ -1806,6 +1806,27 @@ kbd,
   padding: var(--space-3);
 }
 
+/* Setting rows in a narrow side panel (terminal Appearance): label above the control, full width,
+   packed at the top instead of stretched over the panel's height. */
+.panel-body:has(> .setting-row) {
+  align-content: start;
+}
+
+.panel-body > .setting-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+
+.panel-body > .setting-row + .setting-row {
+  border-top: var(--box-rule);
+}
+
+.panel-body > .setting-row .setting-control,
+.panel-body > .setting-row .setting-control > * {
+  width: 100%;
+}
+
 .panel-target {
   display: flex;
   align-items: center;
