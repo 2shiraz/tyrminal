@@ -116,6 +116,11 @@ export function installMockBackend(options) {
       );
       state.knownHosts.push({ id: id(303), host: "retired.example", port: 22, algorithm: "ssh-rsa", fingerprint: "SHA256:retiredRsaSyntheticFingerprint000000000000", addedAt: now - 86400 * 90 });
     }
+    // A large vault for the windowed Hosts list (windowing tests): hosts in no group.
+    for (let n = 0; n < (options.extraHosts ?? 0); n++) {
+      const label = `bulk-host-${String(n + 1).padStart(3, "0")}`;
+      state.hosts.push({ ...host(0, label, `10.99.${Math.floor(n / 250)}.${(n % 250) + 1}`, "ops", 22, { kind: "ask_password" }, null), id: id(10_000 + n) });
+    }
     // A large set of trusted servers for the windowed Known hosts list (windowing tests).
     for (let n = 0; n < (options.extraKnownHosts ?? 0); n++) {
       state.knownHosts.push({ id: id(20_000 + n), host: `bulk-${String(n + 1).padStart(3, "0")}.example`, port: 22, algorithm: "ssh-ed25519", fingerprint: `SHA256:bulk${n}`, addedAt: now - 86400 });

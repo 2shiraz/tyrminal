@@ -3,7 +3,7 @@
 // assistive technology, and keyboard navigation reaches the end. Mock backend.
 import { expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { chooseLayout, openApp } from "./fixtures";
 
 test("windowing: a folder of 500 files keeps a window of rows; keys and type-ahead reach any row", async ({ page }) => {
   await openApp(page);
@@ -86,3 +86,32 @@ test("windowing: 500 trusted servers render a window; scrolling to the bottom sh
   await expect(page.getByText("bulk-500.example", { exact: true })).toBeVisible();
   expect(await rows.count()).toBeLessThan(150);
 });
+
+for (const layout of ["List", "Cards"] as const) {
+  test(`windowing: 500 more hosts (${layout}) render a window; Home/End and arrows reach both ends`, async ({ page }) => {
+    await openApp(page, { extraHosts: 500 });
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+    await chooseLayout(page, layout);
+    const list = page.getByTestId("host-list");
+    const rows = list.locator(":scope > li[data-window-item]");
+    await expect(rows.first()).toBeVisible();
+    // Only a window of the hosts is in the DOM, and screen readers still get the full count.
+    expect(await rows.count()).toBeLessThan(150);
+    const total = await rows.first().getAttribute("aria-setsize");
+    expect(Number(total)).toBeGreaterThan(500);
+    // While windowed, rows carry no FLIP key (nothing animates in while scrolling).
+    await expect(list.locator(":scope > li[data-flip-key]")).toHaveCount(0);
+
+    // The position of the host whose name has focus, from its row's aria-posinset.
+    const focusedAt = () =>
+      page.evaluate(() => Number(document.activeElement?.closest("[data-window-item]")?.getAttribute("aria-posinset") ?? 0));
+    await list.locator(".host-open").first().focus();
+    await page.keyboard.press("End");
+    await expect.poll(focusedAt).toBe(Number(total));
+    expect(await rows.count()).toBeLessThan(150);
+    await page.keyboard.press(layout === "List" ? "ArrowUp" : "ArrowLeft");
+    await expect.poll(focusedAt).toBe(Number(total) - 1);
+    await page.keyboard.press("Home");
+    await expect.poll(focusedAt).toBe(1);
+  });
+}
