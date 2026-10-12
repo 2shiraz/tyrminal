@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["vite/client"] },
+  "compilerOptions": { "types": ["vite/client"], "resolveJsonModule": true },
   "include": ["src", "vite.config.ts"]
 }

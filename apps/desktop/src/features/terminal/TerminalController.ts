@@ -127,6 +127,37 @@ export async function fontsReady(prefs: TerminalPreferences): Promise<void> {
   ]);
 }
 
+/**
+ * Every live terminal. The WebGL renderer shares one glyph texture atlas between terminals with
+ * the same font and colours; when one of them rebuilds it (theme or font change, atlas pages
+ * merged after long use, GPU memory reclaimed while the window was hidden), the others still
+ * point at the old glyph positions and draw fragments of other characters. Redrawing them all
+ * after any such change keeps every terminal readable.
+ */
+const live = new Set<TerminalController>();
+let redrawFrame = 0;
+let clearOnRedraw = false;
+
+/** Redraws every terminal on the next frame, optionally rebuilding the glyph atlas first. */
+function redrawAll(clearAtlas: boolean): void {
+  clearOnRedraw ||= clearAtlas;
+  if (redrawFrame) return;
+  redrawFrame = requestAnimationFrame(() => {
+    redrawFrame = 0;
+    const clear = clearOnRedraw;
+    clearOnRedraw = false;
+    for (const controller of live) controller.redraw(clear);
+  });
+}
+
+if (typeof document !== "undefined") {
+  // Coming back after the window was hidden or idle: the GPU may have dropped the atlas.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") redrawAll(true);
+  });
+  window.addEventListener("focus", () => redrawAll(true));
+}
+
 export class TerminalController {
   private readonly term: Terminal;
   private readonly fit = new FitAddon();
@@ -177,6 +208,7 @@ export class TerminalController {
   ) {
     this.prefs = prefs;
     this.term = new Terminal(terminalOptions(prefs));
+    live.add(this);
     this.term.loadAddon(this.fit);
     this.term.loadAddon(this.search);
     // Unicode 15 widths and grapheme clusters: CJK, emoji (including ZWJ sequences) and
@@ -343,7 +375,8 @@ export class TerminalController {
     if (ligaturesChanged) this.applyLigatures();
     void fontsReady(prefs).then(() => {
       if (!this.disposed) {
-        this.webgl?.clearTextureAtlas();
+        // The atlas is shared: every terminal redraws, not only this one.
+        redrawAll(true);
         this.scheduleResize();
       }
     });
@@ -352,7 +385,15 @@ export class TerminalController {
   setZoom(step: "in" | "out" | "reset"): void {
     this.zoom = step === "reset" ? 0 : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.zoom + (step === "in" ? 1 : -1)));
     this.term.options.fontSize = Math.max(6, this.prefs.fontSize + this.zoom);
+    redrawAll(true);
     this.scheduleResize();
+  }
+
+  /** Repaints every row, rebuilding the glyph atlas first when asked. */
+  redraw(clearAtlas: boolean): void {
+    if (this.disposed) return;
+    if (clearAtlas) this.webgl?.clearTextureAtlas();
+    this.term.refresh(0, this.term.rows - 1);
   }
 
   find(query: string, options: { caseSensitive: boolean; regex: boolean }, direction: "next" | "previous"): void {
@@ -463,6 +504,9 @@ export class TerminalController {
         this.setRenderer("dom", true);
       });
       this.term.loadAddon(addon);
+      // Another terminal sharing the atlas rebuilt or merged its pages: redraw everyone.
+      addon.onChangeTextureAtlas(() => redrawAll(false));
+      addon.onRemoveTextureAtlasCanvas(() => redrawAll(false));
       this.webgl = addon;
       this.setRenderer("webgl", false);
     } catch {
@@ -592,6 +636,7 @@ export class TerminalController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    live.delete(this);
     window.clearTimeout(this.ackTimer);
     window.clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();

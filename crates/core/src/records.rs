@@ -60,6 +60,16 @@ pub(crate) struct HostRecord {
     /// Unix seconds of the last connection that reached the shell. Absent in older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected_at: Option<u64>,
+    // agent A: protocols
+    /// SSH, Telnet or a serial device. Absent (SSH) in older records.
+    #[serde(default, skip_serializing_if = "tyrminal_contracts::HostProtocol::is_ssh")]
+    pub protocol: tyrminal_contracts::HostProtocol,
+    /// Encoding and terminal type. Absent (UTF-8, xterm-256color) in older records.
+    #[serde(default, skip_serializing_if = "tyrminal_contracts::HostTerminal::is_default")]
+    pub terminal: tyrminal_contracts::HostTerminal,
+    /// Agent forwarding to this host (off, and absent, unless the user turned it on).
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub forward_agent: bool,
     // agent B: tunnels and history
     /// Jump host and other advanced connection settings. Absent in older records.
     #[serde(default, skip_serializing_if = "StoredConnection::is_default")]
@@ -319,6 +329,9 @@ mod tests {
             group: None,
             tags: Vec::new(),
             last_connected_at: None,
+            protocol: tyrminal_contracts::HostProtocol::Ssh,
+            terminal: tyrminal_contracts::HostTerminal::default(),
+            forward_agent: false,
             connection: StoredConnection::default(),
         };
         let bytes = encode(&host, 64).unwrap();

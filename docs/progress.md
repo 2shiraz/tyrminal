@@ -4,29 +4,22 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 
 ## Where things stand
 
-| Phase | State | Report |
-|---|---|---|
-| 00 Repository baseline | Gate met | `docs/reports/phase-00.md` |
-| 01 Feasibility spikes | Gate met on macOS; Linux in this sandbox; Windows via CI in progress | `docs/reports/phase-01.md` |
-| 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer and disk-full fault injection: done. An OS screen-lock hook remains | `docs/reports/phase-02-03.md` |
-| 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done (native test kills the server process; passes on Linux) | `docs/reports/phase-02-03.md` |
-| UX track (§3 of the 2026-10 brief) | UI redesign, first-class terminal, snippets: done and tested on Linux; CI on macOS/Windows in progress | this file |
-| Current folder for files and new tabs (AUT-06 follow-up, TRM-02) | Files panel opens in the shell's folder; duplicated tabs keep it (local: checked start folder; SSH: `cd` at the first integrated prompt); `shellContexts.onMark` mark events. Tested: core unit, local lab (real shells), UI mock | ADR 0006 |
-| 04–15 | Not started | |
+Work is split between four agents (A: files, platform, protocols, release; B: tunnels, jump
+hosts, proxies, logs; C: workspaces, tabs, terminal; D: inventory, keys, importers, snippets,
+suggestions), see `docs/work-split.md`. Owner requests are logged in `docs/requests.md`.
 
-Feature matrix: see `node scripts/feature-matrix.mjs --check` (29 IMPLEMENTED_UNVERIFIED,
-18 IN_PROGRESS, 216 NOT_STARTED, 39 DEFERRED_BY_SCOPE on 2026-10-12). **Nothing is VERIFIED**
-until the native suites pass in CI on macOS arm64 and Windows x64 (the declared platforms).
+| Phase | State |
+|---|---|
+| 00–03 | Gate met (reports in `docs/reports/`); screen-lock hook done (ADR 0007) |
+| 04 Inventory | Groups, tags, search, bulk, duplicate, imports, key deployment on main; presentation, PuTTY/MobaXterm/SecureCRT, keys (ECDSA/RSA, PPK, certificates, key files) in PR #5 (D) |
+| 05 Workspace | Tabs, splits, broadcast on main; layouts, detach-to-window (handoff core done by A) in PR #7 (C) |
+| 06 Files | SFTP browser, transfers, folders, two panes, copy between servers, edit sessions on main; desktop drop, full-disk test on A's branch |
+| 07 Connections | Forwarding, jump hosts, proxies in PR #6 (B); Telnet, serial, protocol per host, encodings and terminal type on A's branch; Mosh deferred (ADR 0008) |
+| 08 Automation | Multi-host snippet runs, suggestions in PR #5 (D); logs and history next (B) |
+| 09 Release candidate | Diagnostics consent, update controls, user guide, upgrade test from beta.1, installer smoke test on A's branch |
+| 10–15 | Not started (sync, teams, mobile) |
 
-## Evidence (2026-10-12)
-
-Native workflow run 38216895650 on commit da60796: **Linux x64, macOS arm64 and Windows x64 all
-green** — fast 7/7, integration 3/3, security 6/6, native 4/4 suites, 0 blocked, release build
-and release policy against the built binary. CI (fast, browser UI, cargo-deny, npm audit,
-secret scan, fuzz smoke) green on the same commit. 24 matrix rows VERIFIED on it.
-
-Windows lab: Debian 12 in WSL 1 with the official Node 20 build (Debian's node does not run
-under WSL 1); OpenSSH 9.2p1, PAM keyboard-interactive and the full-screen apps run there.
+Pre-release v0.1.0-beta.1 is published; v0.1.0-beta.2 follows once PR #6 and PR #5 merge.
 
 ## Findings worth keeping
 
@@ -58,13 +51,12 @@ under WSL 1); OpenSSH 9.2p1, PAM keyboard-interactive and the full-screen apps r
 
 ## Next tasks, in order
 
-1. Merge PR #1 and run the release workflow for v0.1.0-beta.1 (pre-release, unsigned).
-2. Phase 04 is implemented on a local branch (groups with inherited settings, tags, search,
-   bulk changes, duplicate, OpenSSH/CSV import); push it on top of main after the release.
-3. Phase 04 remainder: public-key deployment (KEY-05/06), reusable identities (KEY-15..17).
-4. Phase 02 remainder: OS screen-lock hook (needs platform APIs and an ADR for any FFI);
-   verify sleep-lock on a real suspend.
-5. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
+1. Merge PR #6 (B), then PR #5 (D) after it merges main; run the release workflow for
+   v0.1.0-beta.2 (notes in `docs/releases/v0.1.0-beta.2.md`).
+2. Open agent A's PR (handoff, desktop drop, diagnostics, updates, protocols, encodings,
+   Phase 09 tests) after those merges; mark rows VERIFIED from its three-platform native run.
+3. Merge PR #7 (C).
+4. Keep every agent's queue full (`docs/work-split.md`); everything before Phase 10 is assigned.
 
 ## Questions for the owner (none block current work)
 

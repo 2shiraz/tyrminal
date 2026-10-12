@@ -57,6 +57,14 @@ pub(crate) fn address(value: &str) -> Result<String, IpcError> {
     Ok(bare.to_owned())
 }
 
+/// A host's protocol as stored (serial line settings checked; the device itself at connect).
+pub(crate) fn protocol(value: tyrminal_contracts::HostProtocol) -> Result<tyrminal_contracts::HostProtocol, IpcError> {
+    if let tyrminal_contracts::HostProtocol::Serial { settings } = &value {
+        crate::serial::validate_line(settings)?;
+    }
+    Ok(value)
+}
+
 pub(crate) fn port(value: u16) -> Result<u16, IpcError> {
     if value == 0 { Err(invalid("The port must be between 1 and 65535.")) } else { Ok(value) }
 }

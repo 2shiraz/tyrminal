@@ -1,4 +1,13 @@
-import type { ConflictChoice, EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
+import type {
+  ConflictChoice,
+  EditStatus,
+  RemoteEntry,
+  RemoteListing,
+  StreamUpload,
+  TransferDirection,
+  TransferEvent,
+  TransferStarted,
+} from "@tyrminal/contracts";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
@@ -26,7 +35,11 @@ import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { shellContexts } from "../autocomplete/shellContext";
+import { beginUpload, sendUpload } from "./dropUpload";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
+
+/** Transfer ids of dropped-file uploads (cancelled in the page, not by the core's transfer id). */
+const DROP_PREFIX = "drop-";
 
 export interface FilesTarget {
   sessionId: string;
@@ -113,6 +126,8 @@ export function FilesPanel({
   const [localLocation, setLocalLocation] = useState<LocalLocation | null>(null);
   const [localRefresh, setLocalRefresh] = useState(0);
   const [remoteDrop, setRemoteDrop] = useState(false);
+  /** Dropped-file uploads the user cancelled (stopped before their next piece). */
+  const stopped = useRef(new Set<string>());
   const [edits, setEdits] = useState<(EditStatus & { saved?: boolean | undefined })[]>([]);
   const { pending, error, run } = useAction();
   const sessionId = target?.sessionId ?? null;
@@ -243,8 +258,8 @@ export function FilesPanel({
     const early: TransferEvent[] = [];
     return {
       onEvent: (event: TransferEvent) => {
-        if (bound) apply(bound, dir, upload, event);
         if (intoLocalPane && event.type === "done") setLocalRefresh((n) => n + 1);
+        if (bound) apply(bound, dir, upload, event);
         else early.push(event);
       },
       bind: (started: TransferStarted) => {
@@ -296,6 +311,57 @@ export function FilesPanel({
         failNow(entry.name, "download", dir, e);
       }
     }
+  }
+
+  /**
+   * Files dropped from the desktop: the webview gives the page their content but not their
+   * paths, so the page sends it to the core in ordered pieces. Only a complete upload is renamed
+   * into place on the server; anything else removes the partial file.
+   */
+  async function uploadDropped(file: File, dir: string, choice: ConflictChoice) {
+    if (!sessionId) return;
+    let started: StreamUpload;
+    try {
+      started = await beginUpload(sessionId, dir, file, choice);
+    } catch (caught) {
+      const e = toAppError(caught);
+      if (e.code === "CONFLICT" && choice === "ask") {
+        setPrompt({
+          kind: "replace",
+          name: file.name,
+          remote: true,
+          retry: () => void uploadDropped(file, dir, "replace"),
+          keepBoth: () => void uploadDropped(file, dir, "keep_both"),
+        });
+      } else {
+        failNow(file.name, "upload", dir, e);
+      }
+      return;
+    }
+    const id = `${DROP_PREFIX}${started.uploadId}`;
+    track({ transferId: id, name: started.name, direction: "upload", total: file.size }, dir);
+    try {
+      const completed = await sendUpload(started, file, {
+        onProgress: (done) => apply(id, dir, true, { type: "progress", done }),
+        shouldStop: () => stopped.current.delete(id),
+      });
+      apply(id, dir, true, completed ? { type: "done", bytes: file.size, files: 1, skipped: 0 } : { type: "cancelled" });
+    } catch (caught) {
+      const e = toAppError(caught);
+      apply(id, dir, true, { type: "failed", error: { code: e.code, message: e.message } });
+    }
+  }
+
+  function droppedFiles(transfer: DataTransfer) {
+    if (!current) return;
+    const items = Array.from(transfer.items ?? []);
+    const list = Array.from(transfer.files);
+    list.forEach((file, i) => {
+      // A dropped folder arrives as an empty "file"; folders go through Upload folder instead.
+      const entry = items[i]?.webkitGetAsEntry?.();
+      if (entry?.isDirectory) failNow(file.name, "upload", current, new AppError({ code: "INVALID_INPUT", message: msg.files.dropFolder }));
+      else void uploadDropped(file, current, "ask");
+    });
   }
 
   /** A transfer refused before it started still shows up in the list, with the reason. */
@@ -521,7 +587,8 @@ export function FilesPanel({
             className="panel-body files-body"
             data-drop={remoteDrop || undefined}
             onDragOver={(event) => {
-              if (twoPane && event.dataTransfer.types.includes(DRAG_TYPE)) {
+              const types = event.dataTransfer.types;
+              if ((twoPane && types.includes(DRAG_TYPE)) || (listing && types.includes("Files"))) {
                 event.preventDefault();
                 setRemoteDrop(true);
               }
@@ -529,6 +596,11 @@ export function FilesPanel({
             onDragLeave={() => setRemoteDrop(false)}
             onDrop={(event) => {
               setRemoteDrop(false);
+              if (event.dataTransfer.files.length > 0 && !event.dataTransfer.types.includes(DRAG_TYPE)) {
+                event.preventDefault();
+                droppedFiles(event.dataTransfer);
+                return;
+              }
               const raw = event.dataTransfer.getData(DRAG_TYPE);
               if (!raw) return;
               event.preventDefault();
@@ -638,7 +710,10 @@ export function FilesPanel({
                     {t.state === "running" && (
                       <>
                         <progress max={t.total ?? undefined} value={t.total ? t.done : undefined} aria-label={t.name} />
-                        <IconButton label={msg.files.cancelTransfer(t.name)} onClick={() => void filesApi.cancel(t.id).catch(() => undefined)}>
+                        <IconButton label={msg.files.cancelTransfer(t.name)} onClick={() => {
+                          if (t.id.startsWith(DROP_PREFIX)) stopped.current.add(t.id);
+                          else void filesApi.cancel(t.id).catch(() => undefined);
+                        }}>
                           <IconX size={14} />
                         </IconButton>
                       </>
