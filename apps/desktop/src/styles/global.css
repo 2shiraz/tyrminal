@@ -971,8 +971,14 @@ kbd,
 }
 
 /* Identities follow the keys box on the Keychain page. */
-.identities-page {
+.page-inner.identities-page {
   padding-top: 0;
+}
+
+/* Keychain stacks Keys and Identities as two page columns: keep the usual section gap between them
+   rather than one column's bottom padding plus the next one's top. */
+.page-inner:has(+ .identities-page) {
+  padding-bottom: var(--space-5);
 }
 
 .section :focus-visible {
@@ -1841,11 +1847,13 @@ kbd,
   overflow: auto;
 }
 
+/* Pages are a left-aligned column (revamp §5), as Hosts and Settings are, so on a wide window every
+   page starts at the same edge instead of some floating in the middle. */
 .page-inner {
   display: grid;
   gap: var(--space-5);
   max-width: var(--page-max);
-  margin: 0 auto;
+  margin: 0;
   padding: var(--space-6) var(--space-6) var(--space-7);
 }
 
@@ -5114,4 +5122,10 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Snippets: where a folder has no rename button, hold its place so the counts line up. */
+.folder-row-spacer {
+  flex: none;
+  width: var(--control-height-sm);
 }

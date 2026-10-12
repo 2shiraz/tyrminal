@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "rea
 import type { Destination } from "../../app/AppShell";
 import type { Arrangement, Direction } from "../../app/workspace";
 import { useVaultData } from "../../app/vaultData";
-import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
+import { Keys, Shortcut } from "../../components/ui/controls";
 import { openedBy } from "../../lib/inputModality";
 import {
   // agent B: tunnels and history
@@ -241,7 +241,7 @@ export function CommandPalette({
           label: host.label,
           detail: msg.hosts.destination(host.username, host.address, host.port),
           keywords: `${host.address} ${host.username}`,
-          icon: <Avatar label={host.label} size="sm" />,
+          icon: <IconServer size={16} />,
           run: () => pick.onPick(host),
         });
       }
@@ -269,7 +269,7 @@ export function CommandPalette({
         label: host.label,
         detail: msg.hosts.destination(host.username, host.address, host.port),
         keywords: `${host.address} ${host.username}`,
-        icon: <Avatar label={host.label} size="sm" />,
+        icon: <IconServer size={16} />,
         run: () => onConnect(host),
         ...hostAlternatives(host),
       });
@@ -282,7 +282,7 @@ export function CommandPalette({
         label: host.label,
         detail: msg.hosts.destination(host.username, host.address, host.port),
         keywords: `${host.address} ${host.username}`,
-        icon: <Avatar label={host.label} size="sm" />,
+        icon: <IconServer size={16} />,
         run: () => onConnect(host),
         ...hostAlternatives(host),
       });
