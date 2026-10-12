@@ -91,6 +91,10 @@
   --edge-select: inset 2px 0 0 var(--accent);
   --edge-live: inset 0 2px 0 var(--accent);
   --edge-danger: inset 2px 0 0 var(--danger);
+  /* A disabled filled button loses its colour, not its legibility: a translucent accent fill read
+     as washed out (worst in light themes), so it turns neutral instead. */
+  --btn-disabled-bg: var(--bg-active);
+  --btn-disabled-fg: var(--text-faint);
 
   /* ---------- focus: one ring everywhere ---------- */
   --focus-width: 2px;
