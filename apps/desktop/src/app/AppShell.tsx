@@ -6,53 +6,37 @@ import { StatusBar } from "../components/layout/StatusBar";
 import { TabStrip } from "../components/layout/TabStrip";
 import { ResizeHandle } from "../components/ui/ResizeHandle";
 import { useToast } from "../components/ui/Toasts";
-import { KeychainView } from "../features/credentials/KeychainView";
 import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
-import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
 import { msgP } from "../lib/messages-privilege";
 import { ProductionConfirm } from "../features/hosts/ProductionConfirm";
 import { useIsProduction } from "../features/hosts/production";
-import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
-import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
-import { MultiRunDialog } from "../features/snippets/MultiRunDialog";
+import type { Section as SettingsSection } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
-import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
-import { ServerPanel } from "../features/glance/ServerPanel";
 // tmux and screen session awareness (P-31)
 import { msgMx } from "../lib/messages-multiplexers";
-import { NotesPanel } from "../features/notes/NotesPanel";
-import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
-import { TunnelsView } from "../features/tunnels/TunnelsView";
-import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
 import { sftpRequests } from "../features/sftp/requests";
 import { SnippetRunContext } from "../features/snippets/runContext";
-import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
-import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
-import { ContainersDialog, engineName } from "../features/terminal/ContainersDialog";
-import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { engineName } from "../features/terminal/containerEngine";
 import { shellContexts } from "../features/autocomplete/shellContext";
 // command history
 import { installHistoryCapture } from "../features/history/historyCapture";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
-import { CommandOutputDialog } from "../features/terminal/CommandOutputDialog";
-import { SearchSessionsDialog } from "../features/terminal/SearchSessionsDialog";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
 import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
+import { lazyComponent } from "../lib/lazyComponent";
 import { useLoaded } from "../lib/useAsync";
-import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
-import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import type { BroadcastTarget } from "../features/layouts/BroadcastReview";
 import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
 import { extraPaletteItems } from "../features/commands/extraActions";
-import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
+import type { PanelSection } from "../features/sidepanel/ConnectionPanel";
 import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
-import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { msgProduction } from "../lib/messages-production";
@@ -123,6 +107,45 @@ export type Destination =
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
+
+// Loaded on first use: none of these is needed for the first paint of Hosts (the window opens on
+// it). Views show an empty page for the moment their chunk loads; panels and dialogs show nothing.
+const pageFallback = <div className="page" aria-busy="true" />;
+const SnippetsView = lazyComponent(() => import("../features/snippets/SnippetsView").then((m) => m.SnippetsView), pageFallback);
+const KeychainView = lazyComponent(() => import("../features/credentials/KeychainView").then((m) => m.KeychainView), pageFallback);
+const KnownHostsView = lazyComponent(() => import("../features/settings/SettingsViews").then((m) => m.KnownHostsView), pageFallback);
+const SettingsView = lazyComponent<{ initialSection?: SettingsSection | undefined; onOpenKeychain?: () => void }>(() => import("../features/settings/SettingsViews").then((m) => m.SettingsView), pageFallback);
+// agent B: tunnels and history
+const TunnelsView = lazyComponent(() => import("../features/tunnels/TunnelsView").then((m) => m.TunnelsView), pageFallback);
+const RecordingsView = lazyComponent(() => import("../features/history/RecordingsView").then((m) => m.RecordingsView), pageFallback);
+// The side panels beside the terminals.
+const loadFilesPanel = () => import("../features/files/FilesPanel");
+/** The files panel's module once it loaded: its per-session memory exists only from then on. */
+let filesPanelModule: Awaited<ReturnType<typeof loadFilesPanel>> | null = null;
+const FilesPanel = lazyComponent(() =>
+  loadFilesPanel().then((m) => {
+    filesPanelModule = m;
+    return m.FilesPanel;
+  }),
+);
+// server at a glance
+const ServerPanel = lazyComponent(() => import("../features/glance/ServerPanel").then((m) => m.ServerPanel));
+const NotesPanel = lazyComponent(() => import("../features/notes/NotesPanel").then((m) => m.NotesPanel));
+const ConnectionPanel = lazyComponent(() => import("../features/sidepanel/ConnectionPanel").then((m) => m.ConnectionPanel));
+// Dialogs opened from a terminal or the palette.
+// privilege prompts (KEY-18)
+const InsertPasswordDialog = lazyComponent(() => import("../features/privilege/InsertPasswordDialog").then((m) => m.InsertPasswordDialog));
+const DeployKeyDialog = lazyComponent(() => import("../features/credentials/DeployKeyDialog").then((m) => m.DeployKeyDialog));
+const MultiRunDialog = lazyComponent(() => import("../features/snippets/MultiRunDialog").then((m) => m.MultiRunDialog));
+const IntegrationDialog = lazyComponent(() => import("../features/autocomplete/IntegrationDialog").then((m) => m.IntegrationDialog));
+const ConnectionLogDialog = lazyComponent(() => import("../features/terminal/ConnectionLogDialog").then((m) => m.ConnectionLogDialog));
+const ContainersDialog = lazyComponent(() => import("../features/terminal/ContainersDialog").then((m) => m.ContainersDialog));
+const SuggestDialog = lazyComponent(() => import("../features/autocomplete/SuggestDialog").then((m) => m.SuggestDialog));
+const CommandOutputDialog = lazyComponent(() => import("../features/terminal/CommandOutputDialog").then((m) => m.CommandOutputDialog));
+const SearchSessionsDialog = lazyComponent(() => import("../features/terminal/SearchSessionsDialog").then((m) => m.SearchSessionsDialog));
+const SaveLayoutDialog = lazyComponent(() => import("../features/layouts/SaveLayoutDialog").then((m) => m.SaveLayoutDialog));
+const BroadcastReview = lazyComponent(() => import("../features/layouts/BroadcastReview").then((m) => m.BroadcastReview));
+const EncodingDialog = lazyComponent(() => import("../features/terminal/EncodingDialog").then((m) => m.EncodingDialog));
 
 export function AppShell() {
   return (
@@ -280,7 +303,7 @@ function Shell() {
       const id = handles.current.get(p.id)?.sessionId();
       if (id) live.add(id);
     }
-    panelMemory.retain(live);
+    filesPanelModule?.panelMemory.retain(live);
   }, [ws, statuses]);
 
   // Panes connected to a production host (P-26), with the host's label, from the saved host and

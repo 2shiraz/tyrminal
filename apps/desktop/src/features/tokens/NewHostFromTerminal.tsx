@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
-import { HostEditor } from "../hosts/HostEditor";
+import { lazyComponent } from "../../lib/lazyComponent";
 import { type NewHostRequest, onNewHostRequest } from "./requests";
+
+// The host editor loads when the first address is clicked, not with the window.
+const HostEditor = lazyComponent(() => import("../hosts/HostEditor").then((m) => m.HostEditor));
 
 /**
  * The new-host editor, prefilled from an address clicked in terminal output. Saving creates the

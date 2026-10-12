@@ -51,16 +51,9 @@ export function groupDefaults(groups: GroupSummary[], groupId: string | null) {
 }
 
 /** `Parent/Child` names for a group, for pickers. */
-export function groupPath(groups: GroupSummary[], id: string): string {
-  const byId = new Map(groups.map((g) => [g.id, g]));
-  const names: string[] = [];
-  let current = byId.get(id);
-  for (let depth = 0; current && depth < 16; depth += 1) {
-    names.unshift(current.name);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
-  }
-  return names.join(" / ");
-}
+import { groupPath } from "./groupTree";
+
+export { groupPath };
 
 export interface HostFormOptions {
   host: HostSummary | null;

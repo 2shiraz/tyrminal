@@ -59,21 +59,9 @@ interface WriteOptions {
   releaseProxy?: boolean;
 }
 
-/** Ids of `id` and every group nested under it (a group cannot move into these). */
-export function descendantsOf(groups: GroupSummary[], id: string): Set<string> {
-  const out = new Set([id]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const g of groups) {
-      if (g.parentId && out.has(g.parentId) && !out.has(g.id)) {
-        out.add(g.id);
-        grew = true;
-      }
-    }
-  }
-  return out;
-}
+import { descendantsOf } from "./groupTree";
+
+export { descendantsOf };
 
 export function GroupEditor({
   group,

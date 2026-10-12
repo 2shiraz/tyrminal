@@ -21,7 +21,7 @@ const UNLOCK_BUDGET_MS = 200;
 const SERIAL_IPC_MS = 10;
 const UNLOCK_SERIAL_BUDGET_MS = 250;
 /** Script bytes (uncompressed) loaded before the first interactive Hosts paint. */
-const STARTUP_SCRIPT_BUDGET_KB = 1_600;
+const STARTUP_SCRIPT_BUDGET_KB = 700;
 
 interface Ready {
   /** performance.now() at the frame after Hosts became interactive (ms since navigation start). */
