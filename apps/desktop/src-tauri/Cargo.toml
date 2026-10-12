@@ -40,5 +40,8 @@ open = "=5.4.4"
 # Native open/save dialogs for backup files and SFTP transfers, driven from Rust only: the renderer gets no dialog
 # permission and never supplies a path (ADR 0003).
 tauri-plugin-dialog = "=2.8.2"
+# Command-finished desktop notifications (P-23), sent from Rust only: the renderer gets no notification
+# permission and supplies no text; the core builds it from validated fields (ADR 0011).
+tauri-plugin-notification = "=2.6.0"
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }
 tyrminal-core = { path = "../../../crates/core" }

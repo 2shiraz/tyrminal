@@ -136,6 +136,8 @@ const COMMANDS: &[&str] = &[
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    // terminal notifications (P-23)
+    "notify_command_finished",
 ];
 
 fn main() {

@@ -131,6 +131,7 @@
     "allow-startup-set",
     "allow-startup-effective",
     "allow-group-defaults-get",
-    "allow-group-defaults-set"
+    "allow-group-defaults-set",
+    "allow-notify-command-finished"
   ]
 }

@@ -10,3 +10,5 @@ pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
 pub mod tunnels;
+// terminal notifications (P-23)
+pub mod notify;

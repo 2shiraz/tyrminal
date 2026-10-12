@@ -9,6 +9,7 @@ const DEFAULTS: Preferences = {
   localShell: null,
   editorApps: [],
   diagnostics: false,
+  commandNotifications: { enabled: true, minSeconds: 10 },
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

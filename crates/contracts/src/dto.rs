@@ -515,6 +515,37 @@ pub struct Preferences {
     /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
     /// separate from session recording and command history.
     pub diagnostics: bool,
+    // terminal notifications (P-23)
+    /// A desktop notification when a long command finishes in a tab the user is not looking at.
+    pub command_notifications: CommandNotifications,
+}
+
+/// Command-finished notifications (P-23). The finish is known only from shell-integration
+/// marks; a notification carries the tab title, exit status and duration, never command text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct CommandNotifications {
+    pub enabled: bool,
+    /// Commands that ran at least this long, in seconds, notify when they finish.
+    pub min_seconds: u32,
+}
+
+impl Default for CommandNotifications {
+    fn default() -> Self {
+        Self { enabled: true, min_seconds: 10 }
+    }
+}
+
+/// What a command-finished notification said (built natively from validated fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommandNotice {
+    pub title: String,
+    pub body: String,
+    /// False when it was not shown (too soon after the previous one, or a test build).
+    pub shown: bool,
 }
 
 /// One failure for a diagnostic report: which command failed and how, never with what.

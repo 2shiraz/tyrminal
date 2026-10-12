@@ -20,6 +20,7 @@ import { IconFingerprint, IconMonitor, IconPlus, IconMoon, IconShieldAlert, Icon
 import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
+import { CommandNoticeSettings } from "../notify/CommandNoticeSettings";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
@@ -374,6 +375,11 @@ export function SettingsView() {
                   onChange={(confirmMultilinePaste) => setTerminal({ confirmMultilinePaste })}
                 />
                 <Switch label={msg.settings.copyOnSelect} checked={t.copyOnSelect} onChange={(copyOnSelect) => setTerminal({ copyOnSelect })} />
+                {/* terminal notifications (P-23) */}
+                <CommandNoticeSettings
+                  value={prefs.commandNotifications ?? { enabled: true, minSeconds: 10 }}
+                  onChange={(commandNotifications) => update((p) => ({ ...p, commandNotifications }))}
+                />
               </div>
               <div>
                 <button type="button" className="btn btn-ghost" onClick={() => update((p) => ({ ...p, terminal: DEFAULT_PREFERENCES.terminal }))}>

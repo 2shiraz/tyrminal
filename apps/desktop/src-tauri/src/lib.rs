@@ -79,6 +79,8 @@ pub fn run() {
 
     // Native file dialogs for backups, used from Rust only (no renderer permission).
     let builder = builder.plugin(tauri_plugin_dialog::init());
+    // Command-finished notifications (P-23), used from Rust only (no renderer permission).
+    let builder = builder.plugin(tauri_plugin_notification::init());
 
     let app = builder
         .setup(|app| {
@@ -254,6 +256,8 @@ pub fn run() {
             commands::inventory::startup_effective,
             commands::inventory::group_defaults_get,
             commands::inventory::group_defaults_set,
+            // terminal notifications (P-23)
+            commands::notify::notify_command_finished,
         ])
         .build(tauri::generate_context!());
 

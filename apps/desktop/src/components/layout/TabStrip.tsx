@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { type Direction, type Workspace, panesOf, tabTitle } from "../../app/workspace";
+import { msgN } from "../../lib/messages-notify";
 import { msg } from "../../lib/messages";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
@@ -47,6 +48,7 @@ export function TabStrip({
   onDuplicate,
   onNewLocal,
   onOpenPalette,
+  finished,
 }: {
   ws: Workspace;
   destination: Destination;
@@ -61,6 +63,8 @@ export function TabStrip({
   onDuplicate: (id: number) => void;
   onNewLocal: () => void;
   onOpenPalette: () => void;
+  /** Tabs whose long command finished while out of view, with its exit status (P-23). */
+  finished?: ReadonlyMap<number, number | null> | undefined;
 }) {
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
   const [newMenu, setNewMenu] = useState<HTMLElement | null>(null);
@@ -233,6 +237,7 @@ export function TabStrip({
               </span>
             )}
             {pane?.indicator === "attention" && <span className="visually-hidden"> (needs your input)</span>}
+            {finished?.has(tab.id) && <FinishedBadge exit={finished.get(tab.id) ?? null} />}
             <button
               type="button"
               className="tab-close"
@@ -281,5 +286,16 @@ export function TabStrip({
         />
       )}
     </div>
+  );
+}
+
+/** A finished command in a background tab (P-23): a check or a cross, with text, not color alone. */
+function FinishedBadge({ exit }: { exit: number | null }) {
+  const failed = exit !== null && exit !== 0;
+  return (
+    <span className="tab-finished" data-failed={failed || undefined}>
+      <span aria-hidden="true">{failed ? "✕" : "✓"}</span>
+      <span className="visually-hidden"> ({failed ? msgN.badgeFailed(exit) : msgN.badgeOk})</span>
+    </span>
   );
 }

@@ -449,3 +449,10 @@ export const startup = {
     call<string[] | null>("startup_set", { target, snippetIds }),
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };
+
+// terminal notifications (P-23)
+/** Command-finished notifications: the native side builds the text and shows it. */
+export const notices = {
+  commandFinished: (tabTitle: string, exitStatus: number | null, durationMs: number) =>
+    call<import("@tyrminal/contracts").CommandNotice>("notify_command_finished", { tabTitle, exitStatus, durationMs: Math.round(durationMs) }),
+};

@@ -31,6 +31,8 @@ mod tunnels;
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// terminal notifications (P-23)
+mod notify;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use files::{TransferSink, list_local, local_within};
@@ -100,3 +102,5 @@ impl Core {
 pub fn validate_link(url: &str) -> Result<String, IpcError> {
     validate::link(url)
 }
+// terminal notifications (P-23)
+pub use notify::command_finished_notice;
