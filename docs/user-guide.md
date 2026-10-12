@@ -159,7 +159,22 @@ overwrite. The local copy is deleted when you close the edit, the session or Tyr
 **Snippets** (Ctrl+Shift+S, ⌘⇧S on macOS) are saved commands, kept encrypted in the vault and
 organized in folders. **Paste** inserts the text (as a bracketed paste when the terminal
 supports it); **Run** inserts it and presses Enter. The panel always shows which session it
-sends to, and nothing runs automatically.
+sends to. Nothing runs automatically except the startup snippets you choose for a host or group
+(below). A snippet with several lines, or one that uses a variable the server refused, is shown
+for review before it is sent.
+
+**Environment variables.** In the Hosts view, choose **Environment…** from a host's or group's
+menu. Hosts get their groups' variables (the nearest group wins) and can set their own. Each
+variable is requested from the server when a session opens. The server applies only names its
+configuration allows (OpenSSH: `AcceptEnv` in `sshd_config`). Any name it refuses is reported
+when you connect and is not set. Values are stored encrypted, but they are not a secret store:
+the remote shell can print them. Snippets can use them as `$NAME`; the run review lists each
+variable a snippet uses and whether this session set it.
+
+**Startup snippets.** The same dialog chooses snippets to run when a session to the host opens:
+the group's list, nothing, or a list of your own, in order. They are typed into the shell only
+after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
+deleted later is skipped.
 
 **Broadcast** sends what you type to several sessions at once. The sessions that receive input
 are marked while broadcast is on.

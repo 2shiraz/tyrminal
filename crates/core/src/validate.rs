@@ -233,8 +233,13 @@ pub(crate) fn env_vars(vars: &[tyrminal_contracts::EnvVar]) -> Result<Vec<(Strin
         if out.iter().any(|(n, _)| n == name) {
             return Err(invalid("Each variable name can appear only once."));
         }
-        if var.value.len() > MAX_ENV_VALUE || var.value.chars().any(|c| c.is_control() && c != '\t') {
-            return Err(invalid("Variable values are at most 4096 bytes, on one line."));
+        // One line of visible text: no control characters (tab and ESC included) and no
+        // bidirectional or zero-width characters that make the editor show a different value
+        // than the server receives.
+        if var.value.len() > MAX_ENV_VALUE || var.value.chars().any(is_deceptive) {
+            return Err(invalid(
+                "Variable values are at most 4096 bytes, on one line, without control or invisible characters.",
+            ));
         }
         out.push((name.to_owned(), var.value.clone()));
     }
@@ -342,6 +347,34 @@ mod tests {
         for bad in ["a//b", "a/\u{1b}b", &"f".repeat(257)] {
             assert!(folder(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn env_values_are_one_visible_line() {
+        let var = |name: &str, value: &str| tyrminal_contracts::EnvVar { name: name.into(), value: value.into() };
+        assert_eq!(env_vars(&[var("A", "")]).unwrap(), [("A".to_owned(), String::new())]);
+        let ok = "a b=c;$(d) 'é' ✓";
+        assert_eq!(env_vars(&[var("A", ok)]).unwrap()[0].1, ok);
+        let long = "x".repeat(MAX_ENV_VALUE + 1);
+        for bad in [
+            "a\tb",
+            "a\nb",
+            "a\rb",
+            "\u{1b}[31m",
+            "a\u{0}b",
+            "\u{9b}",
+            "a\u{202e}b",
+            "a\u{2067}b",
+            "\u{200b}",
+            "\u{feff}x",
+            &long,
+        ] {
+            assert!(env_vars(&[var("A", bad)]).is_err(), "{bad:?}");
+        }
+        for bad in ["", "9A", "A-B", "A=B", "A B", "Ä", "$A"] {
+            assert!(env_vars(&[var(bad, "v")]).is_err(), "{bad:?}");
+        }
+        assert!(env_vars(&[var("A", "1"), var("A", "2")]).is_err(), "duplicate names");
     }
 
     #[test]
