@@ -211,6 +211,28 @@ test.describe("exits", () => {
     for (const leaked of ["Disk usage", "api-gateway", "df -h"]) expect(text).not.toContain(leaked);
   });
 
+  test("a new toast pushes the stack up with a glide, not a jump", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.type("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+S");
+    const run = page.getByRole("button", { name: "Run Disk usage in the terminal" });
+    await run.click();
+    const toasts = page.locator(".toasts .toast");
+    await expect(toasts).toHaveCount(1);
+    await page.waitForTimeout(400);
+    await run.click();
+    await expect(toasts).toHaveCount(2);
+    // The stack sits on the status bar: the older toast moves up, gliding from where it was.
+    const glides = await toasts.first().evaluate((el) =>
+      el.getAnimations().filter((a) => String((a.effect as KeyframeEffect).getKeyframes()[0]?.transform ?? "").startsWith("translate(")).length,
+    );
+    expect(glides).toBe(1);
+  });
+
   test("a hovered toast stays until the pointer leaves", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
