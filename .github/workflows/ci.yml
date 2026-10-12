@@ -8,7 +8,9 @@ on:
   # twice (once for the push, once for the pull request).
   push:
     branches: [main]
+  # Stacked pull requests are checked once they target main.
   pull_request:
+    branches: [main]
   workflow_call:
 
 permissions:

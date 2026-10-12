@@ -192,13 +192,23 @@ async fn serial_settings_are_checked_when_saved_and_when_opened() {
 #[ignore = "needs socat for a pseudo-terminal pair"]
 #[cfg(unix)]
 async fn a_serial_host_carries_bytes_both_ways() {
+    /// Stops socat however the test ends.
+    struct Socat(std::process::Child);
+    impl Drop for Socat {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
     let dir = TempDir::new().unwrap();
     let (a, b) = (dir.path().join("dev-a"), dir.path().join("dev-b"));
-    let mut socat = std::process::Command::new("socat")
-        .arg(format!("pty,raw,echo=0,link={}", a.display()))
-        .arg(format!("pty,raw,echo=0,link={}", b.display()))
-        .spawn()
-        .expect("socat must be installed");
+    let _socat = Socat(
+        std::process::Command::new("socat")
+            .arg(format!("pty,raw,echo=0,link={}", a.display()))
+            .arg(format!("pty,raw,echo=0,link={}", b.display()))
+            .spawn()
+            .expect("socat must be installed"),
+    );
     for _ in 0..50 {
         if a.exists() && b.exists() {
             break;
@@ -211,26 +221,29 @@ async fn a_serial_host_carries_bytes_both_ways() {
     let id = host(&core, "console", None, HostProtocol::Serial { settings }).await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let session = core.sessions.open_ssh(WINDOW, &id, 80, 24, Arc::new(Sink(tx))).await.unwrap().session_id;
-    // The other end plays the device: it answers what the terminal sends.
+    // The other end plays the device: it answers what the terminal sends. A plain thread, not
+    // spawn_blocking: if the test fails, the runtime must not wait for a read that never ends.
     let peer = std::fs::canonicalize(&b).unwrap();
-    let device_side = tokio::task::spawn_blocking(move || {
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         use std::io::{Read, Write};
-        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(peer).unwrap();
-        let mut buf = [0u8; 64];
-        let mut got = Vec::new();
-        while !got.ends_with(b"AT\r") {
-            let n = f.read(&mut buf).unwrap();
-            got.extend_from_slice(&buf[..n]);
-        }
-        f.write_all(b"OK\r\n").unwrap();
+        let result = (|| -> std::io::Result<()> {
+            let mut f = std::fs::OpenOptions::new().read(true).write(true).open(peer)?;
+            let mut buf = [0u8; 64];
+            let mut got = Vec::new();
+            while !got.ends_with(b"AT\r") {
+                let n = f.read(&mut buf)?;
+                got.extend_from_slice(&buf[..n]);
+            }
+            f.write_all(b"OK\r\n")
+        })();
+        let _ = done_tx.send(result);
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
     core.sessions.write(WINDOW, &session, b"AT\r".to_vec()).await.unwrap();
     output_until(&core, &session, &mut rx, b"OK").await;
-    device_side.await.unwrap();
+    done_rx.recv_timeout(WAIT).expect("the device side finished").expect("the device side read and answered");
     core.sessions.close(WINDOW, &session).unwrap();
-    let _ = socat.kill();
-    let _ = socat.wait();
 }
 
 #[tokio::test]

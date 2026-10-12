@@ -4,10 +4,12 @@
 # against a release binary. The Docker lab remains available to developers (`pnpm lab:up`).
 name: Native
 
+# Not run on pull requests (owner decision): they get the quick checks in ci.yml and
+# security.yml. Every push to main runs this on all three platforms, so a regression shows up
+# right after merge.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
   workflow_call:
 
@@ -25,11 +27,11 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      # Pull requests run the native suites on Linux only, for fast feedback. Every push to main,
+      # manual runs and the release workflow run all three platforms, so a platform-specific
+      # break is still caught right after merge (and always before any release).
       matrix:
-        include:
-          - { platform: linux-x64, os: ubuntu-24.04, lab: local }
-          - { platform: macos-arm64, os: macos-15, lab: local }
-          - { platform: windows-x64, os: windows-2025, lab: wsl }
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"platform":"linux-x64","os":"ubuntu-24.04","lab":"local"}]' || '[{"platform":"linux-x64","os":"ubuntu-24.04","lab":"local"},{"platform":"macos-arm64","os":"macos-15","lab":"local"},{"platform":"windows-x64","os":"windows-2025","lab":"wsl"}]') }}
     env:
       TYRMINAL_LAB_MODE: ${{ matrix.lab }}
       # Disposable runner: the local lab may create its accounts and run sshd.
