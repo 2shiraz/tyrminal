@@ -3,8 +3,8 @@ import { type KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore 
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
-import { IconFolder, IconScrollText, IconSearch, IconSquareTerminal, IconFile } from "../../components/ui/icons";
-import { files } from "../../lib/ipc";
+import { IconFile, IconFolder, IconScrollText, IconSearch, IconSlidersHorizontal, IconSquareTerminal } from "../../components/ui/icons";
+import { environment, files } from "../../lib/ipc";
 import { msgD } from "../../lib/messages-d";
 import { pause } from "./pause";
 import { shellContexts } from "./shellContext";
@@ -20,6 +20,7 @@ type Item =
   | { kind: "snippet"; key: string; snippet: SnippetSummary }
   | { kind: "command"; key: string; name: string; description: string }
   | { kind: "path"; key: string; path: PathSuggestion }
+  | { kind: "variable"; key: string; name: string }
   // command history
   | { kind: "history"; key: string; command: string };
 
@@ -32,12 +33,15 @@ const lines = (text: string) => text.replace(/\n$/, "").split("\n").length;
  */
 export function SuggestDialog({
   sessionId,
+  hostId,
   onInsert,
   onSnippet,
   onIntegration,
   onClose,
 }: {
   sessionId: string;
+  /** The session's saved host, whose environment variables are offered after `$`. */
+  hostId: string | null;
   onInsert: (text: string) => void;
   onSnippet: (snippet: SnippetSummary) => void;
   /** Opens the shell integration setup for this session. */
@@ -50,6 +54,19 @@ export function SuggestDialog({
   const [home, setHome] = useState<string | null>(null);
   const [listing, setListing] = useState<{ dir: string; result: RemoteListing | null } | null>(null);
   const [pausedState, setPausedState] = useState(() => pause.state(sessionId));
+  // Names of the host's environment variables (SNP-14); values are not loaded here.
+  const [variables, setVariables] = useState<string[]>([]);
+  useEffect(() => {
+    if (!hostId) return;
+    let live = true;
+    environment
+      .effective(hostId)
+      .then((list) => live && setVariables(list.map((v) => v.name)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [hostId]);
   // With shell integration, the shell's own folder anchors relative paths (AUT-06).
   const context = useSyncExternalStore(shellContexts.subscribe, () => shellContexts.get(sessionId));
   const cwd = context?.cwd ?? null;
@@ -101,6 +118,10 @@ export function SuggestDialog({
 
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
+    if (query.startsWith("$")) {
+      const prefix = query.slice(1).replace(/^\{/, "").toLowerCase();
+      for (const name of variables.filter((n) => n.toLowerCase().startsWith(prefix))) out.push({ kind: "variable", key: `v:${name}`, name });
+    }
     // command history
     for (const command of historyHits) out.push({ kind: "history", key: `h:${command}`, command });
     if (pathQuery && listing?.dir === pathQuery.dir && listing.result) {
@@ -109,7 +130,7 @@ export function SuggestDialog({
     for (const c of matchCommands(query)) out.push({ kind: "command", key: `c:${c.name}`, ...c });
     for (const s of matchSnippets(query, snippets.value ?? [])) out.push({ kind: "snippet", key: `s:${s.id}`, snippet: s });
     return out;
-  }, [query, snippets.value, pathQuery?.dir, pathQuery?.prefix, pathQuery?.shown, listing, historyHits]);
+  }, [query, snippets.value, pathQuery?.dir, pathQuery?.prefix, pathQuery?.shown, listing, variables, historyHits]);
 
   const choose = (item: Item | undefined) => {
     if (!item) return;
@@ -117,6 +138,7 @@ export function SuggestDialog({
       if (lines(item.snippet.text) > 1) onSnippet(item.snippet);
       else onInsert(item.snippet.text.replace(/\n$/, ""));
     } else if (item.kind === "command") onInsert(`${item.name} `);
+    else if (item.kind === "variable") onInsert(`"$${item.name}"`);
     // command history: inserted for review, never run.
     else if (item.kind === "history") onInsert(item.command);
     else if (!item.path.unsafe) onInsert(item.path.insert);
@@ -169,6 +191,7 @@ export function SuggestDialog({
   }
 
   const groups: [string, Item["kind"]][] = [
+    [msgD.env.suggestions, "variable"],
     // command history
     [msgH.group, "history"],
     [msgD.suggest.paths, "path"],
@@ -241,6 +264,12 @@ export function SuggestDialog({
                           <span className="faint mono truncate">
                             {lines(item.snippet.text) > 1 ? msgD.suggest.multiline(lines(item.snippet.text)) : item.snippet.text}
                           </span>
+                        </>
+                      )}
+                      {item.kind === "variable" && (
+                        <>
+                          <IconSlidersHorizontal size={14} />
+                          <span className="mono">${item.name}</span>
                         </>
                       )}
                       {item.kind === "history" && (

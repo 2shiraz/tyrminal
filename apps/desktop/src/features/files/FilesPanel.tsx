@@ -181,16 +181,15 @@ export function FilesPanel({
   // The shell's current folder, when the shell integration reports it (AUT-06).
   const shellFolder = useSyncExternalStore(shellContexts.subscribe, () => (sessionId ? (shellContexts.get(sessionId)?.cwd ?? null) : null));
 
+  // Refreshing the same folder keeps the selection (while the entry is still there) and the
+  // scroll position; another folder starts at the top.
   const show = useCallback(
-    (result: RemoteListing) => {
+    (result: RemoteListing) =>
       change((m) => {
-        // Refreshing the same folder keeps the selection (while the entry is still there) and
-        // the scroll position; another folder starts at the top.
         const same = m.listing?.path === result.path;
         const selected = same && result.entries.some((e) => e.name === m.selected) ? m.selected : null;
         return { ...m, listing: result, pathText: result.path, selected, scrollTop: same ? m.scrollTop : 0 };
-      });
-    },
+      }),
     [change],
   );
 
@@ -203,10 +202,10 @@ export function FilesPanel({
     [sessionId, run, show],
   );
 
-  // A session seen for the first time starts in its shell's folder when the shell integration
-  // reports it, else at its login folder (also when the shell's folder cannot be listed). One
-  // seen before shows what it showed then: switching tabs never lists again, only Refresh or
-  // moving to a folder does.
+  // A session seen for the first time opens in its shell's folder when the shell integration
+  // reports one, else its login folder (also when the shell's folder cannot be listed). One seen
+  // before shows what it showed then: switching tabs never lists again, only Refresh or moving to
+  // a folder does.
   useEffect(() => {
     if (!sessionId || panelMemory.get(sessionId).listing !== null) return;
     let live = true;

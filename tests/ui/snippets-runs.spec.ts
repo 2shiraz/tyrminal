@@ -49,6 +49,8 @@ test("run on several hosts: review first, then each host's own result, skipped h
   await expect(results.locator('[data-host="edge-cache"]')).toContainText("Skipped: no open session");
   await results.locator('[data-host="staging-web"] summary').click();
   await expect(results.locator('[data-host="staging-web"]')).toContainText("permission denied");
+  // Environment variables the server refused on that host are reported with its result (SNP-13).
+  await expect(results.locator('[data-host="staging-web"]')).toContainText("Not set by the server: LEGACY_MODE");
   expect(await calls(page, "snippet_exec")).toHaveLength(2);
   await page.getByRole("button", { name: "Done" }).click();
 });

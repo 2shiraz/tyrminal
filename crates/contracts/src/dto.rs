@@ -207,6 +207,10 @@ pub struct ImportHost {
     pub tags: Vec<String>,
     /// Notes for this entry, such as an identity file that was not imported.
     pub notes: Vec<String>,
+    /// The label of another host in the same import that this one is reached through (its jump
+    /// host, from an OpenSSH `ProxyJump`). Absent in older previews.
+    #[serde(default)]
+    pub jump_via: Option<String>,
 }
 
 /// Something in the source that was not imported, and why.
@@ -643,6 +647,13 @@ pub enum SessionEvent {
     /// Pre-authentication banner from the server. Untrusted.
     Banner {
         text: String,
+    },
+    /// Environment variables were requested for this session (SNP-13). Names only, never values.
+    /// `rejected` lists those the server refused (usually not allowed by its `AcceptEnv`); they
+    /// are not set in the session.
+    Environment {
+        sent: Vec<String>,
+        rejected: Vec<String>,
     },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]

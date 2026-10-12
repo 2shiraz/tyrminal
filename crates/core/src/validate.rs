@@ -210,6 +210,58 @@ pub(crate) fn id_text(id: &Id) -> String {
     })
 }
 
+/// Most environment variables one host or group sends.
+const MAX_ENV_VARS: usize = 64;
+const MAX_ENV_VALUE: usize = 4096;
+
+/// Environment variables for a host or group: portable names (`[A-Za-z_][A-Za-z0-9_]*`, 64
+/// bytes at most, each once), values without control characters other than tab.
+pub(crate) fn env_vars(vars: &[tyrminal_contracts::EnvVar]) -> Result<Vec<(String, String)>, IpcError> {
+    if vars.len() > MAX_ENV_VARS {
+        return Err(invalid("At most 64 environment variables per host or group."));
+    }
+    let mut out: Vec<(String, String)> = Vec::with_capacity(vars.len());
+    for var in vars {
+        let name = var.name.trim();
+        let mut bytes = name.bytes();
+        let valid = name.len() <= 64
+            && bytes.next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+            && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !valid {
+            return Err(invalid("Variable names use letters, digits and _, and do not start with a digit."));
+        }
+        if out.iter().any(|(n, _)| n == name) {
+            return Err(invalid("Each variable name can appear only once."));
+        }
+        // One line of visible text: no control characters (tab and ESC included) and no
+        // bidirectional or zero-width characters that make the editor show a different value
+        // than the server receives.
+        if var.value.len() > MAX_ENV_VALUE || var.value.chars().any(is_deceptive) {
+            return Err(invalid(
+                "Variable values are at most 4096 bytes, on one line, without control or invisible characters.",
+            ));
+        }
+        out.push((name.to_owned(), var.value.clone()));
+    }
+    Ok(out)
+}
+
+/// A startup list (SNP-08): at most `MAX_STARTUP_SNIPPETS` snippet ids, each once.
+pub(crate) fn startup_snippet_ids(ids: &[String]) -> Result<Vec<String>, IpcError> {
+    if ids.len() > tyrminal_contracts::limits::MAX_STARTUP_SNIPPETS {
+        return Err(invalid("Choose 16 startup snippets at most."));
+    }
+    let mut out: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id_text(&self::id(id)?);
+        if out.contains(&id) {
+            return Err(invalid("A startup snippet is listed twice."));
+        }
+        out.push(id);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +347,48 @@ mod tests {
         for bad in ["a//b", "a/\u{1b}b", &"f".repeat(257)] {
             assert!(folder(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn env_values_are_one_visible_line() {
+        let var = |name: &str, value: &str| tyrminal_contracts::EnvVar { name: name.into(), value: value.into() };
+        assert_eq!(env_vars(&[var("A", "")]).unwrap(), [("A".to_owned(), String::new())]);
+        let ok = "a b=c;$(d) 'é' ✓";
+        assert_eq!(env_vars(&[var("A", ok)]).unwrap()[0].1, ok);
+        let long = "x".repeat(MAX_ENV_VALUE + 1);
+        for bad in [
+            "a\tb",
+            "a\nb",
+            "a\rb",
+            "\u{1b}[31m",
+            "a\u{0}b",
+            "\u{9b}",
+            "a\u{202e}b",
+            "a\u{2067}b",
+            "\u{200b}",
+            "\u{feff}x",
+            &long,
+        ] {
+            assert!(env_vars(&[var("A", bad)]).is_err(), "{bad:?}");
+        }
+        for bad in ["", "9A", "A-B", "A=B", "A B", "Ä", "$A"] {
+            assert!(env_vars(&[var(bad, "v")]).is_err(), "{bad:?}");
+        }
+        assert!(env_vars(&[var("A", "1"), var("A", "2")]).is_err(), "duplicate names");
+    }
+
+    #[test]
+    fn startup_lists_are_bounded_well_formed_and_free_of_duplicates() {
+        let a = "0".repeat(32);
+        let b = "1".repeat(32);
+        assert_eq!(startup_snippet_ids(&[a.clone(), b.clone()]).unwrap(), [a.clone(), b]);
+        assert!(startup_snippet_ids(&[]).unwrap().is_empty());
+        assert!(startup_snippet_ids(&[a.clone(), a.clone()]).is_err());
+        assert!(startup_snippet_ids(&["not an id".into()]).is_err());
+        assert!(startup_snippet_ids(&["A".repeat(32)]).is_err(), "ids are lower-case hex");
+        let many: Vec<String> = (0..17).map(|i| format!("{i:032x}")).collect();
+        assert!(startup_snippet_ids(&many).is_err());
+        assert_eq!(startup_snippet_ids(&many[..16]).unwrap().len(), 16);
     }
 
     #[test]

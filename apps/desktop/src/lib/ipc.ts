@@ -339,6 +339,13 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** Group defaults for route and appearance (HST-05). */
+export const groupDefaults = {
+  get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
+  set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
+    call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
 export const tunnels = {
   list: () => call<TunnelSummaryDto[]>("tunnel_list"),
   save: (tunnel: TunnelInputDto) => call<TunnelSummaryDto>("tunnel_save", { tunnel }),
@@ -413,6 +420,34 @@ export const promptMarks = {
     call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_install", { target }),
   remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
     call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
+};
+
+/** Reusable identities and which hosts and groups use them. Passwords are write-only. */
+export const identities = {
+  list: () => call<import("@tyrminal/contracts").IdentitySummary[]>("identity_list"),
+  save: (identity: import("@tyrminal/contracts").IdentityInput) =>
+    call<import("@tyrminal/contracts").IdentitySummary>("identity_save", { identity }),
+  /** Resolves to how many hosts and groups were using it. */
+  remove: (id: string) => call<number>("identity_delete", { id }),
+  assignments: () => call<import("@tyrminal/contracts").IdentityAssignment[]>("identity_assignments"),
+  assign: (target: import("@tyrminal/contracts").SettingsTarget, identityId: string | null) =>
+    call<import("@tyrminal/contracts").IdentityAssignment>("identity_assign", { target, identityId }),
+};
+
+/** Environment variables of hosts and groups, and what a host ends up sending. */
+export const environment = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").EnvVar[]>("env_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, vars: import("@tyrminal/contracts").EnvVar[]) =>
+    call<import("@tyrminal/contracts").EnvVar[]>("env_set", { target, vars }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
+};
+
+/** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
+export const startup = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
+    call<string[] | null>("startup_set", { target, snippetIds }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };
 
 // command history

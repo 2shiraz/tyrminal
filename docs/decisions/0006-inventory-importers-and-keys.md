@@ -12,6 +12,8 @@ parallel branches never assign the same number.
 | 200 | `HostAppearanceRecord` (host id, OS) | One per host; deleted with the host and copied with it in the same transaction. Kept apart from `HostRecord` so host fields wait for agent B's (work-split ordering). |
 | 202 | `ExecutionTargetRecord` (name, host ids) | Saved host selections for snippet runs; ids of deleted hosts are skipped and counted on read. |
 | 201 | `KeyCertificateRecord` (key id, certificate line, parsed fields) | One per key; deleted with the key in the same transaction. Public data, still encrypted like every record. |
+| 203 | `IdentityRecord` (label, user name, optional password, optional key id) | The password is write-only (never returned). A key an identity uses cannot be deleted. |
+| 204 | `WorkflowRecord` (host id or group id; identity id; later environment and startup snippet) | One per host or group; deleted with its host or group and copied with a duplicated host in the same transaction; dropped when it becomes empty. |
 
 ## Dependencies
 
@@ -165,3 +167,37 @@ sandbox. Nothing is stubbed in the UI.
 - **Command names** avoid the release policy's forbidden words: `prompt_marks_status`,
   `prompt_marks_install`, `prompt_marks_remove`. Test builds edit `TYRMINAL_E2E_HOME`, never the
   real home folder.
+
+## Identities (KEY-15..17)
+
+- An identity is a user name plus a password and/or a key; a key's attached certificate comes
+  with it. Hosts and groups refer to one through their workflow record, so editing the identity
+  changes every host that uses it on its next connection (KEY-16).
+- **Precedence:** a host's own identity always wins. A group's identity applies to the hosts in it
+  and its subgroups (nearest group first) whose sign-in method is "inherit from group", so a host
+  with its own password or key keeps it. The identity's user name replaces the host's when set;
+  an identity with a key signs in with the key, else with its password, else the user is asked.
+- **Connection path:** `hop_plan` asks `identity_for_host` before using the host's own
+  credentials (a few lines; noted under Requests in `docs/work-split.md`). Every hop of a jump
+  chain resolves its own identity the same way.
+- Deleting an identity removes its references in the same transaction and reports how many
+  hosts and groups used it; they fall back to their own settings. There is one personal vault,
+  so "accessible vaults" (KEY-17) is this vault.
+
+## Environment variables (SNP-11..14)
+
+- Stored per host or group in the workflow record (kind 204), encrypted like every record. Names
+  are portable shell names (`[A-Za-z_][A-Za-z0-9_]*`, 64 bytes); values are one line of at most
+  4096 bytes; 64 per target. Values are shown only in the editor; events carry names only.
+- **Inheritance:** outermost group first, nearer groups override, the host overrides everything.
+  The host's editor lists what it inherits, from which group, and what it overrides.
+- **Delivery:** SSH `env` requests with want-reply on the session channel, before the shell
+  (interactive sessions) or the exec request (snippet runs), via
+  `VerifiedConnection::open_shell_with_env` / `open_command_with_env` in `crates/ssh/src/client.rs`.
+  Each refusal (normally a name the server's `AcceptEnv` does not allow) is collected and
+  reported: `SessionEvent::Environment { sent, rejected }` (names only) becomes an error notice
+  in the window, and snippet results list refused names. Nothing is dropped silently, and
+  nothing falls back to typing `export` into the shell. russh copies values into its own
+  buffers while sending, which Tyrminal cannot zeroize.
+- **Lab:** the lab servers already allow `AcceptEnv TYR_*`; the lab test checks an accepted group
+  variable, a host override, and a refused name.

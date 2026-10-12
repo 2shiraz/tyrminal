@@ -5,12 +5,12 @@ if [[ -o interactive && -z ${__tyrminal_si-} && ${TERM-} != dumb ]]; then
   typeset -g __tyrminal_si=1
   __tyrminal_osc7() {
     emulate -L zsh
-    local LC_ALL=C p=$PWD out= c i
+    local LC_ALL=C p=$PWD out= c i n
     for (( i = 1; i <= ${#p}; i++ )); do
       c=${p[i]}
       case $c in
         ([-A-Za-z0-9/._~]) out+=$c ;;
-        (*) printf -v c '%%%02X' "'$c"; out+=$c ;;
+        (*) printf -v n '%d' "'$c"; printf -v c '%%%02X' $((n & 255)); out+=$c ;;
       esac
     done
     printf '\033]7;file://%s%s\033\\' "${HOST-}" "$out"

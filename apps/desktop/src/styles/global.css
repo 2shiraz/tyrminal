@@ -3254,3 +3254,73 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   gap: var(--space-1) var(--space-3);
   font-size: 12px;
 }
+
+.env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.env-inherited {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 12px;
+}
+
+.env-inherited li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.env-inherited li.env-overridden .mono {
+  text-decoration: line-through;
+}
+
+/* ===================================================================== startup snippets */
+
+.startup-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) + 1.2em);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: var(--text-sm);
+}
+
+.startup-list li > * {
+  vertical-align: middle;
+}
+
+.startup-list li > span {
+  margin-right: var(--space-2);
+}
+
+.var-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+
+.var-refs li[data-state="refused"] {
+  color: var(--warning);
+}

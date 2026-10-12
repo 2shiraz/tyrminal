@@ -15,6 +15,7 @@ mod error;
 // agent B: tunnels and history
 mod tunnels;
 // agent D: inventory and snippets
+mod defaults;
 mod inventory;
 // command history
 mod command_history;
@@ -24,6 +25,7 @@ pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
 pub use tunnels::*;
 // agent D: inventory and snippets
+pub use defaults::*;
 pub use inventory::*;
 // command history
 pub use command_history::*;

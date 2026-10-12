@@ -4,4 +4,9 @@ import type { ProxyInput } from "./ProxyInput";
 /**
  * What the host editor sends. Contains a secret: `Debug` is redacted.
  */
-export type HostConnectionInput = { jumpHostId: string | null, proxy: ProxyInput | null, };
+export type HostConnectionInput = { jumpHostId: string | null, proxy: ProxyInput | null, 
+/**
+ * Use the nearest group's route instead (`jump_host_id` and `proxy` are then ignored and the
+ * host's own proxy, including its password, is dropped).
+ */
+inherit: boolean, };

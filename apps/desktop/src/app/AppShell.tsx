@@ -11,7 +11,7 @@ import { HostsView } from "../features/hosts/HostsView";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
-import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
@@ -102,7 +102,7 @@ function Shell() {
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
-  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string } | null>(null);
+  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -212,9 +212,16 @@ function Shell() {
       const handle = p ? handles.current.get(p.id) : undefined;
       const sessionId = handle?.sessionId();
       if (!p || !handle || !sessionId || !handle.connected()) return;
-      const request: SnippetRunRequest = { snippet, mode, paneId: p.id, sessionId, targetLabel: p.label, targetIdentity: p.identity };
-      const lines = snippet.text.replace(/\n$/, "").split("\n").length;
-      if (lines > 1) {
+      const request: SnippetRunRequest = {
+        snippet,
+        mode,
+        paneId: p.id,
+        sessionId,
+        targetLabel: p.label,
+        targetIdentity: p.identity,
+        environment: handle.environment(),
+      };
+      if (needsSnippetReview(request)) {
         setRunRequest(request);
       } else {
         void sendSnippet(request);
@@ -305,7 +312,7 @@ function Shell() {
           const p = activePane(wsRef.current);
           const handle = p ? handles.current.get(p.id) : undefined;
           const sessionId = handle?.connected() ? handle.sessionId() : null;
-          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId });
+          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId, hostId: p.target.hostId });
           else notify("info", msgD.suggest.needsTerminal);
           break;
         }
@@ -577,6 +584,7 @@ function Shell() {
       {suggesting && (
         <SuggestDialog
           sessionId={suggesting.sessionId}
+          hostId={suggesting.hostId}
           onClose={() => {
             setSuggesting(null);
             handles.current.get(suggesting.paneId)?.focus();

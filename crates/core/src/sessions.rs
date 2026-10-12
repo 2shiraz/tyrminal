@@ -42,7 +42,7 @@ use crate::folders;
 use crate::handoff::{HANDOFF_TTL, Relay};
 use crate::streams::Streams;
 use crate::validate;
-use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
+use crate::vault::{ConnectionPlan, PlanAuth, StartupItem, VaultService};
 
 /// Where a session's output and events go. Implemented by the adapter over a per-session IPC
 /// channel; `false` means the receiver is gone and the session should end.
@@ -1431,7 +1431,7 @@ async fn run_ssh(
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
-        Ok((Linked { conn, hops }, reader, writer)) => {
+        Ok((Linked { conn, hops }, reader, writer, startup)) => {
             if let Some(n) = conn.negotiated() {
                 ctx.sink.event(SessionEvent::Negotiated {
                     kex: n.kex,
@@ -1463,6 +1463,7 @@ async fn run_ssh(
             tokio::spawn(async move {
                 sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
             });
+            run_startup(&ctx.entry, startup);
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -1502,7 +1503,7 @@ async fn connect_ssh(
     plan: ConnectionPlan,
     cols: u16,
     rows: u16,
-) -> Result<(Linked, ShellReader, ShellWriter), IpcError> {
+) -> Result<(Linked, ShellReader, ShellWriter, Vec<StartupItem>), IpcError> {
     ctx.state(SessionState::Connecting);
     // Bounds simultaneous connection attempts; released when this function returns.
     let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
@@ -1511,6 +1512,7 @@ async fn connect_ssh(
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
+    let env = plan.env;
     let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
     let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
@@ -1615,10 +1617,45 @@ async fn connect_ssh(
     let conn = chain.pop().ok_or_else(internal)?;
 
     ctx.state(SessionState::OpeningChannel);
+    // Startup snippets (SNP-08), read only now that the host is trusted and signed in, under the
+    // plan's generation: after a lock nothing is read or typed.
+    let startup = ctx.vault.session_startup(plan.generation, &plan.host_id).await?;
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
-    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
+    let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
     ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
-    Ok((Linked { conn, hops: chain }, reader, writer))
+    if !env.is_empty() {
+        let sent: Vec<String> = env.iter().map(|(n, _)| n.clone()).collect();
+        ctx.entry.log.note(&crate::connlog::environment_line(&sent, &rejected));
+        ctx.sink.event(SessionEvent::Environment { sent, rejected });
+    }
+    Ok((Linked { conn, hops: chain }, reader, writer, startup))
+}
+
+/// Types a host's startup snippets into its new shell, in order, each followed by Enter, through
+/// the session's own input queue (so they are encoded and ordered like typed input). Called only
+/// once the shell is open, which is after host trust and authentication. Every snippet is noted
+/// in the connection log by name; a deleted one is skipped and noted.
+fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
+    if startup.is_empty() {
+        return;
+    }
+    let entry = Arc::clone(entry);
+    tokio::spawn(async move {
+        for item in startup {
+            let Some(text) = item.text else {
+                entry.log.note("startup snippet skipped: it was deleted");
+                continue;
+            };
+            let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
+            for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+                if entry.input.send(Input::Data(chunk.to_vec())).await.is_err() {
+                    return;
+                }
+            }
+            entry.log.note(&format!("startup snippet \"{}\" typed", item.name));
+        }
+    });
 }
 
 /// Longest starting folder accepted for a local terminal.
@@ -1931,8 +1968,12 @@ impl Sessions {
         // Ownership first: a wrong window learns nothing about which snippets exist.
         let (entry, conn) = self.connection(owner, session_id)?;
         let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let env = match &entry.host_id {
+            Some(host_id) => self.vault.session_env(host_id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
         let cancel = self.snippet_runs.start(owner, run_id)?;
-        let result = crate::snippet_runs::run(&conn, &text, cancel).await;
+        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
         self.snippet_runs.finish(run_id);
         result
     }

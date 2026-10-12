@@ -16,4 +16,8 @@ exitSignal: string | null, stdout: string, stderr: string,
 /**
  * Some output was not kept (over the per-stream limit).
  */
-truncated: boolean, };
+truncated: boolean, 
+/**
+ * Environment variables of the host that the server refused (SNP-13); names only.
+ */
+envRejected: Array<string>, };
