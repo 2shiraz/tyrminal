@@ -11,7 +11,7 @@
 // suite fail: a blocked check is never counted as passing.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,14 @@ const labFile = join(root, "tests", "ssh-lab", ".run", "lab.json");
 const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win32" ? "tyrminal.exe" : "tyrminal");
 
 const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
+// OpenSSH offers mlkem768x25519-sha256 from 9.9; the container lab has 10.0.
+const needsPostQuantumLab = () => {
+  const missing = needsLab();
+  if (missing) return missing;
+  const version = JSON.parse(readFileSync(labFile, "utf8")).serverVersion ?? "";
+  const [major = 0, minor = 0] = (version.match(/\d+/g) ?? []).map(Number);
+  return major > 9 || (major === 9 && minor >= 9) ? null : `the lab's sshd (${version}) does not offer mlkem768x25519-sha256 (needs OpenSSH 9.9 or later)`;
+};
 const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
 const needsSecretStore = () => {
   if (process.platform === "darwin" || process.platform === "win32") return null;
@@ -79,6 +87,9 @@ const SUITES = {
     { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "sign-in with an OpenSSH user certificate (lab CA)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "cert_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "key exchange policy against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--skip", "negotiated_with_a_server_that_offers_it"), blockedBy: needsLab },
+    { name: "post-quantum key exchange negotiated end to end (lab sshd with ML-KEM)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--exact", "post_quantum_key_exchange_is_negotiated_with_a_server_that_offers_it"), blockedBy: needsPostQuantumLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // privilege prompts (KEY-18)

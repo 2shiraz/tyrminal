@@ -20,6 +20,7 @@ import {
   IconSettings,
   IconSidebar,
   IconSquareTerminal,
+  IconHistory,
 } from "../ui/icons";
 import { msgSftp } from "../../features/sftp/messages";
 
@@ -47,6 +48,7 @@ const PRIMARY: { id: Destination; icon: ReactNode }[] = [
   { id: "snippets", icon: <IconScrollText size={17} /> },
   // agent B: tunnels and history
   { id: "tunnels", icon: <IconRoute size={17} /> },
+  { id: "recordings", icon: <IconHistory size={17} /> },
 ];
 
 const VAULT: { id: Destination; icon: ReactNode }[] = [

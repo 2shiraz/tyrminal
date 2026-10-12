@@ -348,6 +348,12 @@ impl UnlockedVault {
         keys::subkey(&self.root, &self.vault_id, keys::LABEL_BACKUP)
     }
 
+    /// `K_logs` for session recordings (docs/crypto-format.md §11), derived on demand: the caller
+    /// holds it only while a recording is written or read.
+    pub fn logs_key(&self) -> Result<SecretKey, VaultError> {
+        keys::subkey(&self.root, &self.vault_id, keys::LABEL_LOGS)
+    }
+
     fn mac(&self, unsigned: &[u8]) -> Result<Hmac<Sha256>, VaultError> {
         let mut mac =
             <Hmac<Sha256> as KeyInit>::new_from_slice(self.header_mac.expose()).map_err(|_| VaultError::Internal)?;
