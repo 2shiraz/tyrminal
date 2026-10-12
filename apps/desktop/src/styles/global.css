@@ -4099,9 +4099,17 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 /* Production hosts (P-26): a coloured edge together with the text "Production", never colour
    alone. Red keeps it apart from broadcast (amber). */
+/* Resolved on the root, so the badge keeps the app theme's colours inside chrome drawn in the
+   terminal scheme's colours (tab, pane header), and opaque, so it keeps its contrast on tinted
+   rows. */
+:root {
+  --production-fg: var(--danger);
+  --production-bg: color-mix(in srgb, var(--danger) 12%, var(--bg-raised));
+}
+
 .badge-production {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--production-bg);
+  color: var(--production-fg);
   font-weight: 600;
 }
 
