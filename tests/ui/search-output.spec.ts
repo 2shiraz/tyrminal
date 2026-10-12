@@ -3,6 +3,7 @@
 // native suite checks the same against a real shell.
 import { type Page, expect, test } from "@playwright/test";
 
+import { searchLines } from "../../apps/desktop/src/features/terminal/scrollbackSearch";
 import { openApp, waitForTerminalText } from "./fixtures";
 
 const output = (page: Page, text: string) => page.evaluate((t) => (window as unknown as { __mockOutput: (s: string) => void }).__mockOutput(t), text);
@@ -51,6 +52,99 @@ test("search finds text in every open session, grouped by tab, and jumps to it",
   await waitForTerminalText(page, "needle-one");
   // Nothing was sent anywhere: the search never leaves the page.
   expect(JSON.stringify(await page.evaluate(() => (window as unknown as { __mockCalls: unknown[] }).__mockCalls))).not.toContain("needle");
+});
+
+test("search: sliced reads resume where they stopped and never repeat or skip a match", () => {
+  // A fake buffer: 25 rows, row 7 continues row 6 (soft wrap), "x" twice on row 3.
+  const rows = Array.from({ length: 25 }, (_, y) => (y === 3 ? "x and x" : y === 6 ? "a long lin" : y === 7 ? "e ending x" : y % 5 === 0 ? `row ${y} x` : `row ${y}`));
+  const getLine = (y: number) =>
+    rows[y] === undefined ? undefined : ({ isWrapped: y === 7, translateToString: () => rows[y] as string } as unknown as import("@xterm/xterm").IBufferLine);
+  const whole = searchLines(getLine, rows.length, "x").matches.map((m) => `${m.row}:${m.col}`);
+  expect(whole).toEqual(["0:6", "3:0", "3:6", "5:6", "7:9", "10:7", "15:7", "20:7"]);
+  for (const step of [1, 2, 3, 7]) {
+    for (const max of [1, 2, 100]) {
+      const seen: string[] = [];
+      let from = 0;
+      for (let guard = 0; from < rows.length && guard < 100; guard++) {
+        const r = searchLines(getLine, rows.length, "x", false, { from, rows: step, max });
+        seen.push(...r.matches.map((m) => `${m.row}:${m.col}`));
+        // A slice never ends inside a wrapped line.
+        expect(rows[r.next] === undefined || r.next !== 7, `step ${step} max ${max}`).toBe(true);
+        expect(r.next).toBeGreaterThan(from);
+        from = r.next;
+      }
+      expect(seen, `step ${step} max ${max}`).toEqual(whole);
+    }
+  }
+  // Starting inside a wrapped line starts at its first row.
+  expect(searchLines(getLine, rows.length, "x", false, { from: 7, rows: 1 }).matches.map((m) => m.row)).toEqual([7]);
+});
+
+test("search: its shortcut opens it, terminals only, and the query is never logged, sent or stored", async ({ page }) => {
+  const consoleText: string[] = [];
+  page.on("console", (m) => consoleText.push(m.text()));
+  await openApp(page, { renderer: "compatibility" });
+  // Without a terminal there is nothing to search: the shortcut does nothing.
+  await page.keyboard.press("Alt+Shift+F");
+  await expect(page.getByRole("dialog", { name: "Search all sessions" })).toHaveCount(0);
+
+  await connect(page, "api-gateway");
+  await output(page, "\r\nsecret-canary-5521 in the scrollback\r\n");
+  await waitForTerminalText(page, "secret-canary-5521");
+  // An SFTP tab is open too; it is never listed.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("SFTP");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { name: /SFTP/ })).toBeVisible();
+
+  // The shortcut is listed under Keyboard shortcuts and opens the search.
+  await page.keyboard.press("Alt+Shift+F");
+  const dialog = page.getByRole("dialog", { name: "Search all sessions" });
+  await dialog.getByLabel("Text to find in every open session").fill("canary-5521");
+  await expect(dialog.getByRole("status")).toHaveText("1 match in 1 tab");
+  await expect(dialog.getByRole("region")).toHaveCount(1);
+  await expect(dialog.getByRole("region", { name: /SFTP/ })).toHaveCount(0);
+  await dialog.getByLabel("Match case").check();
+  await dialog.getByLabel("Text to find in every open session").fill("canary-5521 in");
+  await expect(dialog.getByRole("status")).toHaveText("1 match in 1 tab");
+
+  // Not in any native call, console line, storage, the URL or the title.
+  const leaks = await page.evaluate(() => {
+    const store = (s: Storage) => Array.from({ length: s.length }, (_, i) => `${s.key(i)}=${s.getItem(s.key(i) ?? "")}`).join("\n");
+    return [
+      JSON.stringify((window as unknown as { __mockCalls: unknown[] }).__mockCalls),
+      JSON.stringify((window as unknown as { __mockState: { prefs: unknown } }).__mockState.prefs),
+      store(localStorage),
+      store(sessionStorage),
+      location.href,
+      document.title,
+    ];
+  });
+  for (const text of [...leaks, consoleText.join("\n")]) expect(text).not.toContain("canary-5521");
+  await expect(async () => {
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0, { timeout: 500 });
+  }).toPass();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("#settings-shortcuts").getByText("Search all sessions", { exact: true })).toBeVisible();
+});
+
+test("search: stops at 500 matches and offers more", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connect(page, "api-gateway");
+  await output(page, Array.from({ length: 700 }, (_, i) => `\r\nhit ${i}`).join(""));
+  await waitForTerminalText(page, "hit 699");
+  await palette(page, "Search all sessions");
+  const dialog = page.getByRole("dialog", { name: "Search all sessions" });
+  await dialog.getByLabel("Text to find in every open session").fill("hit ");
+  await expect(dialog.getByRole("status")).toHaveText("500 matches in 1 tab");
+  await expect(dialog.getByText("Showing the first 500 matches.")).toBeVisible();
+  await expect(dialog.locator(".search-match")).toHaveCount(500);
+  await dialog.getByRole("button", { name: "More…" }).click();
+  await expect(dialog.getByRole("status")).toHaveText("700 matches in 1 tab");
+  await expect(dialog.getByRole("button", { name: "More…" })).toHaveCount(0);
+  // Each line once, in order.
+  await expect(dialog.locator(".search-match").nth(500)).toContainText("hit 500");
 });
 
 test("a command's output is copied or saved without the prompt and command line, and only with marks", async ({ page, context }) => {

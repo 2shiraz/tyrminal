@@ -31,11 +31,12 @@ import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { ConnectionSheet, type TimelineEntry, timelineEntry } from "./ConnectionSheet";
 import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import { QuickForwardBar } from "../tunnels/QuickForward";
 import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
-import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
+import type { ScrollbackMatch, ScrollbackResult, SearchSlice } from "./scrollbackSearch";
 
 const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -82,7 +83,7 @@ export interface PaneHandle {
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
-  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  searchScrollback(query: string, caseSensitive: boolean, slice?: SearchSlice): ScrollbackResult;
   /** P-28: scrolls a match into view and selects it. */
   revealMatch(match: ScrollbackMatch): void;
   /** P-29: commands the shell integration marked, newest first (empty without it). */
@@ -172,6 +173,8 @@ export function TerminalView(props: TerminalViewProps) {
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  // Quick port forwards (P-24): ports the output named, waiting for the user.
+  const [portOffers, setPortOffers] = useState<number[]>([]);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   // The Keychain key the destination refused in this attempt, to offer installing it.
@@ -223,6 +226,7 @@ export function TerminalView(props: TerminalViewProps) {
     setAuth(null);
     setChanged(null);
     setBanner(null);
+    setPortOffers([]);
     setClosed(null);
     setRejectedKey(null);
     environment.current = null;
@@ -289,6 +293,9 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "banner":
             setBanner(event.text);
+            break;
+          case "port_suggestion":
+            setPortOffers((list) => (list.includes(event.port) ? list : [...list, event.port]));
             break;
           // Environment variables the server refused are always reported (SNP-13).
           case "environment":
@@ -404,7 +411,8 @@ export function TerminalView(props: TerminalViewProps) {
         controllerRef.current?.setEncoding(encodingRef.current);
       },
       environment: () => environment.current,
-      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      searchScrollback: (query, caseSensitive, slice) =>
+        controllerRef.current?.searchScrollback(query, caseSensitive, slice) ?? { matches: [], truncated: false, next: 0, length: 0 },
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
       commands: () => controllerRef.current?.commandOutputs.list() ?? [],
       commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
@@ -534,6 +542,15 @@ export function TerminalView(props: TerminalViewProps) {
           </button>
         </div>
       )}
+
+      {/* Quick port forwards (P-24) */}
+      <QuickForwardBar
+        sessionId={controllerRef.current?.id ?? null}
+        hostId={target.kind === "ssh" ? target.hostId : null}
+        ports={portOffers}
+        connected={state === "connected" && !closed}
+        onDone={(port) => setPortOffers((list) => (port === "all" ? [] : list.filter((p) => p !== port)))}
+      />
 
       {findOpen && (
         <FindBar

@@ -148,6 +148,9 @@ pub(crate) struct StoredConnection {
     /// Post-quantum key exchange; the default (prefer) is not stored.
     #[serde(default, skip_serializing_if = "is_default_key_exchange")]
     pub key_exchange: tyrminal_contracts::KeyExchangeMode,
+    /// Quick port forward suggestions are off for this host (P-24).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_port_suggestions: bool,
 }
 
 fn is_default_key_exchange(mode: &tyrminal_contracts::KeyExchangeMode) -> bool {
@@ -224,6 +227,9 @@ pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
 pub(crate) struct ExecutionTargetRecord {
     pub name: String,
     pub host_ids: Vec<String>,
+    /// Groups, resolved to their hosts when a run starts. Absent in older records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_ids: Vec<String>,
 }
 
 /// An OpenSSH user certificate for a key in the keychain (public data), checked against the key

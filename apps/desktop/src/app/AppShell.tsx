@@ -14,6 +14,7 @@ import { msgP } from "../lib/messages-privilege";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
+import { MultiRunDialog } from "../features/snippets/MultiRunDialog";
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
@@ -176,6 +177,8 @@ function Shell() {
   const broadcasting = useMemo<ReadonlySet<number>>(() => new Set(members.keys()), [members]);
   const stopBroadcast = useCallback((tabId: number) => setMembers((current) => withoutTab(current, tabId)), []);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  /** SNP-07: a snippet to run on every open SSH session (reviewed first). */
+  const [runAllOpen, setRunAllOpen] = useState(false);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
@@ -549,6 +552,9 @@ function Shell() {
           break;
         case "lock":
           void vault.lock().catch(() => undefined);
+          break;
+        case "searchSessions":
+          if (wsRef.current.tabs.some((t) => panesOf(t.layout).some((id) => wsRef.current.panes[id]?.target.kind !== "sftp"))) setSearchingSessions(true);
           break;
         // agent D: inventory and snippets
         case "suggest": {
@@ -974,6 +980,7 @@ function Shell() {
                 }
               : undefined
           }
+          onRunAllOpen={snippetRunHost.sessions().length > 0 ? () => setRunAllOpen(true) : undefined}
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={
             terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)
@@ -1131,7 +1138,8 @@ function Shell() {
             panes: panesOf(t.layout).flatMap((paneId) => {
               const handle = handles.current.get(paneId);
               const p = ws.panes[paneId];
-              return handle && p ? [{ paneId, label: p.label, handle }] : [];
+              // Terminals only: an SFTP tab has no scrollback to search.
+              return handle && p && p.target.kind !== "sftp" ? [{ paneId, label: p.label, handle }] : [];
             }),
           }))}
           onReveal={(paneId, match) => {
@@ -1251,6 +1259,8 @@ function Shell() {
           }}
         />
       )}
+
+      {runAllOpen && <MultiRunDialog snippet={null} allOpen onClose={() => setRunAllOpen(false)} />}
 
       {runRequest && (
         <SnippetRunDialog

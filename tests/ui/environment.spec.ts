@@ -30,9 +30,11 @@ test("group variables are inherited, host values override them, refusals are rep
     ["TYR_REGION", "eu-1"],
     ["LEGACY_MODE", "on"],
   ]);
-  await group.getByRole("button", { name: "Save", exact: true }).click();
+  // Saved as you go; Done closes once everything is written.
+  await group.getByRole("button", { name: "Done" }).click();
   await expect(group).toHaveCount(0);
-  await expect(page.getByText("Environment saved")).toBeVisible();
+  const envSets = () => page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string; args: { vars: { name: string }[] } }[] }).__mockCalls.filter((c) => c.cmd === "env_set"));
+  expect((await envSets()).at(-1)?.args.vars.map((v) => v.name)).toEqual(["TYR_REGION", "LEGACY_MODE"]);
 
   const host = await setVars(page, () => page.getByRole("button", { name: "More actions for api-gateway" }).first().click(), "Environment for api-gateway", [["TYR_REGION", "eu-2"]]);
   const inherited = host.getByTestId("env-inherited");
@@ -40,14 +42,16 @@ test("group variables are inherited, host values override them, refusals are rep
   await expect(inherited).toContainText("from Production");
   await expect(inherited.locator("li", { hasText: "TYR_REGION" })).toContainText("overridden here");
   await expect(inherited.locator("li", { hasText: "LEGACY_MODE" })).not.toContainText("overridden here");
-  // Invalid names are refused by the core and nothing is saved.
+  // An invalid name is shown at once and never sent; the list waits until it is fixed or removed.
   await host.getByRole("button", { name: "Add variable" }).click();
   await host.getByLabel("Name 2").fill("1BAD");
-  await host.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(host.getByRole("alert")).toContainText("do not start with a digit");
+  await expect(host.getByRole("alert")).toContainText("not starting with a digit");
+  await expect(host.getByLabel("Name 2")).toHaveAttribute("aria-invalid", "true");
   await host.getByRole("button", { name: "Remove 1BAD" }).click();
-  await host.getByRole("button", { name: "Save", exact: true }).click();
+  await host.getByRole("button", { name: "Done" }).click();
   await expect(host).toHaveCount(0);
+  expect(JSON.stringify(await envSets())).not.toContain("1BAD");
+  expect((await envSets()).at(-1)?.args.vars.map((v) => v.name)).toEqual(["TYR_REGION"]);
 
   // Connecting reports the variable the server refused, by name.
   await page.getByRole("button", { name: "Connect to api-gateway" }).click();

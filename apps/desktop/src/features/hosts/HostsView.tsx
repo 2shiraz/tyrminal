@@ -33,6 +33,7 @@ import {
 import { msgSftp } from "../sftp/messages";
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
 import { useAction } from "../../lib/useAsync";
@@ -124,10 +125,11 @@ export function HostsView({
   const [sort, setSort] = useState<Sort>("name");
   const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Host details panel: what it shows, a counter that rebuilds it after a save, and the guard state.
-  const [panel, setPanel] = useState<{ target: PanelTarget; version: number; justSaved: boolean } | null>(null);
+  // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
+  // state (a password typed but not set).
+  const [panel, setPanel] = useState<{ target: PanelTarget; version: number } | null>(null);
   const [discarding, setDiscarding] = useState<(() => void) | null>(null);
-  const panelDirty = useRef(false);
+  const panelSecret = useRef(false);
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -317,15 +319,15 @@ export function HostsView({
     return () => observer.disconnect();
   }, []);
 
-  /** Runs `then` now, or after the user agrees to discard the panel's unsaved changes. */
+  /** Runs `then` now, or after the user agrees to discard a password typed in the panel but not set. */
   const guard = (then: () => void) => {
-    if (panel && panelDirty.current) setDiscarding(() => then);
+    if (panel && panelSecret.current) setDiscarding(() => then);
     else then();
   };
-  const show = (target: PanelTarget, justSaved = false) => {
+  const show = (target: PanelTarget) => {
     version.current += 1;
-    panelDirty.current = false;
-    setPanel({ target, version: version.current, justSaved });
+    panelSecret.current = false;
+    setPanel({ target, version: version.current });
   };
   const openPanel = (target: PanelTarget) => {
     if (target.kind === "edit" && panel?.target.kind === "edit" && panel.target.host.id === target.host.id) return;
@@ -338,7 +340,7 @@ export function HostsView({
   const closePanel = useCallback(() => {
     const back = opener.current;
     opener.current = null;
-    panelDirty.current = false;
+    panelSecret.current = false;
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
@@ -658,22 +660,23 @@ export function HostsView({
 
       {panel && (
         <HostPanel
-          key={`${panelHostId ?? "new"}:${panel.version}`}
+          // Not keyed by the host: creating the host on its first save keeps the same panel.
+          key={panel.version}
           target={panel.target}
           keys={keyList}
           groups={groupList}
           defaultGroupId={currentGroupId}
           os={panelHostId ? (osOf.get(panelHostId) ?? null) : null}
           identity={identityList ? { list: identityList, current: panelHostId ? (assignments.get(`host:${panelHostId}`)?.identityId ?? null) : null } : undefined}
-          justSaved={panel.justSaved}
-          dirtyRef={panelDirty}
+          secretRef={panelSecret}
           onRequestClose={() => guard(closePanel)}
-          onCancel={closePanel}
           onSaved={(saved) => {
-            show({ kind: "edit", host: saved }, true);
+            // Only the panel that saved: a write that finishes after switching hosts updates the list only.
+            const mine = panel.version;
+            setPanel((current) => (current && current.version === mine ? { ...current, target: { kind: "edit", host: saved } } : current));
             reload();
           }}
-          onConnect={onConnect}
+          onConnect={(host) => guard(() => onConnect(host))}
           onOpenSftp={onOpenSftp}
           onDuplicate={(host) => void duplicate(host)}
           onCopyAddress={(host) => {
@@ -764,12 +767,12 @@ export function HostsView({
           parentId={editingGroup.parentId ?? null}
           groups={groupList}
           keys={keyList}
-          onClose={() => setEditingGroup(null)}
-          onSaved={(saved) => {
+          onClose={(created) => {
             setEditingGroup(null);
-            setFilter({ kind: "group", id: saved.id });
-            reload();
+            // A group created here opens once the editor closes.
+            if (created) setFilter({ kind: "group", id: created.id });
           }}
+          onSaved={() => reload()}
         />
       )}
 
@@ -849,10 +852,6 @@ export function HostsView({
           target={environmentFor.target}
           name={environmentFor.name}
           onClose={() => setEnvironmentFor(null)}
-          onDone={() => {
-            setEnvironmentFor(null);
-            notify("success", msgD.env.saved);
-          }}
         />
       )}
 
@@ -893,7 +892,7 @@ export function HostsView({
           onClose={() => setDiscovering(false)}
           onAdd={(service) => {
             setDiscovering(false);
-            // The panel shows the announced values for review; nothing is saved until Save.
+            // The panel shows the announced values for review; the host is saved on the first edit (or Connect).
             openPanel({
               kind: "new",
               initial: { label: service.name, address: service.addresses[0] ?? service.host, port: service.port, username: "" },
@@ -954,18 +953,18 @@ export function HostsView({
 
       {discarding && (
         <Dialog
-          title={msgD.hostPanel.discardTitle(panel?.target.kind === "edit" ? panel.target.host.label : msgD.hostPanel.newTitle)}
+          title={msgAutosave.discardSecretTitle}
           role="alertdialog"
           icon={<IconTrash2 size={18} />}
           tone="warning"
           onDismiss={() => setDiscarding(null)}
         >
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msgD.hostPanel.discardBody}
+            {msgAutosave.discardSecretBody}
           </p>
           <div className="dialog-actions">
             <button type="button" className="btn" onClick={() => setDiscarding(null)} autoFocus data-autofocus>
-              {msgD.hostPanel.keepEditing}
+              {msgAutosave.keepEditing}
             </button>
             <button
               type="button"
@@ -973,11 +972,11 @@ export function HostsView({
               onClick={() => {
                 const then = discarding;
                 setDiscarding(null);
-                panelDirty.current = false;
+                panelSecret.current = false;
                 then();
               }}
             >
-              {msgD.hostPanel.discard}
+              {msgAutosave.discardSecret}
             </button>
           </div>
         </Dialog>

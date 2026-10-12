@@ -4241,6 +4241,79 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   overflow-wrap: anywhere;
 }
 
+/* Autosave status (host details, group editor, environment): "Saving…", then "Saved" fading out,
+   "Couldn't save – Retry" on failure, and "Undo" while the last write can be undone. */
+.autosave-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.dialog-head .autosave-status {
+  margin-left: auto;
+  padding-top: 6px;
+}
+
+.autosave-status[data-state="error"] .autosave-text {
+  color: var(--danger);
+}
+
+.autosave-status[data-state="saved"] .autosave-text,
+.autosave-status[data-state="undone"] .autosave-text {
+  animation: autosave-fade 2s ease forwards;
+}
+
+@keyframes autosave-fade {
+  0%,
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: the text stays until it is removed, without a fade. */
+@media (prefers-reduced-motion: reduce) {
+  .autosave-status .autosave-text {
+    animation: none !important;
+  }
+}
+
+:root[data-reduce-motion="true"] .autosave-status .autosave-text {
+  animation: none !important;
+}
+
+.autosave-action {
+  padding-inline: var(--space-2);
+}
+
+/* A secret field with its own "Set password" button beside it. */
+.live-secret {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2);
+}
+
+.live-secret-set {
+  margin-top: 22px;
+}
+
+.live-secret-remove {
+  margin-top: var(--space-1);
+}
+
+.dialog-actions-hint {
+  margin-right: auto;
+  align-self: center;
+}
+
 /* server at a glance */
 .glance {
   display: flex;
@@ -4395,4 +4468,27 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   gap: var(--space-1);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Quick port forward suggestions (P-24) */
+.quick-forward {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-raised, var(--surface));
+  font-size: var(--text-sm);
+}
+.quick-forward-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.quick-forward-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }

@@ -33,7 +33,7 @@ export function installMockBackend(options) {
         cursorStyle: "block",
         cursorBlink: false,
         padding: 12,
-        scrollback: 5000,
+        scrollback: options.scrollback ?? 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
         confirmMultilinePaste: true,
@@ -146,11 +146,13 @@ export function installMockBackend(options) {
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
     // "files": a files-only connection (SFTP tab): SSH trust and sign-in, no terminal output.
-    const files = kind === "files";
+    // "exec": a run-only connection for snippet runs (SNP-05): the same, with exec channels only.
+    const exec = kind === "exec";
+    const files = kind === "files" || exec;
     if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
-    if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files, exec };
+    if (files && !exec) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
     if (host?.protocol?.type === "telnet")
@@ -232,6 +234,19 @@ export function installMockBackend(options) {
           }),
         30,
       );
+      return { sessionId };
+    }
+    if (passwordPrompt && exec && args.interactive === false) {
+      // Like the core: nothing is asked; the host is skipped as needing sign-in.
+      setTimeout(() => {
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "NEEDS_SIGN_IN", message: "This host needs a sign-in answer (no saved password or key), so it was skipped." },
+          exitStatus: null,
+        });
+      }, 30);
       return { sessionId };
     }
     if (passwordPrompt) {
@@ -562,6 +577,50 @@ export function installMockBackend(options) {
           runs.set(runId, run);
           return view(run);
         },
+        // Quick port forwards (P-24): only ports suggested to the session are accepted, as natively.
+        quick_forward_start: (a) => {
+          const session = state.sessions.get(a.sessionId);
+          if (!session) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          if (!(window.__mockSuggested.get(a.sessionId) ?? new Set()).has(a.port)) {
+            throw { code: "INVALID_INPUT", message: "That port was not offered for this session." };
+          }
+          const runId = `${nextRun++}`.padStart(32, "c");
+          const run = {
+            view: {
+              runId,
+              tunnelId: `port:${a.port}`,
+              sessionId: a.sessionId,
+              name: `Port ${a.port}`,
+              kind: "local",
+              bindHost: "127.0.0.1",
+              boundPort: a.port,
+              destHost: "127.0.0.1",
+              destPort: a.port,
+              state: "running",
+              activeConnections: 0,
+              totalConnections: 0,
+              refusedConnections: 0,
+              failedConnections: 0,
+              bytesOut: 0,
+              bytesIn: 0,
+              error: null,
+            },
+          };
+          runs.set(runId, run);
+          return view(run);
+        },
+        quick_forward_open: (a) => {
+          const run = runs.get(a.runId);
+          if (!run || run.view.state !== "running" || !run.view.tunnelId.startsWith("port:")) {
+            throw { code: "ACCESS_DENIED", message: "That tunnel is not available to this window." };
+          }
+          const url = `http://127.0.0.1:${run.view.boundPort}/`;
+          window.__mockOpenedQuick.push(url);
+          return url;
+        },
+        host_port_suggestions_set: (a) => {
+          window.__mockPortSuggestionsOff[a.enabled ? "delete" : "add"](a.hostId);
+        },
         tunnel_stop: (a) => {
           const run = runs.get(a.runId);
           if (!run || run.view.state !== "running") throw { code: "NOT_FOUND", message: "That tunnel is not running." };
@@ -588,6 +647,7 @@ export function installMockBackend(options) {
             own,
             inherited: window.__mockInheritedRoute(a.hostId),
             keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+            noPortSuggestions: window.__mockPortSuggestionsOff.has(a.hostId),
           };
         },
         host_connection_set: (a) => {
@@ -595,6 +655,7 @@ export function installMockBackend(options) {
             throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
           }
           keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
+          window.__mockPortSuggestionsOff[a.connection.noPortSuggestions ? "add" : "delete"](a.hostId);
           // HST-05: inheriting drops the host's own route.
           if (a.connection.inherit) {
             jumps.delete(a.hostId);
@@ -1255,6 +1316,7 @@ export function installMockBackend(options) {
       }, 20);
       return { sessionId };
     },
+    session_open_exec: (a) => openSession(a, "exec"),
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
@@ -1299,6 +1361,8 @@ export function installMockBackend(options) {
     session_ack: () => null,
     session_close: (a) => {
       state.sessions.delete(a.sessionId);
+      // Runs on a closed connection stop, as in the core.
+      for (const [runId, run] of state.runs ?? []) if (run.sessionId === a.sessionId) run.stop("The session was closed, so the run stopped.");
     },
     session_trust_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
@@ -1497,7 +1561,13 @@ export function installMockBackend(options) {
           if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false, envRejected: ["LEGACY_MODE"] });
           else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false, envRejected: [] });
         };
-        if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
+        if (session.host === "build-runner-03") {
+          const stop = (message = "The run was cancelled.") => {
+            state.runs.delete(a.runId);
+            reject({ code: "CANCELLED", message });
+          };
+          state.runs.set(a.runId, Object.assign(stop, { sessionId: a.sessionId, stop }));
+        }
         else setTimeout(finish, 50);
       }),
     snippet_exec_cancel: (a) => {
@@ -1507,7 +1577,7 @@ export function installMockBackend(options) {
     execution_target_list: () => structuredClone(state.targets ?? []),
     execution_target_save: (a) => {
       state.targets ??= [];
-      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], missing: 0 };
+      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], groupIds: [...new Set(a.target.groupIds ?? [])], missing: 0 };
       state.targets.push(saved);
       return saved;
     },
@@ -1678,6 +1748,17 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
   };
+  /** Quick port forwards (P-24): the newest session's output named `port`, as the core reports it. */
+  window.__mockSuggested = new Map();
+  window.__mockOpenedQuick = [];
+  window.__mockPortSuggestionsOff = new Set();
+  window.__mockSuggestPort = (port) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (!last) return;
+    if (!window.__mockSuggested.has(last.id)) window.__mockSuggested.set(last.id, new Set());
+    window.__mockSuggested.get(last.id).add(port);
+    channelSend(last.events, { type: "port_suggestion", port });
+  };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {
     if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
@@ -1829,6 +1910,11 @@ export function installMockBackend(options) {
     callbacks,
     async invoke(cmd, args = {}, opts = {}) {
       calls.push({ cmd, args: cmd === "session_write" ? "<bytes>" : args });
+      // Tests can make the next N calls of a command fail (autosave's "Couldn't save – Retry").
+      if (window.__mockFailNext?.[cmd] > 0) {
+        window.__mockFailNext[cmd] -= 1;
+        throw { code: "INTERNAL", message: "The vault could not be written." };
+      }
       const handler = handlers[cmd];
       if (!handler) throw { code: "INTERNAL", message: `mock: unhandled ${cmd}` };
       return handler(args, opts);
