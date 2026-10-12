@@ -5,7 +5,7 @@
 // visual baselines are recorded under reduced motion and do not change.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 import { connectHeld, emitSessionEvent } from "./session-events";
 
 const hosts = (page: Page) => page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
@@ -20,7 +20,7 @@ const running = (page: Page) =>
 test("the stops light in the order the session reports its steps, never ahead of them", async ({ page }) => {
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to api-gateway" }).first().click());
+  await connectHeld(page, () => connectHost(page, "api-gateway"));
   // Nothing reported yet: the first stop is current and nothing is done.
   await expect.poll(() => stops(page)).toEqual(["resolve:now", "connect:pending", "verify:pending", "auth:pending", "shell:pending"]);
   await page.clock.runFor(12); // connecting
@@ -43,7 +43,7 @@ test("the stops light in the order the session reports its steps, never ahead of
 test("a prompt holds the travel at its stop", async ({ page }) => {
   await openApp(page, { trustPromptFor: "staging-web" });
   await hosts(page);
-  await page.getByRole("button", { name: "Connect to staging-web" }).click();
+  await connectHost(page, "staging-web");
   await expect(page.getByRole("alertdialog", { name: "Verify this server before connecting" })).toBeVisible();
   await expect.poll(() => stops(page)).toEqual(["resolve:done", "connect:done", "verify:waiting", "auth:pending", "shell:pending"]);
   await expect(track(page)).toHaveAttribute("data-state", "waiting");
@@ -53,7 +53,7 @@ test("a prompt holds the travel at its stop", async ({ page }) => {
 test("a failure marks the stop it happened at, and Close tab closes the tab", async ({ page }) => {
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to edge-cache" }).first().click());
+  await connectHeld(page, () => connectHost(page, "edge-cache"));
   await page.clock.runFor(42); // authenticating
   await emitSessionEvent(page, { type: "state", state: "failed" });
   await emitSessionEvent(page, { type: "closed", error: { code: "AUTH_FAILED", message: "The server did not accept the password for ops." }, exitStatus: null });
@@ -69,7 +69,7 @@ test("a failure marks the stop it happened at, and Close tab closes the tab", as
 test("a changed host key marks the identity stop", async ({ page }) => {
   await openApp(page, { hostKeyChangedFor: "staging-web" });
   await hosts(page);
-  await page.getByRole("button", { name: "Connect to staging-web" }).click();
+  await connectHost(page, "staging-web");
   await expect(page.getByRole("alert").filter({ hasText: "This server's identity has changed" })).toBeVisible();
   await expect.poll(() => stops(page)).toEqual(["resolve:done", "connect:done", "verify:fail", "auth:pending", "shell:pending"]);
 });
@@ -78,7 +78,7 @@ test("reduced motion: every state is shown and nothing on the track runs", async
   // The fixtures emulate reduced motion, as the visual baselines do.
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to api-gateway" }).first().click());
+  await connectHeld(page, () => connectHost(page, "api-gateway"));
   await page.clock.runFor(27); // verifying_host
   await expect.poll(() => stops(page)).toEqual(["resolve:done", "connect:done", "verify:now", "auth:pending", "shell:pending"]);
   expect(await running(page)).toBe(0);
@@ -94,7 +94,7 @@ test("with motion: the track moves while connecting, then settles over a shell t
     document.documentElement.dataset.reduceMotion = "false";
   });
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to api-gateway" }).first().click());
+  await connectHeld(page, () => connectHost(page, "api-gateway"));
   await page.clock.runFor(27); // verifying_host
   expect(await running(page)).toBeGreaterThan(0);
   const layer = page.locator(".connect-layer");
