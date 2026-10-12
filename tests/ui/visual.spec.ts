@@ -50,7 +50,7 @@ for (const theme of ["dark", "light"] as const) {
       await page.locator(".segmented label", { hasText: "List" }).click();
       await shot(page, `${theme}-07-hosts-list.png`);
       await page.getByRole("button", { name: "Add host" }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "New host" })).toBeVisible();
       await shot(page, `${theme}-08-host-editor.png`);
     });
 
