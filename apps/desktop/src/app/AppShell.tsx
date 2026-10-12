@@ -742,6 +742,10 @@ function Shell() {
       : null;
 
   // agent D: inventory and snippets
+  // Every pane's session state: changes on the session events that connect, drop or close a pane.
+  const sessionsVersion = Object.values(ws.panes)
+    .map((p) => `${p.id}:${statuses[p.id]?.state ?? ""}`)
+    .join(",");
   const snippetRunHost = useMemo(
     () => ({
       sessions: () =>
@@ -754,8 +758,9 @@ function Shell() {
           }),
         ),
       connect,
+      version: sessionsVersion,
     }),
-    [connect],
+    [connect, sessionsVersion],
   );
 
   return (

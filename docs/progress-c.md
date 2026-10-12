@@ -231,6 +231,29 @@ prop (the user's bindings) so they re-render when the bindings change.
   list holds its space and shows placeholders only after 150 ms; a fast one never does). The mock
   can delay a command (`window.__mockDelay[cmd] = ms`).
 
+### Fewer round trips, and polling
+
+- `app/vaultData.tsx` (hosts, recent, keys, snippets, groups, loaded once per unlock) now also holds
+  identities. Known hosts read hosts and keys from it instead of listing them again on every visit;
+  the Hosts view and the Keychain's identities section read identities from it.
+- There are no change events for vault records: the IPC layer listens only to `vault-status`
+  (`lib/ipc.ts`), and no native events were invented. So the cache is refreshed after the app's own
+  edits, as before (the editing view reloads the list it changed; identities reload on the in-page
+  `identityEvents`, now in `features/credentials/identityEvents.ts`).
+- `vault-cache.spec.ts`: switching between Hosts, Known hosts, Keychain and Home lists nothing again;
+  saving an identity refreshes the shared list once.
+
+Timers (`setInterval`), one by one:
+
+| Where | Decision |
+|---|---|
+| `MultiRunDialog` 1 s | **Removed.** It re-rendered to re-read which hosts have a session. The shell's run context now carries a `version` built from every pane's session state, which changes on the session events that connect, drop or close a pane, so the dialog re-renders exactly then. |
+| `TunnelsView` `POLL_MS` | Kept. It lists running forwards; the native side emits no tunnel events, and a forward can stop without a session event. |
+| `FilesPanel` 2 s | Kept. It watches the local copies of files open for editing; no event reports a local file change. |
+| `DiscoveryDialog` 1 s | Kept. LAN discovery results and its countdown; no discovery events. |
+| `SettingsViews` diagnostics 2 s | Kept. Reads an in-memory counter in the renderer (no IPC); there is no event for it. |
+| `TerminalView` 250 ms | Kept. A countdown clock to the next automatic reconnect, not data polling. |
+
 ## Next
 
 Replace the per-session client-side encoding choice with #8's native per-host setting.

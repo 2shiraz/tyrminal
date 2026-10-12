@@ -2,6 +2,7 @@ import type { KnownHostSummary, Preferences, TerminalPreferences } from "@tyrmin
 import { type FormEvent, Suspense, lazy, useEffect, useState } from "react";
 
 import { DEFAULT_PREFERENCES, usePreferences } from "../../app/preferences";
+import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import {
   EmptyState,
@@ -19,7 +20,7 @@ import {
 } from "../../components/ui/controls";
 import { IconFingerprint, IconMonitor, IconPlus, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
 import { msgB } from "../../lib/messages-b";
-import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
+import { diagnostics, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgProduction } from "../../lib/messages-production";
 import { useAction, useLoaded } from "../../lib/useAsync";
@@ -46,8 +47,7 @@ export function KnownHostsView() {
   const [removing, setRemoving] = useState<KnownHostSummary | null>(null);
   // Creating a host from a trusted record (SEC-03): the key is already trusted, so the first
   // connection goes straight to sign-in.
-  const savedHosts = useLoaded(hostsApi.list);
-  const keyList = useLoaded(keysApi.list);
+  const { hosts: savedHosts, keys: keyList } = useVaultData();
   const [creating, setCreating] = useState<KnownHostSummary | null>(null);
   const hasHost = (entry: KnownHostSummary) =>
     (savedHosts.value ?? []).some((h) => h.address.toLowerCase() === entry.host.toLowerCase() && h.port === entry.port);
