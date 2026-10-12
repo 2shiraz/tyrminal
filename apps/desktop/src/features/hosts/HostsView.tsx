@@ -675,7 +675,7 @@ export function HostsView({
                     </span>
                   )}
                   <div className="row-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => onConnect(host)}>
+                    <button type="button" className="btn btn-primary btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
                       <IconPlay size={13} />
                       {msg.hosts.connect}
                     </button>
