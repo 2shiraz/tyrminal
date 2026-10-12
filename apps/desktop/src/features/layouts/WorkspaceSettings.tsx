@@ -21,7 +21,17 @@ import {
 } from "../../lib/shortcuts";
 
 export const WORKSPACE_DEFAULTS: WorkspacePreferences = {
-  highlight: { enabled: false, ipAddresses: true, keywords: [] },
+  // On by default, matching the core's default: addresses and a few status words (display only).
+  highlight: {
+    enabled: true,
+    ipAddresses: true,
+    keywords: [
+      { text: "error", tone: "danger", caseSensitive: false },
+      { text: "failed", tone: "danger", caseSensitive: false },
+      { text: "warning", tone: "warning", caseSensitive: false },
+      { text: "success", tone: "success", caseSensitive: false },
+    ],
+  },
   bindings: [],
   optionAsMeta: isMac,
   rightClickSelectsWord: isMac,
