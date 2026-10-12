@@ -47,14 +47,18 @@ describe("SFTP tab", { concurrency: false }, () => {
   const pane = (side) => `section.sftp-pane[aria-label="${side === "left" ? "Left pane" : "Right pane"}"]`;
   const bodyText = () => s.execute("return document.body.innerText");
   const rowNames = (side) =>
-    s.execute(`return [...document.querySelectorAll(arguments[0] + " table tbody .sftp-name-main")].map((e) => e.textContent)`, [pane(side)]);
+    s.execute(`return [...document.querySelectorAll(arguments[0] + " table tbody .ft-name-text")].map((e) => e.textContent)`, [pane(side)]);
+  // A menu item by its label (its shortcut keys are shown beside it, outside the label).
+  const findItem = `[...document.querySelectorAll('[role="menuitem"]')].find((b) => b.querySelector(":scope > span:not(.kbd-group)")?.textContent.trim() === arguments[0])`;
   const menuItem = async (label) => {
-    const item = await s.until(
-      () => s.execute(`return [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.trim() === arguments[0]) ? true : null`, [label]),
-      { describe: `menu item ${label}` },
-    );
+    const item = await s.until(() => s.execute(`return ${findItem} ? true : null`, [label]), { describe: `menu item ${label}` });
     assert.ok(item);
-    await s.execute(`[...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.trim() === arguments[0]).click()`, [label]);
+    await s.execute(`${findItem}.click()`, [label]);
+  };
+  /** Selects a row, then opens its menu with the row's "More actions" button. */
+  const rowMenu = async (side, entry) => {
+    await s.click(await s.waitFor(`${pane(side)} button[aria-label="Select ${entry}"]`));
+    await s.click(await s.waitFor(`${pane(side)} button[aria-label="More actions for ${entry}"]`));
   };
 
   test("a host opens for files only, after the host-key check, and a file goes both ways", async () => {
@@ -88,15 +92,13 @@ describe("SFTP tab", { concurrency: false }, () => {
     await s.clickButton("Choose folder…", { within: pane("left") });
     await s.until(async () => (await rowNames("left")).includes(name), { describe: "local listing" });
 
-    // Local → host with Actions → Copy to.
-    await s.click(await s.waitFor(`${pane("left")} button[aria-label="Select ${name}"]`));
-    await s.click(await s.waitFor(`${pane("left")} button[aria-label="Actions for the left pane"]`));
+    // Local → host with the row menu's Copy to.
+    await rowMenu("left", name);
     await menuItem("Copy to Lab files");
     await s.until(async () => (await rowNames("right")).includes(name), { describe: "uploaded file listed", timeout: 30_000 });
 
     // Host → this computer under a free name: the original stays untouched.
-    await s.click(await s.waitFor(`${pane("right")} button[aria-label="Select ${name}"]`));
-    await s.click(await s.waitFor(`${pane("right")} button[aria-label="Actions for the right pane"]`));
+    await rowMenu("right", name);
     await menuItem("Copy to This computer");
     await s.until(async () => (await s.find('dialog[open]')) !== null, { describe: "conflict prompt" });
     await s.clickButton("Keep both", { within: "dialog" });
@@ -107,8 +109,7 @@ describe("SFTP tab", { concurrency: false }, () => {
     await app.screenshot("sftp-02-transferred");
 
     // Clean up on the server through the UI (delete asks first).
-    await s.click(await s.waitFor(`${pane("right")} button[aria-label="Select ${name}"]`));
-    await s.click(await s.waitFor(`${pane("right")} button[aria-label="Actions for the right pane"]`));
+    await rowMenu("right", name);
     await menuItem("Delete…");
     await s.clickButton("Delete", { within: "dialog" });
     await s.until(async () => !(await rowNames("right")).includes(name), { describe: "deleted" });

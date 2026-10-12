@@ -518,6 +518,7 @@ export function installMockBackend(options) {
       window.__mockTransfers.set(transferId, {
         finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -621,6 +622,11 @@ export function installMockBackend(options) {
       edits.delete(a.editId);
     },
     files_list: (a) => {
+      // Tests make the next listings fail to see the error state and its retry.
+      if ((window.__mockListFail ?? 0) > 0) {
+        window.__mockListFail -= 1;
+        fsErr("ACCESS_DENIED", "The server refused to list this folder.");
+      }
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
       if (!node) fsErr("NOT_FOUND", "That file or folder does not exist on the server.");
@@ -703,6 +709,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -729,6 +736,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },

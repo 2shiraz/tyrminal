@@ -1,28 +1,19 @@
 import type { ConflictChoice, RemoteEntry, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { IconButton, Notice } from "../../components/ui/controls";
-import { IconCopy, IconDownload, IconTrash2, IconUpload, IconX } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconTrash2, IconX } from "../../components/ui/icons";
 import { type AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgFiles } from "../files/messages";
+import { TransferDrawer } from "../files/TransferDrawer";
+import { type Transfer, applyEvent, refused, started as startedTransfer } from "../files/transfers";
 import { msgSftp } from "./messages";
-import { type Endpoint, formatSize, visibleName } from "./model";
-import { type PaneHealth, type Side, SftpPane } from "./SftpPane";
+import type { Endpoint } from "./model";
+import { type PaneHealth, type Side, type Source, SftpPane } from "./SftpPane";
 import "./sftp.css";
-
-interface Transfer {
-  id: string;
-  name: string;
-  direction: TransferDirection;
-  total: number | null;
-  done: number;
-  state: "running" | "done" | "cancelled" | "failed";
-  error?: string;
-  files?: number;
-  skipped?: number;
-}
 
 interface Conflict {
   name: string;
@@ -33,7 +24,10 @@ interface Conflict {
   start: (choice: ConflictChoice) => void;
 }
 
-const other = (side: Side): Side => (side === "left" ? "right" : "left");
+/** Panes keep their identity (and connection) when they swap sides. */
+type PaneId = "a" | "b";
+const PANES: Record<PaneId, Source> = { a: { kind: "local" }, b: { kind: "none" } };
+const other = (id: PaneId): PaneId => (id === "a" ? "b" : "a");
 
 function whereOf(endpoint: Endpoint | null): string | null {
   if (!endpoint) return null;
@@ -44,8 +38,9 @@ const RANK: PaneHealth[] = ["idle", "ok", "busy", "bad", "attention"];
 
 /**
  * The SFTP tab: two panes side by side, each showing this computer or a saved host over a
- * files-only connection. Dragging an item to the other pane (or Actions → Copy to) copies it
- * through the transfer queue, with progress, cancel and the usual conflict choices.
+ * files-only connection. Dragging an item to the other pane (or F5, or Copy to in its menu)
+ * copies it through the transfer queue, with progress, cancel and the usual conflict choices.
+ * The pane in use is marked; Swap exchanges the panes' sides without reconnecting.
  */
 export function SftpView({
   visible,
@@ -58,59 +53,49 @@ export function SftpView({
 }) {
   const data = useVaultData();
   const hosts = data.hosts.value ?? [];
-  const [endpoints, setEndpoints] = useState<Record<Side, Endpoint | null>>({ left: null, right: null });
+  const [order, setOrder] = useState<[PaneId, PaneId]>(["a", "b"]);
+  const [active, setActive] = useState<PaneId>("a");
+  const [endpoints, setEndpoints] = useState<Record<PaneId, Endpoint | null>>({ a: null, b: null });
   const endpointsRef = useRef(endpoints);
   endpointsRef.current = endpoints;
-  const [refresh, setRefresh] = useState<Record<Side, number>>({ left: 0, right: 0 });
-  const [health, setHealth] = useState<Record<Side, PaneHealth>>({ left: "idle", right: "idle" });
+  const [refresh, setRefresh] = useState<Record<PaneId, number>>({ a: 0, b: 0 });
+  const [health, setHealth] = useState<Record<PaneId, PaneHealth>>({ a: "idle", b: "idle" });
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   /** Name conflicts waiting for a decision, asked one at a time. */
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const conflict = conflicts[0] ?? null;
   const settle = () => setConflicts((list) => list.slice(1));
   const [notice, setNotice] = useState<string | null>(null);
+  const sideOf = (id: PaneId): Side => (order[0] === id ? "left" : "right");
 
-  const onLeftEndpoint = useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, left: e })), []);
-  const onRightEndpoint = useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, right: e })), []);
-  const onLeftHealth = useCallback((h: PaneHealth) => setHealth((c) => (c.left === h ? c : { ...c, left: h })), []);
-  const onRightHealth = useCallback((h: PaneHealth) => setHealth((c) => (c.right === h ? c : { ...c, right: h })), []);
+  const onEndpoint = {
+    a: useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, a: e })), []),
+    b: useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, b: e })), []),
+  };
+  const onHealth = {
+    a: useCallback((h: PaneHealth) => setHealth((c) => (c.a === h ? c : { ...c, a: h })), []),
+    b: useCallback((h: PaneHealth) => setHealth((c) => (c.b === h ? c : { ...c, b: h })), []),
+  };
 
-  const indicator = RANK[Math.max(RANK.indexOf(health.left), RANK.indexOf(health.right))] ?? "idle";
+  const indicator = RANK[Math.max(RANK.indexOf(health.a), RANK.indexOf(health.b))] ?? "idle";
   const indicatorRef = useRef(onIndicator);
   indicatorRef.current = onIndicator;
   useEffect(() => indicatorRef.current(indicator), [indicator]);
 
   function apply(id: string, event: TransferEvent) {
-    setTransfers((list) =>
-      list.map((t) => {
-        if (t.id !== id) return t;
-        switch (event.type) {
-          case "progress":
-            return { ...t, done: event.done };
-          case "done":
-            return { ...t, done: event.bytes, state: "done", files: event.files, skipped: event.skipped };
-          case "cancelled":
-            return { ...t, state: "cancelled" };
-          case "failed":
-            return { ...t, state: "failed", error: event.error.message };
-        }
-      }),
-    );
+    setTransfers((list) => list.map((t) => (t.id === id ? applyEvent(t, event) : t)));
   }
 
   function failNow(name: string, direction: TransferDirection, e: AppError) {
-    setTransfers((list) => [
-      ...list,
-      { id: `refused-${Date.now()}-${list.length}`, name, direction, total: null, done: 0, state: "failed", error: e.message },
-    ]);
+    setTransfers((list) => [...list, refused(name, direction, e.message, list.length)]);
   }
 
-  function transferAll(from: Side, entries: RemoteEntry[]) {
+  function transferAll(from: PaneId, entries: RemoteEntry[]) {
     for (const entry of entries) transfer(from, entry);
   }
 
   /** Copies `entry` from the `from` pane's folder into the other pane's folder. */
-  function transfer(from: Side, entry: RemoteEntry, choice: ConflictChoice = "ask") {
+  function transfer(from: PaneId, entry: RemoteEntry, choice: ConflictChoice = "ask") {
     setNotice(null);
     const to = other(from);
     const src = endpointsRef.current[from];
@@ -152,7 +137,7 @@ export function SftpView({
     }
     started
       .then((s) => {
-        setTransfers((list) => [...list, { id: s.transferId, name: s.name, direction: s.direction, total: s.total, done: 0, state: "running" }]);
+        setTransfers((list) => [...list, startedTransfer(s)]);
         bound = s.transferId;
         for (const event of early.splice(0)) apply(s.transferId, event);
       })
@@ -170,33 +155,32 @@ export function SftpView({
   return (
     <div className="sftp" role="region" aria-label={msgSftp.view}>
       <div className="sftp-panes">
-        <SftpPane
-          side="left"
-          initial={{ kind: "local" }}
-          hosts={hosts}
-          visible={visible}
-          refreshKey={refresh.left}
-          otherWhere={whereOf(endpoints.right)}
-          onEndpoint={onLeftEndpoint}
-          onHealth={onLeftHealth}
-          onTransfer={(entries) => transferAll("left", entries)}
-          onDropFrom={(entries) => transferAll("right", entries)}
-          onOpenKnownHosts={onOpenKnownHosts}
-        />
-        <div className="sftp-divider" aria-hidden="true" />
-        <SftpPane
-          side="right"
-          initial={{ kind: "none" }}
-          hosts={hosts}
-          visible={visible}
-          refreshKey={refresh.right}
-          otherWhere={whereOf(endpoints.left)}
-          onEndpoint={onRightEndpoint}
-          onHealth={onRightHealth}
-          onTransfer={(entries) => transferAll("right", entries)}
-          onDropFrom={(entries) => transferAll("left", entries)}
-          onOpenKnownHosts={onOpenKnownHosts}
-        />
+        {order.map((id, index) => (
+          <Fragment key={id}>
+            {index === 1 && (
+              <div className="sftp-divider">
+                <IconButton size="sm" className="sftp-swap" label={msgFiles.swap} onClick={() => setOrder(([l, r]) => [r, l])}>
+                  <IconArrowLeftRight size={14} />
+                </IconButton>
+              </div>
+            )}
+            <SftpPane
+              side={sideOf(id)}
+              initial={PANES[id]}
+              hosts={hosts}
+              visible={visible}
+              active={active === id}
+              refreshKey={refresh[id]}
+              otherWhere={whereOf(endpoints[other(id)])}
+              onFocusIn={() => setActive(id)}
+              onEndpoint={onEndpoint[id]}
+              onHealth={onHealth[id]}
+              onTransfer={(entries) => transferAll(id, entries)}
+              onDropFrom={(entries) => transferAll(other(id), entries)}
+              onOpenKnownHosts={onOpenKnownHosts}
+            />
+          </Fragment>
+        ))}
       </div>
 
       {notice && (
@@ -208,48 +192,11 @@ export function SftpView({
         </div>
       )}
 
-      {transfers.length > 0 && (
-        <section className="files-transfers sftp-transfers" aria-label={msg.files.transfers}>
-          <div className="files-transfers-head">
-            <h3>{msg.files.transfers}</h3>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setTransfers((list) => list.filter((t) => t.state === "running"))}
-              disabled={!transfers.some((t) => t.state !== "running")}
-            >
-              {msg.files.clearDone}
-            </button>
-          </div>
-          <ul>
-            {transfers.map((t) => (
-              <li key={t.id} className="files-transfer" data-state={t.state}>
-                <span className="files-transfer-icon">
-                  {t.direction === "upload" ? <IconUpload size={13} /> : t.direction === "copy" ? <IconCopy size={13} /> : <IconDownload size={13} />}
-                </span>
-                <span className="files-name">{visibleName(t.name)}</span>
-                <span className="files-meta" data-testid="transfer-state">
-                  {t.state === "running"
-                    ? msg.files.progress(formatSize(t.done), t.total == null ? null : formatSize(t.total))
-                    : t.state === "done"
-                      ? msg.files.doneSummary(t.files ?? 1, t.skipped ?? 0)
-                      : t.state === "cancelled"
-                        ? msg.files.cancelled
-                        : `${msg.files.failed}: ${t.error ?? ""}`}
-                </span>
-                {t.state === "running" && (
-                  <>
-                    <progress max={t.total ?? undefined} value={t.total ? t.done : undefined} aria-label={t.name} />
-                    <IconButton label={msg.files.cancelTransfer(t.name)} onClick={() => void filesApi.cancel(t.id).catch(() => undefined)}>
-                      <IconX size={14} />
-                    </IconButton>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <TransferDrawer
+        transfers={transfers}
+        onCancel={(t) => void filesApi.cancel(t.id).catch(() => undefined)}
+        onClear={() => setTransfers((list) => list.filter((t) => t.state === "running"))}
+      />
 
       {conflict && visible && (
         <Dialog key={`${conflict.name}-${conflicts.length}`} title={msg.files.replaceTitle(conflict.name)} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => settle()}>
