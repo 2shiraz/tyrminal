@@ -1466,10 +1466,10 @@ kbd,
 
 .tabstrip {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: stretch;
+  gap: 0;
   min-width: 0;
-  padding: 0 var(--space-2);
+  padding: 0;
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;
@@ -1487,11 +1487,10 @@ kbd,
   gap: var(--space-2);
   flex: 0 1 220px;
   min-width: 120px;
-  height: 34px;
   padding: 0 4px 0 var(--space-3);
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  border: 0;
+  border-right: var(--box-rule);
+  border-radius: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -1505,10 +1504,15 @@ kbd,
   color: var(--text);
 }
 
+/* The active tab takes the page colour and a 2 px accent line on its top edge (as the live SFTP pane). */
 .tab[aria-selected="true"] {
   background: var(--bg-surface);
-  border-color: var(--border-subtle);
+  box-shadow: var(--edge-live);
   color: var(--text);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .tab[aria-selected="true"]::after {
@@ -1605,7 +1609,7 @@ kbd,
 .tab-new {
   flex: none;
   align-self: center;
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
 .tab-spacer {
