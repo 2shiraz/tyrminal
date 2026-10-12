@@ -43,6 +43,7 @@ import type {
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
+import type { DiscoveryNetwork, DiscoveryStatus } from "@tyrminal/contracts";
 
 /** An error from the native side: a stable code plus a safe, fixed message. */
 export class AppError extends Error {
@@ -448,4 +449,13 @@ export const startup = {
   set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
     call<string[] | null>("startup_set", { target, snippetIds }),
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
+};
+
+/** LAN discovery (HST-14): user-started, time-limited browsing for SSH servers on one network. */
+export const discovery = {
+  /** Local network interfaces to choose from; sends nothing. */
+  networks: () => call<DiscoveryNetwork[]>("discovery_networks"),
+  start: (networkId: string) => call<DiscoveryStatus>("discovery_start", { networkId }),
+  status: () => call<DiscoveryStatus>("discovery_status"),
+  stop: () => call<DiscoveryStatus>("discovery_stop"),
 };

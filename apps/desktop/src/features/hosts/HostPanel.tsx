@@ -9,9 +9,9 @@ import { ErrorNotice, IconButton } from "../../components/ui/controls";
 import { IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
-import { HostFormCards, groupPath, useHostForm } from "./hostForm";
+import { HostFormCards, type HostFormOptions, groupPath, useHostForm } from "./hostForm";
 
-export type PanelTarget = { kind: "new"; initial?: HostSummary } | { kind: "edit"; host: HostSummary };
+export type PanelTarget = { kind: "new"; initial?: HostFormOptions["initial"] } | { kind: "edit"; host: HostSummary };
 
 export function HostPanel({
   target,
