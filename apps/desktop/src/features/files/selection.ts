@@ -114,3 +114,26 @@ export function pressFeedback(element: HTMLElement) {
   window.addEventListener("pointerup", release, true);
   window.addEventListener("pointercancel", release, true);
 }
+
+/** How long typed letters keep adding to one type-ahead search. */
+export const TYPE_AHEAD_MS = 800;
+
+/**
+ * Type-ahead: the first name (in display order) that starts with what was typed, case-
+ * insensitively. The same letter typed again moves to the next name starting with it, as in
+ * Finder and Explorer. Null when nothing matches.
+ */
+export function typeAhead(order: string[], cursor: string | null, typed: string): string | null {
+  const needle = typed.toLowerCase();
+  if (!needle) return null;
+  const repeat = needle.length > 1 && [...needle].every((c) => c === needle[0]);
+  const prefix = repeat ? (needle[0] as string) : needle;
+  const at = cursor ? order.indexOf(cursor) : -1;
+  // A new search includes the current row; a repeated letter starts after it.
+  const start = repeat || needle.length === 1 ? at + 1 : Math.max(0, at);
+  for (let i = 0; i < order.length; i++) {
+    const name = order[(start + i) % order.length] as string;
+    if (name.toLowerCase().startsWith(prefix)) return name;
+  }
+  return null;
+}

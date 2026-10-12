@@ -3,15 +3,16 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp, terminalText, waitForTerminalText } from "./fixtures";
+import { pointOf } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
 /** Clicks terminal text the way a user does: at its position on the terminal's screen layer. */
 async function clickTerminalText(page: Page, text: string) {
-  const box = await page.locator(".xterm-rows span", { hasText: text }).first().boundingBox();
-  if (!box) throw new Error(`no terminal text ${text}`);
-  const x = box.x + Math.min(box.width / 2, 20);
-  const y = box.y + box.height / 2;
+  // By position in the row: highlighted text is drawn one cell per element, so no single
+  // element holds it.
+  await expect.poll(() => pointOf(page, text, text)).not.toBeNull();
+  const { x, y } = (await pointOf(page, text, text)) as { x: number; y: number };
   await page.mouse.move(x, y);
   await page.mouse.move(x + 1, y);
   await page.mouse.click(x + 1, y);

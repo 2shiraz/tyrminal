@@ -144,6 +144,14 @@ const COMMANDS: &[&str] = &[
     "env_get",
     "env_set",
     "env_effective",
+    // privilege prompts (KEY-18)
+    "session_identity",
+    "session_insert_identity_password",
+    // identity deletion (BUILD_SPEC §10.2)
+    "identity_usage",
+    // compromised-password check (SEC-11)
+    "password_check_status",
+    "password_check_run",
     "startup_get",
     "startup_set",
     "startup_effective",

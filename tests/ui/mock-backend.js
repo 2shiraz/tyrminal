@@ -22,6 +22,8 @@ export function installMockBackend(options) {
       reduceMotion: true,
       localShell: null,
       editorApps: [],
+      // compromised-password check (SEC-11)
+      passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -138,7 +140,7 @@ export function installMockBackend(options) {
     const files = kind === "files";
     if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
     if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
@@ -243,6 +245,8 @@ export function installMockBackend(options) {
     const text = new TextDecoder().decode(bytes);
     // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
     window.__mockReceived = (window.__mockReceived ?? "") + text;
+    // terminal input: the same per session, in order (IME, broadcast exclusion tests).
+    (window.__mockInputBySession ??= {})[sessionId] = (window.__mockInputBySession[sessionId] ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -594,6 +598,7 @@ export function installMockBackend(options) {
       window.__mockTransfers.set(transferId, {
         finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -697,6 +702,11 @@ export function installMockBackend(options) {
       edits.delete(a.editId);
     },
     files_list: (a) => {
+      // Tests make the next listings fail to see the error state and its retry.
+      if ((window.__mockListFail ?? 0) > 0) {
+        window.__mockListFail -= 1;
+        fsErr("ACCESS_DENIED", "The server refused to list this folder.");
+      }
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
       if (!node) fsErr("NOT_FOUND", "That file or folder does not exist on the server.");
@@ -779,6 +789,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -805,6 +816,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },
@@ -1050,7 +1062,11 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
-    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
+    session_diagnostics: () => {
+      // terminal input: tests can replace the lines or make the request fail.
+      if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
+      return window.__mockDiagnostics ?? ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"];
+    },
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {
@@ -1065,6 +1081,46 @@ export function installMockBackend(options) {
         const host = state.hosts.find((h) => h.label === s.host);
         if (host && !s.files) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
+    },
+    // compromised-password check (SEC-11): unavailable like the real build unless a test says so.
+    password_check_status: () => ({
+      enabled: state.prefs.passwordCheck.enabled,
+      endpoint: state.prefs.passwordCheck.endpoint,
+      available: Boolean(options.passwordCheckAvailable),
+      unavailableReason: options.passwordCheckAvailable
+        ? null
+        : "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does.",
+      storedPasswords: state.hosts.filter((h) => h.auth.kind === "stored_password").length,
+    }),
+    password_check_run: () => {
+      if (!state.prefs.passwordCheck.enabled) throw { code: "INVALID_INPUT", message: "Turn on the compromised-password check first. It is off until you do." };
+      if (!options.passwordCheckAvailable)
+        throw { code: "UNREACHABLE", message: "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does." };
+      return {
+        items: [
+          { kind: "host", label: "edge-cache", breachCount: 10434004 },
+          { kind: "identity", label: "Ops", breachCount: 0 },
+        ],
+        requests: 2,
+      };
+    },
+    // privilege prompts (KEY-18)
+    session_identity: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      if (!s.hostId) return null;
+      const effective = identityAssignment({ kind: "host", hostId: s.hostId }).effectiveIdentityId;
+      const identity = identityState.list.find((i) => i.id === effective);
+      return identity ? { identityId: identity.id, label: identity.label, hasPassword: identity.password !== null } : null;
+    },
+    session_insert_identity_password: (a) => {
+      const current = handlers.session_identity({ sessionId: a.sessionId });
+      if (!current || current.identityId !== a.identityId)
+        throw { code: "CONFLICT", message: "The identity of this host changed. Check which identity it uses and try again." };
+      const password = identityState.list.find((i) => i.id === a.identityId)?.password;
+      if (!password) throw { code: "INVALID_INPUT", message: "This identity has no stored password." };
+      // Typed by the "core": the renderer never receives the password, and no Enter is added.
+      write(a.sessionId, new TextEncoder().encode(password));
     },
     app_info: () => ({
       commit: "1a2b3c4",
@@ -1324,13 +1380,44 @@ export function installMockBackend(options) {
       return handlers.identity_list().find((i) => i.id === record.id);
     },
     identity_delete: (a) => {
+      // identity deletion (BUILD_SPEC §10.2): refused while in use unless the caller chooses.
+      const users = [...identityState.uses].filter(([, v]) => v === a.id).map(([k]) => k);
+      if (users.length > 0 && !a.references)
+        throw { code: "IN_USE", message: "Hosts or groups use this identity. Choose another identity for them or remove it from them." };
+      const replacement = a.references?.kind === "reassign" ? a.references.identityId : null;
       identityState.list = identityState.list.filter((i) => i.id !== a.id);
-      let n = 0;
-      for (const [k, v] of identityState.uses) if (v === a.id) {
-        identityState.uses.delete(k);
-        n += 1;
+      for (const k of users) {
+        if (replacement) identityState.uses.set(k, replacement);
+        else identityState.uses.delete(k);
       }
-      return n;
+      return users.length;
+    },
+    // identity deletion (BUILD_SPEC §10.2)
+    identity_usage: (a) => {
+      const uses = [];
+      for (const g of state.groups)
+        if (identityState.uses.get(`group:${g.id}`) === a.id) uses.push({ target: { kind: "group", groupId: g.id }, label: g.name, direct: true, afterRemoval: null });
+      for (const h of state.hosts) {
+        const target = { kind: "host", hostId: h.id };
+        const now = identityAssignment(target);
+        if (now.effectiveIdentityId !== a.id) continue;
+        // What the host uses without it: the same resolution with the identity's uses removed.
+        const saved = new Map(identityState.uses);
+        for (const [k, v] of saved) if (v === a.id) identityState.uses.delete(k);
+        const next = identityAssignment(target).effectiveIdentityId;
+        identityState.uses = saved;
+        const other = identityState.list.find((i) => i.id === next);
+        const key = h.auth.kind === "key" ? state.keys.find((k) => k.id === h.auth.keyId) : null;
+        const afterRemoval = other
+          ? { kind: "identity", identityId: other.id, label: other.label }
+          : key
+            ? { kind: "key", keyId: key.id, label: key.label }
+            : h.auth.kind === "stored_password"
+              ? { kind: "stored_password" }
+              : { kind: "ask_password" };
+        uses.push({ target, label: h.label, direct: now.origin?.kind === "host", afterRemoval });
+      }
+      return uses.sort((x, y) => x.label.toLowerCase().localeCompare(y.label.toLowerCase()));
     },
     identity_assignments: () => [
       ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
@@ -1374,6 +1461,14 @@ export function installMockBackend(options) {
     state.sessions.delete(last.id);
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
+  };
+  // terminal input: drop the n-th open session (creation order), not only the newest.
+  window.__mockDropAt = (index) => {
+    const s = [...state.sessions.values()][index];
+    if (!s) return;
+    state.sessions.delete(s.id);
+    channelSend(s.events, { type: "state", state: "failed" });
+    channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);

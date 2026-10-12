@@ -22,6 +22,9 @@ export interface MockOptions {
   orphanKnownHost?: boolean;
   /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */
   notes?: Record<string, { text: string; format?: "plain" | "markdown" }>;
+  // compromised-password check (SEC-11)
+  /** Pretend the build can make range requests (the real build cannot yet). */
+  passwordCheckAvailable?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

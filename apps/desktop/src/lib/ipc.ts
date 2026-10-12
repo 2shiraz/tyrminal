@@ -487,6 +487,31 @@ export const environment = {
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
 };
 
+// privilege prompts (KEY-18)
+export const privilege = {
+  /** The identity whose password the session could type in, or null. */
+  forSession: (sessionId: string) => call<import("@tyrminal/contracts").SessionIdentity | null>("session_identity", { sessionId }),
+  /** Types that identity's password into the session (an explicit user action; no Enter). */
+  insertPassword: (sessionId: string, identityId: string) =>
+    call<void>("session_insert_identity_password", { sessionId, identityId }),
+};
+
+// identity deletion (BUILD_SPEC §10.2)
+export const identityDeletion = {
+  /** Hosts and groups the identity applies to, and how each host signs in without it. */
+  usage: (id: string) => call<import("@tyrminal/contracts").IdentityUse[]>("identity_usage", { id }),
+  /** Refused while the identity is in use unless `references` says what they use instead. */
+  remove: (id: string, references: import("@tyrminal/contracts").IdentityReferences | null) =>
+    call<number>("identity_delete", { id, references }),
+};
+
+// compromised-password check (SEC-11)
+export const passwordCheck = {
+  status: () => call<import("@tyrminal/contracts").PasswordCheckStatus>("password_check_status"),
+  /** Sends one 5-character hash prefix per distinct stored password; refused while off. */
+  run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
+};
+
 /** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
 export const startup = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),

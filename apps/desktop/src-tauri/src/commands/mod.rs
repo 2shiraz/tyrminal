@@ -12,6 +12,10 @@ pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
 pub mod tunnels;
+// privilege prompts (KEY-18)
+pub mod privilege;
+// compromised-password check (SEC-11)
+pub mod password_check;
 // agent C: workspaces
 pub mod layouts;
 // command history

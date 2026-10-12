@@ -123,5 +123,22 @@ for (const theme of ["dark", "light"] as const) {
       await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
       await shot(page, `${theme}-19-sftp-panes.png`);
     });
+
+    test(`files panel (${theme})`, async ({ page }) => {
+      await openApp(page, { theme });
+      await page.keyboard.press("Control+Shift+K");
+      await page.getByRole("combobox", { name: /Type a command/ }).fill("api-gateway");
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+      await page.keyboard.press("Control+Shift+O");
+      const panel = page.getByRole("complementary", { name: "Files" });
+      await panel.getByRole("grid", { name: /^Contents of / }).getByRole("button", { name: "Select deploy.sh" }).click();
+      // One upload running: the drawer with its bar (no rate yet, so the picture is stable).
+      await panel.getByRole("button", { name: "Upload", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Upload files…" }).click();
+      await expect(panel.getByRole("region", { name: "Transfers" }).getByTestId("transfer-state")).toHaveText("1.0 KB of 2.0 KB");
+      await panel.getByRole("grid", { name: /^Contents of / }).getByRole("button", { name: "Select deploy.sh" }).focus();
+      await shot(page, `${theme}-20-files-panel.png`);
+    });
   });
 }

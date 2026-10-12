@@ -27,6 +27,10 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { msgI } from "../../lib/messages-input";
+import { ConnectionDetails } from "../connection/ConnectionDetails";
+import { TokenMenu } from "../tokens/TokenMenu";
+import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import type { CommandRecord } from "./commandOutput";
@@ -71,6 +75,11 @@ export interface PaneHandle {
   setEncoding(id: string): void;
   /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
   release(on: boolean): void;
+  // terminal input: palette copy and paste
+  copy(): Promise<boolean>;
+  paste(): void;
+  /** Scrolls to the previous (-1) or next (+1) command, when the shell marks them. */
+  jumpCommand(direction: -1 | 1): boolean;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
@@ -158,9 +167,11 @@ export function TerminalView(props: TerminalViewProps) {
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [token, setToken] = useState<Token | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
   const environment = useRef<SessionEnvironment | null>(null);
@@ -212,6 +223,8 @@ export function TerminalView(props: TerminalViewProps) {
     const controller = new TerminalController(container, handlers.current.prefs, {
       onTitle: (title) => handlers.current.onTitle(title),
       onLink: (url) => setLink(url),
+      // terminal input: actions on addresses and paths in the output
+      onToken: (token) => setToken(token),
       onClipboardWrite: (text) => {
         if (clipboardAllowed.current) {
           void navigator.clipboard
@@ -350,6 +363,9 @@ export function TerminalView(props: TerminalViewProps) {
       },
       encoding: () => encodingRef.current,
       release: (on) => controllerRef.current?.release(on),
+      copy: () => controllerRef.current?.copy() ?? Promise.resolve(false),
+      paste: () => controllerRef.current?.paste(),
+      jumpCommand: (direction) => controllerRef.current?.jumpCommand(direction) ?? false,
       setEncoding: (id) => {
         encodingRef.current = encodingById(id).id;
         setEncodingId(encodingRef.current);
@@ -551,6 +567,16 @@ export function TerminalView(props: TerminalViewProps) {
         </div>
       )}
 
+      {token && (
+        <TokenMenu
+          token={token}
+          onClose={() => {
+            setToken(null);
+            controllerRef.current?.focus();
+          }}
+        />
+      )}
+      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {closed && (
         <div className="terminal-overlay">
           <div className="overlay-card" role={closed.error ? "alert" : "status"}>
@@ -588,6 +614,12 @@ export function TerminalView(props: TerminalViewProps) {
                 <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
                   {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
                 </p>
+                {/* terminal input: connection details (CON-15) */}
+                {target.kind === "ssh" && controllerRef.current?.id && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailsFor(controllerRef.current?.id ?? null)}>
+                    {msgI.details.link}
+                  </button>
+                )}
               </>
             ) : (
               <p className="muted">{closed.exitStatus !== null ? msg.terminal.endedExit(closed.exitStatus) : msg.terminal.endedClean}</p>
