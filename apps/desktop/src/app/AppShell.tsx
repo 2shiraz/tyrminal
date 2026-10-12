@@ -21,6 +21,7 @@ import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { shellContexts } from "../features/autocomplete/shellContext";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
@@ -164,8 +165,8 @@ function Shell() {
     setWs((current) => selectTab(current, null));
   }, []);
 
-  const open = useCallback((target: PaneTarget, label: string, identity: string) => {
-    setWs((current) => openTab(current, { target, label, identity }));
+  const open = useCallback((target: PaneTarget, label: string, identity: string, startIn?: string) => {
+    setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
   const connect = useCallback(
@@ -412,7 +413,11 @@ function Shell() {
           onDuplicate={(id) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
             const p = t ? wsRef.current.panes[t.focused] : undefined;
-            if (p) open(p.target, p.label, p.identity);
+            if (!p) return;
+            // The copy starts in the shell's current folder when the shell integration reports it.
+            const sessionId = handles.current.get(p.id)?.sessionId();
+            const cwd = sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
+            open(p.target, p.label, p.identity, cwd);
           }}
           onNewLocal={openLocal}
           onNewSftp={openSftp}

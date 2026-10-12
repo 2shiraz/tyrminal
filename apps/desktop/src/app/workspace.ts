@@ -25,6 +25,8 @@ export interface Pane {
   /** Title requested by the remote side, already sanitized. Shown after the label. */
   remoteTitle: string;
   indicator: "busy" | "ok" | "bad" | "attention" | "idle";
+  /** Folder to start in (a duplicated tab's), as the source shell reported it. Used once. */
+  startIn?: string;
 }
 
 export interface Tab {
@@ -66,7 +68,7 @@ export function activePane(ws: Workspace): Pane | null {
   return tab ? (ws.panes[tab.focused] ?? null) : null;
 }
 
-type PaneSeed = Pick<Pane, "target" | "label" | "identity">;
+type PaneSeed = Pick<Pane, "target" | "label" | "identity" | "startIn">;
 
 function newPane(ws: Workspace, seed: PaneSeed): [Workspace, number] {
   const id = ws.nextId;

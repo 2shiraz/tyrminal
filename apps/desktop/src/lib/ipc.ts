@@ -196,8 +196,9 @@ function channels(onOutput: OutputHandler, onEvent: EventHandler) {
 export const sessions = {
   openSsh: (hostId: string, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
-  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
-    call<SessionOpened>("session_open_local", { cols, rows, ...channels(onOutput, onEvent) }),
+  /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
+  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
+    call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),
   /** A files-only connection (SFTP, no shell). Trust and sign-in prompts arrive as events. */
   openFiles(hostId: string, onEvent: EventHandler) {
     const events = new Channel<SessionEvent>();

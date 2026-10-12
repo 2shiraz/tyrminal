@@ -97,6 +97,7 @@ export function PaneGrid({
                       <TerminalView
                         paneId={id}
                         target={pane.target}
+                        startIn={pane.startIn}
                         identity={pane.identity}
                         label={pane.label}
                         visible={visible}

@@ -9,7 +9,7 @@ import type {
   TransferEvent,
   TransferStarted,
 } from "@tyrminal/contracts";
-import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, Notice, Shortcut, Switch, TextField } from "../../components/ui/controls";
@@ -27,6 +27,7 @@ import {
   IconPencil,
   IconRefreshCw,
   IconSlidersHorizontal,
+  IconSquareTerminal,
   IconTrash2,
   IconUpload,
   IconX,
@@ -34,6 +35,7 @@ import {
 import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { shellContexts } from "../autocomplete/shellContext";
 import { beginUpload, sendUpload } from "./dropUpload";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
 import { KeyedMemory, useMemory } from "./memory";
@@ -195,28 +197,48 @@ export function FilesPanel({
   const stopped = useRef(new Set<string>());
   const { pending, error, run } = useAction();
 
+  // The shell's current folder, when the shell integration reports it (AUT-06).
+  const shellFolder = useSyncExternalStore(shellContexts.subscribe, () => (sessionId ? (shellContexts.get(sessionId)?.cwd ?? null) : null));
+
+  // Refreshing the same folder keeps the selection (while the entry is still there) and the
+  // scroll position; another folder starts at the top.
+  const show = useCallback(
+    (result: RemoteListing) =>
+      change((m) => {
+        const same = m.listing?.path === result.path;
+        const selection = same ? pruneSelection(m.selection, result.entries.map((e) => e.name)) : NO_SELECTION;
+        return { ...m, listing: result, pathText: result.path, selection, scrollTop: same ? m.scrollTop : 0 };
+      }),
+    [change],
+  );
+
   const load = useCallback(
     async (path: string | null) => {
       if (!sessionId) return;
       const result = await run(() => filesApi.list(sessionId, path));
-      if (result) {
-        change((m) => {
-          // Refreshing the same folder keeps the selection (while the entry is still there) and
-          // the scroll position; another folder starts at the top.
-          const same = m.listing?.path === result.path;
-          const selection = same ? pruneSelection(m.selection, result.entries.map((e) => e.name)) : NO_SELECTION;
-          return { ...m, listing: result, pathText: result.path, selection, scrollTop: same ? m.scrollTop : 0 };
-        });
-      }
+      if (result) show(result);
     },
-    [sessionId, run, change],
+    [sessionId, run, show],
   );
 
-  // A session seen for the first time starts at its login folder. One seen before shows what it
-  // showed then: switching tabs never lists again, only Refresh or moving to a folder does.
+  // A session seen for the first time opens in its shell's folder when the shell integration
+  // reports one, else its login folder (also when the shell's folder cannot be listed). One seen
+  // before shows what it showed then: switching tabs never lists again, only Refresh or moving to
+  // a folder does.
   useEffect(() => {
-    if (sessionId && panelMemory.get(sessionId).listing === null) void load(null);
-  }, [sessionId, load]);
+    if (!sessionId || panelMemory.get(sessionId).listing !== null) return;
+    let live = true;
+    const start = shellContexts.get(sessionId)?.cwd ?? null;
+    if (start) {
+      filesApi.list(sessionId, start).then(
+        (result) => live && show(result),
+        () => live && void load(null),
+      );
+    } else void load(null);
+    return () => {
+      live = false;
+    };
+  }, [sessionId, load, show]);
 
   // The scroll position comes back with the listing.
   useLayoutEffect(() => {
@@ -581,6 +603,11 @@ export function FilesPanel({
                 autoCapitalize="off"
                 autoCorrect="off"
               />
+              {shellFolder && (
+                <IconButton label={msg.files.shellFolder(shellFolder)} onClick={() => void load(shellFolder)} disabled={pending || current === shellFolder}>
+                  <IconSquareTerminal size={15} />
+                </IconButton>
+              )}
               <IconButton label={msg.files.refresh} onClick={() => current && void load(current)} disabled={!current || pending}>
                 <IconRefreshCw size={15} />
               </IconButton>
