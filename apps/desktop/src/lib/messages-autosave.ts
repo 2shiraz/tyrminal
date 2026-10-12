@@ -30,6 +30,7 @@ export const msgAutosave = {
   label: "Enter a name without control or invisible characters.",
   labelDefault: "Defaults to the address.",
   username: "No spaces, control characters or leading hyphen.",
+  keyMissing: "Choose a key. Until you do, the host keeps its current sign-in.",
   tags: "Tags are 32 characters at most, 16 per host, without control characters.",
   proxyHost: "Enter the proxy's host name or IP address.",
   routeHeld: "The jump host and proxy are saved together once every part is valid.",

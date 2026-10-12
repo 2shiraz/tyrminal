@@ -23,7 +23,7 @@
 // `logFile` (local) holding the sshd VERBOSE log that tests inspect for authentication activity.
 
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -106,6 +106,23 @@ function generateClientMaterial() {
   keygen("ecdsa", join(client, "id_ecdsa"), { comment: "tyrminal-lab-ecdsa", bits: 256 });
   // Deliberately not authorized on any server: used for "key rejected" cases.
   keygen("ed25519", join(client, "id_ed25519_unauthorized"), { comment: "tyrminal-lab-unauthorized" });
+  // User certificates (KEY-07). The key itself is in no authorized_keys file: only a certificate
+  // from the trusted lab CA lets it sign in. Principals cover the container and local lab users.
+  keygen("ed25519", join(client, "user_ca"), { comment: "tyrminal-lab-user-ca" });
+  keygen("ed25519", join(client, "untrusted_ca"), { comment: "tyrminal-lab-untrusted-ca" });
+  keygen("ed25519", join(client, "id_ed25519_certified"), { comment: "tyrminal-lab-certified" });
+  const certify = (ca, out, principals, validity) => {
+    copyFileSync(join(client, "id_ed25519_certified.pub"), join(client, `${out}.pub`));
+    run("ssh-keygen", ["-q", "-s", join(client, ca), "-I", out, "-n", principals, "-V", validity, join(client, `${out}.pub`)]);
+    return join(client, `${out}-cert.pub`);
+  };
+  const principals = [...new Set([...Object.values(DOCKER_USERS), ...Object.values(LOCAL_USERS)])].filter((u) => typeof u === "string" && !u.includes("/")).join(",");
+  const certificates = {
+    valid: certify("user_ca", "cert_valid", principals, "-5m:+1d"),
+    expired: certify("user_ca", "cert_expired", principals, "20000101:20000102"),
+    wrongPrincipal: certify("user_ca", "cert_wrong_principal", "someone-else", "-5m:+1d"),
+    untrustedCa: certify("untrusted_ca", "cert_untrusted_ca", principals, "-5m:+1d"),
+  };
   const authorized = ["id_ed25519", "id_ed25519_enc", "id_rsa", "id_ecdsa"]
     .map((k) => readFileSync(join(client, `${k}.pub`), "utf8").trim())
     .join("\n");
@@ -119,7 +136,10 @@ function generateClientMaterial() {
       rsa: join(client, "id_rsa"),
       ecdsa: join(client, "id_ecdsa"),
       unauthorized: join(client, "id_ed25519_unauthorized"),
+      certified: join(client, "id_ed25519_certified"),
     },
+    certificates,
+    trustedUserCa: readFileSync(join(client, "user_ca.pub"), "utf8").trim(),
   };
 }
 
@@ -201,6 +221,7 @@ async function dockerUp() {
     ...DOCKER_USERS,
     password: material.password,
     keys: material.keys,
+    certificates: material.certificates,
     servers: {},
   };
   // Windows OpenSSH has no PAM, so it cannot serve keyboard-interactive; tests that need the
@@ -208,6 +229,7 @@ async function dockerUp() {
   for (const name of isWindows ? SERVERS : [...SERVERS, "kbd"]) {
     const inDir = serverHostKeys(name);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
+    writeFileSync(join(inDir, "trusted_user_ca"), `${material.trustedUserCa}\n`, { mode: 0o644 });
     writeFileSync(join(inDir, "password"), material.password, { mode: 0o600 });
     const container = `tyrminal-lab-${name}`;
     run("docker", [
@@ -321,7 +343,7 @@ function removeLocalUser(name) {
 
 const toConfigPath = (p) => (isWindows ? p.replaceAll("\\", "/") : p);
 
-function sshdConfig({ port, inDir, authFile, version, kbdOnly = false }) {
+function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false }) {
   const lines = [
     "# Tyrminal local lab sshd (generated per run by scripts/lab.mjs). Never use outside tests.",
     `Port ${port}`,
@@ -336,7 +358,10 @@ function sshdConfig({ port, inDir, authFile, version, kbdOnly = false }) {
     `PasswordAuthentication ${kbdOnly ? "no" : "yes"}`,
     `KbdInteractiveAuthentication ${kbdOnly ? "yes" : "no"}`,
     `PubkeyAuthentication ${kbdOnly ? "no" : "yes"}`,
-    `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))}`,
+    // The lab's own file, and the user's own one, so a key the app installs (KEY deploy) is the
+    // key that then signs in.
+    `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))} .ssh/authorized_keys`,
+    `TrustedUserCAKeys ${toConfigPath(caFile ?? join(inDir, "trusted_user_ca"))}`,
     // Lab only: the generated files live in the checkout, owned by the CI user rather than the
     // lab accounts, so the ownership walk would refuse them. Never copy this to a real server.
     "StrictModes no",
@@ -478,6 +503,7 @@ async function localUp() {
     ...LOCAL_USERS,
     password: material.password,
     keys: material.keys,
+    certificates: material.certificates,
     servers: {},
   };
   const pids = [];
@@ -489,17 +515,22 @@ async function localUp() {
     const inDir = serverHostKeys(name);
     if (!isWindows) chmodSync(inDir, 0o711);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
+    writeFileSync(join(inDir, "trusted_user_ca"), `${material.trustedUserCa}\n`, { mode: 0o644 });
     let authFile = null;
+    let caFile = null;
     if (authDir) {
       mkdirSync(join(authDir, name), { mode: 0o755 });
       chmodSync(join(authDir, name), 0o755);
       authFile = join(authDir, name, "authorized_keys");
       writeFileSync(authFile, `${material.authorized}\n`, { mode: 0o644 });
       chmodSync(authFile, 0o644);
+      caFile = join(authDir, name, "trusted_user_ca");
+      writeFileSync(caFile, `${material.trustedUserCa}\n`, { mode: 0o644 });
+      chmodSync(caFile, 0o644);
     }
     const port = await freePort();
     const config = join(inDir, "sshd_config");
-    writeFileSync(config, sshdConfig({ port, inDir, authFile, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
+    writeFileSync(config, sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
     const logFile = join(inDir, "sshd.log");
     writeFileSync(logFile, "", { mode: 0o644 });
     if (isWindows) {

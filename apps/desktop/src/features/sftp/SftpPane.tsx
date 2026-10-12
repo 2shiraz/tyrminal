@@ -1,25 +1,22 @@
 import type { HostSummary, RemoteEntry, SessionEvent, SessionState } from "@tyrminal/contracts";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu, type MenuEntry } from "../../components/ui/Menu";
-import { EmptyState, ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
+import { useToast } from "../../components/ui/Toasts";
+import { EmptyState, ErrorNotice, IconButton, Keys, Notice, TextField } from "../../components/ui/controls";
 import {
   IconArrowLeftRight,
-  IconArrowUpDown,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconClipboardCopy,
   IconEllipsis,
   IconEye,
-  IconEyeOff,
-  IconFile,
-  IconFolder,
   IconFolderOpen,
   IconFolderPlus,
   IconFolderUp,
   IconHardDrive,
-  IconLink2,
   IconPencil,
   IconRefreshCw,
   IconSearch,
@@ -34,23 +31,13 @@ import {
 import { AppError, files as filesApi, sessions, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { FileTable, type MenuAt } from "../files/FileTable";
+import { msgFiles } from "../files/messages";
+import { PathBar } from "../files/PathBar";
+import { NO_SELECTION, type Selection, pruneSelection, selectionSummary, single } from "../files/selection";
 import { AuthDialog, Fingerprint } from "../terminal/TerminalView";
 import { HopNotice } from "../tunnels/HopNotice";
-import {
-  NO_SELECTION,
-  type Selection,
-  clickSelect,
-  keySelect,
-  pressFeedback,
-  pruneSelection,
-  selectionSummary,
-  single,
-  toggleKey,
-} from "../files/selection";
 import { msgSftp } from "./messages";
-
-/** After this long, opening a folder shows a progress bar (the row shows it at once). */
-const SLOW_MS = 300;
 import {
   type Endpoint,
   type Folder,
@@ -59,11 +46,9 @@ import {
   type SortKey,
   childLoc,
   crumbs,
-  formatModified,
   formatSize,
   localFolder,
   locText,
-  modeString,
   octal,
   parentLoc,
   remoteFolder,
@@ -71,6 +56,10 @@ import {
   visibleEntries,
   visibleName,
 } from "./model";
+import "../files/files.css";
+
+/** After this long, opening a folder shows a progress bar (the row shows it at once). */
+const SLOW_MS = 300;
 
 export type Side = "left" | "right";
 
@@ -96,24 +85,9 @@ interface Connection {
 /** How a pane is doing, for the tab's indicator. */
 export type PaneHealth = "idle" | "busy" | "ok" | "bad" | "attention";
 
-type Prompt =
-  | { kind: "mkdir" }
-  | { kind: "rename"; entry: RemoteEntry }
-  | { kind: "chmod"; entry: RemoteEntry }
-  | { kind: "delete"; entries: RemoteEntry[] };
+type Prompt = { kind: "mkdir" } | { kind: "chmod"; entry: RemoteEntry } | { kind: "delete"; entries: RemoteEntry[] };
 
-const SORT_COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "name", label: msgSftp.columns.name },
-  { key: "modified", label: msgSftp.columns.modified },
-  { key: "size", label: msgSftp.columns.size },
-  { key: "kind", label: msgSftp.columns.kind },
-];
-
-function EntryIcon({ entry }: { entry: RemoteEntry }) {
-  if (entry.kind === "dir") return <IconFolder size={16} />;
-  if (entry.kind === "symlink") return <IconLink2 size={16} />;
-  return <IconFile size={16} />;
-}
+type OpenMenu = { kind: "source"; anchor: HTMLElement } | { kind: "folder"; at: MenuAt } | { kind: "row"; entries: RemoteEntry[]; at: MenuAt };
 
 /**
  * One side of the SFTP tab: this computer (a folder the user chose) or a saved host over a
@@ -125,8 +99,10 @@ export function SftpPane({
   initial,
   hosts,
   visible,
+  active,
   refreshKey,
   otherWhere,
+  onFocusIn,
   onEndpoint,
   onHealth,
   onTransfer,
@@ -139,10 +115,13 @@ export function SftpPane({
   hosts: HostSummary[];
   /** Prompts appear only while the tab is in front. */
   visible: boolean;
+  /** This pane has the keyboard (or was used last): it is marked, the other one is muted. */
+  active: boolean;
   /** Bumped by the tab when a transfer into this pane's folder finished. */
   refreshKey: number;
   /** Where "Copy to …" sends the selection (the other pane), or null when it cannot. */
   otherWhere: string | null;
+  onFocusIn: () => void;
   onEndpoint: (endpoint: Endpoint | null) => void;
   onHealth: (health: PaneHealth) => void;
   /** Copies `entry` from this pane's folder to the other pane's folder. */
@@ -166,10 +145,12 @@ export function SftpPane({
   const [navigating, setNavigating] = useState(false);
   const [slow, setSlow] = useState(false);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
-  const [sourceMenu, setSourceMenu] = useState<HTMLElement | null>(null);
-  const [actionsMenu, setActionsMenu] = useState<HTMLElement | null>(null);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [editPath, setEditPath] = useState(0);
   const [dropping, setDropping] = useState(false);
   const { pending, error, run, clearError } = useAction();
+  const notify = useToast();
   const sessionRef = useRef<string | null>(null);
   const attempt = useRef(0);
 
@@ -306,7 +287,8 @@ export function SftpPane({
     [run, listRemote],
   );
 
-  async function go(loc: Loc, history: "push" | "back" | "forward" | "none" = "push") {
+  /** Shows `loc`; `select` picks a name in it (the folder just left, or a renamed item). */
+  async function go(loc: Loc, history: "push" | "back" | "forward" | "none" = "push", select?: string) {
     setNavigating(true);
     let next: Folder | null;
     try {
@@ -331,7 +313,8 @@ export function SftpPane({
     }
     setFolder(next);
     const loaded = next;
-    setPicked((p) => (sameLoc(from, loaded.loc) ? pruneSelection(p, loaded.entries.map((e) => e.name)) : NO_SELECTION));
+    const names = loaded.entries.map((e) => e.name);
+    setPicked((p) => (select && names.includes(select) ? single(select) : sameLoc(from, loaded.loc) ? pruneSelection(p, names) : NO_SELECTION));
     if (!sameLoc(from, next.loc)) setFilter("");
   }
 
@@ -380,11 +363,10 @@ export function SftpPane({
   useEffect(() => onHealth(health), [health, onHealth]);
 
   const entries = useMemo(() => (folder ? visibleEntries(folder.entries, showHidden, filter, sort) : []), [folder, showHidden, filter, sort]);
-  const order = entries.map((e) => e.name);
   const chosen = entries.filter((e) => picked.names.includes(e.name));
   /** The one selected entry, for actions that take a single item. */
   const selection = chosen.length === 1 ? (chosen[0] as RemoteEntry) : null;
-  const movable = chosen.filter((e) => e.kind === "file" || e.kind === "dir");
+  const movable = (items: RemoteEntry[]) => items.filter((e) => e.kind === "file" || e.kind === "dir");
 
   useEffect(() => {
     if (!navigating) {
@@ -396,6 +378,13 @@ export function SftpPane({
   }, [navigating]);
   const where = folder ? (folder.loc.kind === "local" ? msgSftp.localWhere(locText(folder.loc)) : msgSftp.remoteWhere(source.kind === "host" ? source.label : "", folder.loc.path)) : "";
   const up = folder ? parentLoc(folder.loc) : null;
+  const canChange = folder !== null && endpoint !== null;
+
+  function goUp() {
+    if (!folder || !up) return;
+    const name = folder.loc.kind === "local" ? folder.loc.path.at(-1) : folder.loc.path.replace(/\/+$/, "").split("/").at(-1);
+    void go(up, "push", name);
+  }
 
   function activate(entry: RemoteEntry) {
     if (!folder) return;
@@ -405,24 +394,26 @@ export function SftpPane({
     } else setPicked(single(entry.name));
   }
 
-  function onListKey(event: KeyboardEvent) {
-    if ((event.target as HTMLElement).closest("input, select, textarea")) return;
-    if (event.altKey && event.key === "ArrowLeft" && back.length > 0) {
-      event.preventDefault();
-      void go(back[back.length - 1] as Loc, "back");
-    } else if (event.altKey && event.key === "ArrowRight" && forward.length > 0) {
-      event.preventDefault();
-      void go(forward[forward.length - 1] as Loc, "forward");
-    } else if (event.altKey && event.key === "ArrowUp" && up) {
-      event.preventDefault();
-      void go(up);
-    } else if (event.key === "Delete" && chosen.length > 0) {
-      event.preventDefault();
-      setPrompt({ kind: "delete", entries: chosen });
-    } else if (event.key === "F2" && selection) {
-      event.preventDefault();
-      setPrompt({ kind: "rename", entry: selection });
+  /** Renames in place; a refusal (a name already there) is shown under the field. */
+  async function rename(entry: RemoteEntry, name: string): Promise<string | null> {
+    if (!endpoint || !folder) return null;
+    try {
+      if (endpoint.kind === "local") await filesApi.localRename(endpoint.token, endpoint.path, entry.name, name);
+      else await filesApi.rename(endpoint.sessionId, endpoint.path, entry.name, name);
+    } catch (caught) {
+      return toAppError(caught).message;
     }
+    await go(folder.loc, "none", name);
+    return null;
+  }
+
+  function copyPath(entry: RemoteEntry | null) {
+    if (!folder || folder.loc.kind !== "remote") return;
+    const path = entry ? `${folder.loc.path.replace(/\/+$/, "")}/${entry.name}` : folder.loc.path;
+    void navigator.clipboard.writeText(path).then(
+      () => notify("success", msgFiles.pathCopied),
+      () => undefined,
+    );
   }
 
   // ---------- menus ----------
@@ -434,27 +425,31 @@ export function SftpPane({
     ...sshHosts.map((h) => ({ label: h.label, icon: <IconServer size={15} />, onSelect: () => choose({ kind: "host", hostId: h.id, label: h.label }) })),
   ];
 
-  const canChange = folder !== null && endpoint !== null;
-  const actionItems: MenuEntry[] = [
-    ...(movable.length > 0 && otherWhere
-      ? ([{ label: msgSftp.transferTo(otherWhere), icon: <IconArrowLeftRight size={15} />, onSelect: () => onTransfer(movable) }, "separator"] as MenuEntry[])
-      : []),
-    { label: msgSftp.newFolder, icon: <IconFolderPlus size={15} />, disabled: !canChange, onSelect: () => setPrompt({ kind: "mkdir" }) },
-    { label: msgSftp.rename, icon: <IconPencil size={15} />, disabled: !canChange || !selection, onSelect: () => selection && setPrompt({ kind: "rename", entry: selection }) },
-    {
-      label: msgSftp.permissions,
-      icon: <IconSlidersHorizontal size={15} />,
-      disabled: !canChange || !selection || selection.kind === "symlink",
-      onSelect: () => selection && setPrompt({ kind: "chmod", entry: selection }),
-    },
-    { label: msgSftp.delete, icon: <IconTrash2 size={15} />, tone: "danger", disabled: !canChange || chosen.length === 0, onSelect: () => setPrompt({ kind: "delete", entries: chosen }) },
-    "separator",
-    { label: msgSftp.refresh, icon: <IconRefreshCw size={15} />, disabled: !folder, onSelect: () => void refresh() },
-    {
-      label: showHidden ? msgSftp.hideHidden : msgSftp.showHidden,
-      icon: showHidden ? <IconEyeOff size={15} /> : <IconEye size={15} />,
-      onSelect: () => setShowHidden((v) => !v),
-    },
+  function rowItems(items: RemoteEntry[]): MenuEntry[] {
+    const one = items.length === 1 ? (items[0] as RemoteEntry) : null;
+    const copyable = movable(items);
+    const remote = folder?.loc.kind === "remote";
+    const list: MenuEntry[] = [];
+    if (one && (one.kind === "dir" || (one.kind === "symlink" && remote))) list.push({ label: msgFiles.open, icon: <IconFolderOpen size={15} />, onSelect: () => activate(one) });
+    if (copyable.length > 0 && otherWhere)
+      list.push({ label: msgFiles.copyToOther(otherWhere), icon: <IconArrowLeftRight size={15} />, shortcut: <Keys caps={["F5"]} />, onSelect: () => onTransfer(copyable) });
+    list.push("separator");
+    if (one) {
+      list.push({ label: msgFiles.rename, icon: <IconPencil size={15} />, shortcut: <Keys caps={["F2"]} />, disabled: !canChange, onSelect: () => setRenaming(one.name) });
+      if (one.kind !== "symlink")
+        list.push({ label: msgFiles.permissions, icon: <IconSlidersHorizontal size={15} />, disabled: !canChange, onSelect: () => setPrompt({ kind: "chmod", entry: one }) });
+      if (remote) list.push({ label: msgFiles.copyPath, icon: <IconClipboardCopy size={15} />, onSelect: () => copyPath(one) });
+      list.push("separator");
+    }
+    list.push({ label: msgFiles.delete, icon: <IconTrash2 size={15} />, tone: "danger", shortcut: <Keys caps={["Del"]} />, disabled: !canChange, onSelect: () => setPrompt({ kind: "delete", entries: items }) });
+    return list[0] === "separator" ? list.slice(1) : list;
+  }
+
+  const folderItems: MenuEntry[] = [
+    { label: msgFiles.newFolder, icon: <IconFolderPlus size={15} />, disabled: !canChange, onSelect: () => setPrompt({ kind: "mkdir" }) },
+    { label: msgFiles.refresh, icon: <IconRefreshCw size={15} />, disabled: !folder, onSelect: () => void refresh() },
+    ...(folder?.loc.kind === "remote" ? [{ label: msgFiles.copyPath, icon: <IconClipboardCopy size={15} />, onSelect: () => copyPath(null) }] : []),
+    { label: msgFiles.showHidden, checked: showHidden, onSelect: () => setShowHidden((v) => !v) },
     ...(source.kind === "local" ? (["separator", { label: msgSftp.localChange, icon: <IconFolderOpen size={15} />, onSelect: () => void chooseLocalFolder() }] as MenuEntry[]) : []),
     ...(source.kind === "host" && conn?.sessionId
       ? (["separator", { label: msgSftp.closeConnection, icon: <IconUnplug size={15} />, onSelect: () => choose({ kind: "none" }) }] as MenuEntry[])
@@ -462,6 +457,27 @@ export function SftpPane({
   ];
 
   const sourceLabel = source.kind === "local" ? msgSftp.thisComputer : source.kind === "host" ? source.label : msgSftp.connectTitle;
+  const hiddenCount = folder ? folder.entries.filter((e) => e.name.startsWith(".")).length : 0;
+  const empty = !folder ? null : folder.entries.length === 0 ? (
+    <div className="ft-state">
+      <IconFolderOpen size={24} />
+      <strong>{msgFiles.emptyTitle}</strong>
+      <span>{otherWhere ? msgSftp.emptyDrop : msgFiles.emptyBodyReadOnly}</span>
+    </div>
+  ) : filter.trim() ? (
+    <div className="ft-state">
+      <IconSearch size={22} />
+      <span>{msgSftp.noMatch}</span>
+    </div>
+  ) : (
+    <div className="ft-state">
+      <IconEye size={22} />
+      <span>{msgFiles.onlyHidden(hiddenCount)}</span>
+      <button type="button" className="btn btn-sm" onClick={() => setShowHidden(true)}>
+        {msgFiles.showHidden}
+      </button>
+    </div>
+  );
 
   // ---------- render ----------
 
@@ -469,8 +485,10 @@ export function SftpPane({
     <section
       className="sftp-pane"
       aria-label={sideLabel}
+      data-active={active || undefined}
       data-drop={dropping || undefined}
-      onKeyDown={onListKey}
+      onFocus={onFocusIn}
+      onPointerDown={onFocusIn}
       onDragOver={(event) => {
         if (endpoint && event.dataTransfer.types.includes(SFTP_DRAG)) {
           event.preventDefault();
@@ -491,7 +509,7 @@ export function SftpPane({
       }}
     >
       <header className="sftp-head">
-        <button type="button" className="sftp-source" aria-haspopup="menu" aria-label={`${msgSftp.source}: ${sourceLabel}`} onClick={(e) => setSourceMenu(e.currentTarget)}>
+        <button type="button" className="sftp-source" aria-haspopup="menu" aria-label={`${msgSftp.source}: ${sourceLabel}`} onClick={(e) => setMenu({ kind: "source", anchor: e.currentTarget })}>
           <span className="sftp-source-icon" data-kind={source.kind} aria-hidden="true">
             {source.kind === "host" ? <IconServer size={15} /> : source.kind === "local" ? <IconHardDrive size={15} /> : <IconArrowLeftRight size={15} />}
           </span>
@@ -502,50 +520,7 @@ export function SftpPane({
           <IconChevronDown size={14} />
         </button>
         <span className="spacer" />
-        <IconButton size="sm" label={msgSftp.actionsFor(sideLabel)} aria-haspopup="menu" onClick={(e) => setActionsMenu(e.currentTarget)}>
-          <IconEllipsis size={16} />
-        </IconButton>
-      </header>
-
-      {folder && (
-        <div className="sftp-nav">
-          <IconButton size="sm" label={msgSftp.back} disabled={back.length === 0 || pending} onClick={() => void go(back[back.length - 1] as Loc, "back")}>
-            <IconChevronLeft size={15} />
-          </IconButton>
-          <IconButton size="sm" label={msgSftp.forward} disabled={forward.length === 0 || pending} onClick={() => void go(forward[forward.length - 1] as Loc, "forward")}>
-            <IconChevronRight size={15} />
-          </IconButton>
-          <IconButton size="sm" label={msgSftp.up} disabled={!up || pending} onClick={() => up && void go(up)}>
-            <IconFolderUp size={15} />
-          </IconButton>
-          <nav className="sftp-crumbs" aria-label={msgSftp.breadcrumbs} aria-busy={navigating || undefined} data-loading={navigating || undefined}>
-            <ol>
-              {crumbs(folder.loc).map((crumb, index, all) => {
-                const last = index === all.length - 1;
-                return (
-                  // Positions identify the crumbs: the same name can appear twice in a path.
-                  <li key={`${index}-${crumb.label}`}>
-                    {last ? (
-                      <span aria-current="location" className="sftp-crumb sftp-crumb-current" title={visibleName(crumb.label)}>
-                        {visibleName(crumb.label)}
-                      </span>
-                    ) : (
-                      <button type="button" className="sftp-crumb" onClick={() => void go(crumb.loc)} title={visibleName(crumb.label)}>
-                        {visibleName(crumb.label)}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-              {opening && (
-                <li className="sftp-crumb-pending" aria-hidden="true">
-                  <span className="sftp-crumb">
-                    <span className="spinner spinner-xs" /> {visibleName(opening)}
-                  </span>
-                </li>
-              )}
-            </ol>
-          </nav>
+        {folder && (
           <label className="sftp-filter">
             <IconSearch size={13} aria-hidden="true" />
             <input
@@ -560,135 +535,119 @@ export function SftpPane({
               autoCorrect="off"
             />
           </label>
-          <IconButton size="sm" label={msgSftp.refresh} disabled={pending} onClick={() => void refresh()}>
+        )}
+        <IconButton size="sm" data-tooltip-side="bottom-end" label={msgSftp.actionsFor(sideLabel)} aria-haspopup="menu" onClick={(e) => setMenu({ kind: "folder", at: e.currentTarget })}>
+          <IconEllipsis size={16} />
+        </IconButton>
+      </header>
+
+      {folder && (
+        <div className="sftp-nav">
+          <IconButton size="sm" label={msgSftp.back} disabled={back.length === 0 || pending} onClick={() => void go(back[back.length - 1] as Loc, "back")}>
+            <IconChevronLeft size={15} />
+          </IconButton>
+          <IconButton size="sm" label={msgSftp.forward} disabled={forward.length === 0 || pending} onClick={() => void go(forward[forward.length - 1] as Loc, "forward")}>
+            <IconChevronRight size={15} />
+          </IconButton>
+          <IconButton size="sm" label={msgSftp.up} disabled={!up || pending} onClick={goUp}>
+            <IconFolderUp size={15} />
+          </IconButton>
+          <PathBar
+            crumbs={crumbs(folder.loc).map((crumb) => ({ label: crumb.label, onGo: () => void go(crumb.loc) }))}
+            opening={opening}
+            busy={navigating}
+            editable={folder.loc.kind === "remote" ? { value: folder.loc.path, onSubmit: (path) => void go({ kind: "remote", path }) } : null}
+            editRequest={editPath}
+          />
+          <IconButton size="sm" data-tooltip-side="bottom-end" label={msgSftp.refresh} disabled={pending} onClick={() => void refresh()}>
             <IconRefreshCw size={14} />
           </IconButton>
         </div>
       )}
 
       <div className="sftp-body">
-        <ErrorNotice error={error} />
         {source.kind === "none" && <HostPicker hosts={sshHosts} onLocal={() => choose({ kind: "local" })} onHost={(h) => choose({ kind: "host", hostId: h.id, label: h.label })} />}
         {source.kind === "local" && !folder && (
-          <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
-            <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
-              <IconFolderOpen size={15} /> {msgSftp.localChoose}
-            </button>
-          </EmptyState>
+          <>
+            <ErrorNotice error={error} />
+            <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
+              <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
+                <IconFolderOpen size={15} /> {msgSftp.localChoose}
+              </button>
+            </EmptyState>
+          </>
         )}
         {source.kind === "host" && conn && !folder && (
-          <ConnectionState
-            label={source.label}
-            conn={conn}
-            onReconnect={() => connect(source.hostId)}
-            onOther={() => choose({ kind: "none" })}
-            onOpenKnownHosts={onOpenKnownHosts}
-          />
+          <>
+            {conn.state === "connected" && error ? (
+              <div className="ft-state" role="alert">
+                <IconTriangleAlert size={22} />
+                <strong>{msgFiles.loadFailed}</strong>
+                <span>{error.message}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    clearError();
+                    const id = sessionRef.current;
+                    if (id) void listRemote(id, null).then((f) => f && setFolder(f));
+                  }}
+                >
+                  <IconRefreshCw size={14} /> {msgFiles.retry}
+                </button>
+              </div>
+            ) : (
+              <ConnectionState
+                label={source.label}
+                conn={conn}
+                onReconnect={() => connect(source.hostId)}
+                onOther={() => choose({ kind: "none" })}
+                onOpenKnownHosts={onOpenKnownHosts}
+              />
+            )}
+          </>
         )}
         {folder && (
           <>
-            {folder.truncated && <Notice tone="warning">{msgSftp.truncated(folder.entries.length)}</Notice>}
             {slow && <div className="list-progress sftp-progress" role="progressbar" aria-label={msg.files.loadingFolder} />}
-            <table
-              className="sftp-table"
-              role="grid"
-              aria-multiselectable="true"
-              aria-label={msgSftp.listLabel(where)}
-              aria-busy={navigating || undefined}
-              onKeyDown={(event) => {
-                if ((event.target as HTMLElement).closest("thead")) return;
-                const next = keySelect(picked, order, event.key, event.shiftKey);
-                if (!next) return;
-                event.preventDefault();
-                setPicked(next);
-                const table = event.currentTarget;
-                window.requestAnimationFrame(() => table.querySelector<HTMLButtonElement>(`tr[data-name="${CSS.escape(next.cursor ?? "")}"] .sftp-name`)?.focus());
+            <ErrorNotice error={error} />
+            {folder.truncated && <Notice tone="warning">{msgSftp.truncated(folder.entries.length)}</Notice>}
+            <FileTable
+              label={msgSftp.listLabel(where)}
+              entries={entries}
+              columns={["name", "modified", "size", "mode"]}
+              sort={sort}
+              onSort={(key: SortKey) => setSort((s) => (s.key === key ? { ...s, ascending: !s.ascending } : { key, ascending: true }))}
+              selection={picked}
+              onSelection={setPicked}
+              opening={opening}
+              busy={navigating}
+              inactive={!active}
+              renaming={renaming}
+              onRename={rename}
+              onRenameEnd={() => setRenaming(null)}
+              onActivate={activate}
+              onMenu={(items, at) => setMenu({ kind: "row", entries: items, at })}
+              onBackgroundMenu={(at) => setMenu({ kind: "folder", at })}
+              onKey={(key) => {
+                if (key === "up") goUp();
+                else if (key === "back" && back.length > 0) void go(back[back.length - 1] as Loc, "back");
+                else if (key === "forward" && forward.length > 0) void go(forward[forward.length - 1] as Loc, "forward");
+                else if (key === "rename" && selection && canChange) setRenaming(selection.name);
+                else if (key === "delete" && chosen.length > 0 && canChange) setPrompt({ kind: "delete", entries: chosen });
+                else if (key === "copyOther" && movable(chosen).length > 0) onTransfer(movable(chosen));
+                else if (key === "editPath") setEditPath((n) => n + 1);
               }}
-            >
-              <thead>
-                <tr>
-                  {SORT_COLUMNS.map((column) => (
-                    <th
-                      key={column.key}
-                      scope="col"
-                      className={`sftp-col-${column.key}`}
-                      aria-sort={sort.key === column.key ? (sort.ascending ? "ascending" : "descending") : "none"}
-                    >
-                      <button
-                        type="button"
-                        className="sftp-sort"
-                        aria-label={msgSftp.sortBy(column.label)}
-                        onClick={() => setSort((s) => (s.key === column.key ? { ...s, ascending: !s.ascending } : { key: column.key, ascending: true }))}
-                      >
-                        {column.label}
-                        {sort.key === column.key ? (
-                          <IconChevronDown size={12} className={sort.ascending ? "" : "sftp-sort-desc"} />
-                        ) : (
-                          <IconArrowUpDown size={12} className="sftp-sort-idle" />
-                        )}
-                      </button>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => {
-                  const isSelected = picked.names.includes(entry.name);
-                  const isOpening = opening === entry.name;
-                  const name = visibleName(entry.name);
-                  return (
-                    <tr
-                      key={entry.name}
-                      aria-selected={isSelected}
-                      className={isSelected ? "is-selected" : undefined}
-                      data-name={entry.name}
-                      data-kind={entry.kind}
-                      data-loading={isOpening || undefined}
-                      draggable={endpoint !== null && (entry.kind === "file" || entry.kind === "dir")}
-                      onPointerDown={(event) => pressFeedback(event.currentTarget)}
-                      onDragStart={(event) => {
-                        // Dragging a selected row takes the whole selection; another row goes alone.
-                        const dragged = isSelected && movable.length > 0 ? movable : [entry];
-                        if (!isSelected) setPicked(single(entry.name));
-                        event.dataTransfer.effectAllowed = "copy";
-                        event.dataTransfer.setData(SFTP_DRAG, JSON.stringify({ side, entries: dragged }));
-                      }}
-                      onClick={(event) => setPicked(clickSelect(picked, order, entry.name, { toggle: toggleKey(event), extend: event.shiftKey }))}
-                      onDoubleClick={() => activate(entry)}
-                    >
-                      <td className="sftp-col-name">
-                        <button
-                          type="button"
-                          className="sftp-name"
-                          aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
-                          tabIndex={(picked.cursor ?? order[0]) === entry.name ? 0 : -1}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              activate(entry);
-                            }
-                          }}
-                        >
-                          <span className={`files-icon files-icon-${entry.kind}`}>
-                            {isOpening ? <span className="spinner spinner-xs" aria-hidden="true" /> : <EntryIcon entry={entry} />}
-                          </span>
-                          <span className="sftp-name-text">
-                            <span className="sftp-name-main" title={name}>
-                              {name}
-                            </span>
-                            <span className="sftp-perm mono">{modeString(entry)}</span>
-                          </span>
-                        </button>
-                      </td>
-                      <td className="sftp-col-modified">{formatModified(entry.modified)}</td>
-                      <td className="sftp-col-size mono">{entry.kind === "dir" ? "" : formatSize(entry.size)}</td>
-                      <td className="sftp-col-kind">{msgSftp.kind[entry.kind]}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {entries.length === 0 && <p className="muted sftp-empty">{folder.entries.length === 0 ? msgSftp.empty : filter.trim() ? msgSftp.noMatch : msgSftp.onlyHidden}</p>}
+              canDrag={(entry) => endpoint !== null && (entry.kind === "file" || entry.kind === "dir")}
+              onDragStart={(event, entry, isSelected) => {
+                // Dragging a selected row takes the whole selection; another row goes alone.
+                const dragged = isSelected && movable(chosen).length > 0 ? movable(chosen) : [entry];
+                if (!isSelected) setPicked(single(entry.name));
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData(SFTP_DRAG, JSON.stringify({ side, entries: dragged }));
+              }}
+              empty={empty}
+            />
           </>
         )}
         {dropping && endpoint && (
@@ -704,8 +663,25 @@ export function SftpPane({
         </div>
       )}
 
-      {sourceMenu && <Menu anchor={sourceMenu} items={sourceItems} label={msgSftp.source} onClose={() => setSourceMenu(null)} />}
-      {actionsMenu && <Menu anchor={actionsMenu} items={actionItems} label={msgSftp.actions} onClose={() => setActionsMenu(null)} />}
+      {menu?.kind === "source" && <Menu anchor={menu.anchor} items={sourceItems} label={msgSftp.source} onClose={() => setMenu(null)} />}
+      {menu?.kind === "folder" && (
+        <Menu
+          anchor={menu.at instanceof HTMLElement ? menu.at : undefined}
+          point={menu.at instanceof HTMLElement ? undefined : menu.at}
+          items={folderItems}
+          label={msgSftp.actions}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu?.kind === "row" && (
+        <Menu
+          anchor={menu.at instanceof HTMLElement ? menu.at : undefined}
+          point={menu.at instanceof HTMLElement ? undefined : menu.at}
+          items={rowItems(menu.entries)}
+          label={menu.entries.length === 1 ? msgFiles.rowMenu((menu.entries[0] as RemoteEntry).name) : msg.files.selectionStatus}
+          onClose={() => setMenu(null)}
+        />
+      )}
 
       {prompt && folder && endpoint && (
         <ChangePrompt
@@ -864,7 +840,7 @@ function ConnectionState({
 }
 
 /** Host-key decision for a new server. The safe choice has initial focus. */
-function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
+export function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
   return (
     <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => onAnswer("cancel")}>
       <HopNotice hop={trust.hop} />
@@ -906,7 +882,7 @@ function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "
 
 /** New folder, rename, permissions and delete, on either kind of pane. */
 function ChangePrompt({ prompt, endpoint, onDone }: { prompt: Prompt; endpoint: Endpoint; onDone: (changed: boolean) => void }) {
-  const initial = prompt.kind === "rename" ? prompt.entry.name : prompt.kind === "chmod" ? octal(prompt.entry.permissions) : "";
+  const initial = prompt.kind === "chmod" ? octal(prompt.entry.permissions) : "";
   const [text, setText] = useState(initial);
   const [invalid, setInvalid] = useState<string | null>(null);
   const { pending, error, run } = useAction();
@@ -919,10 +895,6 @@ function ChangePrompt({ prompt, endpoint, onDone }: { prompt: Prompt; endpoint: 
     switch (prompt.kind) {
       case "mkdir":
         return local ? filesApi.localMkdir(endpoint.token, endpoint.path, value) : filesApi.mkdir(endpoint.sessionId, endpoint.path, value);
-      case "rename":
-        return local
-          ? filesApi.localRename(endpoint.token, endpoint.path, prompt.entry.name, value)
-          : filesApi.rename(endpoint.sessionId, endpoint.path, prompt.entry.name, value);
       case "chmod": {
         if (!/^[0-7]{3,4}$/.test(value)) {
           setInvalid(msg.files.modeInvalid);
@@ -985,8 +957,7 @@ function ChangePrompt({ prompt, endpoint, onDone }: { prompt: Prompt; endpoint: 
     );
   }
 
-  const title =
-    prompt.kind === "mkdir" ? msg.files.newFolderTitle : prompt.kind === "rename" ? msg.files.renameTitle(prompt.entry.name) : msg.files.permissionsTitle(prompt.entry.name);
+  const title = prompt.kind === "mkdir" ? msg.files.newFolderTitle : msg.files.permissionsTitle(prompt.entry.name);
   return (
     <Dialog title={title} icon={prompt.kind === "chmod" ? <IconSlidersHorizontal size={18} /> : <IconFolderPlus size={18} />} onDismiss={() => onDone(false)}>
       <form

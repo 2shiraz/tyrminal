@@ -162,6 +162,40 @@ test("undo is offered for 10 s only", async ({ page }) => {
   expect(await calls(page, "host_save")).toHaveLength(1);
 });
 
+test("a key sign-in without a chosen key is never saved, and autosave never picks a key", async ({ page }) => {
+  await openHosts(page);
+  const usesKey = async () => (await calls(page, "host_save")).filter((c) => (c.args as { host: { auth: { kind: string } } }).host.auth.kind === "key");
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await details(page).getByRole("radio", { name: /Use a key from the keychain/ }).check();
+  const select = details(page).getByRole("combobox", { name: "Choose a key" });
+  await expect(select).toHaveValue("");
+  await expect(details(page).getByText("Choose a key. Until you do, the host keeps its current sign-in.")).toBeVisible();
+  await expect(select).toHaveAttribute("aria-invalid", "true");
+  // Other edits save; the sign-in stays as stored, and no key is chosen for the user.
+  await details(page).getByLabel("Tags").fill("web");
+  await details(page).getByLabel("Name", { exact: true }).focus();
+  await expect.poll(count(page, "host_save")).toBe(1);
+  await settled(page);
+  expect((await calls(page, "host_save"))[0]?.args).toMatchObject({ host: { tags: ["web"], auth: { kind: "ask_password" } } });
+  expect(await usesKey()).toHaveLength(0);
+  await expect(select).toHaveValue("");
+
+  // A new host too: created with its own sign-in, never with a key nobody chose.
+  await page.getByRole("button", { name: "Add host" }).click();
+  await panel(page).getByRole("radio", { name: /Use a key from the keychain/ }).check();
+  await panel(page).getByLabel("Address").fill("198.51.100.8");
+  await panel(page).getByLabel("Name", { exact: true }).focus();
+  await expect.poll(count(page, "host_save")).toBe(2);
+  await settled(page);
+  expect((await calls(page, "host_save"))[1]?.args).toMatchObject({ host: { address: "198.51.100.8", auth: { kind: "ask_password" } } });
+  expect(await usesKey()).toHaveLength(0);
+
+  // Choosing a key saves it.
+  await panel(page).getByRole("combobox", { name: "Choose a key" }).selectOption({ label: "Deploy key (ssh-ed25519)" });
+  await expect.poll(async () => (await usesKey()).length).toBe(1);
+  await expect(panel(page).getByText("Choose a key. Until you do, the host keeps its current sign-in.")).toHaveCount(0);
+});
+
 test("the jump host and proxy are one unit: saved once valid, never half, before the host's basics", async ({ page }) => {
   await openHosts(page);
   await list(page).getByRole("button", { name: "staging-web", exact: true }).click();

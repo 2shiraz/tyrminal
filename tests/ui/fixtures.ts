@@ -13,13 +13,20 @@ export interface MockOptions {
   // agent B: tunnels and history
   /** Name the jump-chain hop in that trust prompt. */
   trustPromptHop?: { index: number; total: number; label: string };
+  /** Seed sample session recordings. */
+  recordings?: boolean;
   hostKeyChangedFor?: string;
+  /** The server refuses this host's key until it is installed (key_deploy). */
+  keyRejectedFor?: string;
   /** Simulate a WebView without WebGL (the GPU renderer must fall back). */
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  // compromised-password check (SEC-11)
+  /** Pretend the build can make range requests (the real build cannot yet). */
+  passwordCheckAvailable?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

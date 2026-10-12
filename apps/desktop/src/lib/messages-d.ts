@@ -269,6 +269,25 @@ export const msgD = {
     runRejected: (names: string[]) => `Not set by the server: ${names.join(", ")}`,
     suggestions: "Variables of this host",
   },
+  // Installing a Keychain key on a server whose sign-in does not accept it yet.
+  installKey: {
+    title: "Install a key on a server",
+    titleFor: (key: string) => `Install “${key}” on a server`,
+    body: (host: string) =>
+      `To install the key, sign in to ${host} once with its password. You check the host key and type the password as usual; then you see what changes on the server before anything is written.`,
+    host: "Server",
+    hostChoose: "Choose a server…",
+    noHosts: "There are no SSH hosts yet.",
+    signIn: "Sign in with password",
+    signingIn: "Signing in…",
+    failed: "Could not sign in to install the key:",
+    retry: "Try again",
+    cancel: "Cancel",
+    fromKeychain: "Install on a server…",
+    fromKeychainLabel: (key: string) => `Install ${key} on a server`,
+    fromHost: "Install key on server",
+    fromFailure: "Install this key on the server…",
+  },
   connectionLog: {
     title: (name: string) => `Connection log: ${name}`,
     palette: "Show connection log",

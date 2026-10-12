@@ -22,6 +22,7 @@ export const msgC = {
   tabs: {
     duplicate: "Duplicate tab",
     duplicateFull: (panes: number) => `Not enough room: a copy needs ${panes} more panes and at most 16 can be open.`,
+    nothingClosed: "No closed tab to reopen.",
   },
   panes: {
     full: "At most 16 panes can be open. Close one first.",
@@ -157,7 +158,25 @@ export const msgC = {
       movePaneRight: "Move pane right",
       movePaneUp: "Move pane up",
       movePaneDown: "Move pane down",
+      // terminal input
+      previousCommand: "Jump to the previous command",
+      nextCommand: "Jump to the next command",
+      nextPane: "Next pane",
+      prevPane: "Previous pane",
+      goToTab1: "Go to tab 1",
+      goToTab2: "Go to tab 2",
+      goToTab3: "Go to tab 3",
+      goToTab4: "Go to tab 4",
+      goToTab5: "Go to tab 5",
+      goToTab6: "Go to tab 6",
+      goToTab7: "Go to tab 7",
+      goToTab8: "Go to tab 8",
+      goToLastTab: "Go to last tab",
+      reopenClosedTab: "Reopen closed tab",
+      focusTerminal: "Focus terminal",
+      focusSidebar: "Focus sidebar",
       suggest: "Command suggestions",
+      insertPassword: "Type identity password",
     } as Record<string, string>,
   },
   highlight: {

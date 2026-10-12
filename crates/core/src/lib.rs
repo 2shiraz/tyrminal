@@ -29,13 +29,20 @@ mod transcode;
 mod validate;
 mod vault;
 // agent B: tunnels and history
+mod recording;
 mod tunnels;
+// terminal input: highlight patterns
+mod highlight;
 // agent D: inventory and snippets
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// compromised-password check (SEC-11)
+pub mod password_check;
 // command history
 mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
@@ -91,16 +98,19 @@ impl Core {
     ) -> Result<Self, IpcError> {
         let db = Database::open(db_path).map_err(error::from_storage)?;
         let preferences = PreferencesStore::open(&db_path.with_file_name("preferences.json"));
-        Ok(Self::with_database(db, preferences, secret_store))
+        // Session recordings live beside the database.
+        let logs_dir = db_path.with_file_name("logs");
+        Ok(Self::with_database(db, preferences, secret_store, logs_dir))
     }
 
     fn with_database(
         db: Database,
         preferences: PreferencesStore,
         secret_store: Arc<dyn tyrminal_platform::SecretStore>,
+        logs_dir: std::path::PathBuf,
     ) -> Self {
         let vault = Arc::new(VaultService::new(db, secret_store));
-        let sessions = Sessions::new(Arc::clone(&vault));
+        let sessions = Sessions::new(Arc::clone(&vault), logs_dir);
         Self { vault, sessions, preferences: Arc::new(preferences), discovery: Discovery::new() }
     }
 }
@@ -115,6 +125,32 @@ impl Core {
     ) -> Result<tyrminal_contracts::DiscoveryStatus, IpcError> {
         self.vault.require_unlocked().await?;
         self.discovery.start(owner, network_id)
+    }
+}
+
+// compromised-password check (SEC-11)
+impl Core {
+    /// Whether the check is on, where it would send prefixes, and whether this build can.
+    pub async fn password_check_status(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckStatus, IpcError> {
+        let secrets = self.vault.stored_secrets().await?;
+        Ok(password_check::status(&self.preferences.get().password_check, source, &secrets))
+    }
+
+    /// Checks every stored password against `source` (an explicit request; refused while the
+    /// preference is off).
+    pub async fn check_stored_passwords(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckReport, IpcError> {
+        let prefs = self.preferences.get().password_check;
+        if !prefs.enabled {
+            return password_check::run(&prefs, source, Vec::new()).await;
+        }
+        let secrets = self.vault.stored_secrets().await?;
+        password_check::run(&prefs, source, secrets).await
     }
 }
 

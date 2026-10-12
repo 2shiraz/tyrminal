@@ -39,6 +39,7 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
+  IconHistory,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
@@ -46,8 +47,13 @@ import { msgD } from "../../lib/messages-d";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
+// privilege prompts (KEY-18)
+import { msgP } from "../../lib/messages-privilege";
 import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
+
+/** A palette entry; other features contribute entries through the `extra` prop. */
+export type PaletteItem = Item;
 
 interface Item {
   id: string;
@@ -112,7 +118,9 @@ export function CommandPalette({
   layouts,
   pick,
   openTabs,
+  extra,
   onShellIntegration,
+  onInsertPassword,
   onConnectionLog,
   onSearchSessions,
   onCommandOutput,
@@ -160,10 +168,15 @@ export function CommandPalette({
     | undefined;
   /** Open tabs, so the palette can switch to one by name or destination. */
   openTabs?: { id: number; title: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Further actions contributed by other features (listed after the built-in actions). */
+  extra?: PaletteItem[] | undefined;
   /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  // privilege prompts (KEY-18)
+  /** Present only when the focused pane is a connected SSH session. */
+  onInsertPassword?: (() => void) | undefined;
   /** The focused SSH pane's connection log; present when it has a session. */
   onConnectionLog?: (() => void) | undefined;
   /** P-28: search every open terminal's scrollback; present while any terminal is open. */
@@ -338,6 +351,8 @@ export function CommandPalette({
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
+    // privilege prompts (KEY-18)
+    if (onInsertPassword) list.push(action("insert-password", msgP.insert.palette, <IconKeyRound size={16} />, onInsertPassword, "insertPassword"));
     list.push(action("theme", msg.palette.toggleTheme, <IconSun size={16} />, onToggleTheme));
     list.push(action("sidebar", msg.palette.toggleSidebar, <IconSidebar size={16} />, () => onAction("toggleSidebar"), "toggleSidebar"));
     list.push(action("lock", msg.nav.lock, <IconLock size={16} />, () => onAction("lock"), "lock"));
@@ -368,8 +383,11 @@ export function CommandPalette({
     });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
+    list.push(nav("recordings", <IconHistory size={16} />));
+    // terminal input: contributed actions
+    list.push(...(extra ?? []));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items

@@ -14,6 +14,7 @@ export const msgEnv = {
   startupRemove: (name: string) => `Remove ${name} from startup`,
   startupUp: (name: string) => `Move ${name} earlier`,
   startupTooMany: "16 snippets at most",
+  startupTooLong: (line: number) => `Line ${line} is longer than 1000 bytes; terminals in line mode can't take it, so this snippet is not typed at startup.`,
   noSnippets: "Save a snippet first to run it at startup.",
   // Variables referenced by snippets.
   refs: "Variables this snippet uses",

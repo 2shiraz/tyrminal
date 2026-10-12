@@ -21,7 +21,7 @@ mod jump;
 mod proxy;
 
 pub use agent::ForwardedAgent;
-pub use algorithms::negotiation_summary;
+pub use algorithms::{KeyExchangePolicy, POST_QUANTUM_KEX, negotiation_summary};
 pub use auth::{
     AuthOutcome, ClientKey, KbdPrompt, KbdRound, KeyError, MAX_KBD_PROMPTS, MAX_KBD_ROUNDS, MAX_SERVER_TEXT,
     sanitize_server_text,
