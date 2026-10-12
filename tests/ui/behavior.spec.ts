@@ -78,7 +78,8 @@ test("splits: open, focus moves between panes, close the focused pane", async ({
   await page.keyboard.press("Control+Shift+W");
   await expect(page.locator(".pane")).toHaveCount(2);
   // A separator can be resized from the keyboard.
-  const splitter = page.getByRole("separator").first();
+  // The pane splitter, not a panel edge (the sidebar edge is a separator too).
+  const splitter = page.locator(".splitter[role=separator]").first();
   await splitter.focus();
   const before = Number(await splitter.getAttribute("aria-valuenow"));
   await page.keyboard.press("ArrowRight");
