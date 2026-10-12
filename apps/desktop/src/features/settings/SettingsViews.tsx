@@ -194,9 +194,12 @@ export function SettingsView() {
                 <h2 id="settings-terminal-title">{msg.settings.terminal}</h2>
                 <p>{msg.settings.terminalBody}</p>
               </header>
-              <Suspense fallback={<div className="terminal-preview skeleton" />}>
-                <TerminalPreview prefs={t} />
-              </Suspense>
+              {/* A picture of the settings, not a terminal: nothing inside can take focus. */}
+              <div inert>
+                <Suspense fallback={<div className="terminal-preview skeleton" />}>
+                  <TerminalPreview prefs={t} />
+                </Suspense>
+              </div>
 
               <div className="stack-sm">
                 <span className="label" id="scheme-label">

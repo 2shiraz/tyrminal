@@ -155,6 +155,11 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
+- **A → C:** `tests/ui/accessibility.spec.ts` (axe-core, WCAG 2.2 A/AA) finds two violations in
+  `TabStrip.tsx`: `aria-required-children` (the `tablist` contains elements that are not tabs) and
+  `nested-interactive` (a close button inside each draggable tab). Please fix them and remove the
+  `.exclude(".tabstrip")` line in that spec.
+
 - **A → C (done by A in A's branch, keep when merging):** `AppShell.tsx` passes `others` (the other
   connected SSH sessions, for "Copy to another server") to `FilesPanel`, right below its `target`
   prop. Four lines; nothing else in AppShell changed.
