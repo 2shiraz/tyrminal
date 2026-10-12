@@ -23,6 +23,7 @@ import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
@@ -193,6 +194,10 @@ export class TerminalController {
       allowNonHttpProtocols: false,
     };
     this.term.open(container);
+    // Committed IME text sent exactly once and in order (TRM-11); xterm's own handling otherwise.
+    const composition = installComposition(this.term);
+    if (composition) this.cleanups.push(composition);
+    container.dataset.composition = composition ? "ordered" : "xterm";
     this.highlighter = new OutputHighlighter(this.term, this.toneColors());
     this.applyRenderer();
     this.applyLigatures();
@@ -398,6 +403,16 @@ export class TerminalController {
     } else {
       send();
     }
+  }
+
+  /** Copies the selection (palette action); false when nothing is selected. */
+  copy(): Promise<boolean> {
+    return this.copySelection();
+  }
+
+  /** Pastes the clipboard through the same review as a keyboard paste (palette action). */
+  paste(): void {
+    void this.pasteFromClipboard();
   }
 
   private activateLink(event: MouseEvent, uri: string): void {

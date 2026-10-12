@@ -269,3 +269,8 @@ Never merge these by hand; regenerate them after resolving the sources:
   `sanitize_workspace` checks patterns through the new `crates/core/src/highlight.rs`;
   `features/layouts/WorkspaceSettings.tsx` renders `features/highlight/HighlightRules.tsx` instead of its
   `Keywords` list (removed); `app/AppShell.tsx` one `useSlowPatternNotice()` line.
+- `features/palette/CommandPalette.tsx`: `export type PaletteItem` and an `extra` prop whose items are
+  appended after the built-in ones (one marked line); `features/terminal/TerminalView.tsx`: `copy`/`paste`
+  on `PaneHandle`, a "Show connection details" button on the failure notice and its dialog (marked);
+  `lib/ipc.ts`: `connectionDetails` at the end (marked); `tests/ui/mock-backend.js`: `session_diagnostics`.
+- `features/terminal/TerminalController.ts`: installs `features/terminal/composition.ts` after `open()`.

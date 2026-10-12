@@ -442,6 +442,21 @@ export function installMockBackend(options) {
       if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
       return openSession({ ...a }, "local").sessionId;
     },
+    // terminal input: connection details (CON-15). Synthetic lines for any session id this page
+    // was given; a test can replace them with window.__mockDiagnostics.
+    session_diagnostics: (a) => {
+      if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
+      if (!/^a*\d+$/.test(a.sessionId) || a.sessionId.length !== 32) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return (
+        window.__mockDiagnostics ?? [
+          "Resolving api.example.internal: 203.0.113.10",
+          "Connecting to 203.0.113.10 port 22",
+          "Server identity: ssh-ed25519 SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8 matches the saved key",
+          "Key exchange: mlkem768x25519-sha256; cipher chacha20-poly1305@openssh.com",
+          "Authenticated as deploy with public key",
+        ]
+      );
+    },
     files_copy: (a) => {
       if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
       const node = fs.get(childPath(a.srcDir, a.name));

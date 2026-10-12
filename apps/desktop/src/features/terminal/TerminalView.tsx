@@ -24,6 +24,8 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { msgI } from "../../lib/messages-input";
+import { ConnectionDetails } from "../connection/ConnectionDetails";
 import { msgC } from "../../lib/messages-c";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { encodingById } from "./encoding";
@@ -66,6 +68,9 @@ export interface PaneHandle {
   setEncoding(id: string): void;
   /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
   release(on: boolean): void;
+  // terminal input: palette copy and paste
+  copy(): Promise<boolean>;
+  paste(): void;
 }
 
 interface TerminalViewProps {
@@ -130,6 +135,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
@@ -306,6 +312,8 @@ export function TerminalView(props: TerminalViewProps) {
       },
       encoding: () => encodingRef.current,
       release: (on) => controllerRef.current?.release(on),
+      copy: () => controllerRef.current?.copy() ?? Promise.resolve(false),
+      paste: () => controllerRef.current?.paste(),
       setEncoding: (id) => {
         encodingRef.current = encodingById(id).id;
         setEncodingId(encodingRef.current);
@@ -461,6 +469,7 @@ export function TerminalView(props: TerminalViewProps) {
         </div>
       )}
 
+      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {closed && (
         <div className="terminal-overlay">
           <div className="overlay-card" role={closed.error ? "alert" : "status"}>
@@ -498,6 +507,12 @@ export function TerminalView(props: TerminalViewProps) {
                 <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
                   {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
                 </p>
+                {/* terminal input: connection details (CON-15) */}
+                {target.kind === "ssh" && controllerRef.current?.id && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailsFor(controllerRef.current?.id ?? null)}>
+                    {msgI.details.link}
+                  </button>
+                )}
               </>
             ) : (
               <p className="muted">{closed.exitStatus !== null ? msg.terminal.endedExit(closed.exitStatus) : msg.terminal.endedClean}</p>

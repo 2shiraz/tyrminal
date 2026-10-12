@@ -114,7 +114,12 @@ describe("terminal with real applications", { concurrency: false }, () => {
     // delivers it to the page: compositionstart, preedit updates in the input element, then
     // compositionend. Everything after that (xterm's composition handling, the encoder, IPC,
     // the core and the real shell) is the production path.
-    await t.type("printf %s ");
+    // The ordered composition handling is installed on xterm's helper in this WebView too.
+    assert.equal(await s.execute(`return document.querySelector(".pane[data-focused=true] .terminal-host")?.dataset.composition ?? null`), "ordered");
+    // od reads the terminal line itself, so the bytes it prints are exactly what arrived: no
+    // shell expansion or completion in between.
+    await t.type("od -An -tx1; echo IME-DONE\n");
+    await new Promise((r) => setTimeout(r, 300));
     const composed = await s.execute(`
       const ta = document.querySelector(".pane[data-focused=true] .xterm-helper-textarea");
       ta.focus();
@@ -130,11 +135,11 @@ describe("terminal with real applications", { concurrency: false }, () => {
       ta.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語" }));
       return shown;`);
     assert.equal(composed, "にほんご", "the preedit text is shown while composing");
-    // The committed characters arrive once: od prints exactly the nine UTF-8 bytes of 日本語.
-    await t.type(" | od -An -tx1; echo IME-DONE\n");
+    await t.type("\n");
+    await s.chord([KEYS.ctrl, "D"]);
     const text = await t.waitForText(/^IME-DONE$/m, "od output");
-    assert.match(text, /e6 97 a5 e6 9c ac e8 aa 9e\s*\n/);
-    assert.doesNotMatch(text, /e6 97 a5 e6 9c ac e8 aa 9e e6/, "composed text sent once");
+    // The nine UTF-8 bytes of 日本語 and the newline, once.
+    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
@@ -570,7 +575,7 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
           highlight: {
             enabled: true,
             ipAddresses: false,
-            keywords: [rule("[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
+            keywords: [rule("[a-z]{0,99}[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
           },
           bindings: [],
           optionAsMeta: false,
@@ -589,17 +594,25 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
       // Lines of letters with no "!": the first pattern backtracks for a long time on them.
       await t.type("printf 'login user=alice ok\\n'; for i in $(seq 1 30); do printf '%0150d\\n' 0 | tr 0 a; done; echo HL-DONE\n");
       await t.waitForText(/^HL-DONE$/m, "output");
-      await s.until(() => s.execute(`return document.body.textContent.includes("took too long and was switched off") || null`), {
-        describe: "slow pattern notice",
-        timeout: 15_000,
-      });
+      await s
+        .until(() => s.execute(`return document.body.textContent.includes("took too long and was switched off") || null`), {
+          describe: "slow pattern notice",
+          timeout: 15_000,
+        })
+        .catch(async (error) => {
+          const marks = await s.execute(`return [...document.querySelectorAll(".term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+          throw new Error(`${error.message}; decorations: ${marks}`);
+        });
       // The other rules are drawn (the pattern by the worker, the word on the page).
       await t.type("clear; printf 'login user=alice ok\\n'\n");
       const tones = await s.until(
         () =>
           s.execute(`const t = [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).sort(); return t.length === 2 ? t : null`),
         { describe: "highlight decorations" },
-      );
+      ).catch(async (error) => {
+        const marks = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+        throw new Error(`${error.message}; decorations: ${marks}; screen: ${(await t.terminalText()).slice(-300)}`);
+      });
       assert.deepEqual(tones, ["danger", "info"]);
       await t.type("echo STILL-HERE\n");
       await t.waitForText(/^STILL-HERE$/m, "shell responsive");

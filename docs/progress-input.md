@@ -12,6 +12,8 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 1 | IME composition (TRM-11) | Done: UI tests over Chromium's IME path, native test on Linux |
 | 2 | Broadcast targets can be left out (P-13) | Done: UI tests |
 | 3 | Highlight patterns with bounded matching (TRM-07) | Done: core, UI and native tests on Linux |
+| 4 | Ordered IME commits (TRM-11 fix) | Done: UI stress tests; native check on Linux |
+| 5 | Palette completeness (UX-03), Connection details view (CON-15) | Done: UI tests; native waits for `session_diagnostics` |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -49,6 +51,30 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   pattern switched off while typing keeps working); native `terminal.test.mjs` "highlighting
   patterns in the real WebView" (worker loads in WebKitGTK, slow pattern cut off; Linux).
 
+## Slice 4: committed IME text in exact order (TRM-11)
+
+- Found with 6 parallel runs: xterm 6.0.0's composition helper read committed text a tick after
+  `compositionend` from offsets recorded earlier. A key typed before that tick (Chromium runs
+  input before timers) sent the text twice or partly; Enter or Ctrl+C right after a commit empties
+  the input element first, so the text was lost; back-to-back commits occasionally dropped one.
+  6 of 12 stress runs failed.
+- `features/terminal/composition.ts` replaces the helper's composition methods on the instance
+  (xterm's own handling stays if the internals are not found; the host element says which,
+  `data-composition="ordered"|"xterm"`). Committed text is what the input element gained since
+  the composition began, sent exactly once at the first of: next composition, next key, blur, or
+  one tick after `compositionend`. 42/42 stress runs pass; `ime.spec.ts` keeps the stress case.
+
+## Slice 5: palette and connection details (UX-03, CON-15 view)
+
+- Every application action has a palette entry where it can act (next/previous/rename/close tab,
+  close other tabs, focus and move pane in four directions, copy, paste), running the same code
+  as its shortcut (`features/commands/extraActions.tsx`, contributed through a new `extra` prop).
+- "Connection details…" (palette, for the focused SSH pane) and "Show connection details" (on the
+  connection-failed notice) open a dialog listing the core's lines for that session with Copy.
+  Lines are shown as text; control characters are replaced. IPC `connectionDetails.lines` →
+  `session_diagnostics` (the core command arrives with PR #8; until then the native call fails
+  and the dialog shows the error). UI tests use a mock handler; no native test until the command exists.
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -61,3 +87,8 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   keep matching fast, groups cannot be repeated and backreferences and lookaround are not
   available. A pattern that takes too long is switched off and named in a notice; edit the rules
   to try it again. Rules higher in the list win where matches overlap."
+- Command palette: "Every action is in the palette (Ctrl+Shift+K, ⌘K on macOS): type part of
+  its name. Tab and pane actions appear when a terminal is in front."
+- Connection details: "To see what happened while connecting, choose Connection details… in the
+  palette, or Show connection details on a failed connection. Copy puts the lines on the
+  clipboard; they never contain passwords, passphrases or keys."

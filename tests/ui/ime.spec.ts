@@ -102,6 +102,7 @@ test("IME: committed text is broadcast once to every receiving pane", async ({ p
   await openLocal(page);
   await page.keyboard.press("Alt+Shift+Equal");
   await expect(page.locator(".pane")).toHaveCount(2);
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
   await expect(page.locator(".pane[data-focused=true] .xterm-helper-textarea")).toBeFocused();
   await waitForTerminalText(page, "$");
   await page.keyboard.press("Control+Shift+K");
@@ -121,4 +122,37 @@ test("IME: committed text is broadcast once to every receiving pane", async ({ p
   expect(await sentSince(page, before)).toEqual(["日本", "日本"]);
   await cdp.send("Input.insertText", { text: "語" });
   await expect.poll(() => sentSince(page, before)).toEqual(["日本語", "日本語"]);
+});
+
+// Fast typing: the next key, the next composition or Enter arrives before the browser's next
+// timer tick. xterm's own helper read stale offsets here and sent text twice or not at all.
+test("IME: a key right after a commit, back-to-back commits and Enter keep exact order", async ({ page }) => {
+  await openLocal(page);
+  await expect(page.locator(".pane[data-focused=true] .terminal-host")).toHaveAttribute("data-composition", "ordered");
+  const cdp = await page.context().newCDPSession(page);
+  let before = await inputs(page);
+  for (let i = 0; i < 10; i += 1) {
+    await cdp.send("Input.imeSetComposition", { text: "하", selectionStart: 1, selectionEnd: 1 });
+    await cdp.send("Input.insertText", { text: "한" });
+    await page.keyboard.type(" ");
+  }
+  await expect.poll(async () => (await sentSince(page, before)).join("")).toBe("한 ".repeat(10));
+
+  before = await inputs(page);
+  for (let i = 0; i < 10; i += 1) {
+    await cdp.send("Input.imeSetComposition", { text: "ㄱ", selectionStart: 1, selectionEnd: 1 });
+    await cdp.send("Input.insertText", { text: "글" });
+  }
+  await page.waitForTimeout(100);
+  expect((await sentSince(page, before)).join("")).toBe("글".repeat(10));
+
+  // Enter right after a commit: the text goes first, then the newline (xterm empties its
+  // input element on Enter, which used to lose the text).
+  before = await inputs(page);
+  for (let i = 0; i < 5; i += 1) {
+    await cdp.send("Input.imeSetComposition", { text: "に", selectionStart: 1, selectionEnd: 1 });
+    await cdp.send("Input.insertText", { text: "日" });
+    await page.keyboard.press("Enter");
+  }
+  await expect.poll(async () => (await sentSince(page, before)).join("")).toBe("日\r".repeat(5));
 });

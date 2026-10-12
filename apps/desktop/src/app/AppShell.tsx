@@ -25,6 +25,8 @@ import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
 import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
+import { extraPaletteItems } from "../features/commands/extraActions";
+import { ConnectionDetails } from "../features/connection/ConnectionDetails";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
@@ -122,6 +124,8 @@ function Shell() {
   // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
   const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
+  // terminal input: the connection details dialog (CON-15)
+  const [details, setDetails] = useState<{ sessionId: string; label: string } | null>(null);
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // Tabs in broadcast mode with the panes the user confirmed. Kept in memory only: never saved,
   // and switched off as soon as a confirmed pane stops being connected (a reconnect never
@@ -694,6 +698,23 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          extra={extraPaletteItems({
+            hasTerminal: terminalVisible && tab !== null && pane !== null,
+            tabCount: ws.tabs.length,
+            split: tab ? panesOf(tab.layout).length > 1 : false,
+            onAction: runAction,
+            onCloseTab: () => tab && setWs((current) => closeTab(current, tab.id)),
+            onCloseOtherTabs: () => tab && setWs((current) => closeOtherTabs(current, tab.id)),
+            onCopy: () => void focusedHandle()?.copy(),
+            onPaste: () => focusedHandle()?.paste(),
+            onDetails:
+              pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
+                ? () => {
+                    const sessionId = focusedHandle()?.sessionId();
+                    if (sessionId) setDetails({ sessionId, label: pane.label });
+                  }
+                : undefined,
+          })}
           openTabs={ws.tabs.map((t) => {
             const p = ws.panes[t.focused];
             return { id: t.id, title: tabTitle(ws, t), detail: p?.identity ?? "", onSelect: () => setWs((current) => selectTab(current, t.id)) };
@@ -808,6 +829,17 @@ function Shell() {
             const failure = await saveLayout(name);
             if (failure === null) setSavingAs(false);
             return failure;
+          }}
+        />
+      )}
+
+      {details && (
+        <ConnectionDetails
+          sessionId={details.sessionId}
+          label={details.label}
+          onClose={() => {
+            setDetails(null);
+            focusedHandle()?.focus();
           }}
         />
       )}

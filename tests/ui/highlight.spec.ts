@@ -90,14 +90,14 @@ test("patterns: one that takes too long is switched off, the others keep working
   await openApp(page, { renderer: "compatibility" });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await openSettings(page);
-  // Polynomial backtracking within the static limits: three unbounded runs before a ! that never comes.
-  await addRule(page, "Pattern", "[a-z]*[a-z]*[a-z]*!");
+  // Polynomial backtracking within the static limits: four variable runs before a ! that never comes.
+  await addRule(page, "Pattern", "[a-z]{0,99}[a-z]*[a-z]*[a-z]*!");
   await addRule(page, "Pattern", "id=\\d+");
 
   await connect(page);
   const rows = Array.from({ length: 30 }, () => "a".repeat(150)).join("\r\n");
   await output(page, `\r\n${rows}\r\nid=42\r\n`);
-  await expect(page.getByText("The highlight pattern /[a-z]*[a-z]*[a-z]*!/ took too long and was switched off.")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("The highlight pattern /[a-z]{0,99}[a-z]*[a-z]*[a-z]*!/ took too long and was switched off.")).toBeVisible({ timeout: 10_000 });
   // The other pattern still applies once the slow one is off.
   await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(1);
   // Typing still reaches the session.

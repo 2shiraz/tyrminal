@@ -331,3 +331,9 @@ export const detach = {
   attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
 };
+
+// terminal input: connection details (CON-15)
+/** The core's connection diagnostics for a session of this window: plain lines, no secrets. */
+export const connectionDetails = {
+  lines: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
+};
