@@ -12,7 +12,7 @@ async function connect(page: Page, host: string) {
 }
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Files" });
-const list = (page: Page) => panel(page).getByRole("list", { name: /Contents of/ });
+const list = (page: Page) => panel(page).getByRole("list", { name: /^Contents of \// });
 /** Lets the newest running mock transfer complete. */
 const finishLatest = (page: Page) =>
   page.evaluate(() => {
@@ -79,6 +79,11 @@ test("files: uploads and downloads show progress, never replace without asking, 
   await panel(page).getByRole("button", { name: "Upload…" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Replace" }).click();
   await expect(transfers.getByRole("listitem")).toHaveCount(2);
+  // Keep both uploads under the next free name instead.
+  await panel(page).getByRole("button", { name: "Upload…" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Keep both" }).click();
+  await expect(transfers.getByRole("listitem").nth(2)).toContainText("notes (1).txt");
+  await transfers.getByRole("button", { name: "Cancel notes (1).txt" }).click();
 
   // Cancel a running transfer.
   await transfers.getByRole("button", { name: "Cancel notes.txt" }).click();
@@ -87,9 +92,9 @@ test("files: uploads and downloads show progress, never replace without asking, 
   // Download a selected file into a chosen folder; an existing local file needs confirmation.
   await list(page).getByRole("button", { name: "Select README.md" }).click();
   await panel(page).getByRole("button", { name: "Download…" }).click();
-  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("1.3 KB of 5.0 KB");
+  await expect(transfers.getByTestId("transfer-state").nth(3)).toHaveText("1.3 KB of 5.0 KB");
   await finishLatest(page);
-  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
+  await expect(transfers.getByTestId("transfer-state").nth(3)).toHaveText("Done");
   await panel(page).getByRole("button", { name: "Download…" }).click();
   await expect(page.getByRole("alertdialog", { name: "Replace “README.md”?" })).toContainText("in the folder you chose");
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
@@ -149,4 +154,102 @@ test("files: a local terminal has no files to show", async ({ page }) => {
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
   await page.locator(".statusbar").getByRole("button", { name: "Files" }).click();
   await expect(panel(page)).toContainText("Files work with a connected SSH session");
+});
+
+test("files: whole folders upload and download, report skipped links, and are never merged", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+
+  await panel(page).getByRole("button", { name: "Upload folder…" }).click();
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("3.0 KB of 6.0 KB");
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done · 3 files, 1 link or special file skipped");
+  await expect(list(page).getByRole("button", { name: "Open site" })).toBeVisible();
+
+  // The same folder again is never merged or replaced; keeping both is the only offer.
+  await panel(page).getByRole("button", { name: "Upload folder…" }).click();
+  const folderConflict = page.getByRole("alertdialog", { name: "Replace “site”?" });
+  await expect(folderConflict).toContainText("never merged or replaced");
+  await expect(folderConflict.getByRole("button", { name: "Replace" })).toHaveCount(0);
+  await folderConflict.getByRole("button", { name: "Keep both" }).click();
+  await finishLatest(page);
+  await expect(list(page).getByRole("button", { name: "Open site (1)" })).toBeVisible();
+
+  // Download the folder being shown.
+  await list(page).getByRole("button", { name: "Open app" }).click();
+  await panel(page).getByRole("button", { name: "Download this folder…" }).click();
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
+  // At the root there is no folder above to download into.
+  await panel(page).getByRole("textbox", { name: "Folder on the server" }).fill("/");
+  await page.keyboard.press("Enter");
+  await expect(panel(page).getByRole("button", { name: "Download this folder…" })).toBeDisabled();
+});
+
+test("files: a file opened in an editor is saved only on request, and server changes are not overwritten silently", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await panel(page).getByRole("button", { name: "Edit…" }).click();
+  const editing = panel(page).getByRole("region", { name: "Open in editors" });
+  await expect(editing.getByTestId("edit-state")).toHaveText("No changes yet");
+  await expect(editing.getByRole("button", { name: "Save README.md to the server" })).toBeDisabled();
+
+  await page.evaluate(() => (window as unknown as { __mockEditLocalChange: (n: string) => void }).__mockEditLocalChange("README.md"));
+  await expect(editing.getByTestId("edit-state")).toHaveText("Changed locally", { timeout: 5000 });
+  await page.evaluate(() => (window as unknown as { __mockEditServerChange: (n: string) => void }).__mockEditServerChange("README.md"));
+  await editing.getByRole("button", { name: "Save README.md to the server" }).click();
+  const conflict = page.getByRole("alertdialog", { name: "“README.md” changed on the server" });
+  await expect(conflict.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await conflict.getByRole("button", { name: "Cancel" }).click();
+  await expect(editing.getByTestId("edit-state")).toHaveText("Changed locally");
+  await editing.getByRole("button", { name: "Save README.md to the server" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Replace their changes" }).click();
+  await expect(editing.getByTestId("edit-state")).toHaveText("Saved to the server");
+
+  await editing.getByRole("button", { name: "Stop editing README.md" }).click();
+  await expect(editing).toHaveCount(0);
+});
+
+test("files: two panes copy between this computer and the server by button and by drag and drop", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  await panel(page).getByRole("switch", { name: "Show this computer" }).check();
+  const local = panel(page).getByRole("region", { name: "This computer" });
+  await expect(local).toContainText("Choose a folder on this computer");
+  await local.getByRole("button", { name: "Choose folder…" }).click();
+  const localList = local.getByRole("list", { name: /on this computer/ });
+  await expect(localList.getByRole("button")).toHaveText([/photos/, /deploy\.tar\.gz.*40 KB/, /notes\.md/]);
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+
+  // Button: local file to the server folder shown.
+  await localList.getByRole("button", { name: "Select notes.md" }).click();
+  await panel(page).getByRole("button", { name: "Upload to the server folder" }).click();
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
+  await expect(list(page).getByRole("button", { name: "Select notes.md" })).toBeVisible();
+
+  // Button: remote file to the local folder shown; the local pane refreshes.
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await panel(page).getByRole("button", { name: "Download to this computer" }).click();
+  await finishLatest(page);
+  await expect(localList.getByRole("button", { name: "Select README.md" })).toBeVisible();
+
+  // Drag and drop: a local folder onto the server pane.
+  await localList.getByRole("button", { name: "Open photos" }).dragTo(panel(page).locator(".files-body"));
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
+  await expect(list(page).getByRole("button", { name: "Open photos" })).toBeVisible();
+
+  // Local navigation stays inside the chosen folder.
+  await localList.getByRole("button", { name: "Open photos" }).dblclick();
+  await expect(local).toContainText("Projects / photos");
+  await local.getByRole("button", { name: "Up one local folder" }).click();
+  await expect(local.getByRole("button", { name: "Up one local folder" })).toBeDisabled();
 });

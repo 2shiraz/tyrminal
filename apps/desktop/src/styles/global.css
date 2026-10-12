@@ -3040,6 +3040,12 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
+.files-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .files-transfer progress {
   grid-column: 2 / 3;
   width: 100%;
@@ -3050,6 +3056,67 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .files-transfer[data-state="failed"] .files-meta {
   color: var(--danger);
   white-space: normal;
+}
+
+/* Two-pane files view: this computer on the left, the server on the right. */
+.side-panel-two {
+  width: min(880px, 70vw);
+}
+
+.files-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.files-panes > .files-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.files-local-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.files-local {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+.files-local-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.files-local-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.files-local-actions {
+  padding: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.files-local[data-drop],
+.files-body[data-drop] {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
 }
 
 /* agent B: tunnels and history */

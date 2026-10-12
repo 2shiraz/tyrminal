@@ -51,9 +51,19 @@ impl FileError {
             },
             SftpError::Timeout => Self::Timeout,
             SftpError::IO(_) => Self::Lost,
+            // russh-sftp reports a session whose channel has gone away (the connection dropped)
+            // through these messages; anything else in this variant is a protocol problem.
+            SftpError::UnexpectedBehavior(text) if session_gone(text) => Self::Lost,
             SftpError::Limited(_) | SftpError::UnexpectedPacket | SftpError::UnexpectedBehavior(_) => Self::Protocol,
         }
     }
+}
+
+fn session_gone(text: &str) -> bool {
+    text == "sender dropped"
+        || text == "session closed"
+        || text.starts_with("SendError")
+        || text.starts_with("RecvError")
 }
 
 fn check<T>(result: Result<T, SftpError>) -> Result<T, FileError> {
@@ -344,5 +354,22 @@ impl RemoteWriter {
     pub async fn abandon(mut self) {
         self.pending.clear();
         let _ = self.raw.close(std::mem::take(&mut self.handle)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_session_is_a_lost_link_not_a_protocol_error() {
+        for text in ["sender dropped", "session closed", "SendError: channel closed", "RecvError: channel closed"] {
+            assert_eq!(FileError::from_sftp(&SftpError::UnexpectedBehavior(text.into())), FileError::Lost, "{text}");
+        }
+        assert_eq!(
+            FileError::from_sftp(&SftpError::UnexpectedBehavior("Duplicate version".into())),
+            FileError::Protocol
+        );
+        assert_eq!(FileError::from_sftp(&SftpError::UnexpectedPacket), FileError::Protocol);
     }
 }

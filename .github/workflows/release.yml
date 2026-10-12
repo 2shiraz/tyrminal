@@ -56,7 +56,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
-      fail-fast: true
+      # Every platform reports its own result; publishing still needs all of them.
+      fail-fast: false
       matrix:
         include:
           - { platform: macos-arm64, os: macos-15 }
@@ -89,7 +90,14 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
+        run: |
+          # A secret that is not configured arrives as an empty variable, and the Tauri bundler
+          # treats a present APPLE_CERTIFICATE as a certificate to import. Drop empty ones so an
+          # unsigned build stays unsigned (ad-hoc on macOS) instead of failing.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
       - name: Release policy against the built binary
         run: node scripts/check-release.mjs --require-binary
       - name: Collect artifacts

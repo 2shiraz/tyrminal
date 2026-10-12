@@ -258,6 +258,23 @@ export function installMockBackend(options) {
   /** Completes a running mock transfer (tests drive progress explicitly). */
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
 
+  const edits = new Map();
+  /** Marks an open edit's local copy changed, or the server copy changed (conflict on save). */
+  window.__mockEditLocalChange = (name) => {
+    for (const e of edits.values()) if (e.name === name) e.changed = true;
+  };
+  window.__mockEditServerChange = (name) => {
+    for (const e of edits.values()) if (e.name === name) e.serverChanged = true;
+  };
+
+  // The local side of the two-pane view: a chosen folder with a synthetic tree.
+  const localTree = new Map([
+    ["", [{ name: "photos", kind: "dir" }, { name: "deploy.tar.gz", kind: "file", size: 40960 }, { name: "notes.md", kind: "file", size: 512 }]],
+    ["photos", [{ name: "beach.jpg", kind: "file", size: 204800 }]],
+  ]);
+  const localEntries = (path) =>
+    (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
+
   const handlers = {
     // agent B: tunnels and history
     ...(() => {
@@ -383,6 +400,33 @@ export function installMockBackend(options) {
         },
       };
     })(),
+    files_local_list: (a) => {
+      if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
+      if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");
+      return { token: a.token, rootName: "Projects", path: a.path, entries: localEntries(a.path), truncated: false };
+    },
+    files_edit_open: (a) => {
+      const node = fs.get(childPath(a.dir, a.name));
+      if (!node || node.kind !== "file") fsErr("INVALID_INPUT", "Only files can be opened for editing.");
+      const editId = id(7000 + edits.size);
+      edits.set(editId, { editId, name: a.name, changed: false, serverChanged: false });
+      return { editId, name: a.name, changed: false };
+    },
+    files_edit_status: (a) => {
+      const e = edits.get(a.editId);
+      if (!e) fsErr("ACCESS_DENIED", "That file is not open for editing in this window.");
+      return { editId: e.editId, name: e.name, changed: e.changed };
+    },
+    files_edit_save: (a) => {
+      const e = edits.get(a.editId);
+      if (e.serverChanged && !a.overwrite) fsErr("CONFLICT", "The file changed on the server since you opened it.");
+      e.changed = false;
+      e.serverChanged = false;
+      return { editId: e.editId, name: e.name, changed: false };
+    },
+    files_edit_close: (a) => {
+      edits.delete(a.editId);
+    },
     files_list: (a) => {
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
@@ -426,41 +470,71 @@ export function installMockBackend(options) {
       for (const p of picks) localPicks.set(p.token, p);
       return picks;
     },
+    files_pick_upload_folder: () => {
+      const pick = { token: `upf-${nextTransfer}`, name: "site", size: null, folder: { files: 3, bytes: 6144, skipped: 1 } };
+      localPicks.set(pick.token, pick);
+      return { token: pick.token, name: pick.name, size: null };
+    },
     files_pick_folder: () => {
       const pick = { token: `dl-${nextTransfer}`, name: "Downloads", size: null };
       localPicks.set(pick.token, pick);
       return pick;
     },
     files_upload: (a) => {
-      const pick = localPicks.get(a.token);
+      let pick = localPicks.get(a.token);
+      if (pick && a.path && a.path.length > 0) {
+        const name = a.path[a.path.length - 1];
+        const entry = (localTree.get(a.path.slice(0, -1).join("/")) ?? []).find((e) => e.name === name);
+        pick = entry?.kind === "dir" ? { name, size: null, folder: { files: 1, bytes: 204800, skipped: 0 } } : { name, size: entry?.size ?? 0 };
+      }
       if (!pick) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
-      const target = childPath(a.dir, pick.name);
-      if (fs.has(target) && !a.overwrite) fsErr("CONFLICT", "Something with that name is already there.");
+      let finalName = pick.name;
+      if (a.choice === "keep_both") {
+        for (let n = 1; fs.has(childPath(a.dir, finalName)); n += 1) {
+          const dot = pick.name.lastIndexOf(".");
+          finalName = dot > 0 ? `${pick.name.slice(0, dot)} (${n})${pick.name.slice(dot)}` : `${pick.name} (${n})`;
+        }
+      }
+      const target = childPath(a.dir, finalName);
+      if (fs.has(target) && (a.choice !== "replace" || pick.folder)) fsErr("CONFLICT", "Something with that name is already there.");
       const transferId = id(9000 + nextTransfer++);
-      channelSend(a.events, { type: "progress", done: Math.floor(pick.size / 2) });
+      const total = pick.folder ? pick.folder.bytes : pick.size;
+      channelSend(a.events, { type: "progress", done: Math.floor(total / 2) });
       window.__mockTransfers.set(transferId, {
         finish: () => {
-          addNode(target, "file", pick.size);
-          channelSend(a.events, { type: "done", bytes: pick.size });
+          if (pick.folder) addNode(target, "dir");
+          else addNode(target, "file", pick.size);
+          channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
       });
-      return { transferId, name: pick.name, direction: "upload", total: pick.size };
+      return { transferId, name: finalName, direction: "upload", total };
     },
     files_download: (a) => {
       if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
-      const node = fs.get(childPath(a.dir, a.name));
-      if (window.__mockLocalFiles.has(a.name) && !a.overwrite) fsErr("CONFLICT", "Something with that name is already there.");
+      const path = childPath(a.dir, a.name);
+      const node = fs.get(path);
+      const isDir = node.kind === "dir";
+      if (window.__mockLocalFiles.has(a.name) && a.choice !== "keep_both" && (a.choice !== "replace" || isDir))
+        fsErr("CONFLICT", "Something with that name is already there.");
+      const inside = isDir ? [...fs.keys()].filter((p) => p.startsWith(`${path}/`) && fs.get(p).kind === "file") : [];
+      const size = isDir ? inside.reduce((n, p) => n + fs.get(p).size, 0) : node.size;
       const transferId = id(9000 + nextTransfer++);
-      channelSend(a.events, { type: "progress", done: Math.floor(node.size / 4) });
+      channelSend(a.events, { type: "progress", done: Math.floor(size / 4) });
       window.__mockTransfers.set(transferId, {
         finish: () => {
           window.__mockLocalFiles.add(a.name);
-          channelSend(a.events, { type: "done", bytes: node.size });
+          if (a.path) {
+            const key = a.path.join("/");
+            const list = localTree.get(key) ?? [];
+            if (!list.some((e) => e.name === a.name)) list.push({ name: a.name, kind: isDir ? "dir" : "file", size: isDir ? null : size });
+            localTree.set(key, list);
+          }
+          channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
       });
-      return { transferId, name: a.name, direction: "download", total: node.size };
+      return { transferId, name: a.name, direction: "download", total: size };
     },
     files_cancel: (a) => {
       window.__mockTransfers.get(a.transferId)?.cancel();

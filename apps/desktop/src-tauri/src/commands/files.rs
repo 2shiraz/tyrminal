@@ -11,7 +11,10 @@ use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State, WebviewWindow};
 use tyrminal_core::TransferSink;
-use tyrminal_core::contracts::{ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted};
+use tyrminal_core::contracts::{
+    ConflictChoice, EditStatus, ErrorCode, IpcError, LocalListing, LocalPick, RemoteListing, TransferEvent,
+    TransferStarted,
+};
 
 use crate::state::{AppState, Grant, GrantKind};
 
@@ -23,6 +26,7 @@ impl TransferSink for ChannelTransferSink {
     }
 }
 
+#[cfg_attr(feature = "e2e", allow(dead_code))]
 fn dialog_error() -> IpcError {
     IpcError::new(ErrorCode::IoError, "The file dialog could not be shown.")
 }
@@ -53,6 +57,24 @@ async fn pick_files(app: &AppHandle) -> Result<Vec<PathBuf>, IpcError> {
             .await
             .map_err(|_| dialog_error())?;
         Ok(picked.unwrap_or_default().into_iter().filter_map(|p| p.into_path().ok()).collect())
+    }
+}
+
+/// A folder to upload. Test builds read `TYRMINAL_E2E_UPLOAD_DIR`.
+async fn pick_upload_folder(app: &AppHandle) -> Result<Option<PathBuf>, IpcError> {
+    #[cfg(feature = "e2e")]
+    {
+        let _ = app;
+        Ok(std::env::var_os("TYRMINAL_E2E_UPLOAD_DIR").map(PathBuf::from))
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let dialog = app.dialog().file();
+        let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
+            .await
+            .map_err(|_| dialog_error())?;
+        Ok(picked.and_then(|p| p.into_path().ok()))
     }
 }
 
@@ -91,6 +113,18 @@ pub async fn files_pick_upload(
     state.core()?;
     let paths = pick_files(&app).await?;
     paths.into_iter().map(|p| grant(&state, window.label(), GrantKind::File, p)).collect()
+}
+
+/// Lets the user choose a folder to upload (with everything in it). `None`: cancelled.
+#[tauri::command]
+pub async fn files_pick_upload_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<Option<LocalPick>, IpcError> {
+    state.core()?;
+    let Some(path) = pick_upload_folder(&app).await? else { return Ok(None) };
+    grant(&state, window.label(), GrantKind::UploadFolder, path).map(Some)
 }
 
 /// Lets the user choose a folder to download into. `None`: the dialog was cancelled.
@@ -161,24 +195,33 @@ pub async fn files_chmod(
     state.core()?.sessions.set_file_mode(window.label(), &session_id, &dir, &name, mode).await
 }
 
-/// Uploads a chosen local file into the remote folder `dir`, under its own name.
+/// Uploads a chosen local file or folder into the remote folder `dir`, under its own name.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn files_upload(
     window: WebviewWindow,
     state: State<'_, AppState>,
     session_id: String,
     token: String,
     dir: String,
-    overwrite: bool,
+    choice: ConflictChoice,
+    path: Option<Vec<String>>,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let path = state.grant(window.label(), &token, GrantKind::File)?;
+    // `path`: an item inside a chosen folder (two-pane view); otherwise the chosen item itself.
+    let path = match path {
+        Some(rel) if !rel.is_empty() => {
+            let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+            tyrminal_core::local_within(&root, &rel)?
+        }
+        _ => state.grant(window.label(), &token, &[GrantKind::File, GrantKind::UploadFolder])?,
+    };
     let name = file_name(&path);
     let sink = Arc::new(ChannelTransferSink(events));
-    state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, overwrite, sink).await
+    state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, choice, sink).await
 }
 
-/// Downloads the remote file `dir/name` into a chosen local folder.
+/// Downloads the remote file or folder `dir/name` into a chosen local folder.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn files_download(
@@ -188,12 +231,15 @@ pub async fn files_download(
     dir: String,
     name: String,
     token: String,
-    overwrite: bool,
+    choice: ConflictChoice,
+    path: Option<Vec<String>>,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let folder = state.grant(window.label(), &token, GrantKind::Folder)?;
+    // `path`: a folder inside the chosen one (two-pane view).
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    let folder = tyrminal_core::local_within(&root, &path.unwrap_or_default())?;
     let sink = Arc::new(ChannelTransferSink(events));
-    state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, overwrite, sink).await
+    state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, choice, sink).await
 }
 
 #[tauri::command]
@@ -203,4 +249,72 @@ pub async fn files_cancel(
     transfer_id: String,
 ) -> Result<(), IpcError> {
     state.core()?.sessions.cancel_transfer(window.label(), &transfer_id)
+}
+
+/// Opens a remote file in the default local application for its type. The core downloads it into
+/// an owner-only folder; nothing is uploaded until `files_edit_save`.
+#[tauri::command]
+pub async fn files_edit_open(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    dir: String,
+    name: String,
+) -> Result<EditStatus, IpcError> {
+    if state.edit_root.as_os_str().is_empty() {
+        return Err(IpcError::new(ErrorCode::IoError, "There is no place to keep files being edited."));
+    }
+    let (path, status) =
+        state.core()?.sessions.edit_open(window.label(), &session_id, &dir, &name, &state.edit_root).await?;
+    // Test builds do not launch other applications; the test edits the file directly.
+    #[cfg(not(feature = "e2e"))]
+    open::that_detached(&path).map_err(|_| {
+        IpcError::new(ErrorCode::IoError, "No application could open that file. It is still open for editing.")
+    })?;
+    #[cfg(feature = "e2e")]
+    let _ = path;
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn files_edit_status(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+) -> Result<EditStatus, IpcError> {
+    state.core()?.sessions.edit_status(window.label(), &edit_id).await
+}
+
+#[tauri::command]
+pub async fn files_edit_save(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+    overwrite: bool,
+) -> Result<EditStatus, IpcError> {
+    state.core()?.sessions.edit_save(window.label(), &edit_id, overwrite).await
+}
+
+#[tauri::command]
+pub async fn files_edit_close(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+) -> Result<(), IpcError> {
+    state.core()?.sessions.edit_close(window.label(), &edit_id).await
+}
+
+/// Lists a folder inside a local folder the user chose (the local side of the two-pane view).
+#[tauri::command]
+pub async fn files_local_list(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+) -> Result<LocalListing, IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    let (entries, truncated) =
+        tyrminal_core::list_local(&root, &path, tyrminal_core::contracts::limits::MAX_DIR_ENTRIES).await?;
+    Ok(LocalListing { token, root_name: file_name(&root), path, entries, truncated })
 }

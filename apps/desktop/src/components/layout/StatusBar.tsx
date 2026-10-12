@@ -102,6 +102,7 @@ export function StatusBar({
           type="button"
           className="status-button"
           aria-pressed={filesOpen ?? false}
+          data-panel="files"
           onClick={onToggleFiles}
           data-tooltip={`${msg.palette.toggleFiles} (${shortcutText("toggleFiles")})`}
           data-tooltip-side="top"
@@ -115,6 +116,7 @@ export function StatusBar({
           type="button"
           className="status-button"
           aria-pressed={panelOpen}
+          data-panel="snippets"
           onClick={onTogglePanel}
           data-tooltip={`${msg.palette.toggleSnippets} (${shortcutText("toggleSnippets")})`}
           data-tooltip-side="top"

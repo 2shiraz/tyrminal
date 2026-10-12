@@ -48,6 +48,7 @@ const COMMANDS: &[&str] = &[
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
+    "files_pick_upload_folder",
     "files_list",
     "files_mkdir",
     "files_rename",
@@ -56,6 +57,11 @@ const COMMANDS: &[&str] = &[
     "files_upload",
     "files_download",
     "files_cancel",
+    "files_local_list",
+    "files_edit_open",
+    "files_edit_status",
+    "files_edit_save",
+    "files_edit_close",
     // snippets
     "snippet_list",
     "snippet_save",

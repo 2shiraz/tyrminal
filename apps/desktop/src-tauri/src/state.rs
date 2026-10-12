@@ -8,7 +8,11 @@ const MAX_GRANTS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantKind {
+    /// A file to upload.
     File,
+    /// A folder to upload (with everything in it).
+    UploadFolder,
+    /// A folder to download into.
     Folder,
 }
 
@@ -29,16 +33,19 @@ pub struct AppState {
     pub chosen_backup: std::sync::Mutex<Option<(String, Vec<u8>)>>,
     /// Local file grants, oldest first.
     grants: std::sync::Mutex<Vec<(String, Grant)>>,
+    /// Where local copies of remote files being edited live (owner-only, emptied at start).
+    pub edit_root: PathBuf,
     /// Held for the life of the process: one instance per data directory.
     _instance_lock: Option<std::fs::File>,
 }
 
 impl AppState {
-    pub fn new(core: Result<Core, IpcError>, instance_lock: Option<std::fs::File>) -> Self {
+    pub fn new(core: Result<Core, IpcError>, instance_lock: Option<std::fs::File>, edit_root: PathBuf) -> Self {
         Self {
             core,
             chosen_backup: std::sync::Mutex::new(None),
             grants: std::sync::Mutex::new(Vec::new()),
+            edit_root,
             _instance_lock: instance_lock,
         }
     }
@@ -55,12 +62,12 @@ impl AppState {
         grants.push((token, grant));
     }
 
-    /// The path behind a token, if the token was issued to `owner` for this kind of use.
-    pub fn grant(&self, owner: &str, token: &str, kind: GrantKind) -> Result<PathBuf, IpcError> {
+    /// The path behind a token, if the token was issued to `owner` for one of `kinds`.
+    pub fn grant(&self, owner: &str, token: &str, kinds: &[GrantKind]) -> Result<PathBuf, IpcError> {
         let grants = self.grants.lock().unwrap_or_else(|p| p.into_inner());
         grants
             .iter()
-            .find(|(t, g)| t == token && g.owner == owner && g.kind == kind)
+            .find(|(t, g)| t == token && g.owner == owner && kinds.contains(&g.kind))
             .map(|(_, g)| g.path.clone())
             .ok_or_else(|| IpcError::new(ErrorCode::AccessDenied, "Choose the file or folder again."))
     }

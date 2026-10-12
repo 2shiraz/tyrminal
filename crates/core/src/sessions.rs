@@ -22,8 +22,9 @@ use tyrminal_contracts::limits::{
     TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing, SessionEvent, SessionOpened,
-    SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision, VaultStatus,
+    AuthPromptKind, ConflictChoice, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing,
+    SessionEvent, SessionOpened, SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision,
+    VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -34,8 +35,10 @@ use tyrminal_ssh::{
 use zeroize::Zeroizing;
 
 use crate::deploy;
+use crate::edits;
 use crate::error::{err, from_ssh, internal, invalid, not_found};
 use crate::files::{self, Download, TransferSink, Upload, from_file};
+use crate::folders;
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
 
@@ -89,6 +92,8 @@ pub struct Sessions {
     connect_slots: Arc<Semaphore>,
     /// Running file transfers: owner window and cancel switch.
     transfers: Arc<Mutex<HashMap<String, Transfer>>>,
+    /// Remote files open in local applications.
+    edits: edits::Edits,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
 }
@@ -122,6 +127,7 @@ impl Sessions {
             entries: Mutex::new(HashMap::new()),
             connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
             transfers: Arc::new(Mutex::new(HashMap::new())),
+            edits: edits::Edits::default(),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
         })
@@ -242,6 +248,10 @@ impl Sessions {
         // agent B: tunnels and history
         self.tunnel_runs.session_ended(session_id).await;
         *entry.prompts() = Prompts::default();
+        // Local copies of files opened for editing in this session are removed with it.
+        for folder in self.edits.take_session(session_id) {
+            let _ = tokio::fs::remove_dir_all(folder).await;
+        }
         sink.event(SessionEvent::State {
             state: if outcome.error.is_some() { SessionState::Failed } else { SessionState::Closed },
         });
@@ -406,8 +416,10 @@ impl Sessions {
         Ok((id, cancelled))
     }
 
-    /// Downloads `dir/name` into `local_dir` (a folder the user chose natively) under the same
-    /// name. Checks run before the transfer starts; progress and the result arrive on `sink`.
+    /// Downloads `dir/name` (a file, or a folder with everything in it) into `local_dir` (a
+    /// folder the user chose natively). A taken name is resolved by `choice`; folders are never
+    /// merged or replaced. Checks run before the transfer starts; progress and the result
+    /// arrive on `sink`, and the result's name is the one actually used.
     #[allow(clippy::too_many_arguments)]
     pub async fn download(
         &self,
@@ -416,12 +428,33 @@ impl Sessions {
         dir: &str,
         name: &str,
         local_dir: PathBuf,
-        overwrite: bool,
+        choice: ConflictChoice,
         sink: Arc<dyn TransferSink>,
     ) -> Result<TransferStarted, IpcError> {
         let remote = files::join(files::remote_dir(dir)?, name)?;
         let (_, sftp) = self.sftp(owner, session_id).await?;
-        let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let token = random_token()?;
+        let overwrite = choice == ConflictChoice::Replace;
+        let local_name = if choice == ConflictChoice::KeepBoth {
+            files::free_local_name(&local_dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let name = local_name.as_str();
+        // A folder is copied as a whole tree; anything else must be a regular file.
+        if sftp.stat(&remote).await.map_err(from_file)?.kind == tyrminal_ssh::RemoteKind::Dir {
+            let job = folders::prepare_download(sftp, remote, local_dir, name, token).await?;
+            let total = job.tree.bytes();
+            let (id, cancel) = self.start_transfer(owner)?;
+            let transfers = Arc::clone(&self.transfers);
+            let done_id = id.clone();
+            tokio::spawn(async move {
+                folders::run_download(job, sink.as_ref(), cancel).await;
+                transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+            });
+            return Ok(files::started(id, name.to_owned(), TransferDirection::Download, Some(total)));
+        }
+        let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token };
         let total = files::prepare_download(&job).await?;
         let (id, cancel) = self.start_transfer(owner)?;
         let transfers = Arc::clone(&self.transfers);
@@ -433,7 +466,8 @@ impl Sessions {
         Ok(files::started(id, name.to_owned(), TransferDirection::Download, total))
     }
 
-    /// Uploads a local file (chosen natively) into the remote folder `dir` under `name`.
+    /// Uploads a local file or folder (chosen natively) into the remote folder `dir` under
+    /// `name`; a taken name is resolved by `choice` (folders are never merged or replaced).
     #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
@@ -442,12 +476,35 @@ impl Sessions {
         local: PathBuf,
         dir: &str,
         name: &str,
-        overwrite: bool,
+        choice: ConflictChoice,
         sink: Arc<dyn TransferSink>,
     ) -> Result<TransferStarted, IpcError> {
         let dir = files::remote_dir(dir)?.to_owned();
+        files::remote_name(name)?;
         let (_, sftp) = self.sftp(owner, session_id).await?;
-        let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let token = random_token()?;
+        let overwrite = choice == ConflictChoice::Replace;
+        let remote_name = if choice == ConflictChoice::KeepBoth {
+            files::free_remote_name(&sftp, &dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let name = remote_name.as_str();
+        let is_dir = tokio::fs::metadata(&local).await.is_ok_and(|m| m.is_dir());
+        if is_dir {
+            files::remote_name(name)?;
+            let job = folders::prepare_upload(sftp, local, dir, name, token).await?;
+            let total = job.tree.bytes();
+            let (id, cancel) = self.start_transfer(owner)?;
+            let transfers = Arc::clone(&self.transfers);
+            let done_id = id.clone();
+            tokio::spawn(async move {
+                folders::run_upload(job, sink.as_ref(), cancel).await;
+                transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+            });
+            return Ok(files::started(id, name.to_owned(), TransferDirection::Upload, Some(total)));
+        }
+        let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token };
         let (total, mode) = files::prepare_upload(&job).await?;
         let (id, cancel) = self.start_transfer(owner)?;
         let transfers = Arc::clone(&self.transfers);
@@ -457,6 +514,130 @@ impl Sessions {
             transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
         });
         Ok(files::started(id, name.to_owned(), TransferDirection::Upload, Some(total)))
+    }
+
+    /// Opens a remote file for editing: downloads it into its own owner-only folder under
+    /// `edit_root` and returns the local path for the adapter to hand to the OS, plus its status.
+    pub async fn edit_open(
+        &self,
+        owner: &str,
+        session_id: &str,
+        dir: &str,
+        name: &str,
+        edit_root: &std::path::Path,
+    ) -> Result<(PathBuf, tyrminal_contracts::EditStatus), IpcError> {
+        let remote = files::join(files::remote_dir(dir)?, name)?;
+        if !files::local_name_ok(name) {
+            return Err(invalid("That name cannot be used for a file on this computer."));
+        }
+        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let attrs = sftp.stat(&remote).await.map_err(from_file)?;
+        if attrs.kind != tyrminal_ssh::RemoteKind::File {
+            return Err(invalid("Only files can be opened for editing."));
+        }
+        if attrs.size.is_some_and(|n| n > edits::MAX_EDIT_SIZE) {
+            return Err(edits::too_large());
+        }
+        let id = random_token()?;
+        let folder = edit_root.join(&id);
+        edits::create_private_dir_all(&folder).await.map_err(|e| files::local_io(&e))?;
+        let file = folder.join(name);
+        let downloaded = async {
+            let mut out = files::create_private(&file).await.map_err(|e| files::local_io(&e))?;
+            let sink = files::NullSink;
+            let mut progress = files::Progress::new(&sink);
+            let (_never, mut cancel) = tokio::sync::watch::channel(false);
+            files::pull(&sftp, &remote, &mut out, &mut progress, &mut cancel).await.map_err(files::Stop::into_error)?;
+            drop(out);
+            edits::hash_file(&file).await
+        }
+        .await;
+        let saved_hash = match downloaded {
+            Ok(hash) => hash,
+            Err(e) => {
+                let _ = tokio::fs::remove_dir_all(&folder).await;
+                return Err(e);
+            }
+        };
+        self.edits.insert(
+            id.clone(),
+            edits::Edit {
+                owner: owner.to_owned(),
+                session_id: session_id.to_owned(),
+                remote,
+                name: name.to_owned(),
+                folder,
+                file: file.clone(),
+                remote_size: attrs.size,
+                remote_modified: attrs.modified,
+                permissions: attrs.permissions,
+                saved_hash,
+            },
+        );
+        let status = tyrminal_contracts::EditStatus { edit_id: id, name: name.to_owned(), changed: false };
+        Ok((file, status))
+    }
+
+    /// Whether the local copy of an open edit has changed since it was opened or last saved.
+    pub async fn edit_status(&self, owner: &str, edit_id: &str) -> Result<tyrminal_contracts::EditStatus, IpcError> {
+        let (name, file, saved) =
+            self.edits.with(owner, edit_id, |e| (e.name.clone(), e.file.clone(), e.saved_hash))?;
+        edits::status(edit_id, &name, &file, saved).await
+    }
+
+    /// Uploads the local copy over the remote file. Refused with a conflict when the server's
+    /// copy changed since it was opened, unless `overwrite`.
+    pub async fn edit_save(
+        &self,
+        owner: &str,
+        edit_id: &str,
+        overwrite: bool,
+    ) -> Result<tyrminal_contracts::EditStatus, IpcError> {
+        let (session_id, remote, name, file) = self
+            .edits
+            .with(owner, edit_id, |e| (e.session_id.clone(), e.remote.clone(), e.name.clone(), e.file.clone()))?;
+        let (_, sftp) = self.sftp(owner, &session_id).await?;
+        let now = sftp.stat(&remote).await.map_err(from_file)?;
+        if !overwrite {
+            let (same_attrs, saved) = self.edits.with(owner, edit_id, |e| (e.remote_unchanged(&now), e.saved_hash))?;
+            // Modification times are whole seconds: compare the content too.
+            if !same_attrs || edits::hash_remote(&sftp, &remote).await? != saved {
+                return Err(edits::changed_on_server());
+            }
+        }
+        let hash = edits::hash_file(&file).await?;
+        let dir = files::parent(&remote).unwrap_or_else(|| "/".to_owned());
+        let temp = files::join(&dir, &files::temp_name(&name, &random_token()?))?;
+        let sink = files::NullSink;
+        let mut progress = files::Progress::new(&sink);
+        let (_never, mut cancel) = tokio::sync::watch::channel(false);
+        files::push(&sftp, &file, &temp, &mut progress, &mut cancel).await.map_err(files::Stop::into_error)?;
+        let replaced = async {
+            sftp.set_permissions(&temp, edits::sftp_mode(&now)).await?;
+            sftp.remove_file(&remote).await?;
+            sftp.rename(&temp, &remote).await
+        }
+        .await;
+        if let Err(e) = replaced {
+            let _ = sftp.remove_file(&temp).await;
+            return Err(from_file(e));
+        }
+        let after = sftp.stat(&remote).await.map_err(from_file)?;
+        self.edits.with(owner, edit_id, |e| {
+            e.remote_size = after.size;
+            e.remote_modified = after.modified;
+            e.permissions = after.permissions;
+            e.saved_hash = hash;
+        })?;
+        Ok(tyrminal_contracts::EditStatus { edit_id: edit_id.to_owned(), name, changed: false })
+    }
+
+    /// Stops editing: forgets the edit and removes its local copy (unsaved changes are lost).
+    pub async fn edit_close(&self, owner: &str, edit_id: &str) -> Result<(), IpcError> {
+        let folder = self.edits.take(owner, edit_id)?;
+        tokio::fs::remove_dir_all(folder)
+            .await
+            .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(files::local_io(&e)) })
     }
 
     /// Stops a running transfer; its temporary data is removed and nothing replaces the target.
@@ -872,10 +1053,9 @@ async fn run_ssh(
                     strict_kex: n.strict_kex,
                 });
             }
-            // Registered before "connected" is reported, so a side operation requested as soon as
-            // the renderer sees the session connected (a tunnel, a key install) finds the link.
-            // `conn` stays alive for the whole pump; dropping it closes the transport. It is
-            // shared with the registry entry for side channels and taken back when the shell ends.
+            // Shared before `Connected` is reported, so side operations (files, key install) work
+            // as soon as the renderer sees the session connected. `conn` stays alive for the whole
+            // pump; dropping it closes the transport. It is taken back when the shell ends.
             let conn = Arc::new(conn);
             *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             ctx.state(SessionState::Connected);

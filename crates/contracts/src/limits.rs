@@ -71,6 +71,9 @@ pub const MAX_FILE_NAME_LEN: usize = 255;
 pub const MAX_DIR_ENTRIES: usize = 20_000;
 /// File transfers running at once.
 pub const MAX_TRANSFERS: usize = 8;
+/// Entries (files and folders) and nesting depth of one folder transfer.
+pub const MAX_TREE_ENTRIES: usize = 100_000;
+pub const MAX_TREE_DEPTH: usize = 32;
 
 // agent B: tunnels and history
 /// Simultaneous connections through one forward; further ones are refused and counted.
