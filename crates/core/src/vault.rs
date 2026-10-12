@@ -187,6 +187,9 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
         group_id: record.group.clone(),
         tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
+        protocol: record.protocol.clone(),
+        terminal: record.terminal,
+        forward_agent: record.forward_agent,
     }
 }
 
@@ -214,6 +217,16 @@ fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
     }
 }
 
+/// Where a host is reached (see `VaultService::host_endpoint`).
+pub(crate) struct HostEndpoint {
+    pub protocol: tyrminal_contracts::HostProtocol,
+    pub terminal: tyrminal_contracts::HostTerminal,
+    pub forward_agent: bool,
+    pub address: String,
+    pub port: u16,
+    pub generation: u32,
+}
+
 /// A field-by-field copy (the stored password is copied into a new zeroizing buffer).
 fn copy_host(record: &HostRecord) -> HostRecord {
     let auth = match &record.auth {
@@ -233,6 +246,9 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         group: record.group.clone(),
         tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
+        protocol: record.protocol.clone(),
+        terminal: record.terminal,
+        forward_agent: record.forward_agent,
         // agent B: tunnels and history
         connection: record.connection.clone(),
     }
@@ -251,6 +267,10 @@ fn host_content_len(record: &HostRecord) -> usize {
         + secret_len
         + record.group.as_ref().map_or(0, String::len)
         + record.tags.iter().map(|t| t.len() + 4).sum::<usize>()
+        + match &record.protocol {
+            tyrminal_contracts::HostProtocol::Serial { settings } => settings.path.len() + 64,
+            _ => 0,
+        }
         // agent B: tunnels and history
         + record.connection.content_len()
 }
@@ -946,6 +966,7 @@ impl VaultService {
         let tags = validate::tags(&input.tags)?;
         let existing_id = input.id.as_deref().map(validate::id).transpose()?;
         let group = input.group_id.as_deref().map(validate::id).transpose()?;
+        let protocol = validate::protocol(input.protocol)?;
 
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
@@ -1005,6 +1026,9 @@ impl VaultService {
             group: group.map(|g| validate::id_text(&g)),
             tags,
             last_connected_at,
+            protocol,
+            terminal: input.terminal,
+            forward_agent: input.forward_agent,
             connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
@@ -1251,6 +1275,9 @@ impl VaultService {
                 group,
                 tags: host.tags,
                 last_connected_at: None,
+                protocol: tyrminal_contracts::HostProtocol::Ssh,
+                terminal: tyrminal_contracts::HostTerminal::default(),
+                forward_agent: false,
                 // agent B: tunnels and history
                 connection: Default::default(),
             };
@@ -1719,6 +1746,28 @@ impl VaultService {
     }
 
     /// Fails unless the vault is unlocked; returns the generation for handle binding.
+    /// How a host is reached: its protocol, address and port (Telnet's default port is 23),
+    /// with the generation to open the session under. No credentials are read.
+    pub(crate) async fn host_endpoint(&self, host_id: &str) -> Result<HostEndpoint, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let port = match (&host.protocol, host.port) {
+            (tyrminal_contracts::HostProtocol::Telnet, 0) => 23,
+            (_, 0) => inventory::effective(&group_index(open), host).port,
+            (_, port) => port,
+        };
+        Ok(HostEndpoint {
+            protocol: host.protocol.clone(),
+            terminal: host.terminal,
+            forward_agent: host.forward_agent,
+            address: host.address.clone(),
+            port,
+            generation: self.generation(),
+        })
+    }
+
     pub(crate) async fn require_unlocked(&self) -> Result<u32, IpcError> {
         let inner = self.inner.lock().await;
         if inner.open.is_none() {

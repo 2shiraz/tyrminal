@@ -166,6 +166,9 @@ impl Fixture {
             auth: HostAuthInput::Key { key_id },
             group_id: None,
             tags: Vec::new(),
+            protocol: Default::default(),
+            terminal: Default::default(),
+            forward_agent: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -659,6 +662,9 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         auth: HostAuthInput::AskPassword,
         group_id: None,
         tags: Vec::new(),
+        protocol: Default::default(),
+        terminal: Default::default(),
+        forward_agent: false,
     };
     f.core.vault.save_host(input).await.unwrap();
     f.core.vault.lock().await;
@@ -674,6 +680,23 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
 const PROXY_USER: &str = "proxy-user";
 const PROXY_PASSWORD: &str = "canary-proxy-pass-91c2";
 
+/// Base64 of `user:password` for the expected proxy header; a small encoder of its own, so the
+/// test does not trust the client's.
+fn basic(user: &str, password: &str) -> String {
+    let input = format!("{user}:{password}").into_bytes();
+    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { table[((n >> (18 - 6 * i)) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
 /// A minimal HTTP CONNECT proxy with Basic authentication; counts the tunnels it opened.
 async fn http_proxy() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -681,11 +704,12 @@ async fn http_proxy() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
     let port = listener.local_addr().unwrap().port();
     let tunnels = Arc::new(AtomicUsize::new(0));
     let count = Arc::clone(&tunnels);
-    // base64("proxy-user:canary-proxy-pass-91c2"), computed independently of the client.
-    let expected = "Proxy-Authorization: Basic cHJveHktdXNlcjpjYW5hcnktcHJveHktcGFzcy05MWMy\r\n";
+    // Encoded here, independently of the client, so no encoded credential sits in the source.
+    let expected = format!("Proxy-Authorization: Basic {}\r\n", basic("proxy-user", "canary-proxy-pass-91c2"));
     tokio::spawn(async move {
         while let Ok((mut client, _)) = listener.accept().await {
             let count = Arc::clone(&count);
+            let expected = expected.clone();
             tokio::spawn(async move {
                 let mut head = Vec::new();
                 let mut byte = [0u8; 1];
@@ -696,7 +720,7 @@ async fn http_proxy() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
                     head.push(byte[0]);
                 }
                 let head = String::from_utf8(head).unwrap();
-                if !head.contains(expected) {
+                if !head.contains(&expected) {
                     let _ = client.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n").await;
                     return;
                 }
@@ -926,4 +950,31 @@ async fn a_host_can_turn_post_quantum_off_for_compatibility_or_require_it() {
     f.core.vault.lock().await;
     f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
     assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::RequirePostQuantum);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn forwards_move_with_their_session_to_another_window() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    let echo = echo_server().await;
+    let rule = f.rule(&host, TunnelKind::Local, echo).await;
+    let session = f.connect(WINDOW, &host).await;
+    let run = f.core.sessions.start_tunnel(WINDOW, &session.id, &rule).await.unwrap();
+
+    let token = f.core.sessions.offer_handoff(WINDOW, &session.id, OTHER_WINDOW).unwrap();
+    let (tx, _events) = mpsc::unbounded_channel();
+    f.core.sessions.accept_handoff(OTHER_WINDOW, &token, Arc::new(EventSink(tx))).unwrap();
+
+    // The new window lists and controls the forward; the old one no longer can.
+    assert!(f.active(WINDOW).is_empty());
+    assert_eq!(f.active(OTHER_WINDOW).iter().map(|t| t.run_id.clone()).collect::<Vec<_>>(), vec![run.run_id.clone()]);
+    assert_eq!(f.core.sessions.stop_tunnel(WINDOW, &run.run_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // Closing the old window leaves the forward running.
+    f.core.sessions.stop_tunnels_for_owner(WINDOW);
+    assert!(echoes(loopback(run.bound_port), b"after the move").await);
+
+    f.core.sessions.stop_tunnel(OTHER_WINDOW, &run.run_id).await.unwrap();
+    assert!(!echoes(loopback(run.bound_port), b"stopped").await);
 }

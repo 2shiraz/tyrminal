@@ -15,9 +15,13 @@ base64 = "0.22.1"
 getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Legacy terminal encodings (TRM-05). ADR 0003 addendum.
+encoding_rs = "0.8.42"
+# Serial connections (CON-06); no libudev: ports are opened by path. ADR 0003 addendum.
+serialport = { version = "4.10.1", default-features = false }
 sha2 = "0.11.0"
 thiserror = "2.0.21"
-tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "fs", "io-util"] }
+tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "fs", "io-util", "net"] }
 tyrminal-contracts = { path = "../contracts" }
 tyrminal-platform = { path = "../platform" }
 tyrminal-pty = { path = "../pty" }

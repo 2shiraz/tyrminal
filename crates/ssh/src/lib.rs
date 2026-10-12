@@ -7,6 +7,7 @@
 //!
 //! This crate knows nothing about the vault, storage, Tauri or the UI.
 
+mod agent;
 mod algorithms;
 mod auth;
 mod channels;
@@ -19,6 +20,7 @@ mod forward;
 mod jump;
 mod proxy;
 
+pub use agent::ForwardedAgent;
 pub use algorithms::{KeyExchangePolicy, POST_QUANTUM_KEX, negotiation_summary};
 pub use auth::{
     AuthOutcome, ClientKey, KbdPrompt, KbdRound, KeyError, MAX_KBD_PROMPTS, MAX_KBD_ROUNDS, MAX_SERVER_TEXT,

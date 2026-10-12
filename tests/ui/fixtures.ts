@@ -18,6 +18,8 @@ export interface MockOptions {
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
+  /** Add a trusted server that no saved host points at. */
+  orphanKnownHost?: boolean;
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {

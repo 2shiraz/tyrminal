@@ -395,3 +395,38 @@ async fn a_recording_stops_at_its_size_limit_and_the_session_goes_on() {
     assert_eq!(playback.log.state, SessionLogState::SizeLimit);
     assert!(!played_text(&playback).contains("big-done-25"));
 }
+
+#[tokio::test]
+async fn a_recording_continues_when_its_session_moves_to_another_window() {
+    const SECOND: &str = "second";
+    let f = Fixture::new().await;
+    f.record(5, 64).await;
+    let terminal = Terminal::open(&f.core).await;
+    let session = terminal.session.clone();
+    let token = f.core.sessions.offer_handoff(WINDOW, &session, SECOND).unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    f.core.sessions.accept_handoff(SECOND, &token, Arc::new(ChannelSink(tx))).unwrap();
+
+    f.core.sessions.write(SECOND, &session, b"echo moved-$((6*7))\r".to_vec()).await.unwrap();
+    let mut seen = String::new();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !seen.contains("moved-42") {
+        match tokio::time::timeout_at(deadline, inbox.recv()).await {
+            Ok(Some(Message::Output(bytes))) => {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+                let _ = f.core.sessions.ack(SECOND, &session, bytes.len() as u32).await;
+            }
+            Ok(Some(Message::Event(_))) => {}
+            other => panic!("no output in the new window ({}): {seen:?}", other.is_ok()),
+        }
+    }
+    f.core.sessions.close(SECOND, &session).unwrap();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while f.only_log().await.state == SessionLogState::Recording {
+        assert!(tokio::time::Instant::now() < deadline, "the recording never completed");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let text = played_text(&f.core.sessions.open_session_log(&f.only_log().await.id).await.unwrap());
+    assert!(text.contains("ready-42") && text.contains("moved-42"), "{text:?}");
+    drop(terminal);
+}

@@ -121,3 +121,43 @@ pub async fn session_auth_answer(
 ) -> Result<(), IpcError> {
     state.core()?.sessions.answer_auth(window.label(), &session_id, &prompt_id, secret)
 }
+
+/// Offers a session this window owns to another open window (moving a tab to its own window).
+/// Returns the single-use token the other window passes to `session_attach`.
+#[tauri::command]
+pub async fn session_handoff_offer(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    to: String,
+) -> Result<String, IpcError> {
+    use tauri::Manager;
+    if window.app_handle().get_webview_window(&to).is_none() {
+        return Err(IpcError::new(ErrorCode::NotFound, "That window is not open."));
+    }
+    state.core()?.sessions.offer_handoff(window.label(), &session_id, &to)
+}
+
+/// Takes over a session offered to this window, with this window's own channels for its output
+/// and events. Returns the session id.
+#[tauri::command]
+pub async fn session_attach(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    output: Channel<InvokeResponseBody>,
+    events: Channel<SessionEvent>,
+) -> Result<String, IpcError> {
+    let sink = Arc::new(ChannelSink { output, events });
+    state.core()?.sessions.accept_handoff(window.label(), &token, sink)
+}
+
+/// What happened while a session this window owns connected (no secrets; CON-15).
+#[tauri::command]
+pub async fn session_diagnostics(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<String>, IpcError> {
+    state.core()?.sessions.diagnostics(window.label(), &session_id)
+}

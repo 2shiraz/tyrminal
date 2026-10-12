@@ -63,6 +63,9 @@ export function installMockBackend(options) {
       groupId,
       tags,
       lastConnectedAt: last,
+      protocol: { type: "ssh" },
+      terminal: { encoding: "utf8", term: "xterm256color" },
+      forwardAgent: false,
     });
     state.groups = [
       { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
@@ -89,6 +92,9 @@ export function installMockBackend(options) {
       { id: id(300), host: "10.20.0.11", port: 22, algorithm: "ssh-ed25519", fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8", addedAt: now - 86400 * 30 },
       { id: id(301), host: "ci3.lab.example", port: 2222, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Z0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4", addedAt: now - 86400 * 4 },
     ];
+    if (options.orphanKnownHost) {
+      state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });
+    }
   }
 
   function emit(event, payload) {
@@ -260,6 +266,9 @@ export function installMockBackend(options) {
   let nextTransfer = 1;
   window.__mockLocalFiles = new Set();
   window.__mockFs = fs;
+  const streams = new Map();
+  window.__mockDropped = [];
+  window.__mockReports = [];
   window.__mockTransfers = new Map();
   /** Completes a running mock transfer (tests drive progress explicitly). */
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
@@ -537,6 +546,37 @@ export function installMockBackend(options) {
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
+    // Dropped-file uploads: content arrives in ordered pieces; only a complete one appears.
+    files_upload_begin: (a) => {
+      const target = childPath(a.dir, a.name);
+      if (fs.has(target) && a.choice === "ask") fsErr("CONFLICT", "Something with that name is already there.");
+      const name = fs.has(target) && a.choice === "keep_both" ? a.name.replace(/(\.[^.]+)?$/, " (1)$1") : a.name;
+      const uploadId = id(9500 + nextTransfer++);
+      streams.set(uploadId, { dir: a.dir, name, size: a.size, written: 0 });
+      return { uploadId, name };
+    },
+    files_upload_chunk: (a, o) => {
+      const s = streams.get(o.headers["x-upload"]);
+      if (!s) fsErr("ACCESS_DENIED", "That upload is not running in this window.");
+      if (Number(o.headers["x-offset"]) !== s.written) fsErr("INVALID_INPUT", "The upload arrived out of order and was stopped.");
+      s.written += a.length ?? a.byteLength ?? 0;
+      window.__mockDropped.push({ name: s.name, bytes: a.length ?? a.byteLength });
+    },
+    files_upload_finish: (a) => {
+      const s = streams.get(a.uploadId);
+      streams.delete(a.uploadId);
+      if (!s || s.written !== s.size) fsErr("INVALID_INPUT", "The upload ended before all of the file arrived.");
+      addNode(childPath(s.dir, s.name), "file", s.size, 0o644);
+      return s.name;
+    },
+    files_upload_abort: (a) => {
+      streams.delete(a.uploadId);
+    },
+    diagnostics_report: (a) => {
+      window.__mockReports.push(a.entries);
+      return "tyrminal-diagnostics-2026-10-12.txt";
+    },
+    serial_ports: () => ["/dev/ttyUSB0", "/dev/ttyACM0"],
     terminal_choices: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {
       const extension = a.extension.replace(/^\./, "").toLowerCase();
@@ -774,6 +814,11 @@ export function installMockBackend(options) {
         inherited,
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
+        protocol: a.host.protocol ?? { type: "ssh" },
+        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        forwardAgent: a.host.forwardAgent ?? false,
+        // Serial hosts have no port; Telnet defaults to 23.
+        ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
       };
       state.hosts = existing ? state.hosts.map((h) => (h.id === saved.id ? saved : h)) : [...state.hosts, saved];
       return saved;
@@ -863,6 +908,9 @@ export function installMockBackend(options) {
           groupId: a.intoGroup,
           tags: h.tags,
           lastConnectedAt: null,
+          protocol: { type: "ssh" },
+          terminal: { encoding: "utf8", term: "xterm256color" },
+          forwardAgent: false,
         });
       }
       return a.hosts.length;
@@ -887,6 +935,7 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_write: (a, o) => write(o.headers["x-session"], a),
+    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {
