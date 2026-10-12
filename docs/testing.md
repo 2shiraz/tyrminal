@@ -60,6 +60,11 @@ into `tests/ssh-lab/.run/` (git-ignored). `lab down` removes only containers lab
 | Client keys | Ed25519, Ed25519 with passphrase, RSA 3072, ECDSA P-256, one unauthorized Ed25519 |
 | Lab-only relaxation | `PerSourcePenalties no`: all tests share one NAT source address and deliberately fail authentication |
 
+The local lab (`TYRMINAL_LAB_MODE=local`, used by CI) also starts `kbd` (keyboard-interactive
+only, through PAM), `mfa` (`AuthenticationMethods publickey,password`) and `mfakbd`
+(`AuthenticationMethods publickey,keyboard-interactive`, through PAM). Windows has no PAM, so
+there only `mfa` runs; tests that need a missing server report BLOCKED.
+
 Not in the lab yet: jump host and internal-only destination, SFTP edge cases, keyboard-interactive
 banner fixture, certificate-enabled server, slow/flooding server, a network fault proxy. An
 in-test TCP forwarder provides "same endpoint, different server" and link cuts.

@@ -3349,3 +3349,87 @@ fn rand_tag() -> u32 {
     getrandom::fill(&mut b).unwrap();
     u32::from_le_bytes(b)
 }
+
+// ---------- a second sign-in step after the key (SSH partial success) ----------
+
+fn second_step_port(f: &Fixture, server: &str) -> u16 {
+    let Some(port) = f.lab.0.pointer(&format!("/servers/{server}/port")).and_then(Value::as_u64) else {
+        panic!("BLOCKED: this lab has no \"{server}\" server (the local lab provides it)");
+    };
+    port as u16
+}
+
+/// A server that requires the key and then a password (`AuthenticationMethods publickey,password`)
+/// accepts the key with partial success: that is not a refused key. The user is asked for the
+/// password, the session opens, and the log says what happened without the secret.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_key_accepted_with_a_second_step_asks_for_the_password() {
+    let f = fixture().await;
+    let port = second_step_port(&f, "mfa");
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f.host("mfa", port, &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let password = f.lab.str("/password");
+
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, prompt) = client.until_not_state().await;
+    assert!(!matches!(prompt, SessionEvent::KeyRejected { .. }), "an accepted key was reported as refused");
+    let (prompt_id, kind, attempt) = auth_prompt(&prompt);
+    assert_eq!((kind, attempt), (AuthPromptKind::Password, 1));
+    // A wrong password is asked again, the key is not offered again.
+    client.answer(&prompt_id, Some("not-the-password-7"));
+    let (_, prompt) = client.until_not_state().await;
+    let (prompt_id, kind, attempt) = auth_prompt(&prompt);
+    assert_eq!((kind, attempt), (AuthPromptKind::Password, 2));
+    client.answer(&prompt_id, Some(&password));
+    client.until_connected().await;
+    client.send("echo mfa-$((40+2))\n").await;
+    client.output_until("mfa-42").await;
+
+    let text = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(text.contains("the server accepted the key and also requires a password"), "{text}");
+    assert!(!text.contains("did not accept the key"), "{text}");
+    assert!(!text.contains(&password) && !text.contains("not-the-password-7"), "a secret was logged:\n{text}");
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // Cancelling the second step ends the attempt as cancelled, not as a refused key.
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, prompt) = client.until_not_state().await;
+    client.answer(&auth_prompt(&prompt).0, None);
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::Cancelled));
+}
+
+/// The same with keyboard-interactive as the second step (one-time codes, PAM): the server's
+/// own question is shown, and the stored password is never sent there by itself.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_key_accepted_with_a_keyboard_interactive_step_shows_the_servers_question() {
+    let f = fixture().await;
+    let port = second_step_port(&f, "mfakbd");
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f.host("mfakbd", port, &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, prompt) = client.until_not_state().await;
+    let SessionEvent::AuthPrompt { prompt_id, kind, message, echo, attempt, .. } = prompt else {
+        panic!("expected the server's question, got {prompt:?}");
+    };
+    assert_eq!((kind, attempt, echo), (AuthPromptKind::KeyboardInteractive, 1, false));
+    assert!(message.expect("the server's question").to_lowercase().contains("password"));
+    client.answer(&prompt_id, Some(&f.lab.str("/password")));
+    client.until_connected().await;
+    client.send("echo kbd2-$((40+2))\n").await;
+    client.output_until("kbd2-42").await;
+    let text = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(text.contains("the server accepted the key and also requires keyboard-interactive"), "{text}");
+    assert!(!text.contains(&f.lab.str("/password")), "a secret was logged:\n{text}");
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
