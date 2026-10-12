@@ -390,7 +390,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     const tabs = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].map((e) => e.textContent)`);
     assert.equal(tabs.filter((x) => x.includes("Lab")).length, 2, JSON.stringify(tabs));
     // Its screen starts fresh: nothing from the original tab is replayed into it.
-    await t.waitForText(/^\$/m, "a prompt in the copy");
+    await t.waitForText(/\$\s*$/m, "a prompt in the copy");
     assert.doesNotMatch(await t.terminalText(), /ORIGINAL-2/);
     await t.type("echo COPY-$((2+2))\n");
     await t.waitForText("COPY-4");
@@ -436,7 +436,10 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     );
     // A literal token: the local shell differs per platform (PowerShell on Windows), and the point
     // is where the input goes, not what the shell computes.
-    await t.type("echo ONLY-HERE-42\n");
+    // Into the focused pane, once its shell shows a prompt (zsh on macOS, PowerShell on Windows).
+    const focusedRows = `document.querySelector('.pane:not([hidden])[data-focused="true"] .xterm-rows')?.innerText ?? ""`;
+    await s.until(() => s.execute(`return /[$%#>]\\s*$/m.test(${focusedRows}.replaceAll("\\u00a0", " ")) || null`), { describe: "a prompt in the focused pane", timeout: 30_000 });
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo ONLY-HERE-42\n");
     await s.until(
       () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .xterm-rows")].filter((e) => e.textContent.includes("ONLY-HERE-42")).length`).then((n) => (n > 0 ? n : null)),
       { describe: "echo in the focused pane" },
