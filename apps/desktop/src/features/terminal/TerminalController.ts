@@ -216,8 +216,13 @@ export class TerminalController {
     const rendered = this.term.onRender(() => {
       this.counters.renders += 1;
       this.publishCounters();
+      this.checkCellSize();
     });
     this.cleanups.push(() => rendered.dispose());
+    // A font that finishes loading later changes the cell size without resizing the container.
+    const onFonts = () => this.scheduleResize();
+    document.fonts?.addEventListener("loadingdone", onFonts);
+    this.cleanups.push(() => document.fonts?.removeEventListener("loadingdone", onFonts));
 
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(container);
@@ -498,6 +503,22 @@ export class TerminalController {
           },
         );
     }
+  }
+
+  private lastCellCheck = 0;
+
+  /**
+   * The cell size can change after the last fit (a font or renderer re-measures) while the
+   * container keeps its size, so no resize is observed; the grid would then extend past the
+   * visible area and hide the bottom rows. Re-fit when the current cell size calls for a
+   * different grid. Rate-limited: renders are frequent during output.
+   */
+  private checkCellSize(): void {
+    const now = performance.now();
+    if (now - this.lastCellCheck < 500) return;
+    this.lastCellCheck = now;
+    const proposed = this.fit.proposeDimensions();
+    if (proposed && (proposed.cols !== this.term.cols || proposed.rows !== this.term.rows)) this.scheduleResize();
   }
 
   private fitNow(): void {
