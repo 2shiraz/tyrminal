@@ -107,3 +107,9 @@ pub const MAX_HIGHLIGHT_PATTERN_LEN: usize = 128;
 pub const MAX_PATTERN_UNBOUNDED: usize = 3;
 /// The largest count in a bounded repetition (`{n,m}`) of a highlight pattern.
 pub const MAX_PATTERN_REPEAT: u32 = 256;
+// command history
+/// Commands kept per host (and for local terminals), and the length of one command in bytes.
+pub const MAX_HISTORY_ENTRIES: usize = 1_000;
+pub const MAX_HISTORY_COMMAND_LEN: usize = 1_024;
+/// Suggestions returned for one query.
+pub const MAX_HISTORY_SUGGESTIONS: usize = 8;

@@ -46,6 +46,9 @@ use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelIn
 use crate::layouts::{self, LayoutRecord};
 use crate::records::KIND_LAYOUT;
 use tyrminal_contracts::{LayoutTemplateInput, LayoutTemplateSummary};
+// command history
+use crate::records::{HistoryRecord, HistorySettingsRecord, KIND_HISTORY, KIND_HISTORY_SETTINGS};
+use tyrminal_contracts::{HistoryEntry, HistorySettings};
 // agent D: inventory and snippets
 use crate::records::StoredProxy;
 use crate::records::{
@@ -83,6 +86,9 @@ struct Open {
     targets: BTreeMap<Id, Stored<ExecutionTargetRecord>>,
     identities: BTreeMap<Id, Stored<IdentityRecord>>,
     workflows: BTreeMap<Id, Stored<WorkflowRecord>>,
+    // command history
+    history: BTreeMap<Id, Stored<HistoryRecord>>,
+    history_settings: BTreeMap<Id, Stored<HistorySettingsRecord>>,
 }
 
 impl Open {
@@ -104,6 +110,9 @@ impl Open {
             targets: BTreeMap::new(),
             identities: BTreeMap::new(),
             workflows: BTreeMap::new(),
+            // command history
+            history: BTreeMap::new(),
+            history_settings: BTreeMap::new(),
         }
     }
 }
@@ -552,6 +561,9 @@ impl VaultService {
                 KIND_EXECUTION_TARGET => load!(ExecutionTargetRecord, open.targets),
                 KIND_IDENTITY => load!(IdentityRecord, open.identities),
                 KIND_WORKFLOW => load!(WorkflowRecord, open.workflows),
+                // command history
+                KIND_HISTORY => load!(HistoryRecord, open.history),
+                KIND_HISTORY_SETTINGS => load!(HistorySettingsRecord, open.history_settings),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -3348,6 +3360,156 @@ impl VaultService {
             self.update_workflow(open, &target, |w| WorkflowRecord { jump_host: jump, proxy, os, ..w }).await?;
         }
         self.group_defaults(&gtext).await
+    }
+}
+
+// command history
+/// Command history (`command_history.rs` has the rules) and its setting.
+impl VaultService {
+    fn history_enabled(open: &Open) -> bool {
+        open.history_settings.values().next().is_some_and(|s| s.record.enabled)
+    }
+
+    pub async fn history_settings(&self) -> Result<HistorySettings, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(HistorySettings { enabled: Self::history_enabled(open) })
+    }
+
+    /// Turns history on or off. Off stops remembering and suggesting; it never deletes.
+    pub async fn set_history_settings(&self, settings: HistorySettings) -> Result<HistorySettings, IpcError> {
+        let record = HistorySettingsRecord { enabled: settings.enabled };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match open.history_settings.iter().next() {
+            Some((id, s)) => (*id, s.revision + 1),
+            None => (random_id().map_err(from_vault)?, 1),
+        };
+        self.write(open, id, KIND_HISTORY_SETTINGS, revision, Some((&record, 0))).await?;
+        open.history_settings.clear();
+        open.history_settings.insert(id, Stored { revision, record });
+        Ok(settings)
+    }
+
+    /// Adds a command to a scope when history is on (otherwise does nothing), under the
+    /// generation of the session it came from.
+    pub(crate) async fn add_history(&self, generation: u32, scope: &str, command: &str) -> Result<(), IpcError> {
+        let Some(command) = crate::command_history::normalize(command)? else { return Ok(()) };
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if !Self::history_enabled(open) {
+            return Ok(());
+        }
+        let existing = open.history.iter().find(|(_, h)| h.record.scope == scope).map(|(id, h)| (*id, h.revision));
+        let (id, revision, mut record) = match existing {
+            Some((id, revision)) => (id, revision + 1, open.history[&id].record.clone()),
+            None => {
+                if open.history.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of histories."));
+                }
+                (random_id().map_err(from_vault)?, 1, HistoryRecord { scope: scope.to_owned(), commands: Vec::new() })
+            }
+        };
+        crate::command_history::add(&mut record, command, now_unix());
+        self.write(open, id, KIND_HISTORY, revision, Some((&record, record.content_len()))).await?;
+        open.history.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    /// Suggestions for `query` from a scope (none while history is off).
+    pub(crate) async fn suggest_history(
+        &self,
+        generation: u32,
+        scope: &str,
+        query: &str,
+    ) -> Result<Vec<String>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if !Self::history_enabled(open) {
+            return Ok(Vec::new());
+        }
+        Ok(open
+            .history
+            .values()
+            .find(|h| h.record.scope == scope)
+            .map_or_else(Vec::new, |h| crate::command_history::suggest(&h.record, query)))
+    }
+
+    /// Every remembered command, most recently used first.
+    pub async fn list_history(&self) -> Result<Vec<HistoryEntry>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut out: Vec<HistoryEntry> = open
+            .history
+            .values()
+            .flat_map(|h| {
+                let host_id = (h.record.scope != crate::command_history::LOCAL_SCOPE).then(|| h.record.scope.clone());
+                let host_label = host_id
+                    .as_deref()
+                    .and_then(|id| validate::id(id).ok())
+                    .and_then(|id| open.hosts.get(&id))
+                    .map(|s| s.record.label.clone());
+                h.record.commands.iter().map(move |e| HistoryEntry {
+                    host_id: host_id.clone(),
+                    host_label: host_label.clone(),
+                    command: e.command.clone(),
+                    last_used: e.last_used,
+                    uses: e.uses,
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then_with(|| a.command.cmp(&b.command)));
+        Ok(out)
+    }
+
+    /// Forgets one command of a host (`None`: of local terminals).
+    pub async fn delete_history(&self, host_id: Option<&str>, command: &str) -> Result<(), IpcError> {
+        let scope = match host_id {
+            Some(id) => validate::id_text(&validate::id(id)?),
+            None => crate::command_history::LOCAL_SCOPE.to_owned(),
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, current) = open
+            .history
+            .iter()
+            .find(|(_, h)| h.record.scope == scope)
+            .map(|(id, h)| (*id, h.revision))
+            .ok_or_else(|| not_found("That command is no longer remembered."))?;
+        let mut record = open.history[&id].record.clone();
+        if !crate::command_history::remove(&mut record, command) {
+            return Err(not_found("That command is no longer remembered."));
+        }
+        let revision = current + 1;
+        if record.commands.is_empty() {
+            self.write::<HistoryRecord>(open, id, KIND_HISTORY, revision, None).await?;
+            open.history.remove(&id);
+        } else {
+            self.write(open, id, KIND_HISTORY, revision, Some((&record, record.content_len()))).await?;
+            open.history.insert(id, Stored { revision, record });
+        }
+        Ok(())
+    }
+
+    /// Deletes all command history. Returns how many commands were removed.
+    pub async fn clear_history(&self) -> Result<u32, IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let scopes: Vec<(Id, u64, usize)> =
+            open.history.iter().map(|(id, h)| (*id, h.revision, h.record.commands.len())).collect();
+        let mut removed = 0usize;
+        for (id, revision, count) in scopes {
+            self.write::<HistoryRecord>(open, id, KIND_HISTORY, revision + 1, None).await?;
+            open.history.remove(&id);
+            removed += count;
+        }
+        Ok(u32::try_from(removed).unwrap_or(u32::MAX))
     }
 }
 
