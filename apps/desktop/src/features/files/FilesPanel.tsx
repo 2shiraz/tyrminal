@@ -1,4 +1,4 @@
-import type { RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
+import type { EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
@@ -49,7 +49,8 @@ type Prompt =
   | { kind: "rename"; entry: RemoteEntry }
   | { kind: "chmod"; entry: RemoteEntry }
   | { kind: "delete"; entry: RemoteEntry }
-  | { kind: "replace"; name: string; remote: boolean; retry: () => void };
+  | { kind: "replace"; name: string; remote: boolean; retry: () => void }
+  | { kind: "editConflict"; edit: EditStatus; overwrite: () => void };
 
 export function formatSize(bytes: number | null | undefined): string {
   if (bytes == null) return "";
@@ -93,6 +94,7 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
   const [showHidden, setShowHidden] = useState(false);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [edits, setEdits] = useState<(EditStatus & { saved?: boolean | undefined })[]>([]);
   const { pending, error, run } = useAction();
   const sessionId = target?.sessionId ?? null;
   const listingRef = useRef<RemoteListing | null>(null);
@@ -123,6 +125,47 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
   useEffect(() => {
     ref.current?.querySelector<HTMLInputElement>('input[name="remote-path"]')?.focus();
   }, []);
+
+  // Open edits: their local copies are watched while the panel is open (nothing uploads by itself).
+  const editIds = edits.map((e) => e.editId).join(",");
+  useEffect(() => {
+    if (!editIds) return;
+    const timer = window.setInterval(() => {
+      for (const id of editIds.split(",")) {
+        filesApi
+          .editStatus(id)
+          .then((status) =>
+            setEdits((list) => list.map((e) => (e.editId === id ? { ...status, saved: status.changed ? false : e.saved } : e))),
+          )
+          .catch(() => setEdits((list) => list.filter((e) => e.editId !== id)));
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [editIds]);
+
+  async function editSelected() {
+    if (!sessionId || !current || !selection) return;
+    const opened = await run(() => filesApi.editOpen(sessionId, current, selection.name));
+    if (opened) setEdits((list) => [...list, opened]);
+  }
+
+  async function saveEdit(edit: EditStatus, overwrite: boolean) {
+    try {
+      const status = await filesApi.editSave(edit.editId, overwrite);
+      setEdits((list) => list.map((e) => (e.editId === edit.editId ? { ...status, saved: true } : e)));
+      if (current) void load(current);
+    } catch (caught) {
+      const e = toAppError(caught);
+      if (e.code === "CONFLICT" && !overwrite) setPrompt({ kind: "editConflict", edit, overwrite: () => void saveEdit(edit, true) });
+      else void run(() => Promise.reject(e));
+    }
+  }
+
+  async function closeEdit(edit: EditStatus) {
+    if (edit.changed && !window.confirm(msg.files.editCloseUnsaved)) return;
+    await filesApi.editClose(edit.editId).catch(() => undefined);
+    setEdits((list) => list.filter((e) => e.editId !== edit.editId));
+  }
 
   const entries = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith("."));
   const current = listing?.path ?? null;
@@ -331,6 +374,11 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
                     <IconDownload size={14} /> {msg.files.download}
                   </button>
                 )}
+                {selection.kind === "file" && (
+                  <button type="button" className="btn btn-sm" onClick={() => void editSelected()} disabled={pending}>
+                    <IconPencil size={14} /> {msg.files.edit}
+                  </button>
+                )}
                 <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "rename", entry: selection })}>
                   <IconPencil size={14} /> {msg.files.rename}
                 </button>
@@ -380,6 +428,35 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
               </ul>
             )}
           </div>
+
+          {edits.length > 0 && (
+            <section className="files-transfers" aria-label={msg.files.editing}>
+              <div className="files-transfers-head">
+                <h3>{msg.files.editing}</h3>
+              </div>
+              <ul>
+                {edits.map((e) => (
+                  <li key={e.editId} className="files-transfer" data-state={e.changed ? "changed" : "clean"}>
+                    <span className="files-transfer-icon">
+                      <IconPencil size={13} />
+                    </span>
+                    <span className="files-name">{visibleName(e.name)}</span>
+                    <span className="files-meta" data-testid="edit-state">
+                      {e.changed ? msg.files.editChanged : e.saved ? msg.files.editSaved : msg.files.editUnchanged}
+                    </span>
+                    <span className="files-edit-actions">
+                      <button type="button" className="btn btn-sm btn-primary" disabled={!e.changed} onClick={() => void saveEdit(e, false)} aria-label={msg.files.editSave(e.name)}>
+                        <IconUpload size={13} />
+                      </button>
+                      <IconButton label={msg.files.editClose(e.name)} onClick={() => void closeEdit(e)}>
+                        <IconX size={14} />
+                      </IconButton>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {transfers.length > 0 && (
             <section className="files-transfers" aria-label={msg.files.transfers}>
@@ -482,13 +559,29 @@ function FilesPrompt({
         prompt.retry();
         onDone(false);
         return;
+      case "editConflict":
+        prompt.overwrite();
+        onDone(false);
+        return;
     }
     if (ok) onDone(true);
   }
 
-  if (prompt.kind === "delete" || prompt.kind === "replace") {
-    const title = prompt.kind === "delete" ? msg.files.deleteTitle(prompt.entry.name) : msg.files.replaceTitle(prompt.name);
-    const body = prompt.kind === "delete" ? msg.files.deleteBody : prompt.remote ? msg.files.replaceRemote : msg.files.replaceLocal;
+  if (prompt.kind === "delete" || prompt.kind === "replace" || prompt.kind === "editConflict") {
+    const title =
+      prompt.kind === "delete"
+        ? msg.files.deleteTitle(prompt.entry.name)
+        : prompt.kind === "replace"
+          ? msg.files.replaceTitle(prompt.name)
+          : msg.files.editConflictTitle(prompt.edit.name);
+    const body =
+      prompt.kind === "delete"
+        ? msg.files.deleteBody
+        : prompt.kind === "editConflict"
+          ? msg.files.editConflictBody
+          : prompt.remote
+            ? msg.files.replaceRemote
+            : msg.files.replaceLocal;
     return (
       <Dialog title={title} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => onDone(false)}>
         <div className="stack">
@@ -499,7 +592,7 @@ function FilesPrompt({
               {msg.common.cancel}
             </button>
             <button type="button" className="btn btn-danger-solid" onClick={() => void submit()} disabled={pending}>
-              {prompt.kind === "delete" ? msg.files.delete : msg.files.replace}
+              {prompt.kind === "delete" ? msg.files.delete : prompt.kind === "editConflict" ? msg.files.editOverwrite : msg.files.replace}
             </button>
           </div>
         </div>

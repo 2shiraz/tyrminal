@@ -1513,3 +1513,86 @@ async fn wait_long(rx: &mut mpsc::UnboundedReceiver<TransferEvent>) -> TransferE
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn editing_a_remote_file_saves_explicitly_and_refuses_to_overwrite_server_changes() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let name = format!("tyr-edit-{}.conf", std::process::id());
+    client.send(&format!("printf 'port=1\\n' > ~/{name} && chmod 640 ~/{name} && echo MK-$((40+2))\n")).await;
+    client.output_until("MK-42").await;
+    let root = TempDir::new().unwrap();
+
+    let (local, opened) = s.edit_open(WINDOW, &id, &home, &name, root.path()).await.unwrap();
+    assert!(!opened.changed);
+    assert_eq!(std::fs::read_to_string(&local).unwrap(), "port=1\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(local.parent().unwrap()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "the edit folder is owner-only");
+    }
+    // Another window cannot see or save this edit.
+    assert_eq!(s.edit_status("other-window", &opened.edit_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // A local change is detected, never uploaded by itself, and saved on request.
+    std::fs::write(&local, "port=2\n").unwrap();
+    assert!(s.edit_status(WINDOW, &opened.edit_id).await.unwrap().changed);
+    client.text.clear();
+    client.send(&format!("cat ~/{name}; echo C1-$((40+2))\n")).await;
+    client.output_until("C1-42").await;
+    assert!(client.text.contains("port=1"), "nothing was uploaded before saving");
+    let saved = s.edit_save(WINDOW, &opened.edit_id, false).await.unwrap();
+    assert!(!saved.changed);
+    assert!(!s.edit_status(WINDOW, &opened.edit_id).await.unwrap().changed);
+    client.text.clear();
+    client.send(&format!("cat ~/{name}; ls -l ~/{name}; echo C2-$((40+2))\n")).await;
+    client.output_until("C2-42").await;
+    assert!(client.text.contains("port=2"), "{:?}", client.text);
+    assert!(client.text.contains("-rw-r-----"), "the remote file keeps its permissions: {:?}", client.text);
+
+    // Someone changes the file on the server: saving is refused unless overwriting is chosen.
+    client.send(&format!("printf 'port=9\\nextra\\n' > ~/{name} && echo C3-$((40+2))\n")).await;
+    client.output_until("C3-42").await;
+    std::fs::write(&local, "port=3\n").unwrap();
+    assert_eq!(s.edit_save(WINDOW, &opened.edit_id, false).await.unwrap_err().code, ErrorCode::Conflict);
+    client.text.clear();
+    client.send(&format!("cat ~/{name}; echo C4-$((40+2))\n")).await;
+    client.output_until("C4-42").await;
+    assert!(client.text.contains("extra"), "the server's change was kept");
+    s.edit_save(WINDOW, &opened.edit_id, true).await.unwrap();
+    client.text.clear();
+    client.send(&format!("cat ~/{name}; echo C5-$((40+2))\n")).await;
+    client.output_until("C5-42").await;
+    assert!(client.text.contains("port=3") && !client.text.contains("extra"), "{:?}", client.text);
+
+    // A same-size change that keeps the modification time is caught by content alone.
+    client
+        .send(&format!(
+            "cp -p ~/{name} ~/{name}.ref && printf 'port=8\\n' > ~/{name} && touch -r ~/{name}.ref ~/{name} && rm ~/{name}.ref && echo C6-$((40+2))\n"
+        ))
+        .await;
+    client.output_until("C6-42").await;
+    std::fs::write(&local, "port=7\n").unwrap();
+    assert_eq!(s.edit_save(WINDOW, &opened.edit_id, false).await.unwrap_err().code, ErrorCode::Conflict);
+
+    // Closing removes the local copy.
+    s.edit_close(WINDOW, &opened.edit_id).await.unwrap();
+    assert!(!local.exists() && !local.parent().unwrap().exists());
+    assert_eq!(s.edit_status(WINDOW, &opened.edit_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // Ending the session removes copies still open.
+    let (local, _) = s.edit_open(WINDOW, &id, &home, &name, root.path()).await.unwrap();
+    assert!(local.exists());
+    client.send(&format!("rm -f ~/{name}; exit\n")).await;
+    client.until_closed().await;
+    assert!(!local.parent().unwrap().exists(), "the session's edit copies are gone");
+}

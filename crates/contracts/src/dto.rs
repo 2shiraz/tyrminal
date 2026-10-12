@@ -718,3 +718,14 @@ pub enum TransferEvent {
     },
     Cancelled,
 }
+
+/// A remote file opened in a local application. `changed`: the local copy differs from what
+/// was downloaded or last saved to the server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditStatus {
+    pub edit_id: String,
+    pub name: String,
+    pub changed: bool,
+}

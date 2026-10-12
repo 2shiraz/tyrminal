@@ -184,6 +184,24 @@ pub(crate) enum Stop {
     Failed(IpcError),
 }
 
+impl Stop {
+    pub(crate) fn into_error(self) -> IpcError {
+        match self {
+            Self::Cancelled => err(ErrorCode::Cancelled, "The transfer was cancelled."),
+            Self::Failed(e) => e,
+        }
+    }
+}
+
+/// A sink for copies that report no progress (editing).
+pub(crate) struct NullSink;
+
+impl TransferSink for NullSink {
+    fn event(&self, _: TransferEvent) -> bool {
+        true
+    }
+}
+
 impl From<IpcError> for Stop {
     fn from(e: IpcError) -> Self {
         Self::Failed(e)

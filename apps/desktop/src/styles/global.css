@@ -3040,6 +3040,12 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
+.files-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .files-transfer progress {
   grid-column: 2 / 3;
   width: 100%;

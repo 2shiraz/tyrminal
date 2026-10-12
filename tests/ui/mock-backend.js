@@ -258,7 +258,38 @@ export function installMockBackend(options) {
   /** Completes a running mock transfer (tests drive progress explicitly). */
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
 
+  const edits = new Map();
+  /** Marks an open edit's local copy changed, or the server copy changed (conflict on save). */
+  window.__mockEditLocalChange = (name) => {
+    for (const e of edits.values()) if (e.name === name) e.changed = true;
+  };
+  window.__mockEditServerChange = (name) => {
+    for (const e of edits.values()) if (e.name === name) e.serverChanged = true;
+  };
+
   const handlers = {
+    files_edit_open: (a) => {
+      const node = fs.get(childPath(a.dir, a.name));
+      if (!node || node.kind !== "file") fsErr("INVALID_INPUT", "Only files can be opened for editing.");
+      const editId = id(7000 + edits.size);
+      edits.set(editId, { editId, name: a.name, changed: false, serverChanged: false });
+      return { editId, name: a.name, changed: false };
+    },
+    files_edit_status: (a) => {
+      const e = edits.get(a.editId);
+      if (!e) fsErr("ACCESS_DENIED", "That file is not open for editing in this window.");
+      return { editId: e.editId, name: e.name, changed: e.changed };
+    },
+    files_edit_save: (a) => {
+      const e = edits.get(a.editId);
+      if (e.serverChanged && !a.overwrite) fsErr("CONFLICT", "The file changed on the server since you opened it.");
+      e.changed = false;
+      e.serverChanged = false;
+      return { editId: e.editId, name: e.name, changed: false };
+    },
+    files_edit_close: (a) => {
+      edits.delete(a.editId);
+    },
     files_list: (a) => {
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));

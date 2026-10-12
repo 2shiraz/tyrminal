@@ -33,16 +33,19 @@ pub struct AppState {
     pub chosen_backup: std::sync::Mutex<Option<(String, Vec<u8>)>>,
     /// Local file grants, oldest first.
     grants: std::sync::Mutex<Vec<(String, Grant)>>,
+    /// Where local copies of remote files being edited live (owner-only, emptied at start).
+    pub edit_root: PathBuf,
     /// Held for the life of the process: one instance per data directory.
     _instance_lock: Option<std::fs::File>,
 }
 
 impl AppState {
-    pub fn new(core: Result<Core, IpcError>, instance_lock: Option<std::fs::File>) -> Self {
+    pub fn new(core: Result<Core, IpcError>, instance_lock: Option<std::fs::File>, edit_root: PathBuf) -> Self {
         Self {
             core,
             chosen_backup: std::sync::Mutex::new(None),
             grants: std::sync::Mutex::new(Vec::new()),
+            edit_root,
             _instance_lock: instance_lock,
         }
     }

@@ -6,6 +6,7 @@
 //! adapter crate supplies a [`SessionSink`] and calls these services.
 
 mod deploy;
+mod edits;
 mod error;
 mod files;
 mod folders;

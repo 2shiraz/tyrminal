@@ -179,3 +179,29 @@ test("files: whole folders upload and download, report skipped links, and are ne
   await page.keyboard.press("Enter");
   await expect(panel(page).getByRole("button", { name: "Download this folder…" })).toBeDisabled();
 });
+
+test("files: a file opened in an editor is saved only on request, and server changes are not overwritten silently", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await panel(page).getByRole("button", { name: "Edit…" }).click();
+  const editing = panel(page).getByRole("region", { name: "Open in editors" });
+  await expect(editing.getByTestId("edit-state")).toHaveText("No changes yet");
+  await expect(editing.getByRole("button", { name: "Save README.md to the server" })).toBeDisabled();
+
+  await page.evaluate(() => (window as unknown as { __mockEditLocalChange: (n: string) => void }).__mockEditLocalChange("README.md"));
+  await expect(editing.getByTestId("edit-state")).toHaveText("Changed locally", { timeout: 5000 });
+  await page.evaluate(() => (window as unknown as { __mockEditServerChange: (n: string) => void }).__mockEditServerChange("README.md"));
+  await editing.getByRole("button", { name: "Save README.md to the server" }).click();
+  const conflict = page.getByRole("alertdialog", { name: "“README.md” changed on the server" });
+  await expect(conflict.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await conflict.getByRole("button", { name: "Cancel" }).click();
+  await expect(editing.getByTestId("edit-state")).toHaveText("Changed locally");
+  await editing.getByRole("button", { name: "Save README.md to the server" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Replace their changes" }).click();
+  await expect(editing.getByTestId("edit-state")).toHaveText("Saved to the server");
+
+  await editing.getByRole("button", { name: "Stop editing README.md" }).click();
+  await expect(editing).toHaveCount(0);
+});

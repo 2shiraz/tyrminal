@@ -11,6 +11,7 @@ import type {
   BackupFile,
   BackupPreview,
   BulkHostChange,
+  EditStatus,
   ErrorCode,
   GroupInput,
   GroupSummary,
@@ -211,6 +212,12 @@ export const files = {
   download: (sessionId: string, dir: string, name: string, token: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
     call<TransferStarted>("files_download", { sessionId, dir, name, token, overwrite, events: transferChannel(onEvent) }),
   cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
+  /** Opens a remote file in the default local application; nothing is uploaded until save. */
+  editOpen: (sessionId: string, dir: string, name: string) => call<EditStatus>("files_edit_open", { sessionId, dir, name }),
+  editStatus: (editId: string) => call<EditStatus>("files_edit_status", { editId }),
+  /** Uploads the local copy; refused with CONFLICT if the server's copy changed, unless overwrite. */
+  editSave: (editId: string, overwrite: boolean) => call<EditStatus>("files_edit_save", { editId, overwrite }),
+  editClose: (editId: string) => call<void>("files_edit_close", { editId }),
 };
 
 export const snippets = {

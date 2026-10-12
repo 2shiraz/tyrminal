@@ -11,7 +11,9 @@ use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State, WebviewWindow};
 use tyrminal_core::TransferSink;
-use tyrminal_core::contracts::{ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted};
+use tyrminal_core::contracts::{
+    EditStatus, ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted,
+};
 
 use crate::state::{AppState, Grant, GrantKind};
 
@@ -23,6 +25,7 @@ impl TransferSink for ChannelTransferSink {
     }
 }
 
+#[cfg_attr(feature = "e2e", allow(dead_code))]
 fn dialog_error() -> IpcError {
     IpcError::new(ErrorCode::IoError, "The file dialog could not be shown.")
 }
@@ -233,4 +236,57 @@ pub async fn files_cancel(
     transfer_id: String,
 ) -> Result<(), IpcError> {
     state.core()?.sessions.cancel_transfer(window.label(), &transfer_id)
+}
+
+/// Opens a remote file in the default local application for its type. The core downloads it into
+/// an owner-only folder; nothing is uploaded until `files_edit_save`.
+#[tauri::command]
+pub async fn files_edit_open(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    dir: String,
+    name: String,
+) -> Result<EditStatus, IpcError> {
+    if state.edit_root.as_os_str().is_empty() {
+        return Err(IpcError::new(ErrorCode::IoError, "There is no place to keep files being edited."));
+    }
+    let (path, status) =
+        state.core()?.sessions.edit_open(window.label(), &session_id, &dir, &name, &state.edit_root).await?;
+    // Test builds do not launch other applications; the test edits the file directly.
+    #[cfg(not(feature = "e2e"))]
+    open::that_detached(&path).map_err(|_| {
+        IpcError::new(ErrorCode::IoError, "No application could open that file. It is still open for editing.")
+    })?;
+    #[cfg(feature = "e2e")]
+    let _ = path;
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn files_edit_status(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+) -> Result<EditStatus, IpcError> {
+    state.core()?.sessions.edit_status(window.label(), &edit_id).await
+}
+
+#[tauri::command]
+pub async fn files_edit_save(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+    overwrite: bool,
+) -> Result<EditStatus, IpcError> {
+    state.core()?.sessions.edit_save(window.label(), &edit_id, overwrite).await
+}
+
+#[tauri::command]
+pub async fn files_edit_close(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    edit_id: String,
+) -> Result<(), IpcError> {
+    state.core()?.sessions.edit_close(window.label(), &edit_id).await
 }
