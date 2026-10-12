@@ -3,7 +3,8 @@ import { type FormEvent, type KeyboardEvent, useId, useMemo, useRef, useState } 
 
 import { useVaultData } from "../../app/vaultData";
 import { ErrorNotice, SecretField, TextField } from "../../components/ui/controls";
-import { IconChevronDown, IconSearch, IconServer } from "../../components/ui/icons";
+import { IconChevronDown, IconSearch } from "../../components/ui/icons";
+import { OsIcon } from "../hosts/OsIcon";
 import { type AppError, hosts as hostsApi, identities as identitiesApi, toAppError } from "../../lib/ipc";
 import { msgQuick } from "../../lib/messages-quick";
 import { ConnectTrack, type TrackStop, connectionStops } from "./ConnectTrack";
@@ -166,9 +167,7 @@ export function QuickSetup({
       <section className="connection-sheet quick-connect-sheet" aria-labelledby={`${uid}-title`} onKeyDown={onKeyDown}>
       <form className="stack" onSubmit={next} aria-label={msgQuick.title(address)}>
         <div className="connect-head" data-tile>
-          <span className="avatar connect-host-mark" aria-hidden="true">
-            <IconServer size={16} />
-          </span>
+          <OsIcon os={null} />
           <div className="connect-head-text">
             <h2 id={`${uid}-title`}>{msgQuick.title(address)}</h2>
             <p>{msgQuick.subtitle}</p>
