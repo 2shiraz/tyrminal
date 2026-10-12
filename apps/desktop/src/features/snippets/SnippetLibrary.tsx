@@ -171,6 +171,8 @@ export function SnippetLibrary({
                   <IconPencil size={13} />
                 </IconButton>
               )}
+              {/* The top level cannot be renamed: hold the button's place so the counts line up. */}
+              {folder === "" && !compact && <span className="folder-row-spacer" aria-hidden="true" />}
               </div>
               {open && (
                 <ul aria-label={folder || msg.snippets.topLevel}>

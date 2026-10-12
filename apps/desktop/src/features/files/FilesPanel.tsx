@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Dialog } from "../../components/ui/Dialog";
 import type { MenuEntry } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
-import { IconArrowLeftRight, IconCopy, IconFolderOpen, IconHardDrive, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconCopy, IconFolderOpen, IconHardDrive, IconPanelRightClose, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
 import { files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
@@ -203,8 +203,8 @@ export function FilesPanel({
             </span>
           )}
         </h2>
-        <IconButton size="sm" data-tooltip-side="bottom-end" label={msg.files.close} onClick={onClose}>
-          <IconX size={15} />
+        <IconButton data-tooltip-side="bottom-end" label={msg.files.close} onClick={onClose}>
+          <IconPanelRightClose size={16} />
         </IconButton>
       </div>
 
