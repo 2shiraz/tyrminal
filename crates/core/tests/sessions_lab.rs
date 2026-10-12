@@ -3184,6 +3184,7 @@ async fn a_snippet_runs_on_an_open_session_and_on_a_closed_host_alike() {
     closed.until_closed().await;
     f.core.sessions.close(WINDOW, &open.session).unwrap();
     open.until_closed().await;
+}
 
 // tmux and screen session awareness (P-31)
 fn multiplexer_sessions(
