@@ -162,9 +162,14 @@ describe("terminal with real applications", { concurrency: false }, () => {
       const e = spans.at(-1); if (!e) return null;
       const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
     assert.ok(box, "the function key bar shows Quit");
+    // Where the click actually lands (diagnostic for platforms whose pointer mapping differs).
+    await s.execute(`window.__tyrClicks = []; document.addEventListener("mousedown", (e) => window.__tyrClicks.push({ x: e.clientX, y: e.clientY, target: String(e.target.className).slice(0, 40), trusted: e.isTrusted }), { capture: true, once: true });`);
     try {
       await s.clickAt(box.x, box.y);
-      await t.waitForText(/^tyr\$\s*$/m, "shell prompt after clicking Quit");
+      await t.waitForText(/^tyr\$\s*$/m, "shell prompt after clicking Quit").catch(async (error) => {
+        const clicks = await s.execute("return JSON.stringify(window.__tyrClicks)").catch(() => "?");
+        throw new Error(`${error.message}\n--- click aimed at ${JSON.stringify(box)}, received ${clicks}`);
+      });
     } finally {
       // Never leave htop running for the next test: F10 quits if the click did not.
       if (/Load average|Tasks:|F10Quit|Environment of process/.test(await t.terminalText())) {
