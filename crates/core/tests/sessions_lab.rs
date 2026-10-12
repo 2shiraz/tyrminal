@@ -80,6 +80,8 @@ static SERVER_B: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 struct Forwarder {
     port: u16,
     target: Arc<Mutex<SocketAddr>>,
+    /// The local ports of the forwarder's own connections to the server, as its log shows them.
+    upstream: Arc<Mutex<Vec<u16>>>,
 }
 
 impl Forwarder {
@@ -87,21 +89,30 @@ impl Forwarder {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let target = Arc::new(Mutex::new(target));
-        let shared = Arc::clone(&target);
+        let upstream = Arc::new(Mutex::new(Vec::new()));
+        let (shared, ports) = (Arc::clone(&target), Arc::clone(&upstream));
         tokio::spawn(async move {
             while let Ok((mut inbound, _)) = listener.accept().await {
                 let backend = *shared.lock().unwrap();
+                let ports = Arc::clone(&ports);
                 tokio::spawn(async move {
                     if let Ok(mut outbound) = TcpStream::connect(backend).await {
+                        ports.lock().unwrap().push(outbound.local_addr().unwrap().port());
                         let _ = copy_bidirectional(&mut inbound, &mut outbound).await;
                     }
                 });
             }
         });
-        Self { port, target }
+        Self { port, target, upstream }
     }
     fn retarget(&self, target: SocketAddr) {
         *self.target.lock().unwrap() = target;
+    }
+    /// Server log lines about this forwarder's connections only: other tests use the same
+    /// server at the same time.
+    fn own_lines(&self, lines: Vec<String>) -> Vec<String> {
+        let ports = self.upstream.lock().unwrap().clone();
+        lines.into_iter().filter(|l| ports.iter().any(|p| format!("{l} ").contains(&format!(" port {p} ")))).collect()
     }
 }
 
@@ -3132,7 +3143,8 @@ async fn a_run_only_connection_never_trusts_by_itself_and_refuses_a_changed_key(
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     assert_eq!(client.until_closed().await.0, None);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let lines = new_log_lines(&f.lab, "a", log_before);
+    let lines = forwarder.own_lines(new_log_lines(&f.lab, "a", log_before));
+    assert!(lines.iter().any(|l| l.contains("Starting session: command")), "the run's own lines: {lines:#?}");
     for asked in ["Starting session: shell", "pty"] {
         assert!(!lines.iter().any(|l| l.contains(asked)), "a run-only connection asked for {asked:?}: {lines:#?}");
     }
@@ -3229,8 +3241,11 @@ async fn runs_on_run_only_connections_stop_on_cancel_and_on_lock() {
 async fn a_snippet_runs_on_an_open_session_and_on_a_closed_host_alike() {
     let f = fixture().await;
     let _exclusive = SERVER_B.lock().await;
-    let a = f.key_host("a").await;
-    let b = f.key_host("b").await;
+    // One key for both hosts: the keychain refuses the same key twice.
+    let key_id = f.import("ed25519", None, false).await;
+    let user = f.lab.str("/user");
+    let a = f.host("lab", f.lab.port("a"), &user, HostAuthInput::Key { key_id: key_id.clone() }).await;
+    let b = f.host("lab", f.lab.port("b"), &user, HostAuthInput::Key { key_id }).await;
     let snippet = saved_snippet(&f.core, "where", "echo on-$((40+2))").await;
 
     let mut open = Client::open_ssh(&f.core, &a).await;
