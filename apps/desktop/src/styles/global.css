@@ -2573,7 +2573,6 @@ mark {
 /* ===================================================================== vault screens */
 
 .auth-screen {
-  position: relative;
   display: grid;
   place-items: center;
   height: 100%;
@@ -2582,97 +2581,157 @@ mark {
   background: var(--bg-app);
 }
 
-.auth-screen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(800px 420px at 50% -10%, var(--accent-soft), transparent 70%),
-    radial-gradient(600px 300px at 80% 110%, var(--success-soft), transparent 70%);
-  pointer-events: none;
-}
-
-.auth-screen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle at 1px 1px, var(--border-subtle) 1px, transparent 0);
-  background-size: 22px 22px;
-  mask-image: radial-gradient(ellipse at 50% 30%, black, transparent 70%);
-  pointer-events: none;
-}
-
+/* A plain column on the app background: no card, no grid of dots, no glow. */
 .auth-card {
-  position: relative;
-  z-index: 1;
   display: grid;
-  gap: var(--space-5);
-  width: min(460px, 100%);
-  padding: var(--space-6);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg-overlay) 94%, transparent);
-  box-shadow: var(--shadow-3);
-  animation: dialog-in var(--motion-slow) var(--ease-out);
+  gap: var(--space-4);
+  width: min(380px, 100%);
 }
 
 .auth-card-wide {
-  width: min(600px, 100%);
+  width: min(500px, 100%);
 }
 
 .auth-head {
   display: grid;
   justify-items: start;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.auth-head .wordmark {
+  margin-bottom: var(--space-4);
+}
+
+.auth-head h1 {
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-title);
 }
 
 .auth-head p {
   color: var(--text-muted);
   font-size: var(--text-sm);
+  max-width: 60ch;
 }
 
-.auth-foot {
+.auth-steps {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-4);
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  list-style: none;
   color: var(--text-faint);
   font-size: var(--text-xs);
 }
 
-.recovery-key {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+.auth-steps li {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-inset);
-  font: var(--weight-medium) var(--text-md) / 1 var(--font-mono);
-  letter-spacing: 0.04em;
-  user-select: text;
 }
 
+.auth-steps li[aria-current="step"] {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.auth-steps li[data-done="true"] svg {
+  color: var(--success);
+}
+
+.auth-or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.auth-or::before,
+.auth-or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ---------- the wordmark: a prompt and the cursor ---------- */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+}
+
+.wordmark-mark {
+  display: inline-flex;
+  align-items: center;
+  font: 700 15px / 1 var(--font-mono);
+  letter-spacing: -0.04em;
+}
+
+.cursor-block {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 0.14em;
+  border-radius: 1px;
+  background: var(--cursor, var(--accent));
+  box-shadow: inset 0 0 0 1.5px var(--cursor, var(--accent));
+}
+
+.cursor-block[data-hollow="true"] {
+  background: transparent;
+}
+
+/* ---------- recovery key: numbered groups in reading order ---------- */
 .recovery-key {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--bg-inset);
+  font: var(--weight-medium) 15px / 26px var(--font-mono);
+  letter-spacing: 0.06em;
+  user-select: text;
   counter-reset: group;
 }
 
 .recovery-key span {
-  padding: 8px 0;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  text-align: center;
   white-space: nowrap;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+  transition-delay: calc(var(--n, 0) * 30ms);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 /* Group numbers are generated content: visible, but not part of the key text that is copied. */
 .recovery-key span::before {
   counter-increment: group;
   content: counter(group);
-  display: block;
-  margin-bottom: 5px;
+  display: inline-block;
+  width: 1.6em;
+  margin-right: 6px;
   color: var(--text-faint);
-  font: var(--weight-medium) var(--text-2xs) / 1 var(--font-ui);
+  font: var(--weight-regular) var(--text-2xs) / 26px var(--font-ui);
   letter-spacing: 0;
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recovery-key span {
+    transition-delay: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] .recovery-key span {
+  transition-delay: 0ms;
 }
 
 .strength {

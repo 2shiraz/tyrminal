@@ -1,21 +1,28 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from "react";
 
-import { BrandMark } from "../../components/layout/Sidebar";
+import { Wordmark } from "../../components/ui/Wordmark";
 import { ErrorNotice, Notice, SecretField, TextField } from "../../components/ui/controls";
-import { IconCopy, IconFingerprint, IconLock, IconShieldCheck } from "../../components/ui/icons";
+import { IconCheck, IconCopy, IconFingerprint, IconLock } from "../../components/ui/icons";
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { RestoreBackupDialog } from "./BackupRestore";
 
-function Brand() {
+/** Where first launch is: two real steps, the first ticked once the vault exists. */
+function SetupSteps({ step }: { step: 1 | 2 }) {
+  const steps = [msg.unlock.passphrase, msg.unlock.recoveryKey];
   return (
-    <div className="brand" style={{ padding: 0, margin: 0 }}>
-      <BrandMark size={30} />
-      <span className="brand-name" style={{ fontSize: "var(--text-lg)" }}>
-        {msg.app.name}
-      </span>
-    </div>
+    <ol className="auth-steps" aria-label={msg.onboarding.steps}>
+      {steps.map((label, index) => {
+        const n = index + 1;
+        return (
+          <li key={label} aria-current={n === step ? "step" : undefined} data-done={n < step}>
+            {n < step ? <IconCheck size={13} aria-hidden="true" /> : <span aria-hidden="true">{n}</span>}
+            {label}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -74,7 +81,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit} aria-busy={pending}>
         <div className="auth-head">
-          <Brand />
+          <Wordmark />
+          <SetupSteps step={1} />
           <h1>{msg.onboarding.title}</h1>
           <p>{msg.onboarding.intro}</p>
         </div>
@@ -117,10 +125,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <button type="button" className="btn btn-ghost btn-block" onClick={() => setRestoring(true)}>
           {msg.backup.restoreFirstRun}
         </button>
-        <div className="auth-foot">
-          <IconShieldCheck size={14} />
-          {msg.unlock.localOnly}
-        </div>
       </form>
       {restoring && <RestoreBackupDialog vaultExists={false} onClose={() => setRestoring(false)} onRestored={onDone} />}
     </div>
@@ -147,14 +151,19 @@ export function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; 
     <div className="auth-screen">
       <form className="auth-card auth-card-wide" onSubmit={submit}>
         <div className="auth-head">
-          <Brand />
+          <Wordmark />
+          <SetupSteps step={2} />
           <h1>{msg.onboarding.recoveryTitle}</h1>
           <p>{msg.onboarding.recoveryIntro}</p>
         </div>
+        {/* Shown once per vault, so its groups appear in reading order (the one orchestrated
+            animation in the app; none under reduced motion). */}
         <div className="recovery-key" aria-label={msg.unlock.recoveryKey}>
           {groups.map((group, index) => (
             // Fixed positions of one key.
-            <span key={`${index}-${group}`}>{group} </span>
+            <span key={`${index}-${group}`} style={{ "--n": index } as CSSProperties}>
+              {group}{" "}
+            </span>
           ))}
         </div>
         <div>
@@ -215,16 +224,32 @@ export function Unlock({ busy }: { busy: boolean }) {
     await run(() => (mode === "passphrase" ? vault.unlock(value) : vault.unlockWithRecoveryKey(value)));
   }
 
+  const quickButton = quick && (
+    <button
+      type="button"
+      className={quick && mode === "passphrase" ? "btn btn-primary btn-lg btn-block" : "btn btn-block"}
+      disabled={working}
+      autoFocus
+      onClick={() => void run(() => vault.unlockWithDevice())}
+    >
+      <IconFingerprint size={16} />
+      {msg.quickUnlock.unlockButton}
+    </button>
+  );
+
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit} aria-busy={working}>
         <div className="auth-head">
-          <Brand />
+          <Wordmark />
           <h1>{msg.unlock.title}</h1>
           <p>{msg.unlock.localOnly}</p>
         </div>
+        {/* With quick unlock on, the device is the main way in; the passphrase stays available. */}
+        {quickButton}
+        {quick && <div className="auth-or">{msg.unlock.or}</div>}
         {mode === "passphrase" ? (
-          <SecretField label={msg.unlock.passphrase} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
+          <SecretField label={msg.unlock.passphrase} value={secret} onChange={setSecret} autoFocus={!quick} maxLength={1024} />
         ) : (
           <TextField
             label={msg.unlock.recoveryKey}
@@ -238,7 +263,7 @@ export function Unlock({ busy }: { busy: boolean }) {
           />
         )}
         <ErrorNotice error={error} />
-        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!secret || working}>
+        <button type="submit" className={quick ? "btn btn-block" : "btn btn-primary btn-lg btn-block"} disabled={!secret || working}>
           {working ? (
             <>
               <span className="spinner" aria-hidden="true" />
@@ -251,12 +276,6 @@ export function Unlock({ busy }: { busy: boolean }) {
             </>
           )}
         </button>
-        {quick && (
-          <button type="button" className="btn btn-block" disabled={working} onClick={() => void run(() => vault.unlockWithDevice())}>
-            <IconFingerprint size={16} />
-            {msg.quickUnlock.unlockButton}
-          </button>
-        )}
         <button
           type="button"
           className="btn btn-ghost btn-block"
