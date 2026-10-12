@@ -2,7 +2,7 @@ import type { TerminalPreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fontsReady, terminalOptions } from "./TerminalController";
 import { schemeById } from "./schemes";
@@ -27,31 +27,48 @@ export function TerminalPreview({ prefs }: { prefs: TerminalPreferences }) {
   const ref = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
+  const [ready, setReady] = useState(false);
+
+  // The latest preferences, for a terminal created after the first paint.
+  const latest = useRef(prefs);
+  latest.current = prefs;
 
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
-    const t = new Terminal({ ...terminalOptions(prefs), disableStdin: true, cursorBlink: false, scrollback: 0 });
-    const f = new FitAddon();
-    t.loadAddon(f);
-    t.loadAddon(new UnicodeGraphemesAddon());
-    t.unicode.activeVersion = "15-graphemes";
-    t.open(container);
-    term.current = t;
-    fit.current = f;
-    void fontsReady(prefs).then(() => {
-      f.fit();
-      t.write(SAMPLE);
+    let t: Terminal | null = null;
+    let observer: ResizeObserver | null = null;
+    // Creating the emulator measures fonts and takes tens of milliseconds: do it after Settings
+    // has painted (the next frame, then a task), so opening Settings is never held up by it.
+    let timer = 0;
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(() => {
+        const prefsNow = latest.current;
+        const created = new Terminal({ ...terminalOptions(prefsNow), disableStdin: true, cursorBlink: false, scrollback: 0 });
+        const f = new FitAddon();
+        created.loadAddon(f);
+        created.loadAddon(new UnicodeGraphemesAddon());
+        created.unicode.activeVersion = "15-graphemes";
+        created.open(container);
+        t = created;
+        term.current = created;
+        fit.current = f;
+        setReady(true);
+        void fontsReady(prefsNow).then(() => {
+          f.fit();
+          created.write(SAMPLE);
+        });
+        observer = new ResizeObserver(() => f.fit());
+        observer.observe(container);
+      }, 0);
     });
-    const observer = new ResizeObserver(() => f.fit());
-    observer.observe(container);
     return () => {
-      observer.disconnect();
-      t.dispose();
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      observer?.disconnect();
+      t?.dispose();
       term.current = null;
     };
-    // Created once; preference changes are applied below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -67,7 +84,7 @@ export function TerminalPreview({ prefs }: { prefs: TerminalPreferences }) {
     return () => {
       if (joiner !== null) t.deregisterCharacterJoiner(joiner);
     };
-  }, [prefs]);
+  }, [prefs, ready]);
 
   const scheme = schemeById(prefs.scheme);
   return (
