@@ -9,9 +9,6 @@ async function audit(page: Page) {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .exclude(".xterm")
-    // The tab strip has two known violations (tablist with non-tab children; close buttons nested
-    // in tabs), owned by agent C and tracked in docs/work-split.md. Remove this once fixed.
-    .exclude(".tabstrip")
     .analyze();
   const summary = results.violations.map((v) => `${v.id} (${v.impact}): ${v.help} → ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(" | ")}`);
   expect(summary, summary.join("\n")).toEqual([]);

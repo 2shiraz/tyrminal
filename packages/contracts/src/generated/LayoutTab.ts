@@ -10,4 +10,9 @@ title: string | null, panes: Array<LayoutTarget>, layout: LayoutNode,
 /**
  * Index into `panes`.
  */
-focused: number, focusMode: boolean, };
+focused: number, focusMode: boolean, 
+/**
+ * The working directory each pane's shell last reported (OSC 7), when it did. Restoring
+ * never changes directory by itself: the command is shown and sent only on request.
+ */
+directories?: Array<string | null>, };

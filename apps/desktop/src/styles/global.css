@@ -3411,6 +3411,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   padding: var(--space-5);
 }
 
+/* The selected item's secondary text keeps AA contrast on the accent background. */
+.focus-item[aria-current="true"] .faint {
+  color: var(--accent-text);
+}
+
 /* terminal input and connection tools */
 
 /* A pane left out of broadcast in a broadcasting tab: a dashed muted outline, and its header says so. */

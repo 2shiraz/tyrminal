@@ -11,7 +11,7 @@
 //! are display-safe, and every SSH destination must be a host that exists in the vault.
 
 use serde::{Deserialize, Serialize};
-use tyrminal_contracts::limits::{MAX_LAYOUT_PANES, MAX_TAB_TITLE_LEN};
+use tyrminal_contracts::limits::{MAX_LAYOUT_PANES, MAX_REMOTE_PATH_LEN, MAX_TAB_TITLE_LEN};
 use tyrminal_contracts::{
     IpcError, LayoutDirection, LayoutNode, LayoutTab, LayoutTarget, LayoutTemplateSummary, WorkspacePreferences,
 };
@@ -53,6 +53,8 @@ pub(crate) struct StoredTab {
     pub focused: u32,
     #[serde(default)]
     pub focus_mode: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directories: Vec<Option<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,6 +84,19 @@ fn title(value: Option<&str>) -> Result<Option<String>, IpcError> {
     }
     // Same display rules as every other stored name (no controls, no bidi overrides).
     validate::label(value).map(Some)
+}
+
+/// A directory a shell reported: an absolute path, bounded, with no control or invisible
+/// characters (it is shown to the user and, on request, quoted into a `cd` command).
+fn directory(value: &str) -> Result<String, IpcError> {
+    let deceptive = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200B}'..='\u{200F}' | '\u{FEFF}')
+    };
+    if !value.starts_with('/') || value.len() > MAX_REMOTE_PATH_LEN || value.chars().any(deceptive) {
+        return Err(invalid("A directory in the layout is not a usable path."));
+    }
+    Ok(value.to_owned())
 }
 
 /// Checks a split tree: every leaf names a pane of the tab, each exactly once, and every ratio is
@@ -155,12 +170,20 @@ pub(crate) fn validate_tabs(tabs: &[LayoutTab], host_exists: impl Fn(&Id) -> boo
         if usize::try_from(tab.focused).map_or(true, |f| f >= tab.panes.len()) {
             return Err(invalid("The focused pane does not exist."));
         }
+        let directories = match &tab.directories {
+            None => Vec::new(),
+            Some(list) if list.len() == tab.panes.len() => {
+                list.iter().map(|d| d.as_deref().map(directory).transpose()).collect::<Result<_, _>>()?
+            }
+            Some(_) => return Err(invalid("The layout's directories do not match its panes.")),
+        };
         out.push(StoredTab {
             title: title(tab.title.as_deref())?,
             panes,
             layout,
             focused: tab.focused,
             focus_mode: tab.focus_mode,
+            directories,
         });
     }
     Ok(out)
@@ -201,6 +224,7 @@ pub(crate) fn summary(id: &Id, record: &LayoutRecord) -> LayoutTemplateSummary {
                 layout: to_node(&t.layout),
                 focused: t.focused,
                 focus_mode: t.focus_mode,
+                directories: (!t.directories.is_empty()).then(|| t.directories.clone()),
             })
             .collect(),
         updated_at: record.updated_at,
@@ -219,6 +243,7 @@ pub fn validate_detach(tab: &tyrminal_contracts::DetachTabInput) -> Result<(), I
         layout: tab.layout.clone(),
         focused: tab.focused,
         focus_mode: false,
+        directories: None,
     };
     // Destinations are for display and reconnecting only; the sessions already exist.
     validate_tabs(std::slice::from_ref(&shape), |_| true)?;
@@ -340,7 +365,7 @@ mod tests {
         LayoutTarget::Ssh { host_id: HOST.into() }
     }
     fn tab(panes: Vec<LayoutTarget>, layout: LayoutNode) -> LayoutTab {
-        LayoutTab { title: None, panes, layout, focused: 0, focus_mode: false }
+        LayoutTab { title: None, panes, layout, focused: 0, focus_mode: false, directories: None }
     }
     fn known(_: &Id) -> bool {
         true
@@ -574,5 +599,30 @@ mod tests {
         assert!(validate_detach(&bad_label).is_err());
         let bad_tree = DetachTabInput { layout: leaf(0), ..ok };
         assert!(validate_detach(&bad_tree).is_err());
+    }
+
+    #[test]
+    fn directories_are_absolute_display_safe_and_one_per_pane() {
+        let with = |dirs: Vec<Option<&str>>| LayoutTab {
+            directories: Some(dirs.into_iter().map(|d| d.map(Into::into)).collect()),
+            ..tab(vec![ssh(), ssh()], split(0.5, leaf(0), leaf(1)))
+        };
+        let ok = validate_tabs(&[with(vec![Some("/srv/app"), None])], known).unwrap();
+        assert_eq!(ok[0].directories, vec![Some("/srv/app".to_owned()), None]);
+        // Spaces and quotes are allowed (the command is quoted when sent), controls are not.
+        assert!(validate_tabs(&[with(vec![Some("/srv/it's here"), None])], known).is_ok());
+        for bad in ["relative/path", "~/x", "", "/a\nrm -rf /", "/a\u{1b}]0;x\u{7}", "/a\u{202e}b"] {
+            assert!(validate_tabs(&[with(vec![Some(bad), None])], known).is_err(), "{bad:?}");
+        }
+        assert!(validate_tabs(&[with(vec![Some(&format!("/{}", "a".repeat(4096)))])], known).is_err());
+        // One entry per pane.
+        assert!(message(validate_tabs(&[with(vec![None])], known)).contains("do not match"));
+        // Absent stays absent through a save.
+        let plain = validate_tabs(&[tab(vec![ssh()], leaf(0))], known).unwrap();
+        assert!(plain[0].directories.is_empty());
+        assert_eq!(
+            summary(&[0; 16], &LayoutRecord { name: "x".into(), tabs: plain, updated_at: 0 }).tabs[0].directories,
+            None
+        );
     }
 }

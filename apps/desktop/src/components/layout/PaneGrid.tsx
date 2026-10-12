@@ -44,7 +44,7 @@ export function PaneGrid({
   prefs: TerminalPreferences;
   workspace?: WorkspacePreferences | undefined;
   panel: ReactNode;
-  onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>) => void;
+  onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator" | "directory">>) => void;
   onStatus: (pane: number, status: PaneStatus) => void;
   onFocus: (pane: number) => void;
   /** Brings a pane to the front explicitly (the focus layout's pane list). */
@@ -101,6 +101,7 @@ export function PaneGrid({
               className="pane"
               hidden={!visible}
               data-pane-id={id}
+              data-has-directory={pane.directory ? true : undefined}
               data-focused={focused}
               data-broadcast={broadcasting.has(tab.id) ? (broadcastPaneIds && !broadcastPaneIds.has(id) ? "excluded" : true) : undefined}
               data-drop={dragPane && dragPane.over === id && dragPane.from !== id ? "swap" : undefined}
@@ -136,7 +137,7 @@ export function PaneGrid({
                   <span className="status-dot" data-tone={pane.indicator} aria-hidden="true" />
                   <span className="truncate" style={{ flex: 1 }}>
                     {pane.label}
-                    <span style={{ opacity: 0.7 }}> · {pane.identity}</span>
+                    <span className="pane-identity"> · {pane.identity}</span>
                   </span>
                   {broadcasting.has(tab.id) && broadcastPaneIds && !broadcastPaneIds.has(id) && <span className="faint">{msgI.broadcast.excluded}</span>}
                   {canOpen && (
@@ -187,6 +188,8 @@ export function PaneGrid({
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                   pending={pane.pending}
+                  restoreDirectory={pane.target.kind === "ssh" ? pane.restoreDirectory : undefined}
+                  onDirectory={(directory) => onPatch(id, { directory })}
                   attachToken={pane.attachToken}
                   canReconnect={canOpen}
                   onConnect={() => onConnect([id])}

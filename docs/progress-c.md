@@ -91,6 +91,15 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
   resize); typing in the detached window is not driven natively (the WebDriver plugin sends keys
   to the main window only), so it is covered by the UI test and A's lab test.
 
+## Shell context restore (WSP-10)
+
+- Panes remember the working directory their shell reports with OSC 7 (`file://host/path`):
+  absolute, bounded, no control or invisible characters, otherwise ignored. Templates store it
+  per pane (optional field; older templates unchanged; validated natively).
+- After a restored SSH pane connects, a banner shows the exact command, `cd -- '<path>'` with
+  POSIX single-quote escaping, and sends it only on "Send". Nothing else about the shell (history,
+  commands, environment) is saved or re-run. Shells that do not report OSC 7 get no offer.
+
 ## Findings
 
 1. A Playwright `filter({ hasNot })` checks descendants only; the page tab is excluded by class.

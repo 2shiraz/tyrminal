@@ -284,6 +284,40 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // agent C: workspaces
+    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+    layout_save: (a) => {
+      state.layouts ??= [];
+      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
+      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
+      for (const t of a.layout.tabs)
+        for (const p of t.panes)
+          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
+      const existing = state.layouts.find((l) => l.id === a.layout.id);
+      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
+      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
+      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
+      return saved;
+    },
+    layout_delete: (a) => {
+      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
+    },
+    // Detach: the main window hands sessions to a new window. The mock records the request; a
+    // page opened as a detached window (options.detached) receives that tab and attaches.
+    window_detach: (a) => {
+      window.__mockDetached = a.tab;
+      return "detached-0000000000000001";
+    },
+    window_detach_take: () => {
+      const tab = options.detached;
+      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
+      options.detached = null;
+      return tab;
+    },
+    session_attach: (a) => {
+      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return openSession({ ...a }, "local").sessionId;
+    },
     // agent B: tunnels and history
     ...(() => {
       // Synthetic rules and runs. Exposure is checked the way the native side does it, so the
@@ -408,40 +442,6 @@ export function installMockBackend(options) {
         },
       };
     })(),
-    // agent C: workspaces
-    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
-    layout_save: (a) => {
-      state.layouts ??= [];
-      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
-      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
-      for (const t of a.layout.tabs)
-        for (const p of t.panes)
-          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
-      const existing = state.layouts.find((l) => l.id === a.layout.id);
-      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
-      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
-      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
-      return saved;
-    },
-    layout_delete: (a) => {
-      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
-    },
-    // Detach: the main window hands sessions to a new window. The mock records the request; a
-    // page opened as a detached window (options.detached) receives that tab and attaches.
-    window_detach: (a) => {
-      window.__mockDetached = a.tab;
-      return "detached-0000000000000001";
-    },
-    window_detach_take: () => {
-      const tab = options.detached;
-      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
-      options.detached = null;
-      return tab;
-    },
-    session_attach: (a) => {
-      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
-      return openSession({ ...a }, "local").sessionId;
-    },
     // terminal input: connection details (CON-15). Synthetic lines for any session id this page
     // was given; a test can replace them with window.__mockDiagnostics.
     session_diagnostics: (a) => {

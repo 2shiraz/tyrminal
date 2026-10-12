@@ -41,6 +41,7 @@ fn pair(host_id: &str, title: Option<&str>) -> LayoutTab {
         },
         focused: 1,
         focus_mode: false,
+        directories: None,
     }
 }
 

@@ -30,6 +30,10 @@ export interface Pane {
   pending: boolean;
   /** In a detached window: the single-use token for taking over this pane's session. */
   attachToken?: string;
+  /** The working directory the shell last reported (OSC 7), if it does. */
+  directory?: string;
+  /** Restored from a template: the directory to offer returning to once connected. */
+  restoreDirectory?: string;
 }
 
 /**
@@ -364,7 +368,7 @@ export function paneVisible(ws: Workspace, pane: number): boolean {
   return !tab.focusMode || tab.focused === pane;
 }
 
-export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>): Workspace {
+export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator" | "directory">>): Workspace {
   const current = ws.panes[pane];
   if (!current) return ws;
   if (Object.entries(patch).every(([k, v]) => current[k as keyof Pane] === v)) return ws;
@@ -469,12 +473,15 @@ export function templateTabs(ws: Workspace): LayoutTab[] {
   return ws.tabs.map((tab) => {
     const ids = panesOf(tab.layout);
     const index = new Map(ids.map((id, i) => [id, i]));
+    const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
     return {
       title: tab.customTitle,
       panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target)),
       layout: toNode(tab.layout, index),
       focused: index.get(tab.focused) ?? 0,
       focusMode: tab.focusMode,
+      // Only when a shell reported one; templates without directories stay as they were.
+      ...(directories.some((d) => d !== null) ? { directories } : {}),
     };
   });
 }
@@ -514,9 +521,10 @@ export function restoreTemplate(ws: Workspace, tabs: LayoutTab[], seed: (target:
   let first: number | null = null;
   for (const t of tabs) {
     const ids: number[] = [];
-    for (const target of t.panes) {
+    for (const [i, target] of t.panes.entries()) {
       const [after, id] = newPane(next, seed(target), true);
-      next = after;
+      const dir = t.directories?.[i];
+      next = dir ? { ...after, panes: { ...after.panes, [id]: { ...(after.panes[id] as Pane), restoreDirectory: dir } } } : after;
       ids.push(id);
     }
     const tab: Tab = {

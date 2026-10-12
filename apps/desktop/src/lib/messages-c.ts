@@ -51,6 +51,10 @@ export const msgC = {
     connectAll: "Connect all in this tab",
     waiting: (label: string) => `${label}, not connected`,
     missingHost: "Missing host",
+    directoryTitle: "Return to the saved directory",
+    directoryBody: "This pane was in a saved directory. Return there? This sends:",
+    directoryRun: "Send",
+    directoryDismiss: "Not now",
   },
   layouts: {
     group: "Layouts",

@@ -11,6 +11,7 @@ import {
   IconClipboardPaste,
   IconCopy,
   IconExternalLink,
+  IconFolder,
   IconKeyRound,
   IconPlug,
   IconRefreshCw,
@@ -22,17 +23,17 @@ import {
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgI } from "../../lib/messages-input";
 import { ConnectionDetails } from "../connection/ConnectionDetails";
-import { msgC } from "../../lib/messages-c";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { encodingById } from "./encoding";
 import { schemeById } from "./schemes";
 
 const encodingLabel = (id: string) => encodingById(id).label;
-import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -97,6 +98,10 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
   /** Output arrived while this pane's tab was hidden (reported once until it is shown again). */
   onUnread?: (() => void) | undefined;
+  /** Restored from a template: offer (never perform by itself) a return to this directory. */
+  restoreDirectory?: string | undefined;
+  /** The shell reported its working directory (OSC 7). */
+  onDirectory?: ((path: string) => void) | undefined;
   /** A session handed to this (detached) window: taken over instead of opened. */
   attachToken?: string | undefined;
   /** False where this window cannot open sessions (a detached window): no reconnect. */
@@ -149,6 +154,8 @@ export function TerminalView(props: TerminalViewProps) {
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const unreadReported = useRef(false);
+  // The return-to-directory offer is made at most once per restored pane.
+  const [directoryOffer, setDirectoryOffer] = useState<"waiting" | "shown" | "done">(props.restoreDirectory ? "waiting" : "done");
   const [encodingId, setEncodingId] = useState("utf-8");
   const encodingRef = useRef("utf-8");
   const lastUnencodable = useRef(0);
@@ -205,6 +212,7 @@ export function TerminalView(props: TerminalViewProps) {
       onResize: (cols, rows) => publish({ cols, rows }),
       onSearchResults: (index, total) => setFindCount({ index, total }),
       onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
+      onDirectory: (path) => handlers.current.onDirectory?.(path),
       onUnencodable: (chars) => {
         // At most one notice every few seconds while typing.
         if (Date.now() - lastUnencodable.current < 4000) return;
@@ -324,6 +332,11 @@ export function TerminalView(props: TerminalViewProps) {
     return () => handlers.current.register(null);
   }, []);
 
+  // Offered once the restored session is connected; never sent without a click.
+  useEffect(() => {
+    if (directoryOffer === "waiting" && state === "connected") setDirectoryOffer("shown");
+  }, [directoryOffer, state]);
+
   const needsAttention = trust !== null || auth !== null;
   const indicator: TabIndicator = pending ? "idle" : closed ? (closed.error ? "bad" : "idle") : needsAttention ? "attention" : state === "connected" ? "ok" : "busy";
   useEffect(() => {
@@ -404,6 +417,39 @@ export function TerminalView(props: TerminalViewProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {directoryOffer === "shown" && props.restoreDirectory && visible && (
+        <div className="term-banner" role="group" aria-label={msgC.restore.directoryTitle}>
+          <IconFolder size={16} />
+          <span className="stack-xs" style={{ minWidth: 0 }}>
+            <span>{msgC.restore.directoryBody}</span>
+            <code className="mono truncate" data-testid="restore-command">
+              {cdCommand(props.restoreDirectory)}
+            </code>
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              controllerRef.current?.sendConfirmedCommand(cdCommand(props.restoreDirectory as string));
+              setDirectoryOffer("done");
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgC.restore.directoryRun}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              setDirectoryOffer("done");
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgC.restore.directoryDismiss}
+          </button>
         </div>
       )}
 

@@ -55,6 +55,11 @@ pub struct LayoutTab {
     /// Index into `panes`.
     pub focused: u32,
     pub focus_mode: bool,
+    /// The working directory each pane's shell last reported (OSC 7), when it did. Restoring
+    /// never changes directory by itself: the command is shown and sent only on request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub directories: Option<Vec<Option<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
