@@ -115,7 +115,8 @@ async fn a_telnet_host_warns_negotiates_and_carries_the_terminal() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let session = core.sessions.open_ssh(WINDOW, &id, 100, 30, Arc::new(Sink(tx))).await.unwrap().session_id;
     let events = output_until(&core, &session, &mut rx, b"login: ").await;
-    let SessionEvent::Banner { text } = &events[0] else {
+    // A notice from Tyrminal (shown in the session), not a server banner (shown only in prompts).
+    let SessionEvent::Notice { text } = &events[0] else {
         panic!("the first thing shown must be the warning: {events:?}")
     };
     assert!(text.contains("not encrypted"));

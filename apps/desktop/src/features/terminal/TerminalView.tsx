@@ -206,6 +206,9 @@ export function TerminalView(props: TerminalViewProps) {
             environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
+          case "notice":
+            notify("danger", event.text);
+            break;
           case "negotiated":
             // Sent for every hop of a jump chain; the status bar shows the destination's.
             if (event.hop && event.hop.index !== event.hop.total) break;

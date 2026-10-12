@@ -2246,8 +2246,8 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
     client.send(&format!("{hop}\n")).await;
     let events = output_with_events(&mut client, "HOP-42").await;
     assert!(
-        events.iter().any(|e| matches!(e, SessionEvent::Banner { text } if text.contains("forwarded key"))),
-        "the use is reported: {events:?}"
+        events.iter().any(|e| matches!(e, SessionEvent::Notice { text } if text.contains("forwarded key"))),
+        "the use is reported as a notice the terminal shows (not a server banner): {events:?}"
     );
     // The server cannot change what the agent holds.
     client.send("ssh-add -D; echo REMOVE-EXIT-$?\n").await;
@@ -2442,4 +2442,65 @@ async fn a_transfer_stops_when_its_session_closes_or_the_vault_locks() {
         again.send(&format!("rm -f ~/{name}; echo RM-$((40+2))\n")).await;
         again.output_until("RM-42").await;
     }
+}
+
+/// SNP-08: startup typing ends with its session. Closing the session or locking the vault right
+/// after the shell opens, with a long startup sequence configured, ends the session at once; the
+/// log says the sequence finished or was stopped, nothing keeps the session alive, a locked
+/// session takes no further input, and the next connection runs the sequence from the start.
+///
+/// Typing queues each snippet into the session's input in microseconds, so against a real server
+/// the sequence is normally fully queued before a close lands; the mid-sequence stop itself is
+/// covered deterministically by the `startup_typing_*` unit tests in `sessions.rs`. What makes it
+/// hold is structural: the typing runs inside the session body, which close and lock drop.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
+    use tyrminal_core::contracts::{SettingsTarget, SnippetInput};
+    let f = fixture().await;
+    let v = &f.core.vault;
+    let host_id = f.key_host("a").await;
+    let mut ids = Vec::new();
+    for i in 0..16 {
+        // Long enough lines that typing them all takes more than an instant.
+        let text = format!("echo startup-{i}-done # {}", "x".repeat(16 * 1024));
+        let saved = v
+            .save_snippet(SnippetInput { id: None, name: format!("s{i}"), folder: String::new(), text })
+            .await
+            .unwrap();
+        ids.push(saved.id);
+    }
+    v.set_startup_snippets(SettingsTarget::Host { host_id: host_id.clone() }, Some(ids)).await.unwrap();
+
+    let stopped_or_finished =
+        |log: &str| log.contains("startup snippets stopped with ") || log.contains("startup snippet \"s15\" typed");
+
+    // Close as soon as the shell is open.
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    assert_eq!(client.until_closed().await.0, None);
+    assert_eq!(f.core.sessions.count(), 0, "nothing keeps the session alive");
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(stopped_or_finished(&log), "{log}");
+
+    // Lock as soon as the shell is open: the session ends as locked, and no input reaches it after.
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    client.until_connected().await;
+    v.lock().await;
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::VaultLocked));
+    assert_eq!(f.core.sessions.count(), 0);
+    let write = f.core.sessions.write(WINDOW, &client.session, b"echo after-lock\r".to_vec()).await;
+    assert!(write.is_err(), "a locked session takes no input");
+
+    // After unlocking, a new session runs the whole sequence from the start.
+    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    client.until_connected().await;
+    client.output_until("startup-0-done").await;
+    client.output_until("startup-15-done").await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
 }

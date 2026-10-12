@@ -39,4 +39,4 @@ mac: string, strictKex: boolean,
  * During a jump-host chain: the hop whose key exchange this is. Sent for every hop as
  * soon as its key exchange finishes, before its host key is verified.
  */
-hop: ChainPosition | null, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
+hop: ChainPosition | null, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "notice", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
