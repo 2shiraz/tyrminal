@@ -189,6 +189,48 @@ Baseline before any app change (local, CPU raster, one worker; click-to-paint me
 With SwiftShader GPU raster the same run measured open host 260 ms, open settings 73 ms and open
 palette 49 ms (the others 21–25 ms): the open-host time was raster of the relaid-out page.
 
+
+### The three slowest renders
+
+Profiled with a CPU profile of an unminified build (CDP `Profiler`) around each click, ranked by
+handler work:
+
+1. **Open settings (59–63 ms of work).** 74 ms of self time in xterm's `_measure`: the terminal
+   preview created its emulator (font measuring, renderer setup) in an effect, which React runs
+   inside the click task. The preview now creates the emulator after Settings has painted (next
+   frame, then a task); its box is there at once. After: 43–46 ms click-to-paint, 13 ms work.
+2. **Open host (12 ms).** Every host card re-rendered when the panel opened, because the panel's
+   state lives in HostsView. Cards and rows are now memoized components with one stable handler
+   object (landed with windowing, which needs the same split); with 6 hosts the remaining work is
+   the panel's own render and the forced layout of focusing its first field.
+3. **Open palette (8–13 ms).** Opening the palette (like any shell state: a dialog, the sidebar
+   collapsing) re-rendered the sidebar, tab strip, status bar, the page and every terminal pane.
+   Sidebar, TabStrip, StatusBar, HomeView, HostsView and PaneGrid are now memoized, and AppShell
+   passes stable callbacks (refs for broadcast state) and memoized props (recent hosts, layout
+   info, the side panel). The profile now shows only CommandPalette and the native `showModal`.
+
+Shortcut labels are read from a module-level table; the memoized components take a `shortcuts`
+prop (the user's bindings) so they re-render when the bindings change.
+
+### Pressed state, hover, skeleton delay
+
+- `lib/press.ts`: one capture-phase `pointerdown` listener on the document marks the pressed
+  element (`button`, menu items, options, tabs, rows, host cards, list rows) with `data-pressed`
+  before any handler or render runs, and keeps it for at least 100 ms. It is the file rows'
+  `pressFeedback()` from #18, moved and generalised (`features/files/selection.ts` re-exports it).
+- CSS: pressed shows a tint (buttons keep their existing press transform) with no transition;
+  hover appears in 0 ms and fades out in 120 ms (`--hover-out`); both the OS setting and the
+  in-app "Reduce motion" switch set the fade to 0 and drop the press scale. Disabled controls are
+  not pressed.
+- `lib/useDelayed.ts` (`LOADING_DELAY_MS` = 150): `SkeletonRows` holds the list's space at once
+  but shows placeholder rows only after 150 ms, so fast loads never flash. The Settings preview's
+  fallback does the same (`SkeletonBlock`). The Files panel and SFTP pane show their folder
+  progress bar after 150 ms (was 300 ms) and keep the current rows while the next folder loads.
+- Tests: `press-feedback.spec.ts` (pressed on pointer down with no transition, also for a card and
+  a menu item, not for a disabled button; hover durations with and without reduced motion; a slow
+  list holds its space and shows placeholders only after 150 ms; a fast one never does). The mock
+  can delay a command (`window.__mockDelay[cmd] = ms`).
+
 ## Next
 
 Replace the per-session client-side encoding choice with #8's native per-host setting.

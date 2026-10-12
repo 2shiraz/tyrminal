@@ -11,6 +11,7 @@ import {
   Segmented,
   SecretField,
   SettingRow,
+  SkeletonBlock,
   SkeletonRows,
   Switch,
   TextArea,
@@ -255,7 +256,7 @@ export function SettingsView({
               </header>
               {/* A picture of the settings, not a terminal: nothing inside can take focus. */}
               <div inert>
-                <Suspense fallback={<div className="terminal-preview skeleton" />}>
+                <Suspense fallback={<SkeletonBlock className="terminal-preview" />}>
                   <TerminalPreview prefs={t} />
                 </Suspense>
               </div>

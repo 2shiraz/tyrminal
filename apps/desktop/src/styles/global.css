@@ -4491,4 +4491,112 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: inline-flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+
+/* ---------- press and hover feedback (docs/design/interaction-polish.md, section 1) ----------
+   Hover appears at once and fades out over 120 ms. Pressed (data-pressed, set on pointer down by
+   lib/press.ts before any handler runs) shows with no transition. Reduced motion: no fade and no
+   scale. Only colour changes here; the press scale on buttons is the existing transform. */
+:root {
+  --hover-out: 120ms;
+  --press-tint: rgb(0 0 0 / 0.16);
+}
+
+:root[data-theme="light"] {
+  --press-tint: rgb(0 0 0 / 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --hover-out: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] {
+  --hover-out: 0ms;
+}
+
+:is(
+    .btn,
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  ) {
+  transition-duration: var(--hover-out);
+}
+
+:is(
+    .btn,
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  ):hover {
+  transition-duration: 0ms;
+}
+
+[data-pressed],
+[data-pressed] > .files-row {
+  transition: none !important;
+}
+
+.btn[data-pressed]:not(:disabled) {
+  background-image: linear-gradient(var(--press-tint), var(--press-tint));
+  transform: translateY(0.5px) scale(0.985);
+}
+
+:is(
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  )[data-pressed] {
+  background-color: var(--bg-active);
+  background-image: linear-gradient(var(--press-tint), var(--press-tint));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn[data-pressed]:not(:disabled),
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+:root[data-reduce-motion="true"] :is(.btn[data-pressed], .btn:active):not(:disabled) {
+  transform: none;
+}
+
+/* Space held for a list that is still loading, before its skeleton shows (after 150 ms). */
+.skeleton-space {
+  border-radius: var(--radius-sm);
 }
