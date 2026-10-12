@@ -3469,6 +3469,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   overflow-x: auto;
 }
 
+/* Highlighted links (TRM-07) are underlined, in the link color, just below the text. */
+.term-highlight[data-tone="url"] {
+  box-shadow: inset 0 -1px 0 var(--highlight-color, currentColor);
+}
+
 /* Command boundaries from shell integration (OSC 133): a hairline above each prompt, and a
    short bar in the gutter of a command that failed. Display only. */
 .cmd-separator {
@@ -3483,22 +3488,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   border-radius: 2px;
   background: var(--cmd-failed);
   pointer-events: none;
-}
-
-/* Connection details (CON-15): the core's lines, aligned as they come, scrollable. */
-.connection-details {
-  max-height: 50vh;
-  overflow: auto;
-  margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-inset);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  list-style: none;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* agent D: inventory and snippets */

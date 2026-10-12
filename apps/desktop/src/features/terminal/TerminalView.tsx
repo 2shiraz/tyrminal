@@ -27,8 +27,6 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
-import { msgI } from "../../lib/messages-input";
-import { ConnectionDetails } from "../connection/ConnectionDetails";
 import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
@@ -165,7 +163,6 @@ export function TerminalView(props: TerminalViewProps) {
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
@@ -571,7 +568,6 @@ export function TerminalView(props: TerminalViewProps) {
           }}
         />
       )}
-      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {closed && (
         <div className="terminal-overlay">
           <div className="overlay-card" role={closed.error ? "alert" : "status"}>
@@ -609,12 +605,6 @@ export function TerminalView(props: TerminalViewProps) {
                 <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
                   {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
                 </p>
-                {/* terminal input: connection details (CON-15) */}
-                {target.kind === "ssh" && controllerRef.current?.id && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailsFor(controllerRef.current?.id ?? null)}>
-                    {msgI.details.link}
-                  </button>
-                )}
               </>
             ) : (
               <p className="muted">{closed.exitStatus !== null ? msg.terminal.endedExit(closed.exitStatus) : msg.terminal.endedClean}</p>

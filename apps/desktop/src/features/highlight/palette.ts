@@ -17,8 +17,9 @@ const PREFERENCES: Record<TokenKind, SchemeColor[]> = {
   info: ["brightCyan", "cyan", "brightBlue", "blue"],
   // Quieter than the text, but still readable as text.
   dim: ["brightBlack", "white", "foreground"],
-  address: ["brightCyan", "cyan", "brightBlue"],
-  number: ["brightMagenta", "magenta", "brightBlue"],
+  address: ["brightMagenta", "magenta", "brightCyan"],
+  // Addresses are pink (bright magenta) as in other SSH clients; numbers keep the cyan family.
+  number: ["brightCyan", "cyan", "brightBlue"],
   url: ["brightBlue", "blue", "brightCyan"],
   string: ["green", "brightGreen"],
   date: ["magenta", "brightMagenta", "blue"],

@@ -198,9 +198,12 @@ export class OutputHighlighter {
         const marker = this.term.registerMarker(row.lineIndex - cursorLine);
         if (!marker) continue;
         const decoration = this.term.registerDecoration({ marker, x, width, foregroundColor: this.colors[m.tone], layer: "top" });
+        const color = this.colors[m.tone];
         decoration?.onRender((element) => {
           element.classList.add("term-highlight");
           element.dataset.tone = m.tone;
+          // Links are underlined in their own color (the decoration box sits over the cells).
+          element.style.setProperty("--highlight-color", color);
         });
         this.marks.push({ marker, decoration });
       }
