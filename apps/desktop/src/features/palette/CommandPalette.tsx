@@ -71,11 +71,14 @@ interface Item {
   run: () => void;
 }
 
-/** Subsequence match with a score that favors consecutive and word-start matches. */
-export function fuzzyScore(needle: string, haystack: string): { score: number; positions: number[] } | null {
+/**
+ * Subsequence match with a score that favors consecutive and word-start matches. `quality` is the
+ * match alone; `score` also prefers shorter text, to rank items that match equally well.
+ */
+export function fuzzyScore(needle: string, haystack: string): { score: number; quality: number; positions: number[] } | null {
   const n = needle.toLowerCase();
   const h = haystack.toLowerCase();
-  if (!n) return { score: 0, positions: [] };
+  if (!n) return { score: 0, quality: 0, positions: [] };
   let score = 0;
   let last = -2;
   const positions: number[] = [];
@@ -89,7 +92,7 @@ export function fuzzyScore(needle: string, haystack: string): { score: number; p
     last = index;
     from = index + 1;
   }
-  return { score: score - h.length * 0.01, positions };
+  return { score: score - h.length * 0.01, quality: score, positions };
 }
 
 function Highlighted({ text, positions }: { text: string; positions: number[] }) {
@@ -434,14 +437,31 @@ export function CommandPalette({
         const label = fuzzyScore(query, item.label);
         const extra = label ? null : fuzzyScore(query, `${item.detail ?? ""} ${item.keywords ?? ""}`);
         if (!label && !extra) return null;
-        return { item, score: label ? label.score + 2 : (extra?.score ?? 0), positions: label?.positions ?? [] };
+        return {
+          item,
+          score: label ? label.score + 2 : (extra?.score ?? 0),
+          quality: label ? label.quality + 2 : (extra?.quality ?? 0),
+          positions: label?.positions ?? [],
+        };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
     if (query) {
-      // Keep each group together; groups are ordered by their best match, items by score.
+      // Keep each group together; groups are ordered by their best match, items by score. Text
+      // length only ranks items: groups that match equally well keep their listed order (open
+      // tabs first, then recent connections, hosts, ... actions), so a long tab detail never
+      // puts an action that names the same address above the tab itself.
       const best = new Map<string, number>();
-      for (const r of scored) best.set(r.item.group, Math.max(best.get(r.item.group) ?? -Infinity, r.score));
-      scored.sort((a, b) => (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) || b.score - a.score);
+      const order = new Map<string, number>();
+      for (const r of scored) {
+        best.set(r.item.group, Math.max(best.get(r.item.group) ?? -Infinity, r.quality));
+        if (!order.has(r.item.group)) order.set(r.item.group, order.size);
+      }
+      scored.sort(
+        (a, b) =>
+          (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) ||
+          (order.get(a.item.group) ?? 0) - (order.get(b.item.group) ?? 0) ||
+          b.score - a.score,
+      );
     }
     return scored.slice(0, 60);
   }, [items, query]);

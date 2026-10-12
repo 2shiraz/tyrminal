@@ -2,7 +2,7 @@
 // in __screenshots__ and are reviewed like code; a change in appearance shows up as a diff.
 import { expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 import { MOTD_LINES } from "./motd-fixture";
 
 // Park the pointer so hover states and tooltips never leak into a baseline.
@@ -39,7 +39,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test(`home with data (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
-      await expect(page.getByRole("heading", { name: "Recent connections" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Hosts", exact: true })).toBeVisible();
       await shot(page, `${theme}-05-home.png`);
     });
 
@@ -96,7 +96,7 @@ for (const theme of ["dark", "light"] as const) {
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
       await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
       await shot(page, `${theme}-12-settings.png`);
-      await page.getByRole("heading", { name: "Terminal", level: 2 }).scrollIntoViewIfNeeded();
+      await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Terminal" }).click();
       await page.waitForTimeout(300);
       await shot(page, `${theme}-13-settings-terminal.png`);
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).click();

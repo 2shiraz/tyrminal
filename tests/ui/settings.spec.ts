@@ -2,7 +2,7 @@
 // shells (crates/core/src/preferences.rs) and falls back to the login shell when one disappears.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 
 const prefsSets = (page: Page) =>
   page.evaluate(() =>
@@ -13,7 +13,7 @@ const prefsSets = (page: Page) =>
 
 test("settings: the local terminal shell is chosen from the installed shells", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Terminal");
   const shell = page.getByRole("combobox", { name: "Local terminal shell" });
   await expect(shell).toHaveValue("");
   await expect(shell.locator("option")).toHaveText(["Login shell (default)", "/bin/bash", "/bin/zsh", "/usr/bin/fish"]);
@@ -25,7 +25,7 @@ test("settings: the local terminal shell is chosen from the installed shells", a
 
 test("settings: editors for remote files are added with the app picker and can be removed", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Terminal");
   await expect(page.getByText("No editors chosen.")).toBeVisible();
   const ext = page.getByRole("textbox", { name: "File extension" });
   const add = page.getByRole("button", { name: "Choose app…" });
@@ -43,7 +43,7 @@ test("settings: editors for remote files are added with the app picker and can b
 
 test("settings: diagnostics are off by default, keep only command and code, and are saved only on request", async ({ page }) => {
   await openApp(page);
-  const settings = () => page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  const settings = () => openSettings(page, "Privacy");
   await settings();
   const toggle = page.getByRole("switch", { name: "Keep a list of recent failures for diagnostics" });
   await expect(toggle).not.toBeChecked();
@@ -98,4 +98,54 @@ test("known hosts: a trusted server without a saved host can become one, prefill
   expect(saves.at(-1)?.args).toMatchObject({ host: { address: "198.51.100.7", port: 2200, username: "admin" } });
   // Now that a host points at it, the button is gone.
   await expect(page.getByRole("button", { name: /^Create a host for/ })).toHaveCount(0);
+});
+
+test("settings: one section at a time; the nav marks it and Up and Down move between sections", async ({ page }) => {
+  await openApp(page);
+  await openSettings(page);
+  const nav = page.getByRole("navigation", { name: "Settings" });
+  await expect(nav.getByRole("button", { name: "Appearance" })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("section.settings-section")).toHaveCount(1);
+  await expect(page.locator("#settings-appearance")).toBeVisible();
+
+  await nav.getByRole("button", { name: "Highlighting" }).click();
+  await expect(nav.getByRole("button", { name: "Highlighting" })).toHaveAttribute("aria-current", "page");
+  await expect(nav.locator("[aria-current]")).toHaveCount(1);
+  await expect(page.locator("#settings-highlight").getByRole("heading", { level: 2, name: "Highlighting" })).toBeVisible();
+  await expect(page.locator("#settings-appearance")).toHaveCount(0);
+
+  // One tab stop in the nav; arrows move focus, Enter opens.
+  await expect(nav.locator('button[tabindex="0"]')).toHaveText("Highlighting");
+  await page.keyboard.press("ArrowDown");
+  await expect(nav.getByRole("button", { name: "Vault and unlock" })).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(nav.getByRole("button", { name: "About" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#settings-about")).toBeVisible();
+});
+
+test("settings: search lists matching settings; Enter opens the section and focuses the setting; Esc clears", async ({ page }) => {
+  await openApp(page);
+  await openSettings(page);
+  const search = page.getByRole("searchbox", { name: "Search settings" });
+  await search.fill("font size");
+  const results = page.locator(".settings-results");
+  await expect(results.getByRole("button")).toHaveText(["Terminal / Text / Font size"]);
+  // The nav keeps only sections with a match.
+  await expect(page.getByRole("navigation", { name: "Settings" }).locator(".settings-nav-item")).toHaveText(["Terminal"]);
+  await search.press("Enter");
+  await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Terminal" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("slider", { name: "Font size" })).toBeFocused();
+  await expect(search).toHaveValue("");
+
+  await search.fill("zzz nothing");
+  await expect(page.getByText("No setting matches “zzz nothing”.")).toBeVisible();
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(page.locator("#settings-terminal")).toBeVisible();
+
+  // A result can be clicked too; a switch row focuses its switch.
+  await search.fill("copy on select");
+  await results.getByRole("button").first().click();
+  await expect(page.getByRole("switch", { name: /Copy on select/ })).toBeFocused();
 });
