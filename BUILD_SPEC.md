@@ -1465,6 +1465,19 @@ References: [S33], [S34], [S35], [S42].
 | P-20 | Accessibility | Every UI phase |
 | P-21 | Versioned portable data formats | 02/04/10 |
 | P-22 | Separate privacy/diagnostics consent | 02/09 |
+| P-23 | Command-finished notifications for background sessions | 05 |
+| P-24 | Quick port forward from detected listening ports | 06 |
+| P-25 | Paste safety: hidden control characters and named target | 05 |
+| P-26 | Production host guardrails | 04/05 |
+| P-27 | Security review of keys, sign-in methods, certificates and known hosts | 04 |
+| P-28 | Search across all open sessions | 05 |
+| P-29 | Save or copy one command's output | 05 |
+| P-30 | Encrypted host and group notes | 04 |
+| P-31 | tmux and screen session awareness | 05 |
+| P-32 | Server at a glance: uptime, load, memory and disk | 05 |
+| P-33 | Container shells on the connected host | 05 |
+
+P-23 to P-33 were added at the owner's request on 2026-10-12 ([docs/decisions/0011-owner-feature-additions.md](docs/decisions/0010-owner-feature-additions.md)).
 
 ## 13. Additional hardening details and decision rules
 

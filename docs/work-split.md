@@ -145,6 +145,25 @@ Never merge these by hand; regenerate them after resolving the sources:
 - Anything else: keep both behaviours, run the tests of both sides, and record what was done in
   the merge commit message.
 
+## Host details panel (branch `claude/host-panel`)
+
+The Hosts view edits hosts in a side panel instead of a dialog (`features/hosts/HostPanel.tsx`,
+form state and cards in `features/hosts/hostForm.tsx`; `HostEditor.tsx` stays as the dialog that
+Home's quick connect uses). Edits outside `features/hosts`:
+
+- `apps/desktop/src/features/tunnels/HostAdvanced.tsx`: `useHostAdvanced` also returns `changed`
+  (for the unsaved-changes guard), and `HostAdvancedSection` takes `embedded` (fields without
+  their own `<details>`, inside the panel's "Show more"). No behaviour change otherwise.
+- `apps/desktop/src/lib/messages-d.ts`: a `hostPanel` block at the end.
+- `apps/desktop/src/styles/global.css`: one block at the end for the panel, plus one rule that
+  gives a hint inside the selected `.choice` muted text (AA contrast on the accent tint).
+- Tests: `tests/ui/{inventory,tunnels,accessibility,visual}.spec.ts` drive the panel; new
+  `tests/ui/host-panel.spec.ts`; the two `08-host-editor` baselines re-recorded;
+  `tests/native/{app,backup}.test.mjs` and `flows.mjs` save through the panel.
+- PR #8's fields live in the panel: the protocol select (SSH, Telnet, serial device) and the
+  serial line settings in the Protocol card; encoding, terminal type and agent forwarding under
+  "Show more". `tests/ui/protocols.spec.ts` drives the panel.
+
 ## Status (each agent edits only its own column)
 
 | | Agent A | Agent B | Agent C | Agent D |
@@ -154,6 +173,13 @@ Never merge these by hand; regenerate them after resolving the sources:
 | Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh) |
 
 ## Requests (one agent asking the other for a change in a file it owns)
+
+- **Command history (AUT-01) → owner of `shellContext.ts` / `SuggestDialog.tsx` (PR #10/#5), done in
+  branch `claude/session-logs`, keep when merging:** `ShellMark` `command_start` gained an optional
+  `leadingSpace` flag (the mark's `command` is trimmed, which lost the shell's "leading space = do not
+  remember" convention); `SuggestDialog.tsx` gained a "History" group, a "History…" button and the
+  history manager view, each in a block marked `command history`. `AppShell.tsx` installs the capture
+  with one marked `useEffect` line. Record kinds 60 and 61 are command history.
 
 - **A → C:** `tests/ui/accessibility.spec.ts` (axe-core, WCAG 2.2 A/AA) finds two violations in
   `TabStrip.tsx`: `aria-required-children` (the `tablist` contains elements that are not tabs) and
@@ -240,3 +266,18 @@ Never merge these by hand; regenerate them after resolving the sources:
    `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
+
+## SFTP tab hook-up (branch `claude/sftp-tab`)
+
+The SFTP tab lives in `apps/desktop/src/features/sftp/` (own messages and stylesheet). Its
+hook-up into files other branches own is kept to the minimum, for C (#7, tabs/workspaces) and
+the terminal-input branch (#9) to keep when they merge:
+
+- `app/workspace.ts`: `PaneTarget = TerminalTarget | { kind: "sftp" }` and `Pane.target: PaneTarget`.
+  An SFTP tab has one pane and is never split (AppShell ignores split requests for it).
+- `components/layout/PaneGrid.tsx`: a pane whose target is `sftp` renders `SftpView` instead of
+  `TerminalView`; it stays mounted while hidden like a terminal.
+- `components/layout/TabStrip.tsx`: one optional `onNewSftp` item in the **+** menu.
+- `features/terminal/TerminalView.tsx`: `AuthDialog` and `Fingerprint` are exported (no other change).
+- `Sidebar.tsx`, `HomeView.tsx`, `CommandPalette.tsx`: one optional `onSftp` entry each.
+- `AppShell.tsx`: `openSftp`; the side panels and status-bar session details are hidden on an SFTP tab.

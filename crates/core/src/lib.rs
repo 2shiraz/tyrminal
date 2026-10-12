@@ -8,6 +8,7 @@
 mod connlog;
 mod deploy;
 mod diagnostics;
+mod discovery;
 mod edits;
 mod error;
 mod files;
@@ -31,9 +32,12 @@ mod tunnels;
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// command history
+mod command_history;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
-pub use files::{TransferSink, list_local, local_within};
+pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
+pub use files::{TransferSink, list_local, local_make_dir, local_remove, local_rename, local_set_mode, local_within};
 pub use preferences::PreferencesStore;
 pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
@@ -59,6 +63,8 @@ pub struct Core {
     pub vault: Arc<VaultService>,
     pub sessions: Arc<Sessions>,
     pub preferences: Arc<PreferencesStore>,
+    /// LAN discovery (HST-14); independent of the vault.
+    pub discovery: Arc<Discovery>,
 }
 
 impl core::fmt::Debug for Core {
@@ -91,7 +97,20 @@ impl Core {
     ) -> Self {
         let vault = Arc::new(VaultService::new(db, secret_store));
         let sessions = Sessions::new(Arc::clone(&vault));
-        Self { vault, sessions, preferences: Arc::new(preferences) }
+        Self { vault, sessions, preferences: Arc::new(preferences), discovery: Discovery::new() }
+    }
+}
+
+impl Core {
+    /// Starts LAN discovery on `network_id` for `owner` (a window). Only while the vault is
+    /// unlocked: the lock screen cannot start network activity.
+    pub async fn discovery_start(
+        &self,
+        owner: &str,
+        network_id: &str,
+    ) -> Result<tyrminal_contracts::DiscoveryStatus, IpcError> {
+        self.vault.require_unlocked().await?;
+        self.discovery.start(owner, network_id)
     }
 }
 
