@@ -18,12 +18,12 @@ fn io_error(message: &'static str) -> IpcError {
     IpcError::new(ErrorCode::IoError, message)
 }
 
-fn file_name(path: &Path) -> String {
+pub(crate) fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 #[cfg(not(feature = "e2e"))]
-fn today() -> String {
+pub(crate) fn today() -> String {
     // Days since the epoch to a civil date (no time zone; the name is only a suggestion).
     let days =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0)
@@ -82,7 +82,7 @@ async fn open_path(app: &AppHandle) -> Result<Option<PathBuf>, IpcError> {
 
 /// Writes to a new owner-only temporary file next to the target, then renames it into place, so
 /// a crash never leaves a half-written backup under the chosen name.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let tmp = dir.join(format!(".{}.partial", file_name(path)));
     let mut options = std::fs::OpenOptions::new();

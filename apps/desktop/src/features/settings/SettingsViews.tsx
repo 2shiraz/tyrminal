@@ -16,11 +16,12 @@ import {
   TextArea,
   relativeTime,
 } from "../../components/ui/controls";
-import { IconFingerprint, IconMonitor, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
-import { knownHosts as knownHostsApi, preferences as preferencesApi, vault } from "../../lib/ipc";
+import { IconFingerprint, IconMonitor, IconPlus, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
+import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
+import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
 
@@ -30,6 +31,13 @@ const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m
 export function KnownHostsView() {
   const list = useLoaded(knownHostsApi.list);
   const [removing, setRemoving] = useState<KnownHostSummary | null>(null);
+  // Creating a host from a trusted record (SEC-03): the key is already trusted, so the first
+  // connection goes straight to sign-in.
+  const savedHosts = useLoaded(hostsApi.list);
+  const keyList = useLoaded(keysApi.list);
+  const [creating, setCreating] = useState<KnownHostSummary | null>(null);
+  const hasHost = (entry: KnownHostSummary) =>
+    (savedHosts.value ?? []).some((h) => h.address.toLowerCase() === entry.host.toLowerCase() && h.port === entry.port);
 
   return (
     <div className="page">
@@ -57,6 +65,17 @@ export function KnownHostsView() {
                   </span>
                   <span className="row-sub">{relativeTime(entry.addedAt)}</span>
                 </div>
+                {savedHosts.value && !hasHost(entry) && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setCreating(entry)}
+                    aria-label={msg.knownHosts.createHostFor(msg.knownHosts.endpoint(entry.host, entry.port))}
+                  >
+                    <IconPlus size={14} aria-hidden="true" />
+                    {msg.knownHosts.createHost}
+                  </button>
+                )}
                 <button type="button" className="btn btn-danger btn-sm" onClick={() => setRemoving(entry)}>
                   {msg.knownHosts.remove}
                 </button>
@@ -65,6 +84,18 @@ export function KnownHostsView() {
           </ul>
         )}
       </section>
+      {creating && (
+        <HostEditor
+          host={null}
+          initial={{ address: creating.host, port: creating.port, username: "" }}
+          keys={keyList.value ?? []}
+          onClose={() => setCreating(null)}
+          onSaved={() => {
+            setCreating(null);
+            void savedHosts.reload();
+          }}
+        />
+      )}
       {removing && (
         <RemoveTrustDialog
           entry={removing}
@@ -390,6 +421,16 @@ export function SettingsView() {
                 <h2 id="settings-privacy-title">{msg.settings.privacy}</h2>
                 <p>{msg.settings.privacyBody}</p>
               </header>
+              <DiagnosticsSetting enabled={prefs.diagnostics} onChange={(diagnostics) => update((p) => ({ ...p, diagnostics }))} />
+              <div className="settings-row">
+                <div>
+                  <h3>{msg.settings.updates}</h3>
+                  <p className="muted">{msg.settings.updatesBody(__APP_VERSION__)}</p>
+                </div>
+                <button type="button" className="btn" onClick={() => void linksApi.open(msg.settings.releasesUrl).catch(() => undefined)}>
+                  {msg.settings.updatesOpen}
+                </button>
+              </div>
               <Notice tone="warning">
                 <strong>{msg.settings.status}.</strong> {msg.settings.statusBody}
               </Notice>
@@ -419,6 +460,40 @@ export function SettingsView() {
       )}
       {/* After a restore the vault locks and the app shows the unlock screen on its own. */}
       {dialog === "restore" && <RestoreBackupDialog vaultExists onClose={() => setDialog(null)} onRestored={() => setDialog(null)} />}
+    </div>
+  );
+}
+
+/** P-22: local diagnostics, off by default; a report is only ever saved on request. */
+function DiagnosticsSetting({ enabled, onChange }: { enabled: boolean; onChange: (enabled: boolean) => void }) {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [count, setCount] = useState(diagnostics.count);
+  const { pending, error, run } = useAction();
+  useEffect(() => {
+    const timer = window.setInterval(() => setCount(diagnostics.count()), 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="settings-row">
+      <div>
+        <Switch label={msg.settings.diagnostics} checked={enabled} onChange={(checked) => onChange(checked)} />
+        <p className="muted">{msg.settings.diagnosticsHint}</p>
+        {enabled && <p className="muted">{msg.settings.diagnosticsCount(count)}</p>}
+        <ErrorNotice error={error} />
+        {saved && <Notice tone="success">{msg.settings.diagnosticsSaved(saved)}</Notice>}
+      </div>
+      <button
+        type="button"
+        className="btn"
+        disabled={pending}
+        onClick={async () => {
+          setSaved(null);
+          const name = await run(() => diagnostics.saveReport());
+          if (name) setSaved(name);
+        }}
+      >
+        {msg.settings.diagnosticsSave}
+      </button>
     </div>
   );
 }

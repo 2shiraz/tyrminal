@@ -117,8 +117,13 @@ export class App {
   }
 
   async quit({ keepData = false } = {}) {
-    await this.session.close();
-    const exited = new Promise((resolve) => this.child.once("exit", resolve));
+    // The app may exit as soon as its session closes; listen first, and resolve at once if it
+    // already has, or the wait never ends.
+    const exited = new Promise((resolve) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) resolve();
+      else this.child.once("exit", resolve);
+    });
+    await this.session.close().catch(() => {});
     this.child.kill("SIGTERM");
     const timer = setTimeout(() => this.child.kill("SIGKILL"), 5_000);
     await exited;

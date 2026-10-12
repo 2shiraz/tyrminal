@@ -339,7 +339,8 @@ mod tests {
         assert_eq!(result, Ok(()));
         let text = String::from_utf8(sent).unwrap();
         assert!(text.starts_with("CONNECT inner.lab:22 HTTP/1.1\r\nHost: inner.lab:22\r\n"), "{text}");
-        assert!(text.contains("Proxy-Authorization: Basic bGFiOnMzY3JldA==\r\n"), "{text}");
+        // The encoder itself is checked against the RFC 4648 vectors above.
+        assert!(text.contains(&format!("Proxy-Authorization: Basic {}\r\n", base64(b"lab:s3cret").as_str())), "{text}");
         // IPv6 destinations are bracketed in the authority.
         let (result, sent) = scripted(&spec(ProxyKind::Http, None), b"HTTP/1.0 200 OK\r\n\r\n", "::1").await;
         assert_eq!(result, Ok(()));

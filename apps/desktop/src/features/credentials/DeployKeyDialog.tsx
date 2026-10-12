@@ -60,6 +60,9 @@ export function DeployKeyDialog({
         auth: { kind: "key", keyId },
         groupId: host.groupId,
         tags: host.tags,
+        protocol: host.protocol,
+        terminal: host.terminal,
+        forwardAgent: host.forwardAgent,
       }),
     );
     if (saved) {
