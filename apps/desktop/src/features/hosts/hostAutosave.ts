@@ -175,12 +175,19 @@ export function useHostAutosave(form: HostForm, { host, onSaved }: { host: HostS
     const routeKey = JSON.stringify(routeInput(adv.input()));
     const explicit = options.proxyPassword !== undefined || options.releaseProxy === true;
     const routeDue = explicit || (adv.routeChanged && routeKey !== routeWritten.current);
-    const route = routeOk && routeDue ? routeInput(adv.input(), options.proxyPassword) : null;
+    let route = routeOk && routeDue ? routeInput(adv.input(), options.proxyPassword) : null;
+    let routeKeyWritten = routeKey;
+    // The route is incomplete: key exchange and port suggestions still save, with the stored route.
+    if (route === null && ssh && adv.ready && !explicit && adv.settingsChanged) {
+      const settings = adv.settingsInput();
+      routeKeyWritten = JSON.stringify(settings);
+      if (routeKeyWritten !== routeWritten.current) route = settings;
+    }
     const before = stored.current ? JSON.stringify(hostInput(stored.current, id)) : null;
     const basics = hostInput(draft, id, options.password);
     const basicsChanged = id === null || options.password !== undefined || JSON.stringify(hostInput(draft, id)) !== before;
     const identityChanged = ssh && f.identity !== undefined && draft.identityId !== (stored.current ?? f.start).identityId;
-    return { draft, route, routeKey, basics, basicsChanged, identityChanged };
+    return { draft, route, routeKey: routeKeyWritten, basics, basicsChanged, identityChanged };
   }
 
   async function write(options: WriteOptions = {}): Promise<SaveResult> {

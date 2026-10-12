@@ -133,3 +133,19 @@ test("closing the group editor with a typed, unset proxy password asks first", a
   await expect(group).toHaveCount(0);
   expect(JSON.stringify(await allCalls(page))).not.toContain("canary-unset");
 });
+
+test("closing the group editor with note changes asks about the note", async ({ page }) => {
+  await openHosts(page);
+  const group = await editGroup(page, "Lab");
+  await group.getByRole("button", { name: "Add note" }).click();
+  await group.getByRole("textbox", { name: "Note" }).fill("Lab hardware lives in rack 3");
+  await group.getByRole("button", { name: "Done" }).click();
+  const confirm = page.getByRole("alertdialog", { name: "Discard your note changes?" });
+  await expect(confirm.getByRole("button", { name: "Keep editing" })).toBeFocused();
+  await confirm.getByRole("button", { name: "Keep editing" }).click();
+  await expect(group.getByRole("textbox", { name: "Note" })).toHaveValue("Lab hardware lives in rack 3");
+  await group.getByRole("button", { name: "Done" }).click();
+  await confirm.getByRole("button", { name: "Discard note changes" }).click();
+  await expect(group).toHaveCount(0);
+  expect(await calls(page, "note_set")).toHaveLength(0);
+});
