@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use tyrminal_core::Core;
 use tyrminal_core::contracts::{
     BulkHostChange, ErrorCode, GroupInput, HostAuth, HostAuthInput, HostInput, HostProtocol, IdentityInput,
-    InheritedFields, IpcError, SecretChange, SettingOrigin, SettingsTarget,
+    IdentityReferences, InheritedFields, IpcError, SecretChange, SettingOrigin, SettingsTarget,
 };
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -762,8 +762,10 @@ async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_
         .unwrap();
     assert!(kept.has_password);
 
-    // Deleting an identity clears its references in the same transaction; hosts fall back.
-    assert_eq!(v.delete_identity(&deploy.id).await.unwrap(), 1);
+    // Deleting an identity that is in use needs an explicit choice (BUILD_SPEC §10.2). Removing
+    // it from its users clears the references in the same transaction; hosts fall back.
+    assert_eq!(v.delete_identity(&deploy.id, None).await.unwrap_err().code, ErrorCode::InUse);
+    assert_eq!(v.delete_identity(&deploy.id, Some(IdentityReferences::Remove)).await.unwrap(), 1);
     let assignments = v.list_identity_assignments().await.unwrap();
     let of = |id: &str| assignments.iter().find(|a| a.target == host_target(id)).unwrap().clone();
     assert_eq!(

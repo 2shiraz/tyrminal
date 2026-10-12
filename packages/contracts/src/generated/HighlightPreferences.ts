@@ -5,4 +5,28 @@ import type { HighlightKeyword } from "./HighlightKeyword";
  * Output highlighting: colors drawn over the screen only. The bytes received, shown as text,
  * copied or sent are never changed.
  */
-export type HighlightPreferences = { enabled: boolean, ipAddresses: boolean, keywords: Array<HighlightKeyword>, };
+export type HighlightPreferences = { enabled: boolean, ipAddresses: boolean, keywords: Array<HighlightKeyword>, 
+/**
+ * Numbers, sizes (12K, 3.4GiB), percentages and durations (15ms).
+ */
+numbers: boolean, urls: boolean, macAddresses: boolean, 
+/**
+ * ISO dates, date-times and clock times.
+ */
+dates: boolean, 
+/**
+ * Text in double or single quotes.
+ */
+quoted: boolean, 
+/**
+ * File system paths (/etc/hosts, ~/src, ./build).
+ */
+paths: boolean, 
+/**
+ * 0x values, UUIDs and commit hashes.
+ */
+hex: boolean, 
+/**
+ * Status words: error/fail/denied (red), warn (yellow), ok/success/done (green), info/debug (dim).
+ */
+levels: boolean, };

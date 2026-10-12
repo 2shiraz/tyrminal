@@ -3,6 +3,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
+import { marksOnRow } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -502,7 +503,9 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   }
   await expect(list.getByRole("list", { name: "Files" }).locator("li")).toHaveCount(1);
   await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
-  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(29);
+  // The command jumps (shell integration) are listed with the terminal actions.
+  await expect(list.getByRole("list", { name: "Terminal" })).toContainText("Jump to the previous command");
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(46);
 
   // Search filters by name and by keys; no match says so.
   await search.fill("zoom");
@@ -558,6 +561,75 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   await expect(page.locator("#settings-shortcuts")).toContainText("Alt sends Meta");
 });
 
+test("navigation shortcuts: cycle panes, go to a tab, focus terminal or sidebar, reopen a closed tab", async ({ page }) => {
+  await openApp(page);
+  await twoHostTab(page);
+  const focusedPane = page.locator(".pane:not([hidden])[data-focused=true]");
+  await expect(focusedPane).toHaveAttribute("aria-label", "db-primary");
+  // Next and previous pane cycle through the tab's panes and wrap around.
+  await page.keyboard.press("Control+Shift+BracketRight");
+  await expect(focusedPane).toHaveAttribute("aria-label", "api-gateway");
+  await page.keyboard.press("Control+Shift+BracketRight");
+  await expect(focusedPane).toHaveAttribute("aria-label", "db-primary");
+  await page.keyboard.press("Control+Shift+BracketLeft");
+  await expect(focusedPane).toHaveAttribute("aria-label", "api-gateway");
+
+  // Go to tab N, last tab and the focus actions start without a shortcut and can be given one.
+  await openSettings(page);
+  const list = page.getByRole("group", { name: "Application shortcuts" });
+  const row = (action: string) => list.locator(`li[data-action="${action}"]`);
+  for (const action of ["goToTab1", "goToTab8", "goToLastTab", "focusTerminal", "focusSidebar"]) {
+    await expect(row(action)).toContainText("No shortcut");
+  }
+  await expect(row("reopenClosedTab").locator(".visually-hidden")).toHaveText("Alt+Shift+T");
+  const bind = async (name: string, action: string, chord: string) => {
+    await page.getByRole("button", { name: `Change shortcut for ${name}` }).click();
+    await page.keyboard.press(chord);
+    await expect(row(action).getByRole("alert")).toHaveCount(0);
+    await expect(row(action)).not.toContainText("No shortcut");
+  };
+  await bind("Go to tab 1", "goToTab1", "Alt+Shift+Digit1");
+  await bind("Go to last tab", "goToLastTab", "Alt+Shift+KeyL");
+  await bind("Focus terminal", "focusTerminal", "Alt+Shift+KeyU");
+  await bind("Focus sidebar", "focusSidebar", "Alt+Shift+KeyY");
+  // Alt+1–9 stay with the built-in tab switch.
+  await page.getByRole("button", { name: "Change shortcut for Go to tab 8" }).click();
+  await page.keyboard.press("Alt+Digit8");
+  await expect(row("goToTab8").getByRole("alert")).toHaveText("The system keeps that shortcut (go to a tab by number).");
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("Control+Shift+KeyT");
+  await expect(terminalTabs(page)).toHaveCount(2);
+  await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Alt+Shift+Digit1");
+  await expect(page.getByRole("tab", { name: /prod/ })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Alt+Shift+KeyL");
+  await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.press("Alt+Shift+KeyY");
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest(".sidebar") !== null)).toBe(true);
+  await page.keyboard.press("Alt+Shift+KeyU");
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest(".pane[data-focused=true] .xterm") != null)).toBe(true);
+
+  // Reopen closed tab brings back the arrangement and destinations, disconnected until Connect.
+  await page.keyboard.press("Alt+Shift+Digit1");
+  await page.getByRole("tab", { name: /prod/ }).locator(".tab-close").click();
+  await expect(terminalTabs(page)).toHaveCount(1);
+  await expect.poll(async () => (await calls(page, "session_close")).length).toBe(2);
+  const opened = (await calls(page, "session_open_ssh")).length;
+  await page.keyboard.press("Alt+Shift+KeyT");
+  await expect(terminalTabs(page)).toHaveCount(2);
+  await expect(page.getByRole("tab", { name: /prod/ })).toHaveAttribute("aria-selected", "true");
+  await expect(visiblePanes(page)).toHaveCount(2);
+  await expect(page.getByRole("group", { name: /not connected$/ })).toHaveCount(2);
+  await page.waitForTimeout(300);
+  expect(await calls(page, "session_open_ssh")).toHaveLength(opened);
+  // Each closed tab is reopened once.
+  await page.keyboard.press("Alt+Shift+KeyT");
+  await expect(page.getByText("No closed tab to reopen.")).toBeVisible();
+  await expect(terminalTabs(page)).toHaveCount(2);
+});
+
 test("highlighting: words and IP addresses are colored on screen; the text and input are unchanged", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await openSettings(page);
@@ -571,9 +643,16 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   const line = "build ERROR at 10.0.0.12 from fe80::1 at 12:30:45, mac aa:bb:cc:dd:ee:ff, errors=0";
   await output(page, `\r\n${line}\r\n`);
   const marks = page.locator(".term-highlight");
-  await expect(marks).toHaveCount(3);
-  await expect(page.locator('.term-highlight[data-tone="danger"]')).toHaveCount(1);
-  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(2);
+  // The user's word first; the built-in kinds (on by default) color the rest of the plain text.
+  await expect.poll(() => marksOnRow(page, "build ERROR")).toEqual([
+    ["danger", "ERROR"],
+    ["address", "10.0.0.12"],
+    ["address", "fe80::1"],
+    ["date", "12:30:45"],
+    ["address", "aa:bb:cc:dd:ee:ff"],
+    ["danger", "errors"],
+    ["number", "0"],
+  ]);
   // The screen text is exactly what arrived, and highlighting sent nothing.
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   expect(await calls(page, "session_write")).toHaveLength(writesBefore);
@@ -582,6 +661,7 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   await openSettings(page);
   await page.getByLabel("Highlight output").first().uncheck();
   await page.getByRole("tab", { name: /api-gateway/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   await expect(marks).toHaveCount(0);
 });
 
@@ -814,4 +894,24 @@ test("templates: the reported directory is saved; after Connect a return is offe
   await offer.getByRole("button", { name: "Send" }).click();
   await expect(offer).toHaveCount(0);
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("cd -- '/srv/it'\\''s app': synthetic output");
+});
+
+test("templates: an SFTP tab is left out of a saved layout", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /Local terminal/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm")).toBeVisible();
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /SFTP/ }).click();
+  await expect(page.getByRole("tab", { name: /SFTP/ })).toHaveAttribute("aria-selected", "true");
+
+  await paletteRun(page, "Save layout as");
+  const dialog = page.getByRole("dialog", { name: "Save the open tabs as a layout" });
+  await expect(dialog).toContainText("1 tab, 1 pane");
+  await dialog.getByLabel("Layout name").fill("Mixed");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved layout “Mixed”.")).toBeVisible();
+  const [saved] = await calls(page, "layout_save");
+  const tabs = (saved!.args as { layout: { tabs: { panes: unknown[] }[] } }).layout.tabs;
+  expect(tabs.map((t) => t.panes)).toEqual([[{ kind: "local" }]]);
 });

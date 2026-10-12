@@ -24,6 +24,9 @@ import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
+// compromised-password check (SEC-11)
+import { PasswordCheckSetting } from "../password-check/PasswordCheckSetting";
+import { AboutSection } from "./AboutSection";
 import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
 import { msgC } from "../../lib/messages-c";
 
@@ -145,11 +148,14 @@ function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary
   );
 }
 
-type Section = "appearance" | "terminal" | "shortcuts" | "security" | "backup" | "privacy";
+export type Section = "appearance" | "terminal" | "shortcuts" | "security" | "backup" | "privacy" | "about";
 
-export function SettingsView() {
+export function SettingsView({ initialSection }: { initialSection?: Section | undefined } = {}) {
   const { prefs, update, saveError } = usePreferences();
-  const [section, setSection] = useState<Section>("appearance");
+  const [section, setSection] = useState<Section>(initialSection ?? "appearance");
+  useEffect(() => {
+    if (initialSection) document.getElementById(`settings-${initialSection}`)?.scrollIntoView({ block: "start" });
+  }, [initialSection]);
   const [dialog, setDialog] = useState<"passphrase" | "recovery" | "restore" | "quick" | null>(null);
   const [changed, setChanged] = useState(false);
   const [quickKey, setQuickKey] = useState(0);
@@ -170,6 +176,7 @@ export function SettingsView() {
     { id: "security", label: msg.settings.security },
     { id: "backup", label: msg.backup.title },
     { id: "privacy", label: msg.settings.privacy },
+    { id: "about", label: msg.about.title },
   ];
 
   return (
@@ -253,9 +260,9 @@ export function SettingsView() {
                         data-tooltip={low.length ? msg.settings.lowContrast(low.join(", ")) : undefined}
                       >
                         <span className="scheme-swatch" style={{ background: scheme.background, color: scheme.foreground }}>
-                          <span>
-                            <span style={{ color: scheme.green }}>❯</span> ls <span style={{ color: scheme.blue }}>src</span>
-                          </span>
+                          {/* Sample text in the scheme's foreground, which every scheme keeps at 4.5:1; the
+                              ANSI colours are the dots below (third-party palettes may be lower). */}
+                          <span>❯ ls src</span>
                           <span className="scheme-dots">
                             {[scheme.red, scheme.green, scheme.yellow, scheme.blue, scheme.magenta, scheme.cyan].map((c) => (
                               <span key={c} style={{ background: c }} />
@@ -406,6 +413,8 @@ export function SettingsView() {
                 </button>
               </div>
               <QuickUnlockSetting key={quickKey} onEnable={() => setDialog("quick")} />
+              {/* compromised-password check (SEC-11) */}
+              <PasswordCheckSetting />
             </section>
 
             <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">
@@ -440,6 +449,8 @@ export function SettingsView() {
                 <strong>{msg.settings.status}.</strong> {msg.settings.statusBody}
               </Notice>
             </section>
+
+            <AboutSection />
           </div>
         </div>
       </section>

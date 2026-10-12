@@ -70,6 +70,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
+| `app_info` | — | `AppInfo` | Static build and platform facts (commit, build date, OS, architecture, Tauri and WebView versions); nothing about the user or the vault |
 | `layout_list` / `layout_save` / `layout_delete` | — / `LayoutTemplateInput` / id | `LayoutTemplateSummary[]` / `LayoutTemplateSummary` / — | Agent C. Saved only on request. Each split tree names each pane once, ratios are 0.15–0.85, at most 16 panes, SSH targets must be saved hosts. No commands, output or secrets are stored. A restored pane connects only on Connect |
 | `discovery_networks` | — | interfaces (name, addresses) | Local interface table only; sends nothing (HST-14, ADR 0009) |
 | `discovery_start` | network id | discovery status | Vault unlocked; id must be a listed interface; browses `_ssh._tcp` there for 30 s |

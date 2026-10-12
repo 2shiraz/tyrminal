@@ -18,4 +18,14 @@ optionAsMeta: boolean,
 /**
  * Right click selects the word under the pointer (the platform default on macOS).
  */
-rightClickSelectsWord: boolean, };
+rightClickSelectsWord: boolean, 
+/**
+ * Right click pastes the clipboard (through the same review as any paste). Exclusive with
+ * `right_click_selects_word`. Never while an application has asked for mouse reports.
+ */
+rightClickPaste: boolean, 
+/**
+ * Middle click pastes the clipboard (through the same review). Never while an application
+ * has asked for mouse reports.
+ */
+middleClickPaste: boolean, };
