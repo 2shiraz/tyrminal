@@ -12,14 +12,14 @@ use crate::validate;
 /// Skipped lines reported in one preview; more are summarized in a final entry.
 const MAX_SKIPPED: usize = 500;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Parsed {
     pub hosts: Vec<ImportHost>,
     pub skipped: Vec<ImportSkipped>,
 }
 
 impl Parsed {
-    fn skip(&mut self, line: usize, text: &str, reason: &str) {
+    pub(crate) fn skip(&mut self, line: usize, text: &str, reason: &str) {
         if self.skipped.len() < MAX_SKIPPED {
             let mut shown: String = text.chars().filter(|c| !c.is_control()).take(120).collect();
             if text.chars().count() > 120 {
@@ -36,7 +36,7 @@ impl Parsed {
     }
 }
 
-fn check_size(text: &str) -> Result<(), IpcError> {
+pub(crate) fn check_size(text: &str) -> Result<(), IpcError> {
     if text.len() > MAX_IMPORT_LEN {
         return Err(invalid("The file is too large to import (1 MiB at most)."));
     }
@@ -44,7 +44,7 @@ fn check_size(text: &str) -> Result<(), IpcError> {
 }
 
 /// Validates one candidate host the same way the host editor does. `Err` carries the reason.
-fn checked(mut host: ImportHost) -> Result<ImportHost, String> {
+pub(crate) fn checked(mut host: ImportHost) -> Result<ImportHost, String> {
     let message = |e: IpcError| e.message;
     host.label = validate::label(&host.label).map_err(message)?;
     host.address = validate::address(&host.address).map_err(message)?;

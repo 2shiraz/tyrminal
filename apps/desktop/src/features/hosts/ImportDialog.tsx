@@ -2,14 +2,36 @@ import type { GroupSummary, ImportFormat, ImportPreview } from "@tyrminal/contra
 import { useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
-import { ErrorNotice, Notice, Segmented } from "../../components/ui/controls";
+import { ErrorNotice, Notice } from "../../components/ui/controls";
 import { IconFolderOpen, IconUpload } from "../../components/ui/icons";
-import { importer } from "../../lib/ipc";
+import { importer, knownHostImport } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
 import { groupPath } from "./HostEditor";
 
 const MAX_IMPORT_BYTES = 1024 * 1024;
+
+/** A file source, or the vault's own trusted known hosts (no file). */
+type Source = ImportFormat | "known_hosts";
+
+const ACCEPT: Partial<Record<ImportFormat, string>> = {
+  csv: ".csv,text/csv",
+  putty_reg: ".reg",
+  mobaxterm: ".ini,.mxtsessions",
+  securecrt: ".xml,.ini",
+};
+
+/**
+ * Decodes a chosen file: UTF-16 with a byte-order mark (regedit writes .reg files that way) or
+ * UTF-8. Invalid sequences become U+FFFD; the core then rejects or skips what does not validate.
+ */
+export function decodeImportFile(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+  return new TextDecoder("utf-8").decode(bytes);
+}
 
 /**
  * Import in two steps: choose a file (read in the page as text, never executed), see what would
@@ -26,7 +48,7 @@ export function ImportDialog({
   onClose: () => void;
   onImported: (count: number) => void;
 }) {
-  const [format, setFormat] = useState<ImportFormat>("openssh_config");
+  const [format, setFormat] = useState<Source>("openssh_config");
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [target, setTarget] = useState<string | null>(intoGroup);
@@ -43,11 +65,24 @@ export function ImportDialog({
       setProblem(msg.hosts.importTooLarge);
       return;
     }
-    const text = await file.text();
-    const result = await run(() => importer.preview(format, text));
+    if (format === "known_hosts") return;
+    const source = format;
+    const text = decodeImportFile(await file.arrayBuffer());
+    const result = await run(() => importer.preview(source, text));
     if (result) {
       setPreview(result);
       if (result.hosts.length === 0) setProblem(msg.hosts.importNothing);
+    }
+  }
+
+  async function loadKnownHosts() {
+    setPreview(null);
+    setProblem(null);
+    setFileName(null);
+    const result = await run(() => knownHostImport.preview());
+    if (result) {
+      setPreview(result);
+      if (result.hosts.length === 0) setProblem(msgD.import.knownHostsNone);
     }
   }
 
@@ -61,45 +96,59 @@ export function ImportDialog({
     <Dialog title={msg.hosts.importTitle} icon={<IconUpload size={18} />} onDismiss={onClose} wide>
       <div className="stack">
         <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-          {msg.hosts.importBody}
+          {msgD.import.body}
         </p>
-        <Segmented<ImportFormat>
-          label={msg.hosts.importFormat}
-          value={format}
-          onChange={(value) => {
-            setFormat(value);
-            setPreview(null);
-            setFileName(null);
-            setProblem(null);
-          }}
-          options={[
-            { value: "openssh_config", label: msg.hosts.importOpenssh },
-            { value: "csv", label: msg.hosts.importCsv },
-          ]}
-        />
-        {format === "csv" && <p className="hint">{msg.hosts.importCsvHint}</p>}
-        <div className="row-flex" style={{ flexWrap: "wrap" }}>
-          <button type="button" className="btn" onClick={() => input.current?.click()} disabled={pending} data-autofocus>
-            <IconFolderOpen size={15} />
-            {msg.hosts.importChoose}
-          </button>
-          {fileName && (
-            <span className="mono selectable" data-testid="import-file">
-              {fileName}
-            </span>
-          )}
-          <input
-            ref={input}
-            type="file"
-            hidden
-            accept={format === "csv" ? ".csv,text/csv" : undefined}
-            aria-label={msg.hosts.importChoose}
+        <label className="field">
+          <span className="label">{msg.hosts.importFormat}</span>
+          <select
+            className="select"
+            value={format}
             onChange={(event) => {
-              void chosen(event.target.files?.[0]);
-              event.target.value = "";
+              const value = event.target.value as Source;
+              setFormat(value);
+              setPreview(null);
+              setFileName(null);
+              setProblem(null);
+              if (value === "known_hosts") void loadKnownHosts();
             }}
-          />
-        </div>
+          >
+            <option value="openssh_config">{msg.hosts.importOpenssh}</option>
+            <option value="csv">{msg.hosts.importCsv}</option>
+            <option value="putty_reg">{msgD.import.putty}</option>
+            <option value="mobaxterm">{msgD.import.mobaxterm}</option>
+            <option value="securecrt">{msgD.import.securecrt}</option>
+            <option value="known_hosts">{msgD.import.knownHosts}</option>
+          </select>
+        </label>
+        {format === "csv" && <p className="hint">{msg.hosts.importCsvHint}</p>}
+        {format === "putty_reg" && <p className="hint">{msgD.import.puttyHint}</p>}
+        {format === "mobaxterm" && <p className="hint">{msgD.import.mobaxtermHint}</p>}
+        {format === "securecrt" && <p className="hint">{msgD.import.securecrtHint}</p>}
+        {format === "known_hosts" && <p className="hint">{msgD.import.knownHostsHint}</p>}
+        {format !== "known_hosts" && (
+          <div className="row-flex" style={{ flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={() => input.current?.click()} disabled={pending} data-autofocus>
+              <IconFolderOpen size={15} />
+              {msg.hosts.importChoose}
+            </button>
+            {fileName && (
+              <span className="mono selectable" data-testid="import-file">
+                {fileName}
+              </span>
+            )}
+            <input
+              ref={input}
+              type="file"
+              hidden
+              accept={ACCEPT[format]}
+              aria-label={msg.hosts.importChoose}
+              onChange={(event) => {
+                void chosen(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </div>
+        )}
 
         {problem && <Notice tone="warning">{problem}</Notice>}
 

@@ -11,8 +11,8 @@ Updated: 2026-10-12.
 | Slice | State |
 |---|---|
 | 1. Inventory presentation (HST-13) and group-wide connection (HST-06) | Done, tested (core + UI mock) |
-| 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Next |
-| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Queued |
+| 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Done, tested (core, lab, UI mock); cloud discovery IMP-07..13 BLOCKED (third-party APIs) |
+| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Next |
 | 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Queued |
 | 5. After agent B merges: identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), IMP-02, HST-05 | Waiting on B |
 
@@ -32,12 +32,21 @@ Updated: 2026-10-12.
   instead of opening only some. Each host opens in its own tab through the normal connect path,
   so host-key and password decisions happen per host as usual.
 
+- **Importers** (`crates/core/src/importers.rs`, ADR 0006): PuTTY `.reg` exports, MobaXterm
+  `.ini`/`.mxtsessions`, SecureCRT XML exports and session `.ini`. Parse only; saved passwords are
+  never imported (so encrypted exports need no decryption); key files, tunnels and proxies are
+  listed per host. SecureCRT XML with a DOCTYPE is refused; only predefined entities are accepted.
+  Synthetic fixtures: `tests/fixtures/import/`.
+- **Known-host conversion** offers hosts for trusted records without a host entry, through the
+  same preview and transactional import.
+
 ## Evidence
 
 - `cargo test -p tyrminal-core --test inventory` — includes
   `host_os_is_set_in_bulk_follows_duplicates_and_goes_with_deleted_hosts` (real vault, reopened
   from disk).
-- `node scripts/ui-container.mjs` — 62 passed, including `inventory-presentation.spec.ts` (5).
+- `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion.
+- `node scripts/ui-container.mjs` — full suite green, including `inventory-presentation.spec.ts`.
 - `pnpm verify:fast` 7/7; `cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib` 20/20 against the local lab (OpenSSH 9.6p1).
 
 ## Next commands

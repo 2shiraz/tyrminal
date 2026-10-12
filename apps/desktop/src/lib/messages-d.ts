@@ -51,4 +51,16 @@ export const msgD = {
     connectAllNote: "Each host opens in its own tab and asks for any password or host-key decision there.",
     connectAllDone: (n: number) => `Opening ${plural(n, "session", "sessions")}`,
   },
+  import: {
+    body: "From another SSH client's saved sessions, an OpenSSH config, a CSV file, or hosts you already trusted. You see a preview first; nothing in a file is run, and stored passwords are never imported.",
+    putty: "PuTTY (.reg export)",
+    mobaxterm: "MobaXterm (.ini, .mxtsessions)",
+    securecrt: "SecureCRT (.xml export, session .ini)",
+    knownHosts: "Trusted known hosts",
+    puttyHint: "In PuTTY's registry, export HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions (regedit → Export, or reg export). SSH sessions become hosts; key files and tunnels are listed but not imported.",
+    mobaxtermHint: "Choose MobaXterm.ini or a file exported with Sessions → Export. SSH and SFTP sessions become hosts in their folders; saved passwords are never imported.",
+    securecrtHint: "Choose the XML file from Tools → Export Settings, or one session's .ini file. SSH2 sessions become hosts in their folders; saved passwords are never imported.",
+    knownHostsHint: "Servers whose keys you trusted on a connection but that have no host entry. Each becomes a host; set its user name before connecting.",
+    knownHostsNone: "Every trusted known host already has a host entry.",
+  },
 };

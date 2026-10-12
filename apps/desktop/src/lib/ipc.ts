@@ -265,3 +265,8 @@ export const appearance = {
   /** Sets or clears (`null`) the OS of several hosts, all or nothing; resolves to how many changed. */
   setOs: (ids: string[], os: import("@tyrminal/contracts").HostOs | null) => call<number>("host_set_os", { ids, os }),
 };
+
+/** Hosts for trusted known-host records that no host uses yet; import them with `importer.run`. */
+export const knownHostImport = {
+  preview: () => call<ImportPreview>("import_known_hosts_preview"),
+};

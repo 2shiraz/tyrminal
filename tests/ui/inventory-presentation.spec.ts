@@ -116,3 +116,44 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
   await expect(dialog.getByRole("alert")).toContainText("Only 4 more sessions can be open at once");
   await expect(dialog.getByRole("button", { name: "Open 6 sessions" })).toBeDisabled();
 });
+
+async function openImport(page: Page) {
+  await openApp(page);
+  await openHosts(page);
+  await page.getByRole("button", { name: "Import" }).click();
+  return page.getByRole("dialog", { name: "Import hosts" });
+}
+
+test("a PuTTY export in UTF-16 (as regedit writes it) reaches the core decoded, with its format", async ({ page }) => {
+  const dialog = await openImport(page);
+  await dialog.getByLabel("Format").selectOption({ label: "PuTTY (.reg export)" });
+  await expect(dialog).toContainText("SimonTatham");
+  const reg = "Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\büro]\r\n\"HostName\"=\"h\"\r\n";
+  await dialog.getByLabel("Choose file").setInputFiles({
+    name: "putty.reg",
+    mimeType: "text/plain",
+    buffer: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(reg, "utf16le")]),
+  });
+  await expect.poll(async () => (await calls(page, "import_preview")).length).toBe(1);
+  const [preview] = (await calls(page, "import_preview")) as { args: { format: string; text: string } }[];
+  expect(preview?.args.format).toBe("putty_reg");
+  expect(preview?.args.text).toBe(reg);
+});
+
+test("trusted known hosts without a host entry can be imported after a preview", async ({ page }) => {
+  const dialog = await openImport(page);
+  await page.evaluate(() => {
+    const state = (window as unknown as { __mockState: { knownHosts: { id: string; host: string; port: number; algorithm: string; fingerprint: string; addedAt: number }[] } }).__mockState;
+    state.knownHosts.push({ id: "f".repeat(32), host: "orphan.example", port: 2222, algorithm: "ssh-ed25519", fingerprint: "SHA256:synthetic", addedAt: 0 });
+  });
+  await dialog.getByLabel("Format").selectOption({ label: "Trusted known hosts" });
+  await expect(dialog.getByLabel("Choose file")).toHaveCount(0);
+  const preview = dialog.getByTestId("import-preview");
+  await expect(preview).toContainText("1 host will be added");
+  await expect(preview).toContainText("orphan.example:2222");
+  await expect(preview).toContainText("SHA256:synthetic");
+  expect(await calls(page, "import_hosts")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Import 1 host" }).click();
+  await expect(page.getByText("Imported 1 host")).toBeVisible();
+  await expect(hostCards(page)).toHaveCount(7);
+});

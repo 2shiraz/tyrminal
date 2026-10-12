@@ -79,6 +79,7 @@ const COMMANDS: &[&str] = &[
     // agent D: inventory and snippets
     "host_appearance_list",
     "host_set_os",
+    "import_known_hosts_preview",
 ];
 
 fn main() {

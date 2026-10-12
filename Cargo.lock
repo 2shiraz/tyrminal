@@ -5932,6 +5932,7 @@ name = "tyrminal-core"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "quick-xml",
  "rusqlite",
  "serde",
  "serde_json",

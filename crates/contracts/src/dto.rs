@@ -181,6 +181,13 @@ pub enum ImportFormat {
     OpensshConfig,
     /// CSV with a header row: label, address, port, username, group, tags.
     Csv,
+    // agent D: inventory and snippets
+    /// A Windows registry export (`.reg`) of PuTTY's saved sessions.
+    PuttyReg,
+    /// MobaXterm's `MobaXterm.ini` or an exported `.mxtsessions` file.
+    Mobaxterm,
+    /// SecureCRT's XML settings export, or one session's `.ini` file.
+    Securecrt,
 }
 
 /// A host the import would create.

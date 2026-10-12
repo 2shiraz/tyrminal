@@ -17,6 +17,8 @@ mod records;
 mod sessions;
 mod validate;
 mod vault;
+// agent D: inventory and snippets
+mod importers;
 
 pub use files::TransferSink;
 pub use preferences::PreferencesStore;

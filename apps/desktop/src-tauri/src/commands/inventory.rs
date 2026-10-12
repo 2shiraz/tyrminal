@@ -141,3 +141,8 @@ pub async fn host_set_os(
 ) -> Result<u32, IpcError> {
     state.core()?.vault.set_host_os(&ids, os).await
 }
+
+#[tauri::command]
+pub async fn import_known_hosts_preview(state: State<'_, AppState>) -> Result<ImportPreview, IpcError> {
+    state.core()?.vault.known_host_import_preview().await
+}

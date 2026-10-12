@@ -615,6 +615,13 @@ export function installMockBackend(options) {
       }
       return a.ids.length;
     },
+    import_known_hosts_preview: () => {
+      const used = new Set(state.hosts.map((h) => `${h.address}:${h.port}`));
+      const hosts = state.knownHosts
+        .filter((k) => !used.has(`${k.host}:${k.port}`))
+        .map((k) => ({ label: k.port === 22 ? k.host : `${k.host}:${k.port}`, address: k.host, port: k.port, username: "", group: "", tags: [], notes: [`Trusted ${k.algorithm} key ${k.fingerprint}`] }));
+      return { hosts, skipped: [], duplicates: [] };
+    },
   };
 
   /** Writes raw terminal output (escape sequences included) to the most recent session. */

@@ -366,3 +366,59 @@ async fn host_os_is_set_in_bulk_follows_duplicates_and_goes_with_deleted_hosts()
     assert_eq!(list.len(), 1);
     assert_eq!(os_of(&list, &copy.id), Some(HostOs::Windows));
 }
+
+/// A fixture from `tests/fixtures/import`, decoded the way the import dialog does (UTF-16 with a
+/// byte-order mark, as regedit writes, or UTF-8).
+fn fixture(name: &str) -> String {
+    let bytes = std::fs::read(format!("{}/../../tests/fixtures/import/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    match bytes.as_slice() {
+        [0xff, 0xfe, rest @ ..] => {
+            String::from_utf16(&rest.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>()).unwrap()
+        }
+        _ => String::from_utf8(bytes).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn putty_mobaxterm_and_securecrt_exports_preview_then_import_in_one_transaction() {
+    use tyrminal_core::contracts::ImportFormat;
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let labels =
+        |hosts: &[tyrminal_core::contracts::ImportHost]| hosts.iter().map(|h| h.label.clone()).collect::<Vec<_>>();
+
+    let putty = v.import_preview(ImportFormat::PuttyReg, &fixture("putty-sessions.reg")).await.unwrap();
+    assert_eq!(labels(&putty.hosts), ["prod web 1", "bastion"]);
+    assert_eq!((putty.hosts[1].username.as_str(), putty.hosts[1].port), ("ops", 2222));
+    assert!(putty.hosts[0].notes.iter().any(|n| n.contains("prod-web.ppk")));
+    assert!(putty.hosts[1].notes.iter().any(|n| n.contains("proxy")));
+    // Telnet, serial and PuTTY's defaults are listed as left out, never silently dropped.
+    assert_eq!(putty.skipped.len(), 3, "{:?}", putty.skipped);
+
+    let moba = v.import_preview(ImportFormat::Mobaxterm, &fixture("mobaxterm-sessions.mxtsessions")).await.unwrap();
+    assert_eq!(labels(&moba.hosts), ["jump host", "db primary", "db files", "pi"]);
+    assert_eq!(moba.hosts[1].group, "Production/Databases");
+    assert!(!format!("{moba:?}").contains("synthetic-encrypted"), "stored passwords never reach the preview");
+
+    let crt = v.import_preview(ImportFormat::Securecrt, &fixture("securecrt-export.xml")).await.unwrap();
+    assert_eq!(labels(&crt.hosts), ["api-eu-1", "nas"]);
+    assert_eq!(crt.hosts[0].group, "Production/EU & UK");
+    assert_eq!((crt.hosts[1].username.as_str(), crt.hosts[1].address.as_str()), ("admin", "nas.lab.example"));
+    assert!(!format!("{crt:?}").contains("NOTAREALPASSWORD"));
+
+    // Previews write nothing; the import creates hosts and missing groups together.
+    assert!(v.list_hosts().await.unwrap().is_empty());
+    assert_eq!(v.import_hosts(moba.hosts.clone(), None).await.unwrap(), 4);
+    assert_eq!(v.import_hosts(crt.hosts, None).await.unwrap(), 2);
+    let groups = v.list_groups().await.unwrap();
+    let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+    for name in ["Production", "Databases", "Lab", "EU & UK"] {
+        assert_eq!(names.iter().filter(|n| **n == name).count(), 1, "{name} once: {names:?}");
+    }
+    // A preview that went bad on the way back is refused as a whole.
+    let mut tampered = putty.hosts.clone();
+    tampered[1].address = "evil host; rm -rf /".into();
+    assert_eq!(code(v.import_hosts(tampered, None).await), ErrorCode::InvalidInput);
+    assert_eq!(v.list_hosts().await.unwrap().len(), 6);
+}

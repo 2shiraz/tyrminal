@@ -1125,6 +1125,10 @@ impl VaultService {
         let parsed = match format {
             ImportFormat::OpensshConfig => import::parse_openssh(text)?,
             ImportFormat::Csv => import::parse_csv(text)?,
+            // agent D: inventory and snippets
+            ImportFormat::PuttyReg => crate::importers::parse_putty_reg(text)?,
+            ImportFormat::Mobaxterm => crate::importers::parse_mobaxterm(text)?,
+            ImportFormat::Securecrt => crate::importers::parse_securecrt(text)?,
         };
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
@@ -1697,6 +1701,62 @@ impl VaultService {
             ids.push(*id);
         }
         Ok((rows, ids))
+    }
+
+    /// Hosts for trusted known-host records that no host entry uses yet (same address and
+    /// effective port), as an import preview. Only records the user already trusted are offered,
+    /// and nothing is written until the preview is imported (`import_hosts`, one transaction).
+    pub async fn known_host_import_preview(&self) -> Result<ImportPreview, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let groups = group_index(open);
+        let used: std::collections::HashSet<(String, u16)> = open
+            .hosts
+            .values()
+            .map(|h| (h.record.address.to_lowercase(), inventory::effective(&groups, &h.record).port))
+            .collect();
+        let labels: std::collections::HashSet<String> =
+            open.hosts.values().map(|h| h.record.label.to_lowercase()).collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut known: Vec<&KnownHostRecord> = open.known_hosts.values().map(|k| &k.record).collect();
+        known.sort_by_key(|k| (k.host.to_lowercase(), k.port));
+        let mut preview = ImportPreview { hosts: Vec::new(), skipped: Vec::new(), duplicates: Vec::new() };
+        for record in known {
+            let key = (record.host.to_lowercase(), record.port);
+            if used.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            let label = if record.port == inventory::DEFAULT_PORT {
+                record.host.clone()
+            } else if record.host.contains(':') {
+                format!("[{}]:{}", record.host, record.port)
+            } else {
+                format!("{}:{}", record.host, record.port)
+            };
+            let candidate = ImportHost {
+                label,
+                address: record.host.clone(),
+                port: record.port,
+                username: String::new(),
+                group: String::new(),
+                tags: Vec::new(),
+                notes: vec![format!("Trusted {} key {}", record.algorithm, record.fingerprint)],
+            };
+            match import::checked(candidate) {
+                Ok(host) => {
+                    if labels.contains(&host.label.to_lowercase()) {
+                        preview.duplicates.push(host.label.clone());
+                    }
+                    preview.hosts.push(host);
+                }
+                Err(reason) => preview.skipped.push(tyrminal_contracts::ImportSkipped {
+                    line: 0,
+                    text: record.host.chars().filter(|c| !c.is_control()).take(120).collect(),
+                    reason,
+                }),
+            }
+        }
+        Ok(preview)
     }
 
     /// The OS recorded for each host that has one.

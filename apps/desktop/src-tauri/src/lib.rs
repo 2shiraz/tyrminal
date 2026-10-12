@@ -187,6 +187,7 @@ pub fn run() {
             // agent D: inventory and snippets
             commands::inventory::host_appearance_list,
             commands::inventory::host_set_os,
+            commands::inventory::import_known_hosts_preview,
         ])
         .build(tauri::generate_context!());
 
