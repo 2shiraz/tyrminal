@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-snippet-folder-rename"
+description = "Enables the snippet_folder_rename command without any pre-configured scope."
+commands.allow = ["snippet_folder_rename"]
+
+[[permission]]
+identifier = "deny-snippet-folder-rename"
+description = "Denies the snippet_folder_rename command without any pre-configured scope."
+commands.deny = ["snippet_folder_rename"]

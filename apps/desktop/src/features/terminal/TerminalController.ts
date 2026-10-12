@@ -27,6 +27,7 @@ import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { attachShellContext } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
 
@@ -263,6 +264,8 @@ export class TerminalController {
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
       return true;
     });
+    // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
+    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
 
     // OSC 7: the shell's working directory, remembered for layout templates only.
     this.term.parser.registerOscHandler(7, (data) => {

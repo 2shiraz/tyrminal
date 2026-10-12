@@ -21,6 +21,9 @@ import {
 } from "../../components/ui/icons";
 import { snippets as snippetsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgD } from "../../lib/messages-d";
+import { MultiRunDialog } from "./MultiRunDialog";
+import { MoveSnippetDialog, RenameFolderDialog } from "./OrganizeDialogs";
 import { SnippetEditor } from "./SnippetEditor";
 
 export interface SnippetTarget {
@@ -64,6 +67,9 @@ export function SnippetLibrary({
   const [editing, setEditing] = useState<{ snippet: SnippetSummary | null; initial?: Partial<SnippetSummary> } | null>(null);
   const [deleting, setDeleting] = useState<SnippetSummary | null>(null);
   const [menu, setMenu] = useState<{ snippet: SnippetSummary; anchor: HTMLElement } | null>(null);
+  const [runMany, setRunMany] = useState<SnippetSummary | null>(null);
+  const [moving, setMoving] = useState<{ snippet: SnippetSummary; copy: boolean } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const all = snippets.value ?? [];
 
   const filtered = useMemo(() => {
@@ -132,6 +138,7 @@ export function SnippetLibrary({
           const open = !collapsed.has(folder) || query !== "";
           return (
             <div key={folder || "-"} className="folder" role="listitem">
+              <div className="folder-row">
               <button
                 type="button"
                 className="folder-head"
@@ -152,6 +159,12 @@ export function SnippetLibrary({
                   {items.length}
                 </span>
               </button>
+              {folder !== "" && !compact && (
+                <IconButton size="sm" label={msgD.organize.renameFolder} onClick={() => setRenaming(folder)}>
+                  <IconPencil size={13} />
+                </IconButton>
+              )}
+              </div>
               {open && (
                 <ul aria-label={folder || msg.snippets.topLevel}>
                   {items.map((snippet) => (
@@ -210,6 +223,8 @@ export function SnippetLibrary({
           anchor={menu.anchor}
           onClose={() => setMenu(null)}
           items={[
+            { label: msgD.runs.runOnHosts, icon: <IconPlay size={15} />, onSelect: () => setRunMany(menu.snippet) },
+            "separator",
             { label: msg.snippets.edit, icon: <IconPencil size={15} />, onSelect: () => setEditing({ snippet: menu.snippet }) },
             {
               label: msg.snippets.duplicate,
@@ -220,9 +235,39 @@ export function SnippetLibrary({
                   initial: { name: `${menu.snippet.name} ${msg.snippets.copySuffix}`, folder: menu.snippet.folder, text: menu.snippet.text },
                 }),
             },
+            { label: msgD.organize.moveTo, icon: <IconFolder size={15} />, onSelect: () => setMoving({ snippet: menu.snippet, copy: false }) },
+            { label: msgD.organize.copyTo, icon: <IconCopy size={15} />, onSelect: () => setMoving({ snippet: menu.snippet, copy: true }) },
             "separator",
             { label: msg.snippets.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.snippet) },
           ]}
+        />
+      )}
+
+      {runMany && <MultiRunDialog snippet={runMany} onClose={() => setRunMany(null)} />}
+
+      {moving && (
+        <MoveSnippetDialog
+          snippet={moving.snippet}
+          copy={moving.copy}
+          folders={folders}
+          onClose={() => setMoving(null)}
+          onDone={(folder) => {
+            notify("success", moving.copy ? msgD.organize.copied(folder) : msgD.organize.moved(folder));
+            setMoving(null);
+            void snippets.reload();
+          }}
+        />
+      )}
+
+      {renaming !== null && (
+        <RenameFolderDialog
+          folder={renaming}
+          onClose={() => setRenaming(null)}
+          onDone={(count) => {
+            notify("success", msgD.organize.renamed(count));
+            setRenaming(null);
+            void snippets.reload();
+          }}
         />
       )}
 

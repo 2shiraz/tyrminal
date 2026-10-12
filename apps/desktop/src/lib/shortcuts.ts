@@ -36,7 +36,9 @@ export type ActionId =
   | "movePaneLeft"
   | "movePaneRight"
   | "movePaneUp"
-  | "movePaneDown";
+  | "movePaneDown"
+  // agent D: inventory and snippets
+  | "suggest";
 
 export interface Binding {
   key: string;
@@ -76,6 +78,8 @@ const mac: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -108,6 +112,8 @@ const other: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", alt: true, shift: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", ctrl: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */

@@ -37,6 +37,10 @@ pub struct AppState {
     pub edit_root: PathBuf,
     /// Held for the life of the process: one instance per data directory.
     _instance_lock: Option<std::fs::File>,
+    // agent D: inventory and snippets
+    /// A private-key file picked for import: owner window, file name and text. Kept natively
+    /// until it is imported, replaced or cleared; the renderer never receives the text.
+    pub picked_key: std::sync::Mutex<Option<(String, String, zeroize::Zeroizing<String>)>>,
 }
 
 impl AppState {
@@ -47,6 +51,8 @@ impl AppState {
             grants: std::sync::Mutex::new(Vec::new()),
             edit_root,
             _instance_lock: instance_lock,
+            // agent D: inventory and snippets
+            picked_key: std::sync::Mutex::new(None),
         }
     }
 

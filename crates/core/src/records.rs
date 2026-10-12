@@ -191,6 +191,94 @@ pub(crate) struct TunnelRecord {
     pub updated_at: u64,
 }
 
+// agent D: inventory and snippets
+// Agent D's record kinds start at 200 so parallel branches never pick the same number.
+pub(crate) const KIND_HOST_APPEARANCE: u16 = 200;
+
+/// Presentation settings of a host (its OS icon), apart from its connection settings. At most
+/// one per host; deleting the host deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct HostAppearanceRecord {
+    pub host_id: String,
+    pub os: tyrminal_contracts::HostOs,
+}
+
+pub(crate) const KIND_KEY_CERTIFICATE: u16 = 201;
+pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
+
+/// A saved selection of hosts to run snippets on. Host ids may outlive their hosts; readers
+/// skip the missing ones and report how many.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct ExecutionTargetRecord {
+    pub name: String,
+    pub host_ids: Vec<String>,
+}
+
+/// An OpenSSH user certificate for a key in the keychain (public data), checked against the key
+/// when attached. At most one per key; deleting the key deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct KeyCertificateRecord {
+    pub key_id: String,
+    /// The certificate line (`<type> <base64> [comment]`).
+    pub certificate: String,
+    pub algorithm: String,
+    pub cert_key_id: String,
+    pub principals: Vec<String>,
+    pub valid_after: u64,
+    pub valid_before: u64,
+    pub ca_fingerprint: String,
+}
+
+pub(crate) const KIND_IDENTITY: u16 = 203;
+pub(crate) const KIND_WORKFLOW: u16 = 204;
+
+/// A reusable identity: user name plus a password and/or a key reference. Hosts and groups refer
+/// to it by id, so changing it changes every host that uses it.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct IdentityRecord {
+    pub label: String,
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+}
+
+/// Settings a host or group carries apart from its connection record (identity, environment,
+/// startup snippet). Exactly one of `host_id` / `group_id` is set; at most one record per target.
+/// It is deleted with its host or group, and copied with a duplicated host.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct WorkflowRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
+    /// Environment variables sent with sessions, in order. Values are sensitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<StoredEnv>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct StoredEnv {
+    pub name: String,
+    pub value: Zeroizing<String>,
+}
+
+impl WorkflowRecord {
+    pub fn is_empty(&self) -> bool {
+        self.identity_id.is_none() && self.env.is_empty()
+    }
+
+    pub fn content_len(&self) -> usize {
+        self.host_id.as_ref().map_or(0, String::len)
+            + self.group_id.as_ref().map_or(0, String::len)
+            + self.identity_id.as_ref().map_or(0, String::len)
+            + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
+    }
+}
+
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does
 /// not leave partial copies behind in freed heap blocks.
 struct FixedWriter {
