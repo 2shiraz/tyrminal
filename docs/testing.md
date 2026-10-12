@@ -102,6 +102,10 @@ all passing.
   suites; the job still reports success. Any other file runs everything.
 - The integration, security, transfer and end-to-end steps have their own timeouts (15–25 min), so
   a hang fails within minutes instead of holding the runner for the 2-hour job limit.
+- A failing suite does not skip the others: once the lab is up, the integration, security,
+  transfer and end-to-end steps each run (the end-to-end suite needs its build), so one `main` run
+  reports every suite on every platform. A push to `main` never cancels a running `main` run;
+  GitHub keeps one queued run per branch and replaces it with the newest push.
 - The release workflow packages installers alongside its test workflows; publishing waits for
   packaging and every test workflow.
 
