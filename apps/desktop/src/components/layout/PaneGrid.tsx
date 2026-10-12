@@ -80,6 +80,8 @@ function PaneGridImpl({
   const [dragPane, setDragPane] = useState<{ from: number; over: number | null } | null>(null);
   const front = activeTab(ws);
   const frontIds = front ? panesOf(front.layout) : [];
+  // SFTP panes only: the status bar keeps the app's colours (styles/global.css, terminal chrome).
+  const frontFilesOnly = frontIds.length > 0 && frontIds.every((id) => ws.panes[id]?.target.kind === "sftp");
   const frontSplit = frontIds.length > 1;
   const focusLayout = front !== null && front.focusMode && frontSplit;
   const frontGeometry = front ? paneRects(front.layout) : null;
@@ -101,7 +103,7 @@ function PaneGridImpl({
   };
 
   return (
-    <div className="workspace" hidden={front === null} role="tabpanel" aria-label={msg.terminal.pane} data-focus-layout={focusLayout || undefined}>
+    <div className="workspace" hidden={front === null} role="tabpanel" aria-label={msg.terminal.pane} data-focus-layout={focusLayout || undefined} data-files-only={frontFilesOnly || undefined}>
       <div ref={ref} className="panes" data-split={frontSplit && !focusLayout}>
         {all.map((id) => {
           const pane = ws.panes[id];

@@ -80,6 +80,40 @@ test("sftp locations: several servers in one pane, switched without reconnecting
   await expect(table(pane)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
 });
 
+test("sftp picker: hosts as rows with their OS, a filter that says when nothing matches, and the OS on the tab", async ({ page }) => {
+  await openApp(page, { theme: "light" });
+  // api-gateway runs Ubuntu (as set from Hosts).
+  await page.evaluate(() => {
+    const s = (window as unknown as { __mockState: { hosts: { id: string; label: string }[]; os?: Record<string, string> } }).__mockState;
+    const id = s.hosts.find((h) => h.label === "api-gateway")?.id as string;
+    s.os = { ...(s.os ?? {}), [id]: "ubuntu" };
+  });
+  await openSftp(page);
+  const picker = right(page).getByRole("group", { name: "Select host" });
+  await expect(picker.getByRole("button", { name: /^api-gateway/ }).locator('.os-icon[data-os="ubuntu"]')).toBeVisible();
+  await expect(picker.getByRole("heading", { name: "Connect to host" })).toBeVisible();
+  const filter = right(page).getByRole("searchbox", { name: "Filter hosts" });
+  await filter.fill("no-such-host");
+  await expect(picker).toContainText("No host matches “no-such-host”.");
+  await filter.fill("api");
+  await expect(picker.getByRole("button", { name: /^api-gateway/ })).toBeVisible();
+  await picker.getByRole("button", { name: /^api-gateway/ }).click();
+  await expect(table(right(page))).toHaveAccessibleName(/on api-gateway$/);
+  await expect(tab(right(page), "api-gateway").locator('.os-icon[data-os="ubuntu"]')).toBeVisible();
+  // The SFTP tab is not a terminal: it and the status bar keep the app's colours, not the scheme's.
+  const sftpTab = page.getByRole("tab", { name: /^SFTP/ });
+  await expect(sftpTab).toHaveAttribute("data-files-only", "true");
+  const colours = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.background = "var(--scheme-bg)";
+    document.body.append(probe);
+    const scheme = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { scheme, statusbar: getComputedStyle(document.querySelector(".statusbar") as Element).backgroundColor };
+  });
+  expect(colours.statusbar).not.toBe(colours.scheme);
+});
+
 test("sftp locations: at most eight per pane, and the last one closes into the host picker", async ({ page }) => {
   await openApp(page);
   await openSftp(page);

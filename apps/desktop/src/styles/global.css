@@ -2624,9 +2624,10 @@ mark {
 
 /* The active terminal tab and, while a terminal is in front, the status bar take the terminal
    scheme's colours, so the terminal reads as part of the window rather than a box pasted into it.
-   Text uses the scheme's foreground, which every scheme keeps at 4.5:1 on its background. */
-.tab:not(.tab-page)[aria-selected="true"],
-.main:has(.workspace:not([hidden])) .statusbar {
+   Text uses the scheme's foreground, which every scheme keeps at 4.5:1 on its background. A tab of
+   SFTP panes only is not a terminal and keeps the app's colours. */
+.tab:not(.tab-page, [data-files-only])[aria-selected="true"],
+.main:has(.workspace:not([hidden], [data-files-only])) .statusbar {
   --text: var(--scheme-fg);
   --text-muted: var(--scheme-fg);
   --text-faint: color-mix(in srgb, var(--scheme-fg) 80%, var(--scheme-bg));
@@ -2644,16 +2645,16 @@ mark {
   color: var(--scheme-fg);
 }
 
-.tab:not(.tab-page)[aria-selected="true"] {
+.tab:not(.tab-page, [data-files-only])[aria-selected="true"] {
   --tab-fill: var(--scheme-bg);
 }
 
-.main:has(.workspace:not([hidden])) .statusbar {
+.main:has(.workspace:not([hidden], [data-files-only])) .statusbar {
   background: var(--scheme-bg);
   border-top-color: var(--border-subtle);
 }
 
-.main:has(.workspace:not([hidden])) .status-button[aria-pressed="true"] {
+.main:has(.workspace:not([hidden], [data-files-only])) .status-button[aria-pressed="true"] {
   background: var(--bg-active);
 }
 
