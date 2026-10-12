@@ -257,6 +257,9 @@ export function TerminalView(props: TerminalViewProps) {
             environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
+          case "notice":
+            notify("danger", event.text);
+            break;
           case "negotiated":
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;

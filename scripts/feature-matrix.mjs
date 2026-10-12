@@ -24,7 +24,7 @@ const TRACKING = COLUMNS.slice(6);
 const STATUSES = new Set([
   "NOT_STARTED", "IN_PROGRESS", "IMPLEMENTED_UNVERIFIED", "VERIFIED", "BLOCKED", "DEFERRED_BY_SCOPE",
 ]);
-const EXPECTED = { research: 249, requested: 26, historical: 5, additions: 22 };
+const EXPECTED = { research: 249, requested: 26, historical: 5, additions: 33 };
 
 function cells(line) {
   return line.split("|").slice(1, -1).map((c) => c.trim());
