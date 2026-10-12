@@ -7,6 +7,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -71,15 +72,27 @@ async fn killing_the_writer_never_leaves_a_partial_write() {
         let mut child = Command::new(&exe)
             .args(["--exact", "fault_writer_child", "--nocapture", "--test-threads=1"])
             .env("TYRMINAL_FAULT_WRITER", &path)
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        // A different moment each round (deterministic xorshift, 150–650 ms after start).
+        // Wait for the first completed batch (process start-up time varies a lot between
+        // machines), so every round kills a writer that is mid-stream.
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let started = tokio::task::spawn_blocking(move || {
+            let seen = lines.any(|line| line.is_ok_and(|l| l.contains("tick")));
+            // Keep draining so the writer never blocks on a full pipe before the kill.
+            std::thread::spawn(move || lines.for_each(drop));
+            seen
+        })
+        .await
+        .unwrap();
+        assert!(started, "round {round}: the writer exited before writing");
+        // Then a different moment each round (deterministic xorshift, 0–500 ms later).
         seed ^= seed << 13;
         seed ^= seed >> 7;
         seed ^= seed << 17;
-        tokio::time::sleep(Duration::from_millis(150 + seed % 500)).await;
+        tokio::time::sleep(Duration::from_millis(seed % 500)).await;
         child.kill().unwrap();
         child.wait().unwrap();
 
