@@ -294,3 +294,5 @@ Never merge these by hand; regenerate them after resolving the sources:
 - `lib/shortcuts.ts`: `previousCommand`/`nextCommand` at the end of the union and both maps (marked);
   `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines. `tests/ui/behavior.spec.ts`
   `clickTerminalText` finds text by position (decorated cells are one element per cell).
+- `scripts/check-contrast.mjs`: one marked block runs `scripts/check-highlight-contrast.mjs` (highlight
+  colors of every scheme at AA, computed by the app's palette code).

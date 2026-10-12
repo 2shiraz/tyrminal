@@ -1,7 +1,9 @@
 // Highlight colors per color scheme (TRM-07). Each token kind names the scheme colors that fit
 // it in order of preference; the first one that reads at WCAG AA (4.5:1) on the scheme's
-// background is used, else the most readable of them. Colors therefore follow the scheme the
-// user picked, light or dark, and never fall below what the scheme itself can offer.
+// background is used. When none does (some published palettes have a dim red or magenta), the
+// kind's first choice is moved toward the scheme's foreground, in small steps, until it does: the
+// hue stays the scheme's own and every highlight reads at AA in every scheme, light or dark.
+// scripts/check-highlight-contrast.mjs checks this for every built-in scheme.
 
 import type { TerminalScheme } from "../terminal/schemes";
 import type { TokenKind } from "./builtins";
@@ -27,6 +29,23 @@ const PREFERENCES: Record<TokenKind, SchemeColor[]> = {
 function channels(hex: string): [number, number, number] | null {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
   return m ? [parseInt(m[1] as string, 16), parseInt(m[2] as string, 16), parseInt(m[3] as string, 16)] : null;
+}
+
+function hex(rgb: [number, number, number]): string {
+  return `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Mixes `color` toward `toward` until it reaches `target` contrast on `bg` (or becomes `toward`). */
+function raise(color: string, toward: string, bg: string, target: number): string {
+  const from = channels(color);
+  const to = channels(toward);
+  if (!from || !to) return color;
+  for (let step = 1; step <= 20; step += 1) {
+    const t = step / 20;
+    const mixed = hex(from.map((v, i) => v + ((to[i] as number) - v) * t) as [number, number, number]);
+    if (contrast(mixed, bg) >= target) return mixed;
+  }
+  return toward;
 }
 
 function luminance(rgb: [number, number, number]): number {
@@ -55,7 +74,10 @@ export function highlightPalette(scheme: TerminalScheme): Record<TokenKind, stri
   const palette = {} as Record<TokenKind, string>;
   for (const [kind, names] of Object.entries(PREFERENCES) as [TokenKind, SchemeColor[]][]) {
     const colors = names.map((n) => scheme[n] as string);
-    palette[kind] = colors.find((c) => contrast(c, scheme.background) >= floor(kind)) ?? [...colors].sort((a, b) => contrast(b, scheme.background) - contrast(a, scheme.background))[0] ?? scheme.foreground;
+    const readable = colors.find((c) => contrast(c, scheme.background) >= floor(kind));
+    // Raising the kind's own first choice keeps kinds apart (raising "the most readable" would
+    // turn several kinds into the same color).
+    palette[kind] = readable ?? raise(colors[0] ?? scheme.foreground, scheme.foreground, scheme.background, floor(kind));
   }
   cache.set(scheme.id, palette);
   return palette;

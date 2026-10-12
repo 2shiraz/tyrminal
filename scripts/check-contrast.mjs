@@ -6,6 +6,7 @@
 //
 // Translucent tokens are composited over the surface they are used on before measuring.
 
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,6 +118,14 @@ for (const [text, id] of schemeBlocks) {
   }
 }
 if (schemeBlocks.length < 10) failures.push(`only ${schemeBlocks.length} terminal schemes found; at least 10 are required`);
+
+// terminal input: highlight colors in every scheme (computed by the app's own palette code).
+{
+  const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", join(root, "scripts/check-highlight-contrast.mjs")], { encoding: "utf8" });
+  checked += 1;
+  if (run.status !== 0) failures.push(`highlight colors:\n${run.stdout}${run.stderr}`.trim());
+  else process.stdout.write(run.stdout);
+}
 
 if (failures.length) {
   console.error(failures.map((f) => `FAIL ${f}`).join("\n"));

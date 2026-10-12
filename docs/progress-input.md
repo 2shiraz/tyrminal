@@ -118,8 +118,11 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Only plain output is colored: a match is drawn only if every cell is in the default colors,
   not inverse or invisible. Nothing is drawn on the alternate screen (vim, htop, tmux).
 - Colors come from the current scheme (`features/highlight/palette.ts`): per kind, the first of
-  its preferred ANSI colors that reaches 4.5:1 on the scheme background (3:1 for dimmed words),
-  else the most readable of them.
+  its preferred ANSI colors that reaches 4.5:1 on the scheme background (3:1 for dimmed words);
+  when none does (Nord's red, Solarized's red and violet, most of Catppuccin Latte), the kind's
+  first choice is moved toward the scheme's foreground until it does. `scripts/check-highlight-contrast.mjs`
+  (run by `scripts/check-contrast.mjs` in CI) checks all 14 schemes: 168 colors at AA, 6–10
+  distinct colors per scheme.
 - Settings show each kind with a sample in the scheme's colors and a preview line matched by the
   same code as the terminal.
 - `tests/performance/highlight-bench.mjs`: a full 80×300 screen takes ≤ 7 ms for every
