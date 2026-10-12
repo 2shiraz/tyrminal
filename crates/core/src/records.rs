@@ -42,11 +42,6 @@ pub(crate) enum StoredAuth {
     Key {
         key_id: String,
     },
-    // identities (KEY-15..18)
-    /// A saved identity, read at connect time so its changes apply here too.
-    Identity {
-        identity_id: String,
-    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -82,10 +77,6 @@ pub(crate) struct GroupRecord {
     pub port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_id: Option<String>,
-    // identities (KEY-15..18)
-    /// An identity the group gives its hosts; never set together with `key_id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,35 +214,6 @@ pub(crate) struct KeyCertificateRecord {
     pub valid_after: u64,
     pub valid_before: u64,
     pub ca_fingerprint: String,
-}
-
-// identities (KEY-15..18)
-// Kept apart from agent D's 200..=209 so the two branches never pick the same number.
-pub(crate) const KIND_IDENTITY: u16 = 210;
-
-/// A reusable identity. Hosts and groups reference it by id; none of its values is copied into
-/// them, so an edit here applies everywhere it is used.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct IdentityRecord {
-    pub label: String,
-    /// Empty: the identity names no user.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub username: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password: Option<Zeroizing<String>>,
-    /// A key in the keychain (its certificate, if attached, goes with it).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_id: Option<String>,
-}
-
-impl IdentityRecord {
-    /// Bytes of strings in the record (for its size reservation).
-    pub fn content_len(&self) -> usize {
-        self.label.len()
-            + self.username.len()
-            + self.password.as_ref().map_or(0, |p| p.len())
-            + self.key_id.as_ref().map_or(0, String::len)
-    }
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does

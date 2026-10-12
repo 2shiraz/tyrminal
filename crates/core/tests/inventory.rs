@@ -31,7 +31,6 @@ fn group(name: &str, parent: Option<&str>) -> GroupInput {
         username: None,
         port: None,
         key_id: None,
-        identity_id: None,
     }
 }
 

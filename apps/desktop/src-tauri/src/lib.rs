@@ -232,12 +232,6 @@ pub fn run() {
             commands::snippets::prompt_marks_status,
             commands::snippets::prompt_marks_install,
             commands::snippets::prompt_marks_remove,
-            // identities (KEY-15..18)
-            commands::identities::identity_list,
-            commands::identities::identity_save,
-            commands::identities::identity_delete,
-            commands::identities::session_identity,
-            commands::identities::session_insert_identity_password,
         ])
         .build(tauri::generate_context!());
 

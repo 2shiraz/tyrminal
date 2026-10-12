@@ -6,14 +6,12 @@ use std::collections::HashMap;
 use tyrminal_contracts::limits::MAX_GROUP_DEPTH;
 use tyrminal_contracts::{HostAuth, InheritedFields};
 
-use crate::records::{GroupRecord, HostRecord, IdentityRecord, StoredAuth};
+use crate::records::{GroupRecord, HostRecord, StoredAuth};
 
 pub(crate) const DEFAULT_PORT: u16 = 22;
 
 /// Groups by id text, as the records reference them.
 pub(crate) type GroupIndex<'a> = HashMap<String, &'a GroupRecord>;
-/// Identities by id text, as hosts and groups reference them.
-pub(crate) type IdentityIndex<'a> = HashMap<String, &'a IdentityRecord>;
 
 /// A host's group and its ancestors, nearest first. Writes prevent cycles, dangling parents and
 /// over-deep trees; the walk is still bounded so a damaged record cannot loop.
@@ -48,10 +46,6 @@ pub(crate) fn depth(groups: &GroupIndex<'_>, id: &str) -> usize {
 
 /// The connection settings a host actually uses: its own value, else the nearest group's, else
 /// the default. Deterministic: depends only on the records, never on the order they loaded.
-///
-/// Identities are read here, at the time of use, never copied into hosts or groups. A host's own
-/// identity gives its user name when the host sets none; a group's identity gives the user name
-/// when the group sets none. The nearest value wins, as for every other inherited setting.
 pub(crate) struct Effective<'a> {
     pub username: String,
     pub port: u16,
@@ -60,52 +54,22 @@ pub(crate) struct Effective<'a> {
 }
 
 pub(crate) enum EffectiveAuth<'a> {
-    /// The host's own method (which may be an identity).
+    /// The host's own method.
     Own(&'a StoredAuth),
     /// The nearest group's key.
     GroupKey(String),
-    /// The nearest group's identity.
-    GroupIdentity(String),
     /// Nothing set anywhere: ask for the password.
     Ask,
 }
 
-impl EffectiveAuth<'_> {
-    /// The identity this resolves to, if any.
-    pub(crate) fn identity_id(&self) -> Option<&str> {
-        match self {
-            Self::Own(StoredAuth::Identity { identity_id }) => Some(identity_id),
-            Self::GroupIdentity(identity_id) => Some(identity_id),
-            _ => None,
-        }
-    }
-}
-
-fn identity_username(identities: &IdentityIndex<'_>, id: Option<&str>) -> Option<String> {
-    id.and_then(|id| identities.get(id)).map(|i| i.username.clone()).filter(|u| !u.is_empty())
-}
-
-pub(crate) fn effective<'a>(
-    groups: &GroupIndex<'_>,
-    identities: &IdentityIndex<'_>,
-    host: &'a HostRecord,
-) -> Effective<'a> {
+pub(crate) fn effective<'a>(groups: &GroupIndex<'_>, host: &'a HostRecord) -> Effective<'a> {
     let chain = chain(groups, host.group.as_deref());
     let mut inherited = InheritedFields::default();
-    let own_identity = match &host.auth {
-        StoredAuth::Identity { identity_id } => Some(identity_id.as_str()),
-        _ => None,
-    };
-    let username = if !host.username.is_empty() {
-        host.username.clone()
-    } else if let Some(name) = identity_username(identities, own_identity) {
-        name
-    } else {
+    let username = if host.username.is_empty() {
         inherited.username = true;
-        chain
-            .iter()
-            .find_map(|g| g.username.clone().or_else(|| identity_username(identities, g.identity_id.as_deref())))
-            .unwrap_or_default()
+        chain.iter().find_map(|g| g.username.clone()).unwrap_or_default()
+    } else {
+        host.username.clone()
     };
     let port = if host.port == 0 {
         inherited.port = true;
@@ -116,14 +80,7 @@ pub(crate) fn effective<'a>(
     let auth = match &host.auth {
         StoredAuth::Inherit => {
             inherited.auth = true;
-            chain
-                .iter()
-                .find_map(|g| match (&g.key_id, &g.identity_id) {
-                    (Some(key_id), _) => Some(EffectiveAuth::GroupKey(key_id.clone())),
-                    (None, Some(identity_id)) => Some(EffectiveAuth::GroupIdentity(identity_id.clone())),
-                    (None, None) => None,
-                })
-                .unwrap_or(EffectiveAuth::Ask)
+            chain.iter().find_map(|g| g.key_id.clone()).map_or(EffectiveAuth::Ask, EffectiveAuth::GroupKey)
         }
         own => EffectiveAuth::Own(own),
     };
@@ -136,9 +93,6 @@ pub(crate) fn auth_summary(auth: &EffectiveAuth<'_>) -> HostAuth {
         EffectiveAuth::Own(StoredAuth::Password { .. }) => HostAuth::StoredPassword,
         EffectiveAuth::Own(StoredAuth::Key { key_id }) => HostAuth::Key { key_id: key_id.clone() },
         EffectiveAuth::GroupKey(key_id) => HostAuth::Key { key_id: key_id.clone() },
-        EffectiveAuth::Own(StoredAuth::Identity { identity_id }) | EffectiveAuth::GroupIdentity(identity_id) => {
-            HostAuth::Identity { identity_id: identity_id.clone() }
-        }
         EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => HostAuth::AskPassword,
     }
 }
@@ -258,14 +212,7 @@ mod tests {
     use super::*;
 
     fn group(name: &str, parent: Option<&str>) -> GroupRecord {
-        GroupRecord {
-            name: name.into(),
-            parent: parent.map(Into::into),
-            username: None,
-            port: None,
-            key_id: None,
-            identity_id: None,
-        }
+        GroupRecord { name: name.into(), parent: parent.map(Into::into), username: None, port: None, key_id: None }
     }
 
     #[test]
@@ -291,59 +238,6 @@ mod tests {
         let mut with_other = deep.clone();
         with_other.insert("O".into(), &other);
         assert!(check_placement(&with_other, Some("0"), Some("O")).is_err_and(|e| matches!(e, TreeError::TooDeep)));
-    }
-
-    // identities (KEY-15..18)
-    #[test]
-    fn identities_are_read_at_use_and_the_nearest_setting_wins() {
-        use zeroize::Zeroizing;
-        let identity = |username: &str| IdentityRecord {
-            label: "ops".into(),
-            username: username.into(),
-            password: Some(Zeroizing::new("pw".into())),
-            key_id: None,
-        };
-        let ops = identity("ops-user");
-        let anonymous = identity("");
-        let identities: IdentityIndex<'_> = [("I".to_owned(), &ops), ("N".to_owned(), &anonymous)].into();
-        let root =
-            GroupRecord { username: Some("root-user".into()), identity_id: Some("I".into()), ..group("r", None) };
-        let mid = GroupRecord { identity_id: Some("N".into()), ..group("m", Some("R")) };
-        let groups: GroupIndex<'_> = [("R".to_owned(), &root), ("M".to_owned(), &mid)].into();
-        let host = |username: &str, auth: StoredAuth| HostRecord {
-            label: "h".into(),
-            address: "h.example".into(),
-            port: 0,
-            username: username.into(),
-            auth,
-            group: Some("M".into()),
-            tags: Vec::new(),
-            last_connected_at: None,
-            connection: Default::default(),
-        };
-
-        // Inherit: the nearest group with a credential is "m", whose identity names no user, so
-        // the user name comes from further up ("r" sets its own, which beats its identity).
-        let inheriting = host("", StoredAuth::Inherit);
-        let e = effective(&groups, &identities, &inheriting);
-        assert_eq!(e.auth.identity_id(), Some("N"));
-        assert_eq!(e.username, "root-user");
-        assert!(e.inherited.auth && e.inherited.username);
-        assert_eq!(auth_summary(&e.auth), HostAuth::Identity { identity_id: "N".into() });
-
-        // A host's own identity gives the user name, unless the host sets one itself.
-        let own = host("", StoredAuth::Identity { identity_id: "I".into() });
-        let e = effective(&groups, &identities, &own);
-        assert_eq!((e.username.as_str(), e.inherited.username, e.inherited.auth), ("ops-user", false, false));
-        let named = host("me", StoredAuth::Identity { identity_id: "I".into() });
-        assert_eq!(effective(&groups, &identities, &named).username, "me");
-
-        // A group key beats a farther group identity.
-        let keyed = GroupRecord { key_id: Some("K".into()), ..group("k", Some("R")) };
-        let groups: GroupIndex<'_> = [("R".to_owned(), &root), ("M".to_owned(), &keyed)].into();
-        assert!(
-            matches!(effective(&groups, &identities, &inheriting).auth, EffectiveAuth::GroupKey(ref k) if k == "K")
-        );
     }
 
     #[test]
