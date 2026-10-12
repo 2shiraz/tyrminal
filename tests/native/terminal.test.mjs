@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { KEYS, PASSPHRASE, ui } from "./flows.mjs";
+import { KEYS, PASSPHRASE, ui, waitUnlocked } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -759,7 +759,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
       await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen", timeout: 20_000 });
       await s.fill("Passphrase", PASSPHRASE);
       await s.clickButton("Unlock");
-      await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+      await waitUnlocked(s, { describe: "home after unlock" });
 
       await t.settings("Keyboard shortcuts");
       const shown = await s.until(
