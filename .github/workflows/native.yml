@@ -10,6 +10,10 @@ name: Native
 on:
   push:
     branches: [main]
+  # A nightly run on main. Pushes queue behind each other (a newer push replaces the queued run),
+  # so on busy days no push run completes; the nightly and manual runs always do.
+  schedule:
+    - cron: "17 2 * * *"
   workflow_dispatch:
   workflow_call:
 
@@ -17,7 +21,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.ref }}
+  # Push runs share one group per ref; scheduled and manual runs get their own, so a later push
+  # never replaces them.
+  group: native-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
