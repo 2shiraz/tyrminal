@@ -147,7 +147,12 @@ async fn hosts_sign_in_with_the_identity_as_it_is_when_they_connect() {
     let v = &core.vault;
     let key_text = std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap();
     let key = v
-        .import_key(KeyImportInput { label: "lab key".into(), private_key: key_text, passphrase: None, remember_passphrase: false })
+        .import_key(KeyImportInput {
+            label: "lab key".into(),
+            private_key: key_text,
+            passphrase: None,
+            remember_passphrase: false,
+        })
         .await
         .unwrap();
     // The identity names the user; the host sets none of its own.
@@ -161,7 +166,8 @@ async fn hosts_sign_in_with_the_identity_as_it_is_when_they_connect() {
         })
         .await
         .unwrap();
-    let h = v.save_host(host(lab.port("a"), HostAuthInput::Identity { identity_id: identity.id.clone() })).await.unwrap();
+    let h =
+        v.save_host(host(lab.port("a"), HostAuthInput::Identity { identity_id: identity.id.clone() })).await.unwrap();
 
     let mut by_key = Client::open(&core, &h.id).await;
     by_key.connect().await;
@@ -215,12 +221,16 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
         })
         .await
         .unwrap();
-    let h = v.save_host(host(lab.port("a"), HostAuthInput::Identity { identity_id: identity.id.clone() })).await.unwrap();
+    let h =
+        v.save_host(host(lab.port("a"), HostAuthInput::Identity { identity_id: identity.id.clone() })).await.unwrap();
     let mut c = Client::open(&core, &h.id).await;
     c.connect().await;
 
     let shown = core.sessions.session_identity(WINDOW, &c.session).await.unwrap().unwrap();
-    assert_eq!((shown.identity_id.as_str(), shown.label.as_str(), shown.has_password), (identity.id.as_str(), "lab user", true));
+    assert_eq!(
+        (shown.identity_id.as_str(), shown.label.as_str(), shown.has_password),
+        (identity.id.as_str(), "lab user", true)
+    );
 
     // A server-printed "sudo prompt" gets nothing on its own: after two seconds the terminal
     // input holds no bytes. (POSIX sh: the lab's login shell may be dash. The markers are split

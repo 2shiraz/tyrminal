@@ -3,4 +3,4 @@
 /**
  * How a host authenticates. Never contains the secret itself.
  */
-export type HostAuth = { "kind": "ask_password" } | { "kind": "stored_password" } | { "kind": "key", keyId: string, };
+export type HostAuth = { "kind": "ask_password" } | { "kind": "stored_password" } | { "kind": "key", keyId: string, } | { "kind": "identity", identityId: string, };

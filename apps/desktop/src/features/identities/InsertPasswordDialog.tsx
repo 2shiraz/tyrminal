@@ -73,11 +73,12 @@ export function InsertPasswordDialog({
         )}
         <ErrorNotice error={load.error ?? insert.error} />
         <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose} data-autofocus={ready ? undefined : true}>
+          {/* Cancel takes focus: Enter in the dialog never types the password by accident. */}
+          <button type="button" className="btn" onClick={onClose} data-autofocus>
             {msg.common.cancel}
           </button>
           {ready && (
-            <button type="button" className="btn btn-primary" onClick={() => void confirm()} disabled={insert.pending} data-autofocus>
+            <button type="button" className="btn btn-primary" onClick={() => void confirm()} disabled={insert.pending}>
               {insert.pending ? msg.common.working : msgI.insert.confirm}
             </button>
           )}
