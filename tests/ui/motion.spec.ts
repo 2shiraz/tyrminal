@@ -288,7 +288,7 @@ test.describe("glides and lists", () => {
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
     const glide = primary(page).locator(".nav-glide");
     await expect(glide).toHaveCount(1);
-    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([180]);
+    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([140]);
     await expect(primary(page)).toHaveAttribute("data-gliding", "");
     // Settled: no copy left, and the item carries its own marker again.
     await expect(glide).toHaveCount(0);
@@ -319,7 +319,7 @@ test.describe("glides and lists", () => {
     const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
     await expect(rows.first()).toBeVisible();
     const delays = await rows.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().delay))[0] ?? null));
-    expect(delays).toEqual([0, 30, 60]);
+    expect(delays).toEqual([0, 20, 40]);
     // Once the arrival has settled, filtering from the keyboard re-orders at once.
     await expect.poll(() => rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
     await page.getByRole("searchbox").first().click();

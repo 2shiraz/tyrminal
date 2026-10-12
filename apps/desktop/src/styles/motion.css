@@ -229,8 +229,10 @@ dialog.m-dialog[open]::backdrop {
   pointer-events: none;
 }
 
-/* While it slides, the new item's own marker waits (its text stays above the glide). */
-[data-gliding] [aria-current="page"] {
+/* While it slides, the new item's own marker waits (its text stays above the glide), including
+   the pressed tint, which would otherwise draw a second, scaled box over the glide. */
+[data-gliding] :is(.nav-item, .settings-nav-item)[aria-current="page"] {
   background: transparent;
+  background-image: none;
   box-shadow: none;
 }

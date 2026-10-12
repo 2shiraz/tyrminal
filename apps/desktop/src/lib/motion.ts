@@ -8,6 +8,9 @@ import { motionMs, openedBy } from "./inputModality";
 
 export const EXIT_MS = 100;
 const MAX_FLIP_ITEMS = 300;
+/** Rows in the arrival stagger, and how many rows may come or go before a change just snaps. */
+const STAGGER_ROWS = 6;
+const MAX_CHANGED = 2;
 const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
 
 export function motionAllowed(): boolean {
@@ -98,15 +101,15 @@ export function useFlip(container: RefObject<HTMLElement | null>, { stagger = tr
     const first = items.length > 0 && !staggered.current;
     if (first) staggered.current = true;
     if (!motionAllowed() || (!evenFromKeyboard && openedBy() === "keyboard")) return;
-    const ease = getComputedStyle(root).getPropertyValue("--ease-in-out").trim() || EASE_OUT;
 
     if (first) {
       // The list's first rows: a short stagger, only when a click brought the user here.
       if (!stagger || openedBy() !== "pointer") return;
+      // Opacity only, a few rows, close together: the page is there at once and settles in.
       const step = motionMs("--stagger");
       const enter = motionMs("--duration-fast");
-      items.slice(0, 8).forEach((el, i) => {
-        el.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], {
+      items.slice(0, STAGGER_ROWS).forEach((el, i) => {
+        el.animate([{ opacity: 0 }, { opacity: 1 }], {
           duration: enter,
           delay: i * step,
           easing: EASE_OUT,
@@ -117,6 +120,12 @@ export function useFlip(container: RefObject<HTMLElement | null>, { stagger = tr
     }
 
     if (!before) return;
+    // Only small changes glide (a row added, removed or moved). A re-filter that changes many rows
+    // at once snaps into place: a list of rows flying about reads as busy, not alive.
+    let changed = 0;
+    for (const key of now.keys()) if (!before.has(key)) changed += 1;
+    for (const key of before.keys()) if (!now.has(key)) changed += 1;
+    if (changed > MAX_CHANGED) return;
     const glide = motionMs("--duration-glide");
     for (const el of items) {
       const key = el.dataset.flipKey as string;
@@ -130,7 +139,7 @@ export function useFlip(container: RefObject<HTMLElement | null>, { stagger = tr
       const dx = was.left - rect.left;
       const dy = was.top - rect.top;
       if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-      running.current.set(el, el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: glide, easing: ease }));
+      running.current.set(el, el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: glide, easing: EASE_OUT }));
     }
   });
 }
