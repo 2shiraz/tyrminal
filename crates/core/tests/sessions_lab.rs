@@ -1066,7 +1066,7 @@ async fn deploying_a_public_key_appends_one_line_and_keeps_the_others() {
     client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
     client.until_connected().await;
     // An existing entry without a final newline.
-    client.send("mkdir -p ~/.ssh && printf 'ssh-rsa AAAAB3NzaUnrelated keep-me' > ~/.ssh/authorized_keys && echo PREP-$((40+2))\n").await;
+    client.send("mkdir -p ~/.ssh && printf 'ssh-rsa AAAAB3NzaUnrelated keep-me' > ~/.ssh/authorized_keys && chmod 640 ~/.ssh/authorized_keys && echo PREP-$((40+2))\n").await;
     client.output_until("PREP-42").await;
 
     let key = f.core.vault.generate_key("deployed").await.unwrap();
@@ -1088,7 +1088,8 @@ async fn deploying_a_public_key_appends_one_line_and_keeps_the_others() {
     client.output_until("LS1-42").await;
     let expected = format!("keep-me\r\n{}\r\nFILE-END", key.public_key);
     assert!(client.text.contains(&expected), "{:?}", client.text);
-    assert!(client.text.contains("-rw-r--r--"), "an existing file keeps its permissions: {:?}", client.text);
+    // The mode was set explicitly above (the account's umask differs between runners).
+    assert!(client.text.contains("-rw-r-----"), "an existing file keeps its permissions: {:?}", client.text);
 
     // No file at all: deploying creates it owner-only.
     client.send("rm -f ~/.ssh/authorized_keys && echo GONE-$((40+2))\n").await;
