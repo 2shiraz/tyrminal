@@ -22,6 +22,7 @@ import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
@@ -104,7 +105,8 @@ export type Destination =
   | "knownHosts"
   | "settings"
   // agent B: tunnels and history
-  | "tunnels";
+  | "tunnels"
+  | "recordings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -737,7 +739,7 @@ function Shell() {
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
-          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} />}
+          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} onOpenKeychain={() => navigate("keychain")} />}
           {/* agent B: tunnels and history */}
           {!terminalVisible && destination === "tunnels" && (
             <TunnelsView
@@ -750,6 +752,7 @@ function Shell() {
               onConnect={connect}
             />
           )}
+          {!terminalVisible && destination === "recordings" && <RecordingsView />}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>
@@ -971,6 +974,11 @@ function Shell() {
               : undefined
           }
           // privilege prompts (KEY-18)
+          // security review (P-27)
+          onSecurityReview={() => {
+            navigate("settings");
+            setSettingsAt((current) => ({ section: "review", n: (current?.n ?? 0) + 1 }));
+          }}
           onInsertPassword={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? () => runAction("insertPassword") : undefined}
           onConnectionLog={
             pane?.target.kind === "ssh" && focusedHandle()?.sessionId()

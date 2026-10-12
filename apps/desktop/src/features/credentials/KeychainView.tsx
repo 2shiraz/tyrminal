@@ -10,6 +10,7 @@ import { msgD } from "../../lib/messages-d";
 import { useVaultData } from "../../app/vaultData";
 import { useAction } from "../../lib/useAsync";
 import { IdentitiesSection } from "./IdentitiesSection";
+import { InstallKeyDialog } from "./InstallKeyDialog";
 
 export function KeychainView() {
   // The shared list, so host views see a new or deleted key immediately.
@@ -20,6 +21,7 @@ export function KeychainView() {
   const remove = useAction();
   const [certificates, setCertificates] = useState<Map<string, KeyCertificate>>(new Map());
   const [certifying, setCertifying] = useState<KeySummary | null>(null);
+  const [installing, setInstalling] = useState<KeySummary | null>(null);
 
   // Certificates are separate records; reload them with the key list.
   useEffect(() => {
@@ -106,6 +108,10 @@ export function KeychainView() {
                   <IconShieldCheck size={14} />
                   {certificates.has(key.id) ? msgD.keys.certificate : msgD.keys.addCertificate}
                 </button>
+                <button type="button" className="btn btn-sm" aria-label={msgD.installKey.fromKeychainLabel(key.label)} onClick={() => setInstalling(key)}>
+                  <IconKeyRound size={14} />
+                  {msgD.installKey.fromKeychain}
+                </button>
                 <button type="button" className="btn btn-sm" onClick={() => void copyPublicKey(key)}>
                   {copied === key.id ? <IconCheck size={14} /> : <IconCopy size={14} />}
                   <span aria-live="polite">{copied === key.id ? msg.common.copied : msg.keys.copyPublic}</span>
@@ -123,6 +129,8 @@ export function KeychainView() {
 
       {dialog === "generate" && <GenerateKeyDialog onClose={() => setDialog(null)} onDone={closeAndReload} />}
       {dialog === "import" && <ImportKeyDialog onClose={() => setDialog(null)} onDone={closeAndReload} />}
+
+      {installing && <InstallKeyDialog keyId={installing.id} onClose={() => setInstalling(null)} />}
 
       {certifying && (
         <CertificateDialog
@@ -165,7 +173,7 @@ export function KeychainView() {
   );
 }
 
-function GenerateKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function GenerateKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [label, setLabel] = useState("");
   const [kind, setKind] = useState<KeyKind>("ed25519");
   const { pending, error, run } = useAction();

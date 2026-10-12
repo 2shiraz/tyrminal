@@ -46,6 +46,10 @@ pub const MAX_FOLDER_LEN: usize = 256;
 pub const MAX_NOTE_LEN: usize = 64 * 1024;
 /// Startup snippets on one host or group (SNP-08).
 pub const MAX_STARTUP_SNIPPETS: usize = 16;
+/// Longest line of a startup snippet, in bytes. Startup snippets are typed while the shell may not
+/// be reading yet, when the terminal holds an unfinished line in a fixed buffer (1024 bytes on
+/// macOS, 4096 on Linux); a longer line is cut or garbled, so such a snippet is not typed.
+pub const MAX_STARTUP_LINE_LEN: usize = 1000;
 /// One command's output saved to a file (P-29), in bytes.
 pub const MAX_SAVED_OUTPUT_LEN: usize = 32 * 1024 * 1024;
 /// A URL the user asked to open from terminal output, in bytes.

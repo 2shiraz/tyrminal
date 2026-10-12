@@ -32,7 +32,7 @@ export function installMockBackend(options) {
         letterSpacing: 0,
         cursorStyle: "block",
         cursorBlink: false,
-        padding: 10,
+        padding: 12,
         scrollback: 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
@@ -67,7 +67,7 @@ export function installMockBackend(options) {
       tags,
       lastConnectedAt: last,
       protocol: { type: "ssh" },
-      terminal: { encoding: "utf8", term: "xterm256color" },
+      terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
     });
     state.groups = [
@@ -100,6 +100,15 @@ export function installMockBackend(options) {
       const [kind, name] = key.split(":");
       const target = kind === "host" ? state.hosts.find((h) => h.label === name) : state.groups.find((g) => g.name === name);
       if (target) state.notes[`${kind}:${target.id}`] = { format: "markdown", updatedAt: 1760184000, ...note };
+    }
+    // security review (P-27): an old DSA key, a 2048-bit RSA key and an RSA-only trusted key for
+    // a host that is no longer in the inventory.
+    if (options.reviewFixtures) {
+      state.keys.push(
+        { id: id(3), label: "Old DSA", algorithm: "ssh-dss", fingerprint: "SHA256:dsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-dss AAAAB3NzaC1kc3MFakeSynthetic old-dsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 1024 },
+        { id: id(4), label: "Laptop RSA", algorithm: "ssh-rsa", fingerprint: "SHA256:rsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-rsa AAAAB3NzaC1yc2EFakeSynthetic laptop-rsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 2048 },
+      );
+      state.knownHosts.push({ id: id(303), host: "retired.example", port: 22, algorithm: "ssh-rsa", fingerprint: "SHA256:retiredRsaSyntheticFingerprint000000000000", addedAt: now - 86400 * 90 });
     }
     if (options.orphanKnownHost) {
       state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });
@@ -149,9 +158,10 @@ export function installMockBackend(options) {
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
+    const keyRejected = kind === "ssh" && options.keyRejectedFor === host?.label && host.auth.kind === "key" && !state.deployed?.has(host.auth.keyId);
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked || passwordPrompt
+        ? trustPrompt || blocked || passwordPrompt || keyRejected
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -170,6 +180,22 @@ export function installMockBackend(options) {
       }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
+    }
+    // The server refuses the host's key until it has been installed (key_deploy).
+    if (keyRejected) {
+      const key = state.keys.find((k) => k.id === host.auth.keyId);
+      setTimeout(() => {
+        channelSend(s.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(s.events, { type: "key_rejected", keyId: key.id, label: key.label, hop: null });
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed", hop: null });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "AUTH_FAILED", message: `The server did not accept the key "${key.label}". Its public key may not be installed on this server.` },
+          exitStatus: null,
+        });
+      }, 40);
+      return { sessionId };
     }
     if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
       setTimeout(() => {
@@ -460,6 +486,8 @@ export function installMockBackend(options) {
       const runs = new Map();
       const jumps = new Map();
       const proxies = new Map();
+      const keyExchanges = new Map();
+      window.__mockKeyExchanges = keyExchanges;
       window.__mockJumps = jumps;
       window.__mockProxies = proxies;
       let nextRule = 1;
@@ -554,9 +582,19 @@ export function installMockBackend(options) {
         },
         host_connection_get: (a) => {
           const own = window.__mockOwnRoute.has(a.hostId) || jumps.has(a.hostId) || proxies.has(a.hostId);
-          return { jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null, own, inherited: window.__mockInheritedRoute(a.hostId) };
+          return {
+            jumpHostId: jumps.get(a.hostId) ?? null,
+            proxy: proxies.get(a.hostId) ?? null,
+            own,
+            inherited: window.__mockInheritedRoute(a.hostId),
+            keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+          };
         },
         host_connection_set: (a) => {
+          if (!["prefer_post_quantum", "require_post_quantum", "classic"].includes(a.connection.keyExchange ?? "prefer_post_quantum")) {
+            throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
+          }
+          keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
           // HST-05: inheriting drops the host's own route.
           if (a.connection.inherit) {
             jumps.delete(a.hostId);
@@ -584,6 +622,113 @@ export function installMockBackend(options) {
             const h = state.hosts.find((x) => x.id === hostId);
             return { hostId, label: h?.label ?? "", address: h?.address ?? "", port: h?.port ?? 22 };
           });
+        },
+      };
+    })(),
+    // Session recordings
+    ...(() => {
+      // Synthetic recordings. Nothing is encrypted here: the format and its verification are
+      // tested natively (crates/session-log, crates/core/tests/history.rs).
+      const b64 = (text) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+      const fail = (code, message) => {
+        throw { code, message };
+      };
+      let settings = { enabled: false, keepPerHost: 5, maxLogMib: 64 };
+      const base = Date.parse("2026-10-11T09:00:00Z");
+      const hostId = (label) => state.hosts.find((h) => h.label === label)?.id ?? null;
+      const hostile =
+        "deploy@staging-web:~$ cat notes\r\n" +
+        "\u001b]8;;https://attacker.example/\u0007open the runbook\u001b]8;;\u0007\r\n" +
+        "\u001b]52;c;cHduZWQ=\u0007\u001b]0;not your title\u0007" +
+        "rollout finished: 12 pods ready\r\ndeploy@staging-web:~$ ";
+      const logs = options.recordings
+        ? [
+            {
+              id: "a1".repeat(16),
+              title: "staging-web",
+              hostId: hostId("staging-web"),
+              kind: "ssh",
+              startedAt: base + 2 * 3600_000,
+              endedAt: base + 2 * 3600_000 + 754_000,
+              sizeBytes: 18_432,
+              state: "complete",
+              bookmarked: true,
+              comment: "Rollout of 2.4 — pods restarted twice",
+              frames: [
+                { type: "output", atMs: 0, data: b64("Welcome to Ubuntu 24.04.1 LTS\r\n") },
+                { type: "resize", atMs: 300, cols: 100, rows: 30 },
+                { type: "output", atMs: 900, data: b64(hostile) },
+              ],
+            },
+            {
+              id: "b2".repeat(16),
+              title: "api-gateway",
+              hostId: hostId("api-gateway"),
+              kind: "ssh",
+              startedAt: base + 3600_000,
+              endedAt: null,
+              sizeBytes: 4_096,
+              state: "incomplete",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("deploy@api-gateway:~$ uptime\r\n 09:12 up 41 days\r\n") }],
+            },
+            {
+              id: "c3".repeat(16),
+              title: "Local terminal",
+              hostId: null,
+              kind: "local",
+              startedAt: base,
+              endedAt: base + 61_000,
+              sizeBytes: 2_048,
+              state: "damaged",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("~ % make test\r\nok\r\n") }],
+            },
+          ]
+        : [];
+      window.__mockRecordings = logs;
+      const summary = ({ frames, ...log }) => ({ ...log });
+      const find = (id) => logs.find((l) => l.id === id) ?? fail("NOT_FOUND", "That recording no longer exists.");
+      return {
+        recording_settings_get: () => ({ ...settings }),
+        recording_settings_set: (a) => {
+          const next = a.settings;
+          if (!(next.keepPerHost >= 1 && next.keepPerHost <= 100)) fail("INVALID_INPUT", "Keep between 1 and 100 recordings per host.");
+          if (!(next.maxLogMib >= 1 && next.maxLogMib <= 512)) fail("INVALID_INPUT", "A recording's size limit must be between 1 and 512 MiB.");
+          // Saving takes a moment natively (an encrypted vault write); quick successive changes
+          // must not overwrite one another.
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              settings = { ...next };
+              resolve({ ...settings });
+            }, 150),
+          );
+        },
+        session_log_list: () => [...logs].sort((x, y) => y.startedAt - x.startedAt).map(summary),
+        session_log_storage: () => ({ count: logs.length, totalBytes: logs.reduce((n, l) => n + l.sizeBytes, 0) }),
+        session_log_bookmark: (a) => {
+          const log = find(a.id);
+          const comment = a.comment.trim();
+          if (comment.length > 2000) fail("INVALID_INPUT", "A comment can be at most 2,000 characters.");
+          Object.assign(log, { bookmarked: a.bookmarked, comment });
+          return summary(log);
+        },
+        session_log_delete: (a) => {
+          const log = find(a.id);
+          if (log.state === "recording") fail("INVALID_INPUT", "This session is still being recorded. Close it first.");
+          logs.splice(logs.indexOf(log), 1);
+        },
+        session_log_delete_all: () => {
+          const gone = logs.filter((l) => l.state !== "recording");
+          for (const log of gone) logs.splice(logs.indexOf(log), 1);
+          return gone.length;
+        },
+        session_log_open: (a) => {
+          const log = find(a.id);
+          if (log.state === "unreadable") fail("NOT_FOUND", "This recording's file is missing or cannot be read.");
+          return { log: summary(log), cols: 80, rows: 24, frames: log.frames, truncated: false };
         },
       };
     })(),
@@ -913,7 +1058,7 @@ export function installMockBackend(options) {
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
         protocol: a.host.protocol ?? { type: "ssh" },
-        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: a.host.forwardAgent ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
@@ -1022,7 +1167,7 @@ export function installMockBackend(options) {
           tags: h.tags,
           lastConnectedAt: null,
           protocol: { type: "ssh" },
-          terminal: { encoding: "utf8", term: "xterm256color" },
+          terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
           forwardAgent: false,
         });
       }
@@ -1030,6 +1175,51 @@ export function installMockBackend(options) {
     },
     key_list: () => structuredClone(state.keys),
     known_host_list: () => structuredClone(state.knownHosts),
+    known_host_remove: (a) => {
+      if (String(a.reason ?? "").trim().length < 3) throw { code: "INVALID_INPUT", message: "Say why you are removing this key." };
+      state.knownHosts = state.knownHosts.filter((k) => k.id !== a.id);
+    },
+    // security review (P-27): the same rules as crates/core/src/security_review.rs, over mock state.
+    security_review: () => {
+      const reviewedAt = Math.floor(Date.now() / 1000);
+      const ssh = state.hosts.filter((h) => (h.protocol?.type ?? "ssh") === "ssh");
+      const usedBy = (keyId) => ssh.filter((h) => h.auth.kind === "key" && h.auth.keyId === keyId).length;
+      const findings = [];
+      for (const k of state.keys) {
+        if (k.algorithm === "ssh-dss") findings.push({ kind: "dsa_key", keyId: k.id, label: k.label, usedBy: usedBy(k.id) });
+        else if (k.algorithm === "ssh-rsa" && (k.bits ?? 3072) < 3072) findings.push({ kind: "short_rsa_key", keyId: k.id, label: k.label, bits: k.bits, usedBy: usedBy(k.id) });
+        if (!k.passphraseProtected || k.passphraseStored)
+          findings.push({ kind: "key_without_passphrase", keyId: k.id, label: k.label, passphraseStored: k.passphraseProtected, usedBy: usedBy(k.id) });
+      }
+      for (const h of ssh) {
+        if (h.auth.kind !== "key") findings.push({ kind: "password_sign_in", hostId: h.id, label: h.label, stored: h.auth.kind === "stored_password" });
+      }
+      for (const c of Object.values(state.certificates ?? {})) {
+        const label = state.keys.find((k) => k.id === c.keyId)?.label ?? "";
+        if (c.validBefore !== null && c.validBefore <= reviewedAt) findings.push({ kind: "certificate_expired", keyId: c.keyId, label, validBefore: c.validBefore });
+        else if (c.validBefore !== null && c.validBefore - reviewedAt <= 30 * 86400)
+          findings.push({ kind: "certificate_expiring", keyId: c.keyId, label, validBefore: c.validBefore });
+      }
+      const used = new Set(ssh.map((h) => `${h.address.toLowerCase()}:${h.port}`));
+      const stronger = new Set(state.knownHosts.filter((k) => k.algorithm !== "ssh-rsa").map((k) => `${k.host}:${k.port}`));
+      for (const k of state.knownHosts) {
+        const endpoint = `${k.host}:${k.port}`;
+        if (!used.has(endpoint))
+          findings.push({ kind: "unused_known_host", knownHostId: k.id, host: k.host, port: k.port, algorithm: k.algorithm, fingerprint: k.fingerprint });
+        if (k.algorithm === "ssh-rsa" && !stronger.has(endpoint))
+          findings.push({ kind: "ssh_rsa_only_known_host", knownHostId: k.id, host: k.host, port: k.port, fingerprint: k.fingerprint });
+      }
+      const rank = ["dsa_key", "short_rsa_key", "certificate_expired", "certificate_expiring", "password_sign_in", "key_without_passphrase", "unused_known_host", "ssh_rsa_only_known_host"];
+      const severity = (f) =>
+        f.kind === "dsa_key" || f.kind === "certificate_expired" || (f.kind === "short_rsa_key" && f.bits < 2048)
+          ? 0
+          : ["short_rsa_key", "password_sign_in", "certificate_expiring"].includes(f.kind)
+            ? 1
+            : 2;
+      const name = (f) => (f.label ?? f.host).toLowerCase();
+      findings.sort((a, b) => severity(a) - severity(b) || rank.indexOf(a.kind) - rank.indexOf(b.kind) || name(a).localeCompare(name(b)));
+      return { findings, keys: state.keys.length, hosts: ssh.length, certificates: Object.keys(state.certificates ?? {}).length, knownHosts: state.knownHosts.length, reviewedAt };
+    },
     snippet_list: () => structuredClone(state.snippets),
     snippet_save: (a) => {
       const existing = state.snippets.find((s) => s.id === a.snippet.id);
@@ -1048,6 +1238,17 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
+    // Signs in with a typed password, whatever the host uses (to install a key).
+    session_open_key_install: (a) => {
+      const host = state.hosts.find((h) => h.id === a.hostId);
+      const sessionId = `${state.nextSession++}`.padStart(32, "a");
+      state.sessions.set(sessionId, { id: sessionId, output: null, events: a.events, user: host.username, host: host.label, line: "", files: true });
+      setTimeout(() => {
+        channelSend(a.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(a.events, { type: "auth_prompt", promptId: "k1", kind: "password", username: host.username, attempt: 1, maxAttempts: 3, message: null, echo: false, hop: null });
+      }, 20);
+      return { sessionId };
+    },
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
