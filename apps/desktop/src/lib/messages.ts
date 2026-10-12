@@ -393,7 +393,7 @@ export const msg = {
       "Tyrminal makes no network connections of its own. The only traffic is the SSH connections you start. There is no account, telemetry, crash upload or automatic update check.",
     diagnostics: "Keep a list of recent failures for diagnostics",
     diagnosticsHint:
-      "Off by default. Only which action failed and its error code are kept, in memory, never host names, paths, commands, output or secrets. Nothing is sent: you can save a report to a file and decide what to do with it. Session recording and command history are separate settings.",
+      "Off by default. Only which action failed and its error code are kept, in memory, never host names, paths, commands, output or secrets. Nothing is sent: you can save a report to a file and decide what to do with it.",
     diagnosticsCount: (n: number) => (n === 1 ? "1 failure kept" : `${n} failures kept`),
     diagnosticsSave: "Save diagnostic report…",
     diagnosticsSaved: (name: string) => `Saved ${name}.`,

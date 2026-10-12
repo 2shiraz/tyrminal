@@ -658,6 +658,11 @@ pub enum SessionEvent {
         sent: Vec<String>,
         rejected: Vec<String>,
     },
+    /// A notice from Tyrminal itself, never server text, shown when it happens (for example
+    /// that the server used a forwarded key, or that a Telnet session is not encrypted).
+    Notice {
+        text: String,
+    },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
     Closed {
@@ -712,6 +717,9 @@ mod tests {
         // Field names are part of the contract with the generated TypeScript.
         let json = format!("{:?}", serde_json_like(&event));
         assert!(json.contains("trust_prompt") && json.contains("promptId") && json.contains("resolvedAddress"));
+        // Notices from Tyrminal are a separate event from untrusted server banners.
+        let notice = serde_json_like(&SessionEvent::Notice { text: "n".into() });
+        assert!(notice.contains("\"notice\""), "{notice}");
     }
 
     fn serde_json_like<T: Serialize>(value: &T) -> String {
