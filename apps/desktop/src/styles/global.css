@@ -900,6 +900,8 @@ kbd,
   color: var(--text-muted);
   font-size: var(--text-sm);
   max-width: 360px;
+  /* Even lines: no single word left alone on the last one. */
+  text-wrap: balance;
 }
 
 .empty-actions {
