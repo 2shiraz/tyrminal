@@ -4,12 +4,13 @@
 if [[ $- == *i* && -z ${__tyrminal_si-} && ${TERM-} != dumb ]]; then
   __tyrminal_si=1
   __tyrminal_osc7() {
-    local LC_ALL=C p=$PWD out= c i
+    local LC_ALL=C p=$PWD out= c i n
     for ((i = 0; i < ${#p}; i++)); do
       c=${p:i:1}
       case $c in
         [-A-Za-z0-9/._~]) out+=$c ;;
-        *) printf -v c '%%%02X' "'$c"; out+=$c ;;
+        # Bash 3.2 reads bytes >= 0x80 as negative numbers; keep the low 8 bits.
+        *) printf -v n '%d' "'$c"; printf -v c '%%%02X' $((n & 255)); out+=$c ;;
       esac
     done
     printf '\033]7;file://%s%s\033\\' "${HOSTNAME-}" "$out"

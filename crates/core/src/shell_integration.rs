@@ -355,7 +355,8 @@ mod tests {
         for script in [BASH, ZSH] {
             assert!(!script.contains("eval"), "no eval");
             assert!(!script.contains("source") && !script.contains(". /"), "loads nothing");
-            assert!(!script.contains("$(") && !script.contains('`'), "no command substitution");
+            // `$((...))` is arithmetic; `$(...)` (command substitution) and backticks are not allowed.
+            assert!(!script.replace("$((", "").contains("$(") && !script.contains('`'), "no command substitution");
             assert!(!script.contains(BEGIN) && !script.contains(END), "markers stay unique");
             assert!(script.ends_with('\n'));
         }
