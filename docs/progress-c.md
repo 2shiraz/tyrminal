@@ -10,8 +10,8 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 | 1 | Tab duplicate/reorder, session status indicators | Done: UI tests and native test on Linux |
 | 2 | Layouts: multi-host splits, grid/focus layouts, pane reorder, 16 panes | Done: UI tests and native 16-pane test on Linux |
 | 3 | Named layout templates in the vault, explicit save, unsaved indicator, restore by explicit action | Done: core, UI and native tests on Linux |
-| 4 | Detach a tab into its own window (scoped capability, session handoff bound to the window label) | Next |
-| 5 | Keyboard customization, encodings/emulation (honest limits), output highlighting, palette/recent polish, broadcast target review (P-13) | — |
+| 4 | Detach a tab into its own window (scoped capability, session handoff bound to the window label) | Waiting on agent A (handoff request in work-split.md) |
+| 5 | Keyboard customization, encodings/emulation (honest limits), output highlighting, palette/recent polish, broadcast target review (P-13) | Mostly done; palette/recent polish (UX-03/04) next |
 
 ## Slice 1 (2026-10-12)
 
@@ -64,6 +64,18 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 - WSP-10 (shell context) is BLOCKED: it needs shell integration (Phase 08); templates store no
   commands, so there is nothing to re-run or preview.
 
+## Slice 5 (2026-10-12)
+
+- P-13: broadcast starts only after a review listing exactly the receiving panes (label and
+  destination); confirming re-checks that the panes and their sessions are unchanged.
+- Shortcuts (TRM-08, WSP-13): any action can be rebound, unbound or reset; a shortcut needs Ctrl,
+  Alt or Cmd and never Ctrl with a single key, enforced in the UI and natively. Option as Meta
+  (macOS) and right-click word selection are settings.
+- Highlighting (TRM-07): words and IPv4/IPv6 addresses (not times or MAC addresses) are colored by
+  xterm decorations over the visible rows; bytes, buffer text, copies and input are untouched.
+- Encodings (TRM-05): per-session output decoding and exact input encoding; characters the
+  encoding lacks are not sent and the user is told. TRM-06 is BLOCKED (see the matrix).
+
 ## Findings
 
 1. A Playwright `filter({ hasNot })` checks descendants only; the page tab is excluded by class.
@@ -72,6 +84,8 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
    Native tests use the palette and real buttons instead.
 3. A pane split repeatedly halves to zero width; WebDriver cannot click its header. The native
    test tiles the panes (grid) before using a header button.
+5. WHATWG `TextDecoder("iso-8859-1")` is Windows-1252; offered as one choice.
+6. xterm drops an invalid UTF-8 byte rather than showing U+FFFD.
 4. The broadcast UI test typed while the focused terminal was still answering a cursor-position
    query; after the focus fix the typing pane is the answering one and, under load, the reply
    landed between keys (`h[11;23Rostname`). The test now waits for the reply (`data-tx`).
