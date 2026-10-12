@@ -23,6 +23,8 @@ mod validate;
 mod vault;
 // agent B: tunnels and history
 mod tunnels;
+// terminal input: highlight patterns
+mod highlight;
 
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;

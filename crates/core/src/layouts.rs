@@ -280,7 +280,15 @@ pub(crate) fn sanitize_workspace(mut prefs: WorkspacePreferences) -> Result<Work
     if h.keywords.len() > MAX_HIGHLIGHT_KEYWORDS {
         return Err(invalid("At most 32 highlight words can be set."));
     }
+    // terminal input: highlight patterns
+    if h.keywords.iter().filter(|k| k.pattern).count() > tyrminal_contracts::limits::MAX_HIGHLIGHT_PATTERNS {
+        return Err(invalid("At most 8 highlight patterns can be set."));
+    }
     for keyword in &mut h.keywords {
+        if keyword.pattern {
+            crate::highlight::check_pattern(&keyword.text)?;
+            continue;
+        }
         let text = keyword.text.trim();
         if text.is_empty() || text.chars().count() > MAX_KEYWORD_LEN {
             return Err(invalid("A highlight word must be 1 to 64 characters."));
@@ -487,8 +495,12 @@ mod tests {
     #[test]
     fn highlight_words_are_bounded_and_display_safe() {
         use tyrminal_contracts::{HighlightKeyword, HighlightTone};
-        let word =
-            |text: &str| HighlightKeyword { text: text.into(), tone: HighlightTone::Danger, case_sensitive: false };
+        let word = |text: &str| HighlightKeyword {
+            text: text.into(),
+            tone: HighlightTone::Danger,
+            case_sensitive: false,
+            pattern: false,
+        };
         let with = |words: Vec<HighlightKeyword>| {
             let mut p = WorkspacePreferences::default();
             p.highlight.keywords = words;
@@ -499,6 +511,31 @@ mod tests {
             assert!(sanitize_workspace(with(vec![word(bad)])).is_err(), "{bad:?}");
         }
         assert!(sanitize_workspace(with((0..33).map(|i| word(&format!("w{i}"))).collect())).is_err());
+    }
+
+    #[test]
+    fn highlight_patterns_are_checked_and_kept_verbatim() {
+        use tyrminal_contracts::{HighlightKeyword, HighlightTone};
+        let pattern = |text: &str| HighlightKeyword {
+            text: text.into(),
+            tone: HighlightTone::Info,
+            case_sensitive: true,
+            pattern: true,
+        };
+        let with = |words: Vec<HighlightKeyword>| {
+            let mut p = WorkspacePreferences::default();
+            p.highlight.keywords = words;
+            p
+        };
+        // Not trimmed: spaces are part of a pattern.
+        assert_eq!(sanitize_workspace(with(vec![pattern(" id=\\d+")])).unwrap().highlight.keywords[0].text, " id=\\d+");
+        assert!(sanitize_workspace(with(vec![pattern("(a+)+$")])).is_err());
+        assert!(sanitize_workspace(with((0..8).map(|i| pattern(&format!("p{i}"))).collect())).is_ok());
+        assert!(sanitize_workspace(with((0..9).map(|i| pattern(&format!("p{i}"))).collect())).is_err());
+        // A plain word with pattern syntax is literal text and stays allowed.
+        let mut literal = pattern("(a+)+$");
+        literal.pattern = false;
+        assert!(sanitize_workspace(with(vec![literal])).is_ok());
     }
 
     #[test]

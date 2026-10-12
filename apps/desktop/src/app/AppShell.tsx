@@ -24,6 +24,7 @@ import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
@@ -103,6 +104,7 @@ function Shell() {
   applyBindingOverrides(workspacePrefs(prefs.workspace).bindings);
   const data = useVaultData();
   const notify = useToast();
+  useSlowPatternNotice();
   const [destination, setDestination] = useState<Destination>("home");
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);

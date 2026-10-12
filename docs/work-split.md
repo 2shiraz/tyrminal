@@ -265,3 +265,7 @@ Never merge these by hand; regenerate them after resolving the sources:
 - `features/terminal/TerminalController.ts`: `onKey` leaves IME-processed keys to xterm (3 lines).
 - `tests/ui/mock-backend.js`: per-session input log (`__mockInputBySession`) and `__mockDropAt(i)`.
 - `tests/ui/tunnels.spec.ts`: closes the tab through `.tab-close` (no nested button since PR #7).
+- `crates/contracts/src/layouts.rs`: `HighlightKeyword.pattern` (serde default false); `crates/core/src/layouts.rs`
+  `sanitize_workspace` checks patterns through the new `crates/core/src/highlight.rs`;
+  `features/layouts/WorkspaceSettings.tsx` renders `features/highlight/HighlightRules.tsx` instead of its
+  `Keywords` list (removed); `app/AppShell.tsx` one `useSlowPatternNotice()` line.

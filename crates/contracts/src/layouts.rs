@@ -113,6 +113,10 @@ pub struct HighlightKeyword {
     pub text: String,
     pub tone: HighlightTone,
     pub case_sensitive: bool,
+    /// `text` is a regular expression from a restricted, bounded subset (see
+    /// `tyrminal_core` `highlight::check_pattern`); otherwise it is matched literally.
+    #[serde(default)]
+    pub pattern: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

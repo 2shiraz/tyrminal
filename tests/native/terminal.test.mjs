@@ -559,3 +559,52 @@ describe("a tab moved to its own window", { concurrency: false }, () => {
     }
   });
 });
+
+describe("output highlighting patterns in the real WebView (TRM-07)", { concurrency: false }, () => {
+  test("patterns from saved preferences match in a worker; a slow one is switched off and the shell stays usable", async () => {
+    const rule = (text, tone, pattern) => ({ text, tone, caseSensitive: false, pattern });
+    const app = await App.launch({
+      prefs: {
+        ...DOM_RENDERER_PREFS,
+        workspace: {
+          highlight: {
+            enabled: true,
+            ipAddresses: false,
+            keywords: [rule("[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
+          },
+          bindings: [],
+          optionAsMeta: false,
+          rightClickSelectsWord: false,
+        },
+      },
+    });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      // The lab's POSIX shell on every platform (Windows' local shell is not one).
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      // Lines of letters with no "!": the first pattern backtracks for a long time on them.
+      await t.type("printf 'login user=alice ok\\n'; for i in $(seq 1 30); do printf '%0150d\\n' 0 | tr 0 a; done; echo HL-DONE\n");
+      await t.waitForText(/^HL-DONE$/m, "output");
+      await s.until(() => s.execute(`return document.body.textContent.includes("took too long and was switched off") || null`), {
+        describe: "slow pattern notice",
+        timeout: 15_000,
+      });
+      // The other rules are drawn (the pattern by the worker, the word on the page).
+      await t.type("clear; printf 'login user=alice ok\\n'\n");
+      const tones = await s.until(
+        () =>
+          s.execute(`const t = [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).sort(); return t.length === 2 ? t : null`),
+        { describe: "highlight decorations" },
+      );
+      assert.deepEqual(tones, ["danger", "info"]);
+      await t.type("echo STILL-HERE\n");
+      await t.waitForText(/^STILL-HERE$/m, "shell responsive");
+    } finally {
+      await app.quit();
+    }
+  });
+});
