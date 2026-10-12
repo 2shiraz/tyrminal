@@ -35,7 +35,6 @@ jobs:
       # Disposable runner: the local lab may create its accounts and run sshd.
       TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES: "1"
       TYRMINAL_LAB_WSL_DISTRO: Debian-12
-      TYRMINAL_LAB_WSL_NODE: /opt/node/bin/node
     defaults:
       run:
         shell: bash
@@ -117,7 +116,8 @@ jobs:
           rm node.tar.xz
           /opt/node/bin/node --version
           /usr/sbin/sshd -V 2>&1 | head -1 || true
-          for b in vim nano tmux htop mc; do command -v "$b" >/dev/null && "$b" --version 2>&1 | head -1 || echo "$b: not runnable"; done
+          for b in vim nano htop mc; do command -v "$b" >/dev/null && "$b" --version 2>&1 | head -1 || echo "$b: not runnable"; done
+          tmux -V
       - name: Keep the WSL instance running for the whole job
         if: runner.os == 'Windows'
         shell: pwsh

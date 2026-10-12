@@ -574,9 +574,16 @@ function delegateToWsl() {
   }
   const distro = process.env.TYRMINAL_LAB_WSL_DISTRO || "Debian-12";
   const self = run("wsl.exe", ["-d", distro, "-u", "root", "--", "wslpath", "-a", fileURLToPath(import.meta.url).replaceAll("\\", "/")]);
+  // Inside the distribution: the official Node build at /opt/node when it is installed (CI;
+  // Debian's packaged node does not execute under WSL 1), otherwise `node` from PATH. Checked
+  // here rather than passed through the environment, because Git Bash rewrites POSIX-looking
+  // environment values into Windows paths.
+  const officialNode = "/opt/node/bin/node";
+  const node = spawnSync("wsl.exe", ["-d", distro, "-u", "root", "-e", "test", "-x", officialNode]).status === 0 ? officialNode : "node";
+  // -e runs the program directly, without a login shell re-parsing the arguments.
   const r = spawnSync(
     "wsl.exe",
-    ["-d", distro, "-u", "root", "--", "env", "TYRMINAL_LAB_MODE=local", "TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1", "TYRMINAL_LAB_WINDOWS_PATHS=1", process.env.TYRMINAL_LAB_WSL_NODE || "node", self, ...process.argv.slice(2)],
+    ["-d", distro, "-u", "root", "-e", "env", "TYRMINAL_LAB_MODE=local", "TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1", "TYRMINAL_LAB_WINDOWS_PATHS=1", node, self, ...process.argv.slice(2)],
     { stdio: "inherit" },
   );
   process.exit(r.status ?? 1);
