@@ -21,6 +21,8 @@ const HOST_PASSWORD: &str = "synthetic-host-password-7f3a";
 const IDENTITY_PASSWORD: &str = "synthetic-identity-password-91c2";
 const KEY_PASSPHRASE: &str = "synthetic-key-passphrase-55d0";
 const DAY: u64 = 24 * 60 * 60;
+// A throwaway DSA key that authorizes nothing; see tests/fixtures/review/README.md.
+const DSA_FIXTURE: &str = include_str!("../../../tests/fixtures/review/dsa-throwaway.key");
 // Public halves of throwaway keys; see tests/fixtures/review/README.md.
 const RSA_KNOWN_HOST: &str = include_str!("../../../tests/fixtures/review/rsa3072.pub");
 
@@ -280,8 +282,8 @@ async fn dsa_and_short_rsa_keys_in_the_keychain_are_high_severity() {
     let v = &core.vault;
     // The importer accepts these old keys (they may still be needed for old servers); the
     // review is where the user learns to replace them.
-    let dsa =
-        v.import_key(import("old dsa", keygen(work.path(), "dsa", &["-t", "dsa"], ""), None, false)).await.unwrap();
+    // DSA comes from a checked-in throwaway key: ssh-keygen on Windows can no longer make one.
+    let dsa = v.import_key(import("old dsa", DSA_FIXTURE.to_owned(), None, false)).await.unwrap();
     let rsa = v
         .import_key(import("old rsa", keygen(work.path(), "rsa1024", &["-t", "rsa", "-b", "1024"], ""), None, false))
         .await
