@@ -31,6 +31,7 @@ import { msgI } from "../../lib/messages-input";
 import { ConnectionDetails } from "../connection/ConnectionDetails";
 import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
+import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { encodingById } from "./encoding";
 import type { CommandRecord } from "./commandOutput";
@@ -166,6 +167,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [banner, setBanner] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [token, setToken] = useState<Token | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
@@ -284,6 +286,8 @@ export function TerminalView(props: TerminalViewProps) {
             notify("danger", event.text);
             break;
           case "negotiated":
+            // Sent for every hop of a jump chain; the status bar shows the destination's.
+            if (event.hop && event.hop.index !== event.hop.total) break;
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;
           case "closed":
@@ -634,6 +638,11 @@ export function TerminalView(props: TerminalViewProps) {
                       {msg.terminal.cancelAutoReconnect}
                     </button>
                   )}
+                  {target.kind === "ssh" && controllerRef.current?.id && (
+                    <button type="button" className="btn" onClick={() => setLogOpen(true)}>
+                      {msgD.connectionLog.open}
+                    </button>
+                  )}
                   <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
                     <IconRefreshCw size={15} />
                     {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
@@ -643,6 +652,10 @@ export function TerminalView(props: TerminalViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {logOpen && controllerRef.current?.id && (
+        <ConnectionLogDialog sessionId={controllerRef.current.id} title={props.label} onClose={() => setLogOpen(false)} />
       )}
 
       {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}

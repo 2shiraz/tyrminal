@@ -116,6 +116,7 @@ export function CommandPalette({
   openTabs,
   extra,
   onShellIntegration,
+  onConnectionLog,
   onSearchSessions,
   onCommandOutput,
 }: {
@@ -168,6 +169,8 @@ export function CommandPalette({
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  /** The focused SSH pane's connection log; present when it has a session. */
+  onConnectionLog?: (() => void) | undefined;
   /** P-28: search every open terminal's scrollback; present while any terminal is open. */
   onSearchSessions?: (() => void) | undefined;
   /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
@@ -277,6 +280,7 @@ export function CommandPalette({
       // agent D: inventory and snippets
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
+      if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
       if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
     // agent C: workspaces

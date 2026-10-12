@@ -271,6 +271,16 @@ export const msgD = {
     runRejected: (names: string[]) => `Not set by the server: ${names.join(", ")}`,
     suggestions: "Variables of this host",
   },
+  connectionLog: {
+    title: (name: string) => `Connection log: ${name}`,
+    palette: "Show connection log",
+    open: "Connection log",
+    label: "Connection log",
+    body: "What happened while this session connected: addresses, hops, algorithms and the sign-in method tried. Passwords, keys and other secrets are never recorded.",
+    empty: "Nothing was recorded for this session.",
+    copy: "Copy",
+    close: "Close",
+  },
   hostPanel: {
     title: "Host details",
     newTitle: "New host",
