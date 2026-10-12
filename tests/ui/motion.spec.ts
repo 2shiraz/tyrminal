@@ -123,7 +123,7 @@ for (const mode of ["system setting", "in-app switch"] as const) {
     await page.keyboard.press("Escape");
 
     await primary.getByRole("button", { name: /^Hosts/ }).click();
-    await page.getByRole("button", { name: "Add host" }).first().click();
+    await page.getByRole("button", { name: "New host" }).first().click();
     await expect(page.getByTestId("host-panel")).toBeVisible();
     await still();
 
@@ -211,6 +211,28 @@ test.describe("exits", () => {
     for (const leaked of ["Disk usage", "api-gateway", "df -h"]) expect(text).not.toContain(leaked);
   });
 
+  test("a new toast pushes the stack up with a glide, not a jump", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.type("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+S");
+    const run = page.getByRole("button", { name: "Run Disk usage in the terminal" });
+    await run.click();
+    const toasts = page.locator(".toasts .toast");
+    await expect(toasts).toHaveCount(1);
+    await page.waitForTimeout(400);
+    await run.click();
+    await expect(toasts).toHaveCount(2);
+    // The stack sits on the status bar: the older toast moves up, gliding from where it was.
+    const glides = await toasts.first().evaluate((el) =>
+      el.getAnimations().filter((a) => String((a.effect as KeyframeEffect).getKeyframes()[0]?.transform ?? "").startsWith("translate(")).length,
+    );
+    expect(glides).toBe(1);
+  });
+
   test("a hovered toast stays until the pointer leaves", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
@@ -230,6 +252,54 @@ test.describe("exits", () => {
   });
 });
 
+// Moments (motion.md PR 4).
+test.describe("moments", () => {
+  test("a wrong passphrase shakes the card once and puts focus back in the field", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    await allowMotion(page);
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    const card = page.locator("form.auth-card");
+    const shakes = await card.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)));
+    expect(shakes).toEqual([220]);
+    // The right one still opens the vault, and the window fades in.
+    await field.fill("correct horse");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  });
+
+  test("under reduced motion a wrong passphrase only refocuses", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    const field = page.getByLabel("Passphrase");
+    await field.fill("not it");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
+    await expect(field).toBeFocused();
+    expect(await page.locator("form.auth-card").evaluate((el) => el.getAnimations().length)).toBe(0);
+  });
+
+  test("a finished transfer flashes once, and status dots change colour gently", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    const style = await page.evaluate(() => {
+      const row = document.createElement("li");
+      row.className = "xfer-row";
+      row.dataset.state = "done";
+      const dot = document.createElement("span");
+      dot.className = "status-dot";
+      document.body.append(row, dot);
+      const result = { flash: getComputedStyle(row).animationName, dot: getComputedStyle(dot).transitionProperty };
+      row.remove();
+      dot.remove();
+      return result;
+    });
+    expect(style).toEqual({ flash: "m-flash", dot: "background-color" });
+  });
+});
+
 // Glides and lists (motion.md PR 3).
 test.describe("glides and lists", () => {
   const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" });
@@ -240,7 +310,7 @@ test.describe("glides and lists", () => {
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
     const glide = primary(page).locator(".nav-glide");
     await expect(glide).toHaveCount(1);
-    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([180]);
+    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([140]);
     await expect(primary(page)).toHaveAttribute("data-gliding", "");
     // Settled: no copy left, and the item carries its own marker again.
     await expect(glide).toHaveCount(0);
@@ -271,11 +341,66 @@ test.describe("glides and lists", () => {
     const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
     await expect(rows.first()).toBeVisible();
     const delays = await rows.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().delay))[0] ?? null));
-    expect(delays).toEqual([0, 30, 60]);
+    expect(delays).toEqual([0, 20, 40]);
     // Once the arrival has settled, filtering from the keyboard re-orders at once.
     await expect.poll(() => rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
     await page.getByRole("searchbox").first().click();
     await page.keyboard.type("di");
     expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+  });
+});
+
+// Host details (owner request): opened by a click, the content slides in while the cards glide to
+// the narrower list; switching hosts only crossfades; keyboard and reduced motion are instant.
+test.describe("host details", () => {
+  const panelContent = (page: Page) =>
+    page.getByTestId("host-panel").evaluate((el) =>
+      [...el.children]
+        .filter((c) => !c.classList.contains("resize-handle"))
+        .flatMap((c) => c.getAnimations().map((a) => Object.keys((a.effect as KeyframeEffect).getKeyframes()[0] ?? {}).filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)).sort().join("+"))),
+    );
+  async function toHosts(page: Page) {
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+    await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
+  }
+
+  test("a click slides the content in; switching hosts only crossfades; closing by pointer fades a copy", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    const list = page.getByTestId("host-list");
+    await list.getByRole("button", { name: "staging-web", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(new Set(await panelContent(page))).toEqual(new Set(["opacity+transform"]));
+    await expect.poll(() => panelContent(page)).toEqual([]);
+
+    await list.getByRole("button", { name: "edge-cache", exact: true }).click();
+    await expect(page.getByTestId("host-panel-location")).toBeVisible();
+    await expect.poll(async () => new Set(await panelContent(page))).toEqual(new Set(["opacity"]));
+
+    await page.getByTestId("host-panel").getByRole("button", { name: "Close host details" }).click();
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(1);
+    await expect(page.locator("[data-exit-ghost]")).toHaveCount(0);
+  });
+
+  test("opened from the keyboard, or under reduced motion, the panel is simply there", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await toHosts(page);
+    await page.getByRole("button", { name: "New host", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("host-panel")).toHaveCount(0);
+    expect(await page.locator("[data-exit-ghost]").count()).toBe(0);
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await page.getByRole("button", { name: "New host", exact: true }).click();
+    await expect(page.getByTestId("host-panel")).toBeVisible();
+    expect(await panelContent(page)).toEqual([]);
   });
 });

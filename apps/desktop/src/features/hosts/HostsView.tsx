@@ -11,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -19,9 +19,13 @@ import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspa
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
-import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
+import { EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
 import {
   IconArrowLeftRight,
+  IconArrowUpDown,
+  IconChevronDown,
+  IconChevronRight,
+  IconClipboardCopy,
   IconColumns2,
   IconCopy,
   IconEllipsis,
@@ -34,10 +38,14 @@ import {
   IconNetwork,
   IconPencil,
   IconPlay,
+  IconPlug,
   IconPlus,
   IconSearch,
   IconServer,
+  IconScrollText,
   IconSlidersHorizontal,
+  IconSquareTerminal,
+  IconTag,
   IconStar,
   IconTextCursorInput,
   IconTrash2,
@@ -46,14 +54,17 @@ import {
   IconX,
 } from "../../components/ui/icons";
 import { msgSftp } from "../sftp/messages";
+import { playExit } from "../../lib/exitGhost";
+import { motionMs, openedBy } from "../../lib/inputModality";
 import { type AppError, appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi, toAppError } from "../../lib/ipc";
 import { msgC } from "../../lib/messages-c";
 import { msg } from "../../lib/messages";
 import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
-import { msgDiscovery } from "../../lib/messages-discovery";
 import { msgProduction } from "../../lib/messages-production";
+import { useWindowedList } from "../../components/ui/useWindowedList";
 import { flashSaved, useFlip } from "../../lib/motion";
+import { msgBulk, msgHv } from "../../lib/messages-hostsview";
 import { msgSelect } from "../../lib/messages-select";
 import { isMac } from "../../lib/platform";
 import { type OpenLayout } from "../../app/multiOpen";
@@ -64,6 +75,7 @@ import { HostPanel, type PanelTarget } from "./HostPanel";
 import { groupPath } from "./hostForm";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
+import { MultiRunDialog } from "../snippets/MultiRunDialog";
 import { OsIcon } from "./OsIcon";
 import { MAX_LOCATIONS } from "../sftp/SftpPane";
 import { useIsProduction } from "./production";
@@ -89,26 +101,6 @@ export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   }
 }
 
-/** Groups as a depth-first tree with their nesting level, siblings by name. */
-function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number }[] {
-  const children = new Map<string | null, GroupSummary[]>();
-  for (const g of groups) {
-    const list = children.get(g.parentId) ?? [];
-    list.push(g);
-    children.set(g.parentId, list);
-  }
-  const out: { group: GroupSummary; depth: number }[] = [];
-  const walk = (parent: string | null, depth: number) => {
-    const list = (children.get(parent) ?? []).sort((a, b) => a.name.localeCompare(b.name));
-    for (const g of list) {
-      out.push({ group: g, depth });
-      if (depth < 16) walk(g.id, depth + 1);
-    }
-  };
-  walk(null, 0);
-  return out;
-}
-
 function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
   const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
@@ -121,7 +113,7 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 }
 
 /** How Hosts is shown until the user changes it; the choice is kept in preferences. */
-const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "all" } };
+const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "none" }, connectHintUses: 0 };
 
 /** What an optimistic bulk change looks like before the vault answers (the reload brings the exact result). */
 function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { kind: "delete" }>): HostSummary {
@@ -141,27 +133,8 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
 /** How long after a click a second one still makes a double-click (the common system default). */
 const DOUBLE_CLICK_MS = 300;
 
-/** Times a host is connected from Hosts by double-click or Enter before the hint stops showing. */
+/** Connections from Hosts by double-click or Enter before the "Double-click to connect" hint stops. */
 const HINT_UNTIL = 3;
-
-/**
- * Connections made from Hosts by double-click or Enter in this run of the app. Kept in memory only:
- * app code never uses browser storage (scripts/check-release.mjs), so the hint shows again for the
- * first few connections after each start.
- */
-let hintUses = 0;
-
-/** The "Double-click to connect" hint on host names, for the first few connections from Hosts. */
-function useDoubleClickHint() {
-  const [count, setCount] = useState(hintUses);
-  return {
-    show: count < HINT_UNTIL,
-    used: () => {
-      hintUses += 1;
-      setCount(hintUses);
-    },
-  };
-}
 
 /** Ctrl on Windows and Linux, Cmd on macOS: the "add to the selection" modifier. */
 const toggleKey = (event: { ctrlKey: boolean; metaKey: boolean }) => (isMac ? event.metaKey : event.ctrlKey);
@@ -174,6 +147,7 @@ function HostsViewImpl({
   onConnectSplit,
   onOpenSftp,
   onOpenSftpMany,
+  onLocal,
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
@@ -187,6 +161,8 @@ function HostsViewImpl({
   onOpenSftp?: (host: HostSummary) => void;
   /** Open in SFTP for a selection: one SFTP tab, each host a location of it. */
   onOpenSftpMany?: (hosts: HostSummary[]) => void;
+  /** "Terminal": a terminal on this computer. */
+  onLocal?: () => void;
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
@@ -206,6 +182,14 @@ function HostsViewImpl({
   const setLayout = (next: HostsLayout) => setView({ layout: next });
   const setSort = (next: HostsSort) => setView({ sort: next });
   const setFilter = (next: HostsFilter) => setView({ filter: next });
+  // The hint count lives with the other Hosts preferences, so it survives restarts.
+  const hintUses = view.connectHintUses ?? 0;
+  const hint = {
+    show: hintUses < HINT_UNTIL,
+    used: () => {
+      if (hintUses < HINT_UNTIL) setView({ connectHintUses: hintUses + 1 });
+    },
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
   // state (what is not autosaved: a password typed but not set, note edits).
@@ -216,13 +200,13 @@ function HostsViewImpl({
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const groupsRef = useRef<HTMLUListElement>(null);
   // Selection is shown by the row tint and edge; assistive technology hears "Selected" after the name.
   const selectedNoteId = useId();
-  const hint = useDoubleClickHint();
   const [narrow, setNarrow] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [deleting, setDeleting] = useState<HostSummary | null>(null);
-  const [menu, setMenu] = useState<{ host: HostSummary; anchor: HTMLElement } | null>(null);
+  const [menu, setMenu] = useState<{ host: HostSummary; anchor: HTMLElement; point?: { x: number; y: number } | undefined } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ group: GroupSummary; anchor: HTMLElement } | null>(null);
   const [editingGroup, setEditingGroup] = useState<{ group: GroupSummary | null; parentId?: string | null } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<GroupSummary | null>(null);
@@ -251,7 +235,6 @@ function HostsViewImpl({
   const savedFilter = view.filter;
   const filter: HostsFilter =
     savedFilter.kind === "group" && groups.value && !groups.value.some((g) => g.id === savedFilter.id) ? { kind: "all" } : savedFilter;
-  const tree = useMemo(() => groupTree(groupList), [groupList]);
 
   // Hosts with an open session, from the user's own tabs (no probing of servers).
   const connected = useMemo(() => {
@@ -334,14 +317,16 @@ function HostsViewImpl({
     };
   }, [query, hosts.value]);
 
+  // Sections (docs/design/revamp.md): at the top, the top-level groups and the hosts in no group
+  // (or every host with "Show all hosts"); inside a group, its subgroups and its own hosts. A
+  // search is flat: every matching host, with where it lives.
+  const searching = query.trim() !== "";
   const filtered = useMemo(() => {
     let all = [...(hosts.value ?? [])];
-    if (filter.kind === "none") all = all.filter((h) => !h.groupId);
-    if (filter.kind === "group") {
-      const inside = descendantsOf(groupList, filter.id);
-      all = all.filter((h) => h.groupId !== null && inside.has(h.groupId));
-    }
-    if (query.trim() && searched) all = all.filter((h) => searched.ids.has(h.id));
+    if (searching) {
+      if (searched) all = all.filter((h) => searched.ids.has(h.id));
+    } else if (filter.kind === "none") all = all.filter((h) => !h.groupId);
+    else if (filter.kind === "group") all = all.filter((h) => h.groupId === filter.id);
     const byLabel = (a: HostSummary, b: HostSummary) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
     const path = (h: HostSummary) => (h.groupId ? groupPath(groupList, h.groupId) : "");
     if (sort === "name") all.sort(byLabel);
@@ -350,11 +335,55 @@ function HostsViewImpl({
     // Hosts without a group last.
     if (sort === "group") all.sort((a, b) => Number(!a.groupId) - Number(!b.groupId) || path(a).localeCompare(path(b)) || byLabel(a, b));
     return all;
-  }, [hosts.value, query, searched, sort, filter, groupList]);
+  }, [hosts.value, searching, searched, sort, filter, groupList]);
 
   const total = hosts.value?.length ?? 0;
-  // quick connect: offered once the search for this exact text found no host.
-  const quickTarget = query.trim() && searched?.query === query.trim() && filtered.length === 0 ? parseAddress(query) : null;
+  const favourites = useMemo(() => (hosts.value ?? []).filter((h) => h.favourite).sort((a, b) => a.label.localeCompare(b.label)), [hosts.value]);
+  const shownGroups = useMemo(() => {
+    const byName = (a: GroupSummary, b: GroupSummary) => a.name.localeCompare(b.name);
+    if (searching) {
+      const needle = query.trim().toLowerCase();
+      // Search terms like tag:… or os:… name hosts, not groups.
+      return needle.includes(":") ? [] : groupList.filter((g) => g.name.toLowerCase().includes(needle)).sort(byName);
+    }
+    const parent = filter.kind === "group" ? filter.id : null;
+    return groupList.filter((g) => g.parentId === parent).sort(byName);
+  }, [searching, query, filter, groupList]);
+  /** The open group and the groups above it, outermost first. */
+  const trail = useMemo(() => {
+    const out: GroupSummary[] = [];
+    let id: string | null = filter.kind === "group" ? filter.id : null;
+    for (let depth = 0; id && depth < 32; depth += 1) {
+      const g = groupList.find((x) => x.id === id);
+      if (!g) break;
+      out.unshift(g);
+      id = g.parentId;
+    }
+    return out;
+  }, [filter, groupList]);
+  // Where "Hosts" in the breadcrumb goes back to: the top level as it was left.
+  const topKind = useRef<"all" | "none">(filter.kind === "all" ? "all" : "none");
+  if (filter.kind === "all" || filter.kind === "none") topKind.current = filter.kind;
+  const showPath = searching || filter.kind === "all";
+  const drill = (group: GroupSummary) => {
+    setFilter({ kind: "group", id: group.id });
+    requestAnimationFrame(() => groupsRef.current?.querySelector<HTMLElement>(".group-open")?.focus() ?? listRef.current?.querySelector<HTMLElement>(".host-open")?.focus());
+  };
+  const tagFilter = /^tag:(\S+)$/.exec(query.trim())?.[1] ?? null;
+  const allTags = useMemo(() => [...new Set((hosts.value ?? []).flatMap((h) => h.tags))].sort((a, b) => a.localeCompare(b)), [hosts.value]);
+  const [addMenu, setAddMenu] = useState<HTMLElement | null>(null);
+  const [tagMenu, setTagMenu] = useState<HTMLElement | null>(null);
+  const [sortMenu, setSortMenu] = useState<HTMLElement | null>(null);
+  // quick connect: an address typed in the search that matches no host opens a new tab for it.
+  const quickTarget = searching && filtered.length === 0 ? parseAddress(query) : null;
+  const canSubmit = searching && (filtered.length > 0 || (quickTarget !== null && onQuickConnect !== undefined));
+  /** Enter or Connect in the search bar: the first match connects; an unknown address opens quick connect. */
+  function submitSearch() {
+    if (!searching) return;
+    const first = filtered[0];
+    if (first) connectFrom(first);
+    else if (quickTarget && onQuickConnect) startQuick(quickTarget);
+  }
   function startQuick(target: QuickTarget) {
     setQuery("");
     onQuickConnect?.(target);
@@ -401,6 +430,15 @@ function HostsViewImpl({
   // click of a double-click must not shrink what the double-click opens.
   const replaced = useRef<{ id: string; ids: Set<string> } | null>(null);
   const shownIds = filtered.map((h) => h.id);
+  // Long lists are windowed: only the hosts near the visible part are in the DOM. Their rows come
+  // and go as the list scrolls, so they carry no FLIP key while windowed (nothing animates in).
+  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef);
+  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef);
+  const listWindow = layout === "grid" ? gridWindow : rowWindow;
+  const windowItem = (host: HostSummary, i: number) =>
+    listWindow.windowed
+      ? { "data-window-item": true, "aria-setsize": filtered.length, "aria-posinset": listWindow.start + i + 1 }
+      : { "data-window-item": true, "data-flip-key": host.id };
   const selectWith = (id: string, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const additive = toggleKey(event);
     const from = anchor.current;
@@ -464,13 +502,38 @@ function HostsViewImpl({
     else if (how === "split" && onConnectSplit) onConnectSplit(host);
     else onConnect(host);
   };
-  const focusHost = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-host-id="${CSS.escape(id)}"] .host-open`)?.focus();
+  const hostButton = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-host-id="${CSS.escape(id)}"] .host-open`);
+  /** Focuses a host; in a windowed list it is scrolled into the DOM first, then focused once drawn. */
+  const focusHost = (id: string) => {
+    if (!listWindow.windowed) {
+      hostButton(id)?.focus();
+      return;
+    }
+    listWindow.scrollToIndex(shownIds.indexOf(id));
+    requestAnimationFrame(() => hostButton(id)?.focus());
+  };
   /** Hosts per row in the card grid (1 in the list), from where the cards are laid out. */
   const perRow = () => {
     const items = [...(listRef.current?.children ?? [])] as HTMLElement[];
     const top = items[0]?.offsetTop;
     const n = items.filter((el) => el.offsetTop === top).length;
     return layout === "grid" ? Math.max(1, n) : 1;
+  };
+  /** Group rows: arrows move between them and on into the hosts; Enter opens (the button does). */
+  const onGroupKey = (event: KeyboardEvent<HTMLUListElement>) => {
+    const buttons = [...(groupsRef.current?.querySelectorAll<HTMLElement>(".group-open") ?? [])];
+    const index = buttons.indexOf(event.target as HTMLElement);
+    if (index < 0) return;
+    const down = event.key === "ArrowDown" || (layout === "grid" && event.key === "ArrowRight");
+    const up = event.key === "ArrowUp" || (layout === "grid" && event.key === "ArrowLeft");
+    if (!down && !up) return;
+    event.preventDefault();
+    const next = buttons[index + (down ? 1 : -1)];
+    if (next) next.focus();
+    else if (down) {
+      const first = filtered[0];
+      if (first) focusHost(first.id);
+    }
   };
   const onListKey = (event: KeyboardEvent<HTMLUListElement>) => {
     const target = event.target as HTMLElement;
@@ -497,6 +560,15 @@ function HostsViewImpl({
       if (layout === "list" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) return;
       event.preventDefault();
       const index = shownIds.indexOf(current);
+      // Up from the first host goes to the last group row above.
+      if (index === 0 && step < 0 && !event.shiftKey && event.key !== "Home") {
+        const groupButtons = groupsRef.current?.querySelectorAll<HTMLElement>(".group-open");
+        const last = groupButtons?.[groupButtons.length - 1];
+        if (last) {
+          last.focus();
+          return;
+        }
+      }
       const nextId = shownIds[Math.min(shownIds.length - 1, Math.max(0, index + step))];
       if (!nextId) return;
       if (toggleKey(event) && !event.shiftKey) {
@@ -521,6 +593,12 @@ function HostsViewImpl({
     if (event.key === "Enter") {
       event.preventDefault();
       connectFrom(host, toggleKey(event) ? "split" : event.shiftKey ? "sftp" : "connect");
+      return;
+    }
+    // Shift+F10 or the Menu key: the same menu as a right-click.
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      actions(host, target);
       return;
     }
     // Space adds the host to the selection or takes it out, like Cmd/Ctrl-click.
@@ -564,7 +642,33 @@ function HostsViewImpl({
     reload();
   }
 
-  const actions = (host: HostSummary, anchor: HTMLElement) => setMenu({ host, anchor });
+  /**
+   * The host menu (right-click, "…", Shift+F10): on a host of a multi-selection it acts on the whole
+   * selection; on any other host it selects just that host first, as Finder does.
+   */
+  const actions = (host: HostSummary, at: HTMLElement, point?: { x: number; y: number }) => {
+    if (selected.has(host.id) && selected.size > 1) {
+      setBulkMenu({ anchor: at, point });
+      return;
+    }
+    anchor.current = host.id;
+    setSelected(new Set([host.id]));
+    setMenu({ host, anchor: at, point });
+  };
+  /** A right-click opens the menu at the pointer. */
+  const contextMenu = (host: HostSummary, event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    actions(host, event.currentTarget, { x: event.clientX, y: event.clientY });
+  };
+  const [bulkMenu, setBulkMenu] = useState<{ anchor: HTMLElement; point?: { x: number; y: number } | undefined } | null>(null);
+  const [runOn, setRunOn] = useState<string[] | null>(null);
+  const copyAddresses = (list: HostSummary[]) => {
+    // A user-initiated copy of non-secret data, one address per line.
+    void navigator.clipboard
+      .writeText(list.map((h) => h.address).join("\n"))
+      .then(() => notify("success", msgBulk.copied(list.length)))
+      .catch(() => undefined);
+  };
 
   // The panel takes the whole view when the list and the panel do not both fit.
   useEffect(() => {
@@ -598,9 +702,34 @@ function HostsViewImpl({
     const back = opener.current;
     opener.current = null;
     panelUnsaved.current = { password: false, note: false };
+    // Closing by pointer: the panel fades out as an inert copy while the cards glide back.
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (el) playExit(el, { transform: "translateX(16px)" });
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
+  // Host details motion (docs/design/motion.md; owner request). One mechanism: the list takes its
+  // new width at once and the cards that move glide there (useFlip on the list), while the panel's
+  // content slides in 16 px and fades. Animating the panel's width instead would reflow the grid on
+  // every frame, so cards would jump between column counts. Switching hosts with the panel open
+  // only crossfades the content. Closing, an inert copy of the panel fades (closePanel) and the
+  // cards glide back. Keyboard opens and closes, and reduced motion, are instant.
+  const shownPanel = useRef<typeof panel>(null);
+  useLayoutEffect(() => {
+    const was = shownPanel.current;
+    shownPanel.current = panel;
+    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
+    if (!el || !panel) return;
+    const ms = motionMs("--duration-base");
+    if (ms <= 0 || openedBy() !== "pointer") return;
+    const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
+    if (!was) {
+      const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
+      for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
+    } else if (was.version !== panel.version) {
+      for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    }
+  }, [panel]);
   const panelHostId = panel?.target.kind === "edit" ? panel.target.host.id : null;
   const currentGroupId = filter.kind === "group" ? filter.id : null;
   const groupName = (id: string | null) => (id ? groupPath(groupList, id) : null);
@@ -608,21 +737,46 @@ function HostsViewImpl({
   return (
     <div className="hosts-layout" ref={layoutRef} data-narrow={narrow} data-panel={panel !== null}>
       <div className="page hosts-main" inert={narrow && panel !== null}>
+        <h1 id="hosts-title" className="visually-hidden">
+          {msg.hosts.title}
+        </h1>
+        <form
+          className="hosts-search"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitSearch();
+          }}
+        >
+          <IconSearch size={16} />
+          <input
+            className="input hosts-search-input"
+            type="search"
+            placeholder={msgHv.searchPlaceholder}
+            aria-label={msg.hosts.searchLabel}
+            title={msg.hosts.searchHelp}
+            ref={searchRef}
+            value={query}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown") return;
+              event.preventDefault();
+              const group = groupsRef.current?.querySelector<HTMLElement>(".group-open");
+              if (group) group.focus();
+              else if (filtered[0]) focusHost(filtered[0].id);
+            }}
+          />
+          <button type="submit" className="btn btn-primary" title={filtered.length === 0 && quickTarget ? msgQuick.option(formatTarget(quickTarget)) : msgHv.connectHint} disabled={!canSubmit}>
+            <IconPlay size={14} />
+            {msgHv.connect}
+          </button>
+        </form>
         <section className="page-inner" aria-labelledby="hosts-title">
-          <div className="page-header">
-            <div className="page-title">
-              <h1 id="hosts-title">{msg.hosts.title}</h1>
-              {total > 0 && <p>{msg.hosts.subtitle(total)}</p>}
-            </div>
-            <div className="row-flex">
-              <button type="button" className="btn" onClick={() => setDiscovering(true)}>
-                <IconNetwork size={15} />
-                {msgDiscovery.open}
-              </button>
-              <button type="button" className="btn" onClick={() => setImporting(true)}>
-                <IconUpload size={15} />
-                {msg.hosts.import}
-              </button>
+
+          <div className="hosts-toolbar" role="toolbar" aria-label={msgHv.toolbar}>
+            <div className="split-button">
               <button
                 ref={addButton}
                 type="button"
@@ -630,94 +784,73 @@ function HostsViewImpl({
                 aria-expanded={panel?.target.kind === "new"}
                 onClick={() => openPanel({ kind: "new" })}
               >
-                <IconPlus size={16} />
-                {msg.hosts.add}
+                <IconPlus size={15} />
+                {msgHv.newHost}
               </button>
+              <IconButton label={msgHv.moreNew} aria-haspopup="menu" className="split-button-more" onClick={(event) => setAddMenu(event.currentTarget)}>
+                <IconChevronDown size={14} />
+              </IconButton>
             </div>
+            {onLocal && (
+              <button type="button" className="btn" title={msgHv.terminalHint} onClick={onLocal}>
+                <IconSquareTerminal size={15} />
+                {msgHv.terminal}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn"
+              title={msgHv.serialHint}
+              onClick={() => openPanel({ kind: "new", initial: { address: "", port: 0, username: "", protocol: "serial" } })}
+            >
+              <IconPlug size={15} />
+              {msgHv.serial}
+            </button>
+            <span className="spacer" />
+            <IconButton label={msgHv.tags} aria-haspopup="menu" data-active={tagFilter !== null || undefined} onClick={(event) => setTagMenu(event.currentTarget)}>
+              <IconTag size={15} />
+            </IconButton>
+            <IconButton label={msgHv.sort} aria-haspopup="menu" onClick={(event) => setSortMenu(event.currentTarget)}>
+              <IconArrowUpDown size={15} />
+            </IconButton>
+            <Segmented<HostsLayout>
+              label={msg.hosts.view}
+              value={layout}
+              onChange={setLayout}
+              iconOnly
+              options={[
+                { value: "list", label: msg.hosts.viewList, icon: <IconList size={15} /> },
+                { value: "grid", label: msg.hosts.viewGrid, icon: <IconLayoutGrid size={15} /> },
+              ]}
+            />
           </div>
 
-          {(total > 0 || groupList.length > 0) && (
-            <div className="group-bar" role="navigation" aria-label={msg.hosts.groupsLabel} data-testid="group-bar">
-              <button type="button" className="chip" aria-pressed={filter.kind === "all"} onClick={() => setFilter({ kind: "all" })}>
-                {msg.hosts.allHosts}
+          {filter.kind === "group" && !searching && (
+            <nav className="hosts-breadcrumb" aria-label={msgHv.breadcrumb} data-testid="breadcrumb">
+              <button type="button" className="crumb" onClick={() => setFilter({ kind: topKind.current })}>
+                {msgHv.root}
               </button>
-              {groupList.length > 0 && (
-                <button type="button" className="chip" aria-pressed={filter.kind === "none"} onClick={() => setFilter({ kind: "none" })}>
-                  {msg.hosts.ungrouped}
-                </button>
-              )}
-              {tree.map(({ group, depth }) => (
-                <span key={group.id} className="chip-group" style={{ marginInlineStart: depth > 0 ? 4 : 0 }}>
-                  <button
-                    type="button"
-                    className="chip"
-                    aria-pressed={filter.kind === "group" && filter.id === group.id}
-                    title={groupPath(groupList, group.id)}
-                    onClick={() => setFilter({ kind: "group", id: group.id })}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setGroupMenu({ group, anchor: event.currentTarget });
-                    }}
-                  >
-                    <IconFolder size={13} />
-                    {depth > 0 ? `${"› ".repeat(Math.min(depth, 3))}${group.name}` : group.name}
-                  </button>
-                  <IconButton size="sm" label={msg.hosts.groupActions(group.name)} aria-haspopup="menu" onClick={(event) => setGroupMenu({ group, anchor: event.currentTarget })}>
-                    <IconEllipsis size={14} />
-                  </IconButton>
+              {trail.map((g, i) => (
+                <span key={g.id} className="crumb-step">
+                  <IconChevronRight size={13} className="faint" />
+                  {i === trail.length - 1 ? (
+                    <span className="crumb crumb-current" aria-current="page">
+                      {g.name}
+                    </span>
+                  ) : (
+                    <button type="button" className="crumb" onClick={() => setFilter({ kind: "group", id: g.id })}>
+                      {g.name}
+                    </button>
+                  )}
                 </span>
               ))}
-              <button type="button" className="chip chip-ghost" onClick={() => setEditingGroup({ group: null, parentId: currentGroupId })}>
-                <IconFolderPlus size={13} />
-                {msg.hosts.newGroup}
-              </button>
-            </div>
-          )}
-
-          {total > 0 && (
-            <div className="toolbar">
-              <div className="input-with-icon">
-                <IconSearch size={15} />
-                <input
-                  className="input"
-                  type="search"
-                  placeholder={msg.common.search}
-                  aria-label={msg.hosts.searchLabel}
-                  title={msg.hosts.searchHelp}
-                  ref={searchRef}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    // quick connect: Enter on an address that matches no host.
-                    if (event.key === "Enter" && quickTarget && onQuickConnect) {
-                      event.preventDefault();
-                      startQuick(quickTarget);
-                    }
-                  }}
-                />
-              </div>
-              <span className="spacer" />
-              <Segmented<HostsSort>
-                label={msg.hosts.sort}
-                value={sort}
-                onChange={setSort}
-                options={[
-                  { value: "name", label: msg.hosts.sortName },
-                  { value: "recent", label: msg.hosts.sortRecent },
-                  { value: "address", label: msgD.inventory.sortAddress },
-                  { value: "group", label: msgD.inventory.sortGroup },
-                ]}
-              />
-              <Segmented<HostsLayout>
-                label={msg.hosts.view}
-                value={layout}
-                onChange={setLayout}
-                options={[
-                  { value: "grid", label: msg.hosts.viewGrid, icon: <IconLayoutGrid size={14} /> },
-                  { value: "list", label: msg.hosts.viewList, icon: <IconList size={14} /> },
-                ]}
-              />
-            </div>
+              <IconButton size="sm" label={msgHv.groupActions(trail.at(-1)?.name ?? "")} aria-haspopup="menu" onClick={(event) => {
+                const g = trail.at(-1);
+                if (g) setGroupMenu({ group: g, anchor: event.currentTarget });
+              }}>
+                <IconEllipsis size={14} />
+              </IconButton>
+            </nav>
           )}
 
           <ErrorNotice error={hosts.error ?? remove.error ?? action.error} />
@@ -729,23 +862,9 @@ function HostsViewImpl({
             <EmptyState icon={<IconServer size={28} />} title={msg.hosts.emptyTitle} body={msg.hosts.emptyBody}>
               <button type="button" className="btn btn-primary" onClick={() => openPanel({ kind: "new" })}>
                 <IconPlus size={16} />
-                {msg.hosts.add}
+                {msgHv.newHost}
               </button>
             </EmptyState>
-          )}
-
-          {total > 0 && filtered.length === 0 && (
-            <p className="muted">
-              {msg.hosts.noMatch}
-              {quickTarget && onQuickConnect && (
-                <>
-                  {" "}
-                  <button type="button" className="btn btn-sm" onClick={() => startQuick(quickTarget)}>
-                    {msgQuick.option(formatTarget(quickTarget))}
-                  </button>
-                </>
-              )}
-            </p>
           )}
 
           {bulkCount > 0 && (
@@ -753,37 +872,25 @@ function HostsViewImpl({
               <strong>{msg.hosts.selected(selectedIds.length)}</strong>
               <button
                 type="button"
-                className="btn btn-sm btn-primary"
+                className="btn btn-sm btn-ghost"
                 onClick={() => setConnectAll({ hosts: (hosts.value ?? []).filter((h) => selected.has(h.id)), groupName: null })}
               >
                 <IconPlay size={13} />
                 {msgSelect.connectN(selectedIds.length)}
               </button>
-              {openSelectionInSftp && (
-                <button type="button" className="btn btn-sm" onClick={openSelectionInSftp}>
-                  <IconArrowLeftRight size={13} />
-                  {msgSelect.openInSftp(sftpSelection.length)}
-                </button>
-              )}
               {groupList.length > 0 && (
-                <button type="button" className="btn btn-sm" onClick={() => setBulk("move")}>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setBulk("move")}>
                   <IconFolder size={13} />
                   {msg.hosts.moveTo}
                 </button>
               )}
-              <button type="button" className="btn btn-sm" onClick={() => setSettingOs({ ids: selectedIds, initial: null })}>
-                <IconServer size={13} />
-                {msgD.inventory.setOs}
-              </button>
-              <button type="button" className="btn btn-sm" onClick={() => setBulk("add_tag")}>
-                {msg.hosts.addTag}
-              </button>
-              <button type="button" className="btn btn-sm" onClick={() => setBulk("remove_tag")}>
-                {msg.hosts.removeTag}
-              </button>
-              <button type="button" className="btn btn-sm btn-danger" onClick={() => setBulk("delete")}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setBulk("delete")}>
                 <IconTrash2 size={13} />
                 {msg.common.delete}
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" aria-haspopup="menu" onClick={(event) => setBulkMenu({ anchor: event.currentTarget })}>
+                <IconEllipsis size={13} />
+                {msgBulk.more}
               </button>
               <span className="spacer" />
               <button type="button" className="btn btn-sm btn-ghost" aria-label={msg.hosts.clearSelection} onClick={() => setSelected(new Set())}>
@@ -793,159 +900,301 @@ function HostsViewImpl({
             </div>
           )}
 
-          <span id={selectedNoteId} className="visually-hidden">
-            {msgSelect.selectedNote}
-          </span>
-          {layout === "grid" ? (
-            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
-              {filtered.map((host) => {
-                const isConnected = connected.has(host.id);
-                return (
-                  <li key={host.id} data-flip-key={host.id}>
-                    <article
-                      className="host-card"
-                      data-connected={isConnected}
-                      data-active={panelHostId === host.id}
-                      data-pending={pendingIds.has(host.id) || undefined}
-                      data-selected={selected.has(host.id) || undefined}
-                      data-host-id={host.id}
-                      aria-label={host.label}
-                      onClick={(event) => {
-                        if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
-                        rowClick(host, event);
-                      }}
-                      onDoubleClick={(event) => {
-                        if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
-                        connectFrom(host, "connect", true);
-                      }}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        actions(host, event.currentTarget);
-                      }}
-                    >
-                      {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
-                      <div className="host-card-main">
-                        <span className="host-card-title">
-                          <button
-                            type="button"
-                            className="host-open truncate"
-                            aria-current={panelHostId === host.id ? true : undefined}
-                            data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
-                            aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              rowClick(host, event);
-                            }}
-                          >
-                            {host.label}
-                          </button>
-                        </span>
-                        <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
-                        {(host.groupId || host.tags.length > 0) && (
-                          <span className="host-card-tags">
-                            {host.groupId && (
-                              <span className="tag tag-group">
-                                <IconFolder size={11} />
-                                {groupName(host.groupId)}
-                              </span>
-                            )}
-                            {host.tags.map((tag) => (
-                              <span key={tag} className="tag">
-                                {tag}
-                              </span>
-                            ))}
-                          </span>
-                        )}
-                      </div>
-                      <div className="host-card-meta">
-                        <div className="host-card-badges">
-                        {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
-                        {identityOf(host.id) ? (
-                          <span className="badge">
-                            <IconUser size={12} />
-                            {identityOf(host.id)}
-                          </span>
-                        ) : (
-                          <AuthBadge host={host} keys={keyList} />
-                        )}
-                        {isConnected ? (
-                          <span className="badge badge-success">
-                            <span className="status-dot" data-tone="ok" aria-hidden="true" />
-                            {msg.hosts.connectedNow}
-                          </span>
-                        ) : (
-                          <span className="badge">
-                            {host.lastConnectedAt ? msg.hosts.lastConnected(relativeTime(host.lastConnectedAt)) : msg.hosts.neverConnected}
-                          </span>
-                        )}
-                        </div>
-                      </div>
-                      <div className="host-card-actions">
-                        <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
-                          <IconEllipsis size={16} />
-                        </IconButton>
-                      </div>
-                    </article>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
-              {filtered.map((host) => (
-                <li
-                  key={host.id}
-                  data-flip-key={host.id}
-                  data-active={panelHostId === host.id}
-                  data-pending={pendingIds.has(host.id) || undefined}
-                  data-selected={selected.has(host.id) || undefined}
-                  data-host-id={host.id}
-                  onClick={(event) => {
-                    if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
-                    rowClick(host, event);
-                  }}
-                  onDoubleClick={(event) => {
-                    if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
-                    connectFrom(host, "connect", true);
-                  }}
-                >
-                  {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
-                  <div className="row-main">
+          {favourites.length > 0 && !searching && filter.kind !== "group" && (
+            <section className="hosts-section" aria-labelledby="hosts-fav-title">
+              <div className="box-strip hosts-section-head">
+                <h2 id="hosts-fav-title">{msgBulk.favourites}</h2>
+                <span className="count">{favourites.length}</span>
+              </div>
+              <ul className="fav-strip" aria-label={msgBulk.favourites}>
+                {favourites.map((h) => (
+                  <li key={h.id}>
                     <button
                       type="button"
-                      className="host-open row-title"
-                      aria-current={panelHostId === host.id ? true : undefined}
-                      data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
-                      aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
+                      className="fav-tile"
+                      aria-label={h.label}
+                      title={msgSelect.doubleClickHint}
+                      aria-current={panelHostId === h.id ? true : undefined}
                       onClick={(event) => {
-                        event.stopPropagation();
-                        rowClick(host, event);
+                        if (event.detail > 1) return;
+                        openPanel({ kind: "edit", host: h });
+                      }}
+                      onDoubleClick={() => onConnect(h)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        if (toggleKey(event) && onConnectSplit) onConnectSplit(h);
+                        else if (event.shiftKey) {
+                          if (h.protocol.type === "ssh") onOpenSftp?.(h);
+                        } else onConnect(h);
                       }}
                     >
-                      {host.label}
+                      <OsIcon os={osOf.get(h.id) ?? null} size="sm" />
+                      <span className="truncate">{h.label}</span>
                     </button>
-                    <span className="row-sub">
-                      {msg.hosts.destination(host.username, host.address, host.port)} · {identityOf(host.id) ?? authSummary(host, keyList)}
-                      {host.groupId ? ` · ${groupName(host.groupId)}` : ""}
-                      {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
-                    </span>
-                  </div>
-                  {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
-                  {connected.has(host.id) && (
-                    <span className="badge badge-success">
-                      <span className="status-dot" data-tone="ok" aria-hidden="true" />
-                      {msg.hosts.connectedNow}
-                    </span>
-                  )}
-                  <div className="row-actions">
-                    <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
-                      <IconEllipsis size={16} />
-                    </IconButton>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
+
+          {shownGroups.length > 0 && (
+            <section className="hosts-section" aria-labelledby="hosts-groups-title" data-testid="group-bar">
+              <div className="box-strip hosts-section-head">
+                <h2 id="hosts-groups-title">{msgHv.groups}</h2>
+                <span className="count">{shownGroups.length}</span>
+                <span className="spacer" />
+                <IconButton size="sm" label={msg.hosts.newGroup} onClick={() => setEditingGroup({ group: null, parentId: currentGroupId })}>
+                  <IconFolderPlus size={14} />
+                </IconButton>
+              </div>
+              <ul className={layout === "grid" ? "tile-grid group-grid" : "list group-list"} aria-label={msgHv.groups} ref={groupsRef} onKeyDown={onGroupKey}>
+                {shownGroups.map((g) => (
+                  <li
+                    key={g.id}
+                    className="group-row"
+                    data-group-id={g.id}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button")) return;
+                      drill(g);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setGroupMenu({ group: g, anchor: event.currentTarget });
+                    }}
+                  >
+                    <span className="group-tile" aria-hidden="true">
+                      <IconFolder size={18} />
+                    </span>
+                    <div className="row-main">
+                      <button type="button" className="group-open row-title" title={groupPath(groupList, g.id)} onClick={() => drill(g)}>
+                        {g.name}
+                      </button>
+                      <span className="row-sub">
+                        {msgHv.hostCount(hostsInGroup(g.id).length)}
+                        {searching && g.parentId ? ` · ${groupPath(groupList, g.parentId)}` : ""}
+                      </span>
+                    </div>
+                    {g.production && <span className="badge badge-production">{msgProduction.label}</span>}
+                    <div className="row-actions">
+                      <IconButton size="sm" label={msg.hosts.groupActions(g.name)} aria-haspopup="menu" onClick={(event) => setGroupMenu({ group: g, anchor: event.currentTarget })}>
+                        <IconEllipsis size={16} />
+                      </IconButton>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="hosts-section" aria-labelledby="hosts-list-title">
+            {total > 0 && (
+              <div className="box-strip hosts-section-head">
+                <h2 id="hosts-list-title">{searching ? msgHv.results : msgHv.hosts}</h2>
+                <span className="count">{filtered.length}</span>
+                <span className="spacer" />
+                {!searching && filter.kind !== "group" && groupList.length > 0 && (
+                  <button type="button" className="chip" aria-pressed={filter.kind === "all"} onClick={() => setFilter({ kind: filter.kind === "all" ? "none" : "all" })}>
+                    {msgHv.showAll}
+                  </button>
+                )}
+              </div>
+            )}
+            {total > 0 && filtered.length === 0 && (
+              // Short: with a search, Connect in the search box (or Enter) starts quick connect.
+              <p className="muted hosts-empty">{searching ? msgHv.noSavedMatch : filter.kind === "group" ? msgHv.emptyGroup : msgHv.noUngrouped}</p>
+            )}
+
+            <span id={selectedNoteId} className="visually-hidden">
+              {msgSelect.selectedNote}
+            </span>
+            {layout === "grid" ? (
+              <ul
+                className="tile-grid host-grid"
+                aria-label={searching ? msgHv.results : msgHv.hosts}
+                data-testid="host-list"
+                ref={listRef}
+                style={gridWindow.style}
+                data-windowed={gridWindow.windowed || undefined}
+                onKeyDown={onListKey}
+              >
+                {filtered.slice(gridWindow.start, gridWindow.end).map((host, i) => {
+                  const isConnected = connected.has(host.id);
+                  return (
+                    <li key={host.id} {...windowItem(host, i)}>
+                      <article
+                        className="host-card"
+                        data-connected={isConnected}
+                        data-active={panelHostId === host.id}
+                        data-pending={pendingIds.has(host.id) || undefined}
+                        data-selected={selected.has(host.id) || undefined}
+                        data-host-id={host.id}
+                        aria-label={host.label}
+                        onClick={(event) => {
+                          if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
+                          rowClick(host, event);
+                        }}
+                        onDoubleClick={(event) => {
+                          if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
+                          connectFrom(host, "connect", true);
+                        }}
+                        onContextMenu={(event) => contextMenu(host, event)}
+                      >
+                        <OsIcon os={osOf.get(host.id) ?? null} />
+                        <div className="host-card-main">
+                          <span className="host-card-title">
+                            <button
+                              type="button"
+                              className="host-open truncate"
+                              aria-current={panelHostId === host.id ? true : undefined}
+                              data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
+                              aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                rowClick(host, event);
+                              }}
+                            >
+                              {host.label}
+                            </button>
+                            {host.favourite && (
+                              <span className="row-star" role="img" aria-label={msgBulk.favourite}>
+                                <IconStar size={12} fill="currentColor" />
+                              </span>
+                            )}
+                          </span>
+                          <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                          {(host.groupId || host.tags.length > 0) && (
+                            <span className="host-card-tags">
+                              {host.groupId && (
+                                <span className="tag tag-group">
+                                  <IconFolder size={11} />
+                                  {groupName(host.groupId)}
+                                </span>
+                              )}
+                              {host.tags.map((tag) => (
+                                <span key={tag} className="tag">
+                                  {tag}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                        <div className="host-card-meta">
+                          <div className="host-card-badges">
+                          {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
+                          {identityOf(host.id) ? (
+                            <span className="badge">
+                              <IconUser size={12} />
+                              {identityOf(host.id)}
+                            </span>
+                          ) : (
+                            <AuthBadge host={host} keys={keyList} />
+                          )}
+                          {isConnected ? (
+                            <span className="badge badge-success">
+                              <span className="status-dot" data-tone="ok" aria-hidden="true" />
+                              {msg.hosts.connectedNow}
+                            </span>
+                          ) : (
+                            <span className="badge">
+                              {host.lastConnectedAt ? msg.hosts.lastConnected(relativeTime(host.lastConnectedAt)) : msg.hosts.neverConnected}
+                            </span>
+                          )}
+                          </div>
+                        </div>
+                        <div className="host-card-actions">
+                          <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                            <IconEllipsis size={16} />
+                          </IconButton>
+                        </div>
+                      </article>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <ul
+                className="list host-rows"
+                aria-label={searching ? msgHv.results : msgHv.hosts}
+                data-testid="host-list"
+                ref={listRef}
+                style={rowWindow.style}
+                data-windowed={rowWindow.windowed || undefined}
+                onKeyDown={onListKey}
+              >
+                {filtered.slice(rowWindow.start, rowWindow.end).map((host, i) => (
+                  <li
+                    key={host.id}
+                    {...windowItem(host, i)}
+                    data-active={panelHostId === host.id}
+                    data-pending={pendingIds.has(host.id) || undefined}
+                    data-selected={selected.has(host.id) || undefined}
+                    data-host-id={host.id}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
+                      rowClick(host, event);
+                    }}
+                    onDoubleClick={(event) => {
+                      if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
+                      connectFrom(host, "connect", true);
+                    }}
+                    onContextMenu={(event) => contextMenu(host, event)}
+                  >
+                    <OsIcon os={osOf.get(host.id) ?? null} />
+                    <div className="row-main">
+                      <button
+                        type="button"
+                        className="host-open row-title"
+                        aria-current={panelHostId === host.id ? true : undefined}
+                        data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
+                        aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          rowClick(host, event);
+                        }}
+                      >
+                        {host.label}
+                      </button>
+                      <span className="row-sub">
+                        {msgHv.protocolUser(host.protocol.type, host.protocol.type === "serial" ? "" : (identityOf(host.id) ?? host.username))}
+                        {showPath && host.groupId ? ` · ${groupName(host.groupId)}` : ""}
+                      </span>
+                    </div>
+                    <span className="host-col-address mono truncate" title={msg.hosts.destination(host.username, host.address, host.port)}>
+                      {host.protocol.type === "serial" ? host.address : `${host.address}${host.port === 22 ? "" : `:${host.port}`}`}
+                    </span>
+                    <span className="host-col-badges">
+                      {host.favourite && (
+                        <span className="row-star" role="img" aria-label={msgBulk.favourite}>
+                          <IconStar size={12} fill="currentColor" />
+                        </span>
+                      )}
+                      {host.tags.slice(0, 3).map((tag) => (
+                        <span key={tag} className="tag">
+                          {tag}
+                        </span>
+                      ))}
+                      {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
+                      {connected.has(host.id) && (
+                        <span className="badge badge-success">
+                          <span className="status-dot" data-tone="ok" aria-hidden="true" />
+                          {msg.hosts.connectedNow}
+                        </span>
+                      )}
+                    </span>
+                    <div className="row-actions">
+                      <IconButton size="sm" className="row-edit" label={msgHv.edit(host.label)} onClick={() => openPanel({ kind: "edit", host })}>
+                        <IconPencil size={15} />
+                      </IconButton>
+                      <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                        <IconEllipsis size={16} />
+                      </IconButton>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </section>
       </div>
 
@@ -989,21 +1238,10 @@ function HostsViewImpl({
       {menu && (
         <Menu
           label={msg.hosts.more(menu.host.label)}
-          anchor={menu.anchor}
+          anchor={menu.point ? undefined : menu.anchor}
+          point={menu.point}
           onClose={() => setMenu(null)}
           items={[
-            // On a host of a multi-selection the menu acts on the whole selection first.
-            ...(selected.has(menu.host.id) && selectedHosts.length > 1
-              ? [
-                  {
-                    label: msgSelect.connectN(selectedHosts.length),
-                    icon: <IconPlay size={15} />,
-                    onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null }),
-                  },
-                  ...(openSelectionInSftp ? [{ label: msgSelect.openInSftp(sftpSelection.length), icon: <IconArrowLeftRight size={15} />, onSelect: openSelectionInSftp }] : []),
-                  "separator" as const,
-                ]
-              : []),
             { label: msg.hosts.connect, icon: <IconPlay size={15} />, onSelect: () => onConnect(menu.host) },
             ...(onConnectSplit ? [{ label: msgSelect.connectInSplit, icon: <IconColumns2 size={15} />, onSelect: () => onConnectSplit(menu.host) }] : []),
             ...(onOpenSftp && menu.host.protocol.type === "ssh"
@@ -1038,6 +1276,87 @@ function HostsViewImpl({
             },
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
           ]}
+        />
+      )}
+
+      {bulkMenu && (
+        <Menu
+          label={msgBulk.title(selectedHosts.length)}
+          anchor={bulkMenu.point ? undefined : bulkMenu.anchor}
+          point={bulkMenu.point}
+          onClose={() => setBulkMenu(null)}
+          items={[
+            { label: msgBulk.title(selectedHosts.length), disabled: true, onSelect: () => undefined },
+            "separator",
+            { label: msgBulk.connectTabs(selectedHosts.length), icon: <IconPlay size={15} />, onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null }) },
+            { label: msgBulk.connectSplit, icon: <IconColumns2 size={15} />, onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null, layout: "split" }) },
+            ...(openSelectionInSftp ? [{ label: msgBulk.sftp(sftpSelection.length), icon: <IconArrowLeftRight size={15} />, onSelect: openSelectionInSftp }] : []),
+            { label: msgBulk.run, icon: <IconScrollText size={15} />, onSelect: () => setRunOn(selectedHosts.map((h) => h.id)) },
+            "separator",
+            ...(groupList.length > 0 ? [{ label: msgBulk.move, icon: <IconFolder size={15} />, onSelect: () => setBulk("move") }] : []),
+            { label: msgBulk.setOs, icon: <IconServer size={15} />, onSelect: () => setSettingOs({ ids: selectedIds, initial: null }) },
+            { label: msgBulk.addTag, icon: <IconTag size={15} />, onSelect: () => setBulk("add_tag") },
+            { label: msgBulk.removeTag, onSelect: () => setBulk("remove_tag") },
+            ...(prefs.productionTag
+              ? [
+                  { label: msgBulk.markProduction(prefs.productionTag), onSelect: () => void applyOptimistic(selectedIds, { kind: "add_tag", tag: prefs.productionTag }) },
+                  { label: msgBulk.unmarkProduction(prefs.productionTag), onSelect: () => void applyOptimistic(selectedIds, { kind: "remove_tag", tag: prefs.productionTag }) },
+                ]
+              : []),
+            "separator",
+            { label: msgBulk.duplicate, icon: <IconCopy size={15} />, onSelect: () => void (async () => { for (const h of selectedHosts) await duplicate(h); })() },
+            { label: msgBulk.copyAddresses, icon: <IconClipboardCopy size={15} />, onSelect: () => copyAddresses(selectedHosts) },
+            "separator",
+            { label: msgBulk.remove(selectedHosts.length), icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setBulk("delete") },
+          ]}
+        />
+      )}
+
+      {runOn && <MultiRunDialog snippet={null} hostIds={runOn} onClose={() => setRunOn(null)} />}
+
+      {addMenu && (
+        <Menu
+          label={msgHv.moreNew}
+          anchor={addMenu}
+          onClose={() => setAddMenu(null)}
+          items={[
+            { label: msgHv.newGroup, icon: <IconFolderPlus size={15} />, onSelect: () => setEditingGroup({ group: null, parentId: currentGroupId }) },
+            { label: msgHv.importHosts, icon: <IconUpload size={15} />, onSelect: () => setImporting(true) },
+            { label: msgHv.findOnNetwork, icon: <IconNetwork size={15} />, onSelect: () => setDiscovering(true) },
+          ]}
+        />
+      )}
+
+      {tagMenu && (
+        <Menu
+          label={msgHv.tags}
+          anchor={tagMenu}
+          onClose={() => setTagMenu(null)}
+          items={
+            allTags.length === 0
+              ? [{ label: msgHv.noTags, disabled: true, onSelect: () => undefined }]
+              : [
+                  { label: msgHv.clearTag, checked: tagFilter === null, onSelect: () => setQuery("") },
+                  "separator" as const,
+                  ...allTags.map((tag) => ({ label: tag, checked: tagFilter === tag, onSelect: () => setQuery(`tag:${tag}`) })),
+                ]
+          }
+        />
+      )}
+
+      {sortMenu && (
+        <Menu
+          label={msgHv.sort}
+          anchor={sortMenu}
+          onClose={() => setSortMenu(null)}
+          items={(
+            [
+              ["name", msg.hosts.sortName],
+              ["recent", msg.hosts.sortRecent],
+              ["address", msgD.inventory.sortAddress],
+              ["group", msgD.inventory.sortGroup],
+            ] as const
+          ).map(([value, label]) => ({ label, checked: sort === value, onSelect: () => setSort(value) }))}
         />
       )}
 

@@ -2,6 +2,7 @@
 @import "./motion.css";
 @import "./fonts.css";
 @import "./box.css";
+@import "./hosts.css";
 
 /* ===================================================================== base */
 
@@ -920,27 +921,73 @@ kbd,
   padding: var(--space-5);
 }
 
+/* A page section is a box (revamp §7): its head is the box strip, its list touches the edges, and
+   anything else inside (toolbars, notes, empty states, settings) sits on the box padding. */
 .section {
-  display: grid;
-  gap: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
 }
 
 .section-head {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  min-height: var(--strip-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+}
+
+.section-head:last-child {
+  border-bottom: 0;
 }
 
 .section-head h2 {
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
+.section > :not(.section-head, .list, .box-empty) {
+  margin: var(--space-3);
+}
+
+.section > :not(.section-head, .list, .box-empty) + :not(.section-head, .list, .box-empty) {
+  margin-top: 0;
+}
+
+.section > .list {
+  border: 0;
+  border-radius: 0;
+}
+
+.section > .section-hint {
+  font-size: var(--text-sm);
+}
+
+/* Identities follow the keys box on the Keychain page. */
+.identities-page {
+  padding-top: 0;
+}
+
+.section :focus-visible {
+  outline-offset: -2px;
+}
+
+/* A list is a box of rows (revamp §7): 36 px rows touching the box edges, hairlines between. */
 .list {
   display: grid;
-  gap: 1px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--border-subtle);
+  margin: 0;
+  padding: 0;
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  list-style: none;
   overflow: hidden;
 }
 
@@ -949,14 +996,36 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-raised);
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-box);
   transition: background var(--duration-press) var(--ease-out);
 }
 
+.list > li + li {
+  border-top: var(--box-rule);
+}
+
 .list > li:hover {
-  background: var(--bg-raised-hover);
+  background: var(--bg-hover);
+}
+
+.list :focus-visible {
+  outline-offset: -2px;
+}
+
+/* A row's icon: 16 px and muted, no tinted square (revamp §7). */
+.list .tile-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+}
+
+.list .tile-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .row-main {
@@ -1270,8 +1339,9 @@ kbd,
 /* ===================================================================== app shell */
 
 .shell {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--w-sidebar, var(--sidebar-width)) minmax(0, 1fr);
   height: 100%;
   background: var(--bg-app);
   background-image: var(--app-backdrop);
@@ -1405,10 +1475,6 @@ kbd,
   font-variant-numeric: tabular-nums;
 }
 
-.nav-session {
-  height: 30px;
-  font-weight: var(--weight-regular);
-}
 
 .sidebar-footer {
   display: grid;
@@ -1478,7 +1544,7 @@ kbd,
   align-items: stretch;
   min-width: 0;
   padding: 0;
-  background: var(--bg-sidebar);
+  background: var(--bg-strip);
   /* Painted under the tabs, so the active tab covers it where it meets the page. */
   box-shadow: inset 0 -1px 0 var(--border-subtle);
   overflow: hidden;
@@ -1518,6 +1584,8 @@ kbd,
   position: relative;
   display: flex;
   flex: 0 1 auto;
+  /* Set from the tabs' minimum widths (TabStrip.tsx). */
+  min-width: 0;
   align-items: flex-end;
   align-self: stretch;
   gap: 0;
@@ -1532,8 +1600,8 @@ kbd,
   /* A width rather than a flex basis: the tab list is sized from it, so a short title never
      leaves the tab hanging past the list (under the pinned "+"). */
   flex: 0 1 auto;
-  width: var(--tab-w, 180px);
-  min-width: var(--tab-min, 84px);
+  width: var(--tab-w, 150px);
+  min-width: var(--tab-min, 90px);
   height: var(--tab-h);
   padding: 0 6px 0 10px;
   border: 0;
@@ -1553,7 +1621,7 @@ kbd,
 }
 
 .tab[aria-selected="true"] {
-  --tab-w: 240px;
+  --tab-w: 220px;
   --tab-min: 140px;
   z-index: 1;
   flex-shrink: 0.3;
@@ -1561,15 +1629,35 @@ kbd,
   color: var(--text);
 }
 
-/* Width changes glide only after a pointer choice; a keyboard switch is instant. Reduced motion
-   sets every duration to 0. */
-.tabstrip[data-input="pointer"] .tab,
-.tabstrip[data-input="pointer"] .tab:hover {
+/* Width is the one thing that moves (TabStrip.tsx): when the active tab changes, the old one
+   narrows while the new one widens with the same duration and easing, so the pair stays in step
+   and the tabs between them follow. Pointer only; keyboard changes and reduced motion (every
+   duration 0) are instant. It also holds while the clicked tab is pressed, whose press feedback
+   otherwise drops transitions: a tab that stopped mid-way would jump. */
+:root[data-input="pointer"] .tabstrip-tabs > .tab,
+:root[data-input="pointer"] .tabstrip-tabs > .tab[data-pressed] {
   transition:
     width var(--duration-glide) var(--ease-in-out),
     min-width var(--duration-glide) var(--ease-in-out),
     background var(--duration-press) var(--ease-out),
-    color var(--duration-press) var(--ease-out);
+    color var(--duration-press) var(--ease-out) !important;
+}
+
+/* A new tab grows in from nothing, and one closed with the pointer narrows to nothing. */
+@starting-style {
+  :root[data-input="pointer"] .tabstrip-tabs > .tab:not(.tab-page) {
+    width: 0;
+    min-width: 0;
+  }
+}
+
+.tab[data-closing],
+.tab[data-closing][aria-selected="true"] {
+  --tab-w: 0px;
+  --tab-min: 0px;
+  padding-inline: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .tab:focus-visible {
@@ -1665,15 +1753,41 @@ kbd,
   font-size: var(--text-sm);
 }
 
-.tab-close {
+/* The leading slot: the status dot, or the close button where it shows (the active tab, and any
+   tab under the pointer). Both sit in the same 20 px cell, so neither ever changes the tab's layout. */
+.tab-lead {
   display: grid;
   place-items: center;
   flex: none;
   width: 20px;
   height: 20px;
-  border: 0;
+}
+
+.tab-lead > * {
+  grid-area: 1 / 1;
+}
+
+/* A plain 8 px dot in tabs (no halo); it only shows state, and clicks in the slot go to the close
+   button. */
+.tab-lead .status-dot,
+.tab-lead .status-dot[data-unread] {
+  box-shadow: none;
+  outline: none;
+  pointer-events: none;
+}
+
+/* Unread output in a background tab shows in its name rather than as a ring round the dot. */
+.tab[data-unread]:not([aria-selected="true"]) .tab-label {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: transparent;
   color: var(--text-faint);
   cursor: pointer;
   opacity: 0;
@@ -1682,11 +1796,14 @@ kbd,
     background var(--duration-press) var(--ease-out);
 }
 
-/* The close button shows on the active tab and on hover. */
 .tab:hover .tab-close,
-.tab[aria-selected="true"] .tab-close,
-.tab-close:focus-visible {
+.tab[aria-selected="true"] .tab-close {
   opacity: 1;
+}
+
+.tab:hover .tab-lead .status-dot,
+.tab[aria-selected="true"] .tab-lead .status-dot {
+  opacity: 0;
 }
 
 .tab-close:hover {
@@ -1702,7 +1819,7 @@ kbd,
   flex: none;
   align-self: flex-end;
   margin: 0 4px calc((var(--tab-h) - var(--control-height-sm)) / 2) 4px;
-  background-color: var(--bg-sidebar);
+  background-color: var(--bg-strip);
 }
 
 .tab-spacer {
@@ -1861,21 +1978,87 @@ kbd,
   height: 3px;
 }
 
+/* ---------- resizable panel edges ---------- */
+
+/* A 6 px hit area on a panel's inner edge; its hairline sits on the panel's border and turns
+   accent on hover, focus and drag. Placed per panel below. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after,
+.resize-handle[data-active="true"]::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: none;
+}
+
+/* On a panel's left edge (side panels, host details). */
+.side-panel > .resize-handle,
+.host-panel > .resize-handle {
+  left: -3px;
+}
+
+/* On the sidebar's right edge, over its border. */
+.shell > .resize-handle {
+  left: calc(var(--w-sidebar, var(--sidebar-width)) - 4px);
+}
+
+.shell[data-sidebar="collapsed"] > .resize-handle,
+.hosts-layout[data-narrow="true"] .host-panel > .resize-handle {
+  display: none;
+}
+
+/* While an edge is dragged: one cursor everywhere, no text selection, no width transitions. */
+:root[data-resizing],
+:root[data-resizing] * {
+  cursor: col-resize;
+}
+
+:root[data-resizing] body {
+  user-select: none;
+}
+
+:root[data-resizing] .shell {
+  transition: none;
+}
+
 /* ---------- side panel (snippets) ---------- */
 
 .side-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: var(--panel-width);
+  width: var(--w-side-panel, var(--panel-width));
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
 }
 
-/* Side panels and the host panel slide a short way in from their edge (as .m-panel). */
-.side-panel,
-.host-panel {
+/* Side panels slide a short way in from their edge (as .m-panel). The host panel's motion is in
+   HostsView: it grows its width with the list instead, and must not re-slide when the host changes. */
+.side-panel {
   transition:
     opacity var(--duration-base) var(--ease-drawer),
     transform var(--duration-base) var(--ease-drawer);
@@ -1903,7 +2086,7 @@ kbd,
 .panel-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden auto;
   padding: var(--space-3);
 }
 
@@ -1913,7 +2096,7 @@ kbd,
   align-content: start;
 }
 
-.panel-body > .setting-row {
+.panel-body > .setting-row:not([data-variant="switch"]) {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-2) 0;
@@ -1923,30 +2106,55 @@ kbd,
   border-top: var(--box-rule);
 }
 
-.panel-body > .setting-row .setting-control,
-.panel-body > .setting-row .setting-control > * {
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control,
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control > * {
   width: 100%;
 }
 
+/* A switch keeps its own size: label and hint on the left, the switch on the right. */
+.panel-body .setting-row[data-variant="switch"] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.panel-body .setting-row[data-variant="switch"] .setting-control {
+  flex: none;
+  width: auto;
+}
+
+/* Where snippets go: a slim strip under the panel head. */
 .panel-target {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
-  margin: 0 var(--space-3) var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
   font-size: var(--text-xs);
 }
 
 .panel-target[data-ready="false"] {
-  border-style: dashed;
   color: var(--text-muted);
 }
 
+/* Snippets (revamp §7): folders are strips with a count, snippets dense rows with the command's
+   first line in muted mono. Nothing is wider than its container. */
+.snippet-list {
+  display: grid;
+  min-width: 0;
+}
+
 .folder {
-  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.folder + .folder {
+  margin-top: var(--space-2);
 }
 
 .folder-head {
@@ -1954,10 +2162,11 @@ kbd,
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 28px;
-  padding: 0 6px;
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -1966,11 +2175,15 @@ kbd,
 }
 
 .folder-head:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
+.folder-head .box-count {
+  margin-left: auto;
+}
+
 .folder-head svg.chevron {
+  flex: none;
   transition: transform var(--duration-press) var(--ease-out);
 }
 
@@ -1978,29 +2191,38 @@ kbd,
   transform: rotate(90deg);
 }
 
+.folder ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .snippet {
-  display: grid;
-  gap: 6px;
-  margin: 4px 0;
-  padding: 10px var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
-  transition:
-    border-color var(--duration-press) var(--ease-out),
-    box-shadow var(--duration-press) var(--ease-out);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--box-rule);
 }
 
 .snippet:hover,
 .snippet:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-1);
+  background: var(--bg-hover);
+}
+
+.snippet-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
 }
 
 .snippet-name {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
@@ -2011,14 +2233,53 @@ kbd,
   font: var(--text-xs) / 1.5 var(--font-mono);
   white-space: pre;
   text-overflow: ellipsis;
-  max-height: 3em;
   font-variant-ligatures: none;
 }
 
 .snippet-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+/* In the side panel Run shows on hover or when the row has focus; Paste is in the row's menu. */
+.snippet-list[data-compact] .snippet-run {
+  opacity: 0;
+}
+
+.snippet-list[data-compact] .snippet:hover .snippet-run,
+.snippet-list[data-compact] .snippet:focus-within .snippet-run {
+  opacity: 1;
+}
+
+.snippets-panel-body {
+  padding: var(--space-2) 0 0;
+}
+
+.snippets-panel-body .row-flex {
+  padding: 0 var(--space-3);
+}
+
+/* On the Snippets page each folder is a box. */
+.snippet-list:not([data-compact]) .folder {
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
+}
+
+.snippet-list:not([data-compact]) .folder li:last-child {
+  border-bottom: 0;
+}
+
+.snippet-list:not([data-compact]) .folder-row:has(> .folder-head[aria-expanded="false"]) {
+  border-bottom: 0;
+}
+
+.snippet :focus-visible,
+.folder-head:focus-visible {
+  outline-offset: -2px;
 }
 
 /* ---------- status bar ---------- */
@@ -3134,7 +3395,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 /* ---------- files (SFTP) panel ---------- */
 
 .side-panel-wide {
-  width: max(var(--panel-width), 380px);
+  width: var(--w-files, max(var(--panel-width), 380px));
 }
 
 .spinner.spinner-xs {
@@ -3184,7 +3445,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 /* Two-pane files view: this computer on the left, the server on the right. */
 .side-panel-two {
-  width: min(880px, 70vw);
+  width: var(--w-files-two, min(880px, 70vw));
 }
 
 .files-panes {
@@ -3494,7 +3755,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   border-radius: inherit;
   background: var(--accent-soft);
   pointer-events: none;
-  animation: saved-flash 400ms var(--ease-out) forwards;
+  animation: saved-flash var(--duration-flash) var(--ease-out) forwards;
 }
 
 @keyframes saved-flash {
@@ -3551,16 +3812,20 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* The side panel's sections: snippets, history, appearance (TRM-14). */
+/* Section tabs under the panel head: a strip of square tabs, the current one with the live edge. */
 .panel-sections {
   display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) 0;
+  flex: none;
+  min-width: 0;
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .panel-section-tab {
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
-  padding: var(--space-1) var(--space-2);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
@@ -3573,9 +3838,14 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .panel-section-tab[aria-selected="true"] {
-  background: var(--bg-inset);
+  background: var(--bg-sidebar);
+  box-shadow: var(--edge-live);
   color: var(--text);
   font-weight: var(--weight-medium);
+}
+
+.panel-section-tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .panel-section {
@@ -3585,10 +3855,22 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-height: 0;
 }
 
+/* Connection history in the side panel: dense rows on the panel's edges, Open on hover or focus. */
+.panel-history-body {
+  padding: 0;
+}
+
+.panel-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--box-rule);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .panel-history {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3598,18 +3880,48 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--box-rule);
   font-size: var(--text-sm);
 }
 
+.panel-history li:hover,
+.panel-history li:focus-within {
+  background: var(--bg-hover);
+}
+
 .panel-history li[data-current] {
-  font-weight: var(--weight-medium);
+  box-shadow: var(--edge-select);
 }
 
 .panel-history .row-main {
-  display: flex;
+  display: grid;
   flex: 1;
-  flex-direction: column;
   min-width: 0;
+}
+
+.panel-history-name {
+  font-weight: var(--weight-medium);
+}
+
+.panel-history-sub {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.panel-history-open {
+  opacity: 0;
+}
+
+.panel-history li:hover .panel-history-open,
+.panel-history li:focus-within .panel-history-open {
+  opacity: 1;
+}
+
+.panel-history :focus-visible {
+  outline-offset: -2px;
 }
 
 /* Highlight kinds (TRM-07): a toggle per kind with a sample in the scheme's own colors. */
@@ -3713,9 +4025,36 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* agent D: inventory and snippets */
+/* The host tile: an OS logo (or a server glyph) on a neutral square. */
 .os-icon {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-inset);
+  color: var(--os-dark, var(--text-muted));
+}
+
+:root[data-theme="light"] .os-icon {
+  color: var(--os-light, var(--text-muted));
+}
+
+.os-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.os-icon-sm {
+  width: 28px;
+  height: 28px;
+}
+
+.os-icon-sm svg {
+  width: 16px;
+  height: 16px;
 }
 
 .connect-all-list {
@@ -3727,6 +4066,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  padding-right: var(--space-1);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .folder-row > .folder-head {
@@ -3916,10 +4258,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: 400px;
+  width: var(--w-host-panel, 400px);
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
@@ -3985,15 +4328,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   padding: var(--space-3);
 }
 
+/* The panel's sections are boxes (box.css): a strip with the heading, then the fields. */
 .host-section {
+  flex: none;
+  /* Unclipped, unlike other boxes: a clipped box has no minimum height, and the panel's grid would
+     squeeze it. The strip rounds its own corners instead. */
+  overflow: visible;
+}
+
+.host-section > .box-strip {
+  border-radius: calc(var(--radius-box) - 1px) calc(var(--radius-box) - 1px) 0 0;
+}
+
+.host-section-body {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
 }
 
 .host-section-title {
@@ -4001,16 +4352,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-weight: var(--weight-semibold);
 }
 
-.host-address {
-  display: grid;
+.host-address > .host-section-body {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-3);
 }
 
-/* Line the mark up with the input, below the field's label. */
-.host-address > .avatar {
-  margin-top: 22px;
+/* The strip names the box; the field's label stays for assistive technology. */
+.host-address .field > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .host-address-mark {
@@ -4036,6 +4390,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .protocol-select {
   width: auto;
   min-width: 7em;
+}
+
+/* "SSH on [22] port" stays one line at the panel's narrowest: the protocol menu gives way, not the
+   line (hosts.css makes the panel's other selects full width). */
+.host-panel .host-panel-body .protocol-line {
+  flex-wrap: nowrap;
+}
+
+.host-panel .host-panel-body .protocol-line > .protocol-select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.host-panel .host-panel-body .protocol-line > :is(.protocol-port, span) {
+  flex: none;
+  overflow-wrap: normal;
 }
 
 .host-auth {
@@ -4072,16 +4443,43 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-more > summary {
-  width: fit-content;
   cursor: pointer;
+  list-style: none;
+}
+
+.host-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A disclosure arrow at the start of the strip, turned while the box is open. */
+.host-more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.host-more[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 .host-more > summary:hover {
   color: var(--text);
 }
 
-.host-more:not([open]) {
-  gap: 0;
+.host-more:not([open]) > summary {
+  border-bottom: 0;
+  border-radius: calc(var(--radius-box) - 1px);
+}
+
+.host-reuse {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .host-effective {
@@ -4432,18 +4830,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
-/* P-30: host and group notes. Plain token styling. */
+/* P-30: host and group notes, a box like the host's other sections. */
 .note-card {
-  display: grid;
-  gap: var(--space-3);
   min-width: 0;
-}
-
-.note-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
 }
 
 .note-view {
@@ -4689,14 +5078,15 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .host-card[data-selected="true"],
 .tile[data-selected="true"],
 .list > li[data-selected="true"] {
-  /* The row tint plus the accent edge on the left: selection reads without any checkbox. */
-  background: var(--bg-selected);
+  /* The row tint plus the accent edge on the left: selection reads without any checkbox. The
+     tint is laid over the row's own colour, not over the list's divider grey behind it. */
+  background: linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg-raised);
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
   box-shadow: var(--edge-select);
 }
 
 .list > li[data-selected="true"]:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 16%, transparent)), var(--bg-raised);
 }
 
 /* The selection strip (two or more hosts): one compact line above the list. */

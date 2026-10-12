@@ -101,6 +101,7 @@ export type { MultiplexerUnavailable } from "./MultiplexerUnavailable";
 export type { Note } from "./Note";
 export type { NoteFormat } from "./NoteFormat";
 export type { NoteInput } from "./NoteInput";
+export type { PanelWidths } from "./PanelWidths";
 export type { PasswordCheckItem } from "./PasswordCheckItem";
 export type { PasswordCheckPreferences } from "./PasswordCheckPreferences";
 export type { PasswordCheckReport } from "./PasswordCheckReport";

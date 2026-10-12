@@ -39,6 +39,7 @@ import { decodeOsc52, ligatureRanges, parseOsc7, sanitizeTitle } from "./termina
 import { CommandOutputs } from "./commandOutput";
 import { type ScrollbackResult, type SearchSlice, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
+import { isPanelResizing, onPanelResizeEnd } from "../../lib/resizing";
 
 export type TerminalTarget =
   | { kind: "ssh"; hostId: string }
@@ -366,6 +367,8 @@ export class TerminalController {
 
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(container);
+    // Dragging a side panel edge resizes the container on every frame: fit once at the end.
+    this.cleanups.push(onPanelResizeEnd(() => this.scheduleResize()));
   }
 
   /**
@@ -786,6 +789,7 @@ export class TerminalController {
 
   private scheduleResize(): void {
     window.clearTimeout(this.resizeTimer);
+    if (isPanelResizing()) return;
     this.resizeTimer = window.setTimeout(() => {
       if (this.disposed) return;
       this.fitNow();

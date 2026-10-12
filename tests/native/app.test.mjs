@@ -115,7 +115,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await app.screenshot("04-keychain");
 
     await nav("Hosts");
-    await s.clickButton("Add host");
+    await s.clickButton("New host");
     await s.fill("Name", "Lab server", { within: HOST_PANEL });
     await s.fill("Address", "127.0.0.1", { within: HOST_PANEL });
     const port = await s.fill("Port", "", { within: HOST_PANEL });

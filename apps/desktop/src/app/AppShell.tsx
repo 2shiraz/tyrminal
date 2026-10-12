@@ -4,6 +4,7 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
 import { TabStrip } from "../components/layout/TabStrip";
+import { ResizeHandle } from "../components/ui/ResizeHandle";
 import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
 import { HostsView } from "../features/hosts/HostsView";
@@ -995,9 +996,7 @@ function Shell() {
       <Sidebar
         destination={terminalVisible ? null : destination}
         collapsed={collapsed}
-        ws={ws}
         onNavigate={navigate}
-        onSelectTab={selectTabById}
         onOpenPalette={openPalette}
         onLocalTerminal={openLocal}
         onSftp={openSftp}
@@ -1008,6 +1007,7 @@ function Shell() {
         hostCount={data.hosts.value?.length ?? 0}
         snippetCount={data.snippets.value?.length ?? 0}
       />
+      {!collapsed && <ResizeHandle panel="sidebar" />}
 
       <div className="main">
         <TabStrip
@@ -1038,7 +1038,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} onLocal={openLocal} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

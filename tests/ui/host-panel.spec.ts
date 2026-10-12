@@ -181,7 +181,7 @@ test("a key sign-in without a chosen key is never saved, and autosave never pick
   await expect(select).toHaveValue("");
 
   // A new host too: created with its own sign-in, never with a key nobody chose.
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   await panel(page).getByRole("radio", { name: /Use a key from the keychain/ }).check();
   await panel(page).getByLabel("Address").fill("198.51.100.8");
   await panel(page).getByLabel("Name", { exact: true }).focus();
@@ -263,7 +263,7 @@ test("a failed write says so and Retry writes it", async ({ page }) => {
 
 test("a new host is created on its first valid address, never from an invalid one", async ({ page }) => {
   await openHosts(page);
-  const add = page.getByRole("button", { name: "Add host" });
+  const add = page.getByRole("button", { name: "New host" });
   await add.click();
   const fresh = page.getByRole("complementary", { name: "New host" });
   await expect(fresh.getByLabel("Address")).toBeFocused();
@@ -305,7 +305,7 @@ test("a new host is created on its first valid address, never from an invalid on
 
 test("a new host's route is written right after the host is created", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   const fresh = page.getByRole("complementary", { name: "New host" });
   await fresh.getByText("Show more").click();
   await fresh.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
@@ -390,8 +390,8 @@ test("clicking a host opens its details beside the list; Escape closes and focus
   await expect(details(page).getByLabel("Address")).toHaveValue("203.0.113.24");
   await expect(details(page).getByLabel("Name", { exact: true })).toHaveValue("edge-cache");
   await expect(panel(page).getByTestId("host-panel-location")).toHaveText("Local vault");
-  // The cards, top to bottom.
-  await expect(panel(page).locator("h3")).toHaveText(["General", "Protocol", "Credentials", "Notes"]);
+  // The section boxes, top to bottom, each headed by its strip.
+  await expect(panel(page).locator(".box-strip h3")).toHaveText(["Address", "General", "Connection", "Credentials", "Notes"]);
   await expect(panel(page).getByText("Show more")).toBeVisible();
   await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toHaveAttribute("aria-current", "true");
   // The primary button is always Connect.
@@ -439,13 +439,13 @@ test("the menu copies the address, duplicates, and deletes after confirmation", 
   await confirm.getByRole("button", { name: "Delete" }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Add host" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "New host" })).toBeFocused();
   expect(await calls(page, "host_delete")).toHaveLength(1);
 });
 
 test("a new host connects from the bottom button once it exists", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   // The panel is renamed "Host details" once the host exists, so address it by its test id.
   await panel(page).getByLabel("Address").fill("198.51.100.7");
   await panel(page).getByLabel("Name", { exact: true }).fill("lab-box");
@@ -549,4 +549,65 @@ test("the port suggestions switch autosaves, even while the route is incomplete,
   await expect.poll(async () => (await off()).length).toBe(0);
   await settled(page);
   await expect(suggestions).toBeChecked();
+});
+
+test("Credentials offers an identity when other hosts sign in with the same user and key", async ({ page }) => {
+  await openHosts(page);
+  // A password sign-in has nothing an identity could share from here: no hint.
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await expect(details(page).getByTestId("host-reuse")).toHaveCount(0);
+
+  // build-runner-03 uses the deploy key as "builder", which no other host does.
+  await list(page).getByRole("button", { name: "build-runner-03", exact: true }).click();
+  await expect(details(page).getByLabel("Address")).toHaveValue("ci3.lab.example");
+  await expect(details(page).getByTestId("host-reuse")).toHaveCount(0);
+  // As "deploy" it shares api-gateway's user and key.
+  await details(page).getByLabel("User name").fill("deploy");
+  const hint = details(page).getByTestId("host-reuse");
+  await expect(hint).toContainText("1 other host signs in as deploy with this key.");
+  await hint.getByRole("button", { name: "Create an identity" }).click();
+
+  await expect.poll(count(page, "identity_save")).toBe(1);
+  const [made] = await calls(page, "identity_save");
+  expect(made?.args).toEqual({ identity: { id: null, label: "deploy (Deploy key)", username: "deploy", password: { kind: "keep" }, keyId: expect.any(String) } });
+  // This host now uses it (autosaved); the hint gives way to the identity picker.
+  await expect(hint).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, "identity_assign")).map((c) => c.args)).toContainEqual({
+    target: { kind: "host", hostId: expect.any(String) },
+    identityId: expect.any(String),
+  });
+  await settled(page);
+});
+
+test("Host details boxes never scroll sideways at the panel's minimum width", async ({ page }) => {
+  await openHosts(page);
+  await list(page).getByRole("button", { name: "build-runner-03", exact: true }).click();
+  // The narrowest the resize handle allows (ResizeHandle.tsx, hostPanel.min).
+  const handle = page.getByRole("separator", { name: "Resize host details" });
+  await handle.focus();
+  await page.keyboard.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  // The widest content: a long user name in the reuse hint, the key picker and Show more open.
+  await details(page).getByLabel("User name").fill("deploy");
+  await expect(details(page).getByTestId("host-reuse")).toBeVisible();
+  await details(page).getByText("Show more").click();
+  const body = panel(page).locator(".host-panel-body");
+  const { scroll, client } = await body.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(scroll).toBeLessThanOrEqual(client);
+  // "SSH on [22] port" stays on one line.
+  const protocol = await details(page).getByRole("combobox", { name: "Protocol" }).boundingBox();
+  const port = await details(page).getByRole("textbox", { name: "Port" }).boundingBox();
+  expect(Math.abs((protocol?.y ?? 0) - (port?.y ?? 100))).toBeLessThan(8);
+});
+
+test("Host details never scroll sideways, even at their narrowest, with long values", async ({ page }) => {
+  await openHosts(page);
+  await page.setViewportSize({ width: 1024, height: 760 });
+  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  const panel = page.getByTestId("host-panel");
+  await panel.getByLabel("Name", { exact: true }).fill("a-very-long-host-name-that-keeps-going-".repeat(4));
+  await panel.getByText("Show more").click();
+  const body = panel.locator(".host-panel-body");
+  const { scroll, client } = await body.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(scroll).toBeLessThanOrEqual(client);
 });

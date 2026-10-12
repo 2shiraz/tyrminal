@@ -50,7 +50,7 @@ export function useGlide(container: RefObject<HTMLElement | null>, className = "
     root.dataset.gliding = "";
     const animation = element.animate(
       [{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }],
-      { duration: ms, easing: getComputedStyle(root).getPropertyValue("--ease-in-out").trim() || "ease-in-out" },
+      { duration: ms, easing: getComputedStyle(root).getPropertyValue("--ease-out").trim() || "ease-out" },
     );
     glide.current = { element, animation };
     animation.onfinish = () => {

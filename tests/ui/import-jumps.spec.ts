@@ -9,7 +9,8 @@ import { openApp } from "./fixtures";
 test("an OpenSSH config's ProxyJump becomes a jump host; ProxyCommand is ignored and said so", async ({ page }) => {
   await openApp(page);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).first().click();
-  await page.getByRole("button", { name: "Import" }).click();
+  await page.getByRole("button", { name: "More ways to add" }).click();
+  await page.getByRole("menuitem", { name: "Import…" }).click();
   const dialog = page.getByRole("dialog", { name: "Import hosts" });
   const config = "Host bastion\n  HostName bastion.example\nHost inner\n  ProxyJump bastion\nHost legacy\n  ProxyCommand nc %h %p\n";
   await dialog.getByLabel("Choose file").setInputFiles({ name: "config", mimeType: "text/plain", buffer: Buffer.from(config) });

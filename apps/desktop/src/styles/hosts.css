@@ -1,0 +1,386 @@
+/*
+ * The Hosts page (docs/design/revamp.md): a search bar that also connects, one toolbar, then a
+ * Groups box and a Hosts box. Rows are about 52 px, on 16/24 px gutters, with aligned columns.
+ * Scoped under .hosts-main so the general list rules in global.css stay as they are elsewhere.
+ */
+
+/* The full width of the page, on 24 px gutters. */
+.hosts-main .page-inner {
+  gap: var(--space-4);
+  max-width: none;
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-7);
+}
+
+/* ------------------------------------------------------------ search bar */
+
+/* The first thing on the page: full width, on the top edge, above everything else. */
+.hosts-main .hosts-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 52px;
+  padding: 0 var(--space-3) 0 var(--space-5);
+  border-bottom: var(--box-border);
+  background: var(--bg-box);
+  color: var(--text-muted);
+}
+
+.hosts-main .hosts-search:focus-within {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.hosts-main .hosts-search .hosts-search-input {
+  flex: 1;
+  padding: 0;
+  box-shadow: none;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-md, 15px);
+}
+
+.hosts-main .hosts-search-input::placeholder {
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------ toolbar */
+
+.hosts-main .hosts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hosts-main .split-button {
+  display: inline-flex;
+}
+
+.hosts-main .split-button > .btn:first-child {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.hosts-main .split-button > .split-button-more {
+  --btn-bg: var(--accent);
+  --btn-fg: var(--on-accent, #fff);
+  border-inline-start: 1px solid color-mix(in srgb, var(--on-accent, #fff) 30%, transparent);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.hosts-main .hosts-toolbar .btn-icon[data-active] {
+  color: var(--accent-text);
+  background: var(--bg-selected);
+}
+
+.hosts-main .segmented-icons label {
+  padding-inline: var(--space-2);
+}
+
+/* ------------------------------------------------------------ breadcrumb */
+
+.hosts-main .hosts-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.hosts-main .crumb-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.hosts-main .crumb {
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+}
+
+.hosts-main button.crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.hosts-main .crumb-current {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+
+/* ------------------------------------------------------------ sections */
+
+.hosts-main .hosts-section {
+  display: grid;
+  gap: 0;
+}
+
+.hosts-main .hosts-section-head {
+  border: var(--box-border);
+  border-bottom: 0;
+  border-start-start-radius: var(--radius-box);
+  border-start-end-radius: var(--radius-box);
+}
+
+.hosts-main .hosts-section-head + .list,
+.hosts-main .hosts-section-head + .tile-grid,
+.hosts-main .hosts-section-head ~ .list.host-rows,
+.hosts-main .hosts-section-head ~ .host-grid {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+.hosts-main .hosts-section-head .count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.hosts-main .hosts-section-head .chip {
+  height: 24px;
+}
+
+.hosts-main .hosts-empty {
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--box-border);
+  border-top: 0;
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------ rows */
+
+.hosts-main .list > li {
+  min-height: 52px;
+  padding: var(--space-2) var(--space-4);
+  gap: var(--space-3);
+  cursor: default;
+}
+
+.hosts-main .list > li:hover {
+  background: var(--bg-raised-hover, var(--bg-hover));
+}
+
+/* Columns: tile | name and protocol | address | tags and state | actions. */
+.hosts-main .host-rows > li {
+  display: grid;
+  grid-template-columns: 36px minmax(160px, 1.2fr) minmax(120px, 1fr) minmax(0, 1fr) auto;
+}
+
+.hosts-main .host-col-address {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.hosts-main .host-col-badges {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hosts-main .row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* The edit pencil shows on hover or focus, like Finder's inline actions. */
+.hosts-main .row-edit {
+  opacity: 0;
+}
+
+.hosts-main li:hover .row-edit,
+.hosts-main li:focus-within .row-edit,
+.hosts-main .row-edit:focus-visible {
+  opacity: 1;
+}
+
+/* Group rows: a folder tile in the accent tint. */
+.hosts-main .group-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-selected);
+  color: var(--accent-text);
+}
+
+.hosts-main .group-open,
+.hosts-main .host-open {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  text-align: start;
+  cursor: default;
+}
+
+.hosts-main .group-row {
+  cursor: pointer;
+}
+
+.hosts-main .group-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.hosts-main .group-grid > .group-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+}
+
+@media (max-width: 860px) {
+  .hosts-main .host-rows > li {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+
+  .hosts-main .host-col-address,
+  .hosts-main .host-col-badges {
+    display: none;
+  }
+}
+
+/* In Cards, the strip stands alone above tiles that carry their own borders. */
+.hosts-main .hosts-section:has(> .tile-grid) > .hosts-section-head {
+  margin-bottom: var(--space-2);
+  border-bottom: var(--box-border);
+  border-radius: var(--radius-box);
+}
+
+/* ------------------------------------------------------------ favourites */
+
+.hosts-main .fav-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--box-border);
+  border-end-start-radius: var(--radius-box);
+  border-end-end-radius: var(--radius-box);
+  background: var(--bg-box);
+  list-style: none;
+}
+
+.hosts-main .fav-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 220px;
+  height: 40px;
+  padding: 0 var(--space-3) 0 var(--space-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-box);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: default;
+}
+
+.hosts-main .fav-tile:hover {
+  background: var(--bg-hover);
+}
+
+.hosts-main .fav-tile[aria-current="true"] {
+  background: var(--bg-selected);
+  box-shadow: var(--edge-select);
+}
+
+.hosts-main .row-star {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+}
+
+/* ------------------------------------------------------------ selection strip: slim, no borders */
+
+.hosts-main .bulk-bar.box-strip {
+  min-height: 36px;
+  padding-block: 2px;
+}
+
+.hosts-main .bulk-bar .btn {
+  height: 28px;
+}
+
+/* ------------------------------------------------------------ Host details: never wider than itself */
+
+.host-panel .host-panel-body {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.host-panel .host-panel-body *,
+.host-panel .host-panel-body *::before,
+.host-panel .host-panel-body *::after {
+  min-width: 0;
+}
+
+.host-panel .host-panel-body :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, .choice, .card, .host-section, fieldset, details) {
+  max-width: 100%;
+}
+
+.host-panel .host-panel-body :is(select, textarea, .choice) {
+  width: 100%;
+}
+
+.host-panel .host-panel-body :is(p, span, label, .hint, .row-sub, code, .mono) {
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ polish */
+
+/* An empty list draws nothing (no stray border under an empty state or "no matches"). */
+.hosts-main [data-testid="host-list"]:empty {
+  display: none;
+}
+
+/* The message closes the box its strip opened. */
+.hosts-main .hosts-empty {
+  border-end-start-radius: var(--radius-box);
+  border-end-end-radius: var(--radius-box);
+  background: var(--bg-box);
+}
+
+/* Keyboard focus shows on the whole row or card, not as a box around the name. */
+.hosts-main .host-open:focus-visible,
+.hosts-main .group-open:focus-visible {
+  outline: none;
+}
+
+.hosts-main .list > li:has(:is(.host-open, .group-open):focus-visible),
+.hosts-main .host-card:has(.host-open:focus-visible),
+.hosts-main .group-grid > .group-row:has(.group-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}

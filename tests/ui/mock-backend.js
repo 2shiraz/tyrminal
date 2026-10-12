@@ -27,7 +27,7 @@ export function installMockBackend(options) {
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
       interfaceScale: null,
-      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
+      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" }, connectHintUses: 0 } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -115,6 +115,15 @@ export function installMockBackend(options) {
         { id: id(4), label: "Laptop RSA", algorithm: "ssh-rsa", fingerprint: "SHA256:rsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-rsa AAAAB3NzaC1yc2EFakeSynthetic laptop-rsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 2048 },
       );
       state.knownHosts.push({ id: id(303), host: "retired.example", port: 22, algorithm: "ssh-rsa", fingerprint: "SHA256:retiredRsaSyntheticFingerprint000000000000", addedAt: now - 86400 * 90 });
+    }
+    // A large vault for the windowed Hosts list (windowing tests): hosts in no group.
+    for (let n = 0; n < (options.extraHosts ?? 0); n++) {
+      const label = `bulk-host-${String(n + 1).padStart(3, "0")}`;
+      state.hosts.push({ ...host(0, label, `10.99.${Math.floor(n / 250)}.${(n % 250) + 1}`, "ops", 22, { kind: "ask_password" }, null), id: id(10_000 + n) });
+    }
+    // A large set of trusted servers for the windowed Known hosts list (windowing tests).
+    for (let n = 0; n < (options.extraKnownHosts ?? 0); n++) {
+      state.knownHosts.push({ id: id(20_000 + n), host: `bulk-${String(n + 1).padStart(3, "0")}.example`, port: 22, algorithm: "ssh-ed25519", fingerprint: `SHA256:bulk${n}`, addedAt: now - 86400 });
     }
     if (options.orphanKnownHost) {
       state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });

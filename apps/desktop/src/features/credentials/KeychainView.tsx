@@ -90,6 +90,11 @@ export function KeychainView() {
         )}
 
         {total > 0 && (
+          <section className="section" aria-labelledby="keys-list-title">
+            <div className="section-head">
+              <h2 id="keys-list-title">{msgD.keys.listTitle}</h2>
+              <span className="box-count">{total}</span>
+            </div>
           <ul className="list" ref={listRef}>
             {(keys.value ?? []).map((key) => (
               <li key={key.id} data-flip-key={key.id}>
@@ -125,6 +130,7 @@ export function KeychainView() {
               </li>
             ))}
           </ul>
+          </section>
         )}
       </section>
 

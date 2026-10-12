@@ -7,10 +7,11 @@ import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
-import { Avatar, IconButton, RangeField, Segmented, SettingRow, Shortcut, relativeTime } from "../../components/ui/controls";
+import { IconButton, RangeField, Segmented, SettingRow, Shortcut, relativeTime } from "../../components/ui/controls";
 import { IconPanelRightClose, IconZoomIn, IconZoomOut } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { SnippetLibrary, type SnippetTarget, TargetIndicator } from "../snippets/SnippetLibrary";
 import { SCHEMES } from "../terminal/schemes";
 import { useExit } from "../../lib/exitGhost";
@@ -104,10 +105,8 @@ export function ConnectionPanel({
       <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${section}`} className="panel-section">
         {section === "snippets" && (
           <>
-            <div style={{ paddingTop: "var(--space-3)" }}>
-              <TargetIndicator target={target} />
-            </div>
-            <div className="panel-body" style={{ paddingTop: 0 }}>
+            <TargetIndicator target={target} />
+            <div className="panel-body snippets-panel-body">
               <SnippetLibrary target={target} onSend={onSend} compact />
             </div>
           </>
@@ -115,6 +114,7 @@ export function ConnectionPanel({
         {section === "history" && <History hostId={hostId} onConnect={onConnect} />}
         {section === "appearance" && <Appearance onZoom={onZoom} />}
       </div>
+      <ResizeHandle panel="sidePanel" />
     </aside>
   );
 }
@@ -123,28 +123,34 @@ function History({ hostId, onConnect }: { hostId: string | null; onConnect: (hos
   const { recent } = useVaultData();
   const hosts = recent.value ?? [];
   return (
-    <div className="panel-body stack-sm">
-      <p className="faint" style={{ fontSize: "var(--text-sm)", margin: 0 }}>
-        {msgI.panel.historyNote}
-      </p>
+    <div className="panel-body panel-history-body">
+      <p className="panel-note">{msgI.panel.historyNote}</p>
       {hosts.length === 0 ? (
-        <p className="faint">{msgI.panel.historyEmpty}</p>
+        <p className="panel-note">{msgI.panel.historyEmpty}</p>
       ) : (
         <ul className="panel-history" aria-label={msgI.panel.historyList}>
           {hosts.map((host) => (
-            <li key={host.id} data-current={host.id === hostId || undefined}>
-              <Avatar label={host.label} size="sm" />
+            <li
+              key={host.id}
+              data-current={host.id === hostId || undefined}
+              onDoubleClick={(event) => {
+                // Double-click opens it again, as Open does; not from the button itself.
+                if ((event.target as HTMLElement).closest("button")) return;
+                onConnect(host);
+              }}
+            >
               <span className="row-main">
-                <span className="truncate">
+                <span className="panel-history-name truncate">
                   {host.label}
                   {host.id === hostId && <span className="faint"> · {msgI.panel.current}</span>}
                 </span>
-                <span className="faint mono truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
-                <span className="faint" style={{ fontSize: "var(--text-xs)" }}>
+                <span className="panel-history-sub truncate">
+                  <span className="mono">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                  {" · "}
                   {host.lastConnectedAt ? msgI.panel.connectedAgo(relativeTime(host.lastConnectedAt)) : msgI.panel.neverConnected}
                 </span>
               </span>
-              <button type="button" className="btn btn-sm" aria-label={msgI.panel.openAgain(host.label)} onClick={() => onConnect(host)}>
+              <button type="button" className="btn btn-sm panel-history-open" aria-label={msgI.panel.openAgain(host.label)} onClick={() => onConnect(host)}>
                 {msgI.panel.open}
               </button>
             </li>

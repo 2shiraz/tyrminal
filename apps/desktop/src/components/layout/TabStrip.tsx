@@ -4,7 +4,7 @@ import type { Destination } from "../../app/AppShell";
 import { msgN } from "../../lib/messages-notify";
 import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
-import { animateOut, useFlip } from "../../lib/motion";
+import { motionMs, openedBy } from "../../lib/inputModality";
 import { msgC } from "../../lib/messages-c";
 import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -106,13 +106,14 @@ function TabStripImpl({
   });
   const PageIcon = PAGE_ICONS[destination];
 
-  // Tabs slide aside when one opens, closes or moves, and a new one fades in (lib/motion.ts).
+  // One mechanism moves the tabs: each tab's width (styles/global.css). When the active tab
+  // changes, the old one narrows while the new one widens in the same frames, and the tabs between
+  // them follow; opening grows a tab in and closing with the pointer shrinks it out. Pointer only:
+  // keyboard changes and reduced motion are instant. No transform (FLIP) runs on tabs.
   const tabsRef = useRef<HTMLDivElement>(null);
-  useFlip(tabsRef);
 
   // Overflow scrolls sideways only: the wheel scrolls the strip horizontally, the active tab is
   // kept in view, and faded edges show that more tabs are hidden on that side.
-  const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
@@ -140,16 +141,40 @@ function TabStripImpl({
       el.removeEventListener("wheel", onWheel);
     };
   }, []);
+  // Tabs shrink evenly to their minimum widths before the strip scrolls: the list may narrow down
+  // to the sum of those minimums, never further, so a tab never hangs past it (under the "+").
   useLayoutEffect(() => {
-    tabRefs.current.get(ws.active ?? -1)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const list = tabsRef.current;
+    if (!list) return;
+    let least = 0;
+    for (const tab of list.children) {
+      const style = getComputedStyle(tab);
+      least += style.flexShrink === "0" ? tab.getBoundingClientRect().width : Number.parseFloat(style.minWidth) || 0;
+    }
+    list.style.minWidth = `${Math.ceil(least)}px`;
+  });
+  // The active tab is scrolled into view once its width has settled, never during the change.
+  useEffect(() => {
+    const reveal = () => tabRefs.current.get(ws.active ?? -1)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const ms = openedBy() === "pointer" ? motionMs("--duration-glide") : 0;
+    if (ms <= 0) {
+      reveal();
+      return;
+    }
+    const timer = window.setTimeout(reveal, ms + 20);
+    return () => window.clearTimeout(timer);
   }, [ws.active, ws.tabs.length]);
-  // Width changes animate only when a tab was chosen with the pointer (docs/design/motion.md):
-  // switching from the keyboard is instant.
-  const markInput = (input: "pointer" | "keyboard") => {
-    if (stripRef.current) stripRef.current.dataset.input = input;
+  /** A tab closed with the pointer narrows to nothing first; from the keyboard it closes at once. */
+  const closeWithPointer = (id: number) => {
+    const element = tabRefs.current.get(id);
+    const ms = motionMs("--duration-glide");
+    if (!element || ms <= 0) {
+      onClose(id);
+      return;
+    }
+    element.dataset.closing = "true";
+    window.setTimeout(() => onClose(id), ms);
   };
-  /** A tab closed with the pointer shrinks out first; from the keyboard it closes at once. */
-  const closeWithPointer = (id: number) => animateOut(tabRefs.current.get(id), () => onClose(id), "scale(0.94)");
 
   function focusTab(index: number) {
     const id = index < 0 ? null : ws.tabs[index]?.id;
@@ -206,7 +231,7 @@ function TabStripImpl({
   };
 
   return (
-    <div className="tabstrip" ref={stripRef} onPointerDownCapture={() => markInput("pointer")} onKeyDownCapture={() => markInput("keyboard")}>
+    <div className="tabstrip">
       {/* "+" scrolls with the tabs, right after the last one; it stays pinned at the end only when
           the tabs overflow. */}
       <div className="tabstrip-scroll" ref={scrollRef}>
@@ -285,7 +310,24 @@ function TabStripImpl({
               }}
               onDragEnd={() => setDrag(null)}
             >
-              <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+              {/* One fixed slot at the start: the status dot, or the close button on the active or
+                  hovered tab (as Termius), so nothing in the tab changes size while widths move.
+                  The close button is a pointer target only: a focusable control may not sit inside
+                  a tab. From the keyboard a tab closes with Delete or from its menu (Shift+F10). */}
+              <span className="tab-lead">
+                <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+                <span
+                  className="tab-close"
+                  aria-hidden="true"
+                  title={msg.nav.closeTab(title)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeWithPointer(tab.id);
+                  }}
+                >
+                  <IconX size={13} />
+                </span>
+              </span>
               {renaming === tab.id ? (
                 <input
                   className="tab-rename"
@@ -312,28 +354,18 @@ function TabStripImpl({
                   }}
                 />
               ) : (
-                <span className="tab-label" title={pane ? `${title} — ${pane.identity}` : title}>
+                // The saved name only; the destination and the title the server set are in the tooltip.
+                <span
+                  className="tab-label"
+                  title={[title, pane?.identity, pane?.remoteTitle && !tab.customTitle ? pane.remoteTitle : null].filter(Boolean).join(" — ")}
+                >
                   {title}
-                  {pane?.remoteTitle && !tab.customTitle && <span className="tab-title"> · {pane.remoteTitle}</span>}
                   {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
                 </span>
               )}
               {isProduction && <span className="badge badge-production tab-production">{msgProduction.label}</span>}
               <span className="visually-hidden">{msgC.status.describe(status)}</span>
               {finished?.has(tab.id) && <FinishedBadge exit={finished.get(tab.id) ?? null} />}
-              {/* A pointer target only: a focusable control may not sit inside a tab. From the
-                  keyboard a tab closes with Delete or from its menu (Shift+F10). */}
-              <span
-                className="tab-close"
-                aria-hidden="true"
-                title={msg.nav.closeTab(title)}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeWithPointer(tab.id);
-                }}
-              >
-                <IconX size={14} />
-              </span>
             </div>
           );
         })}

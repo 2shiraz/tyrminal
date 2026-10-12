@@ -44,6 +44,11 @@ export function groupByFolder(list: SnippetSummary[]): [string, SnippetSummary[]
   return [...groups.entries()].sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
 }
 
+/** The first non-empty line of a snippet, for its one-line preview. */
+function firstLine(text: string): string {
+  return text.split("\n").find((line) => line.trim() !== "") ?? "";
+}
+
 function lines(text: string): number {
   return text.replace(/\n$/, "").split("\n").length;
 }
@@ -137,7 +142,7 @@ export function SnippetLibrary({
         </p>
       )}
 
-      <div role="list" aria-label={msg.snippets.title} data-testid="snippet-list" ref={listRef}>
+      <div className="snippet-list" role="list" aria-label={msg.snippets.title} data-testid="snippet-list" data-compact={compact || undefined} ref={listRef}>
         {groups.map(([folder, items]) => {
           const open = !collapsed.has(folder) || query !== "";
           return (
@@ -159,9 +164,7 @@ export function SnippetLibrary({
                 <IconChevronRight size={14} className="chevron" />
                 <IconFolder size={14} />
                 <span className="truncate">{folder || msg.snippets.topLevel}</span>
-                <span className="faint" style={{ marginLeft: "auto", fontWeight: 400 }}>
-                  {items.length}
-                </span>
+                <span className="box-count">{items.length}</span>
               </button>
               {folder !== "" && !compact && (
                 <IconButton size="sm" label={msgD.organize.renameFolder} onClick={() => setRenaming(folder)}>
@@ -172,29 +175,43 @@ export function SnippetLibrary({
               {open && (
                 <ul aria-label={folder || msg.snippets.topLevel}>
                   {items.map((snippet) => (
-                    <li key={snippet.id} className="snippet" data-snippet={snippet.name} data-flip-key={snippet.id}>
-                      <div className="snippet-name">
-                        <span className="truncate" style={{ flex: 1 }}>
-                          {snippet.name}
+                    <li
+                      key={snippet.id}
+                      className="snippet"
+                      data-snippet={snippet.name}
+                      data-flip-key={snippet.id}
+                      onDoubleClick={(event) => {
+                        // Double-click runs, as Run does; not from the buttons inside the row.
+                        if (!canSend || (event.target as HTMLElement).closest("button")) return;
+                        onSend?.(snippet, "run");
+                      }}
+                    >
+                      <div className="snippet-main">
+                        <span className="snippet-name">
+                          <span className="truncate">{snippet.name}</span>
+                          {lines(snippet.text) > 1 && <span className="badge">{msg.snippets.lines(lines(snippet.text))}</span>}
                         </span>
-                        {lines(snippet.text) > 1 && <span className="badge">{msg.snippets.lines(lines(snippet.text))}</span>}
+                        {/* The command as plain text, exactly as it will be sent; the first line here. */}
+                        <span className="snippet-code" title={snippet.text}>
+                          {firstLine(snippet.text)}
+                        </span>
                       </div>
-                      {/* The command text is shown as plain text, exactly as it will be sent. */}
-                      <div className="snippet-code">{snippet.text}</div>
                       <div className="snippet-actions">
+                        {!compact && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={!canSend}
+                            aria-label={msg.snippets.pasteTo(snippet.name)}
+                            onClick={() => onSend?.(snippet, "paste")}
+                          >
+                            <IconClipboardPaste size={13} />
+                            {msg.snippets.paste}
+                          </button>
+                        )}
                         <button
                           type="button"
-                          className="btn btn-sm"
-                          disabled={!canSend}
-                          aria-label={msg.snippets.pasteTo(snippet.name)}
-                          onClick={() => onSend?.(snippet, "paste")}
-                        >
-                          <IconClipboardPaste size={13} />
-                          {msg.snippets.paste}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
+                          className="btn btn-sm btn-primary snippet-run"
                           disabled={!canSend}
                           aria-label={msg.snippets.runIn(snippet.name)}
                           onClick={() => onSend?.(snippet, "run")}
@@ -202,7 +219,6 @@ export function SnippetLibrary({
                           <IconPlay size={13} />
                           {msg.snippets.run}
                         </button>
-                        <span className="spacer" />
                         <IconButton
                           size="sm"
                           label={msg.snippets.more(snippet.name)}
@@ -227,6 +243,17 @@ export function SnippetLibrary({
           anchor={menu.anchor}
           onClose={() => setMenu(null)}
           items={[
+            ...(compact
+              ? [
+                  {
+                    label: msg.snippets.pasteTo(menu.snippet.name),
+                    icon: <IconClipboardPaste size={15} />,
+                    disabled: !canSend,
+                    onSelect: () => onSend?.(menu.snippet, "paste"),
+                  },
+                  "separator" as const,
+                ]
+              : []),
             { label: msgD.runs.runOnHosts, icon: <IconPlay size={15} />, onSelect: () => setRunMany({ snippet: menu.snippet, allOpen: false }) },
             { label: msgRuns.runAllOpen, icon: <IconPlay size={15} />, onSelect: () => setRunMany({ snippet: menu.snippet, allOpen: true }) },
             "separator",

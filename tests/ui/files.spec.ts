@@ -125,6 +125,40 @@ test("files: the path can be typed, and Escape puts the breadcrumbs back", async
   await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
 });
 
+test("files: squeezed breadcrumbs stay in their own place, and the path field shows only while editing", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await list(page).getByRole("button", { name: "Open app" }).dblclick();
+  await expect(list(page)).toHaveAccessibleName("Contents of /home/deploy/app on api-gateway");
+  const bar = panel(page).locator(".pathbar");
+  const field = panel(page).getByRole("textbox", { name: "Folder on the server" });
+  // A narrow pane: the crumbs shrink, and none is drawn over its neighbour (it read "r/oot").
+  await bar.evaluate((el) => {
+    el.style.flex = "0 0 90px";
+    el.style.maxWidth = "90px";
+  });
+  const spills = await bar.evaluate((el) =>
+    [...el.querySelectorAll("li")].flatMap((li) => {
+      const slot = li.getBoundingClientRect();
+      const crumb = (li.firstElementChild as HTMLElement).getBoundingClientRect();
+      const visible = Math.min(crumb.right, slot.right) - Math.max(crumb.left, slot.left);
+      return getComputedStyle(li).overflow === "hidden" || visible >= crumb.width - 0.5 ? [] : [li.textContent];
+    }),
+  );
+  expect(spills).toEqual([]);
+  // Crumbs and the path field are never both there.
+  await expect(field).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Edit path" }).click();
+  await expect(field).toBeFocused();
+  await expect(panel(page).getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(field).toHaveCount(0);
+  // The free space that edits the path draws no box of its own.
+  await panel(page).getByRole("button", { name: "Edit path" }).hover();
+  await expect(panel(page).getByRole("button", { name: "Edit path" })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+});
+
 test("files: uploads and downloads show progress, never replace without asking, and can be cancelled", async ({ page }) => {
   await openApp(page);
   await connect(page, "api-gateway");

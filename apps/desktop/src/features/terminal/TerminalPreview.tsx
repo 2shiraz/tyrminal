@@ -4,6 +4,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
 
+import { isPanelResizing, onPanelResizeEnd } from "../../lib/resizing";
 import { fontsReady, terminalOptions } from "./TerminalController";
 import { schemeById } from "./schemes";
 import { ligatureRanges } from "./terminalPolicy";
@@ -58,11 +59,16 @@ export function TerminalPreview({ prefs }: { prefs: TerminalPreferences }) {
           f.fit();
           created.write(SAMPLE);
         });
-        observer = new ResizeObserver(() => f.fit());
+        // Not on every frame of a panel drag: once when it ends.
+        observer = new ResizeObserver(() => {
+          if (!isPanelResizing()) f.fit();
+        });
         observer.observe(container);
       }, 0);
     });
+    const offResizeEnd = onPanelResizeEnd(() => fit.current?.fit());
     return () => {
+      offResizeEnd();
       cancelAnimationFrame(frame);
       window.clearTimeout(timer);
       observer?.disconnect();
