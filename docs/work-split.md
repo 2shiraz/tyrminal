@@ -181,6 +181,13 @@ Home's quick connect uses). Edits outside `features/hosts`:
   history manager view, each in a block marked `command history`. `AppShell.tsx` installs the capture
   with one marked `useEffect` line. Record kinds 60 and 61 are command history.
 
+- **Server at a glance (P-32), in shared files, keep when merging:** blocks marked `server at a
+  glance` in `AppShell.tsx` (a third side panel, `"server"`, and its target: SSH sessions with a
+  negotiated connection only), `StatusBar.tsx` (the **Server** button), `sessions.rs` (the `glance`
+  field of `Entry` and `Sessions::server_glance`), `vault.rs`/`records.rs` (record kinds 70–79; 70 is
+  the per-host off list), `global.css` (`.glance*`), the Tauri command lists and `ipc.ts`, and
+  `tests/ui/mock-backend.js` (which now sends `negotiated` for SSH hosts only, as the core does).
+
 - **A → C:** `tests/ui/accessibility.spec.ts` (axe-core, WCAG 2.2 A/AA) finds two violations in
   `TabStrip.tsx`: `aria-required-children` (the `tablist` contains elements that are not tabs) and
   `nested-interactive` (a close button inside each draggable tab). Please fix them and remove the

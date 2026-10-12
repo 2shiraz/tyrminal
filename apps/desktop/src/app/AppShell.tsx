@@ -14,6 +14,8 @@ import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
+// server at a glance
+import { ServerPanel } from "../features/glance/ServerPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -56,6 +58,8 @@ import {
   closePane,
   closeTab,
   connectPanes,
+  cyclePane,
+  reopenClosedTab,
   detachInput,
   cycleTab,
   duplicateTab,
@@ -121,9 +125,9 @@ function Shell() {
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
   // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | null>(null);
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
@@ -354,7 +358,7 @@ function Shell() {
       try {
         await detachApi.open(input);
         setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
-        setWs((current) => closeTab(current, tabId));
+        setWs((current) => closeTab(current, tabId, { remember: false }));
         notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
       } catch (error) {
         for (const h of live) h?.release(false);
@@ -520,11 +524,53 @@ function Shell() {
         case "movePaneDown":
           moveFocused("down");
           break;
+        case "nextPane":
+          setWs((current) => cyclePane(current, 1));
+          break;
+        case "prevPane":
+          setWs((current) => cyclePane(current, -1));
+          break;
+        case "goToTab1":
+        case "goToTab2":
+        case "goToTab3":
+        case "goToTab4":
+        case "goToTab5":
+        case "goToTab6":
+        case "goToTab7":
+        case "goToTab8":
+        case "goToLastTab": {
+          const tabs = wsRef.current.tabs;
+          const target = action === "goToLastTab" ? tabs.at(-1) : tabs[Number(action.slice(-1)) - 1];
+          if (target) setWs((current) => selectTab(current, target.id));
+          break;
+        }
+        case "reopenClosedTab": {
+          const current = wsRef.current;
+          const last = current.closedTabs?.at(-1);
+          if (!last) {
+            notify("info", msgC.tabs.nothingClosed);
+            break;
+          }
+          const next = reopenClosedTab(current, seedFor);
+          if (next === current) notify("danger", msgC.layouts.full(last.panes.length));
+          else setWs(next);
+          break;
+        }
+        case "focusTerminal":
+          focusedHandle()?.focus();
+          break;
+        case "focusSidebar":
+          setCollapsed(false);
+          // After the sidebar has expanded.
+          window.requestAnimationFrame(() =>
+            document.querySelector<HTMLElement>(".sidebar [aria-current='page'], .sidebar button")?.focus(),
+          );
+          break;
         default:
           break;
       }
     },
-    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate],
+    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate, notify, seedFor],
   );
 
   // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys
@@ -558,6 +604,11 @@ function Shell() {
   const showPanel = sidePanel !== null && terminalVisible && !sftpVisible;
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
+  // server at a glance: SSH sessions only (a negotiated SSH connection; never Telnet or serial).
+  const glanceTarget =
+    filesSession && pane?.target.kind === "ssh" && paneStatus?.security
+      ? { sessionId: filesSession, hostId: pane.target.hostId, label: pane.label }
+      : null;
 
   // agent D: inventory and snippets
   const snippetRunHost = useMemo(
@@ -655,7 +706,15 @@ function Shell() {
                 prefs={prefs.terminal}
                 workspace={workspacePrefs(prefs.workspace)}
                 panel={
-                  showPanel && sidePanel === "files" ? (
+                  showPanel && sidePanel === "server" ? (
+                    <ServerPanel
+                      target={glanceTarget}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : showPanel && sidePanel === "files" ? (
                     <FilesPanel
                       target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
                       others={Object.values(ws.panes).flatMap((p) => {
@@ -716,6 +775,8 @@ function Shell() {
           onTogglePanel={terminalVisible && !sftpVisible ? () => togglePanel("snippets") : undefined}
           filesOpen={sidePanel === "files"}
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
+          serverOpen={sidePanel === "server"}
+          onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
