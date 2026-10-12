@@ -95,6 +95,7 @@ test("no token actions in full-screen applications; dragging still selects", asy
   await openApp(page, { renderer: "compatibility" });
   await connect(page);
   await output(page, "\r\nselect 10.0.0.77 here\r\n");
+  await expect.poll(() => pointOf(page, "select 10.0.0.77", "here")).not.toBeNull();
   // A drag across the address selects instead of opening the menu.
   const a = (await pointOf(page, "select 10.0.0.77", "select")) as { x: number; y: number };
   const b = (await pointOf(page, "select 10.0.0.77", "here")) as { x: number; y: number };

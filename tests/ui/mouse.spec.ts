@@ -67,14 +67,17 @@ test("middle click pastes only when turned on", async ({ page }) => {
   const before = await inputs(page);
   await screen(page).click({ button: "middle" });
   await page.waitForTimeout(200);
-  expect((await sentSince(page, before)).join("")).toBe("");
+  // Off: the clipboard is not pasted. (On Linux the platform may still paste its own primary
+  // selection, through the usual paste review; that is not this mapping.)
+  expect((await sentSince(page, before)).join("")).not.toContain("hostname");
+  const offset = await inputs(page);
 
   await settings(page);
   await page.getByLabel("Middle click pastes").check();
   await page.getByRole("tab", { name: /api-gateway/ }).click();
   await expect(page.locator(".pane:not([hidden]) .terminal-host")).toHaveAttribute("data-mouse", /middle-paste/);
   await screen(page).click({ button: "middle" });
-  await expect.poll(async () => (await sentSince(page, before)).join("")).toBe("hostname");
+  await expect.poll(async () => (await sentSince(page, offset)).join("")).toBe("hostname");
 });
 
 test("an application that asked for mouse reports gets the click; Shift pastes anyway", async ({ page }) => {
