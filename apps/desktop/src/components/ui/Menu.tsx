@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useExit } from "../../lib/exitGhost";
 import { openedBy } from "../../lib/inputModality";
 import { IconCheck } from "./icons";
 
@@ -35,6 +36,8 @@ export function Menu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Closing by pointer, the menu shrinks back a little and fades (a static copy; see lib/exitGhost).
+  const exitRef = useExit<HTMLDivElement>({ transform: "scale(0.97)" }, ref);
   // The corner it grows from (the trigger's), set with the position: motion.md §3, Menus.
   const [position, setPosition] = useState<{ left: number; top: number; "--origin"?: string }>({ left: -9999, top: -9999 });
   // Opened from the keyboard, a menu is simply there.
@@ -99,7 +102,7 @@ export function Menu({
   }
 
   return createPortal(
-    <div ref={ref} className="menu m-pop" role="menu" aria-label={label} style={position as React.CSSProperties} data-opened-by={opened} onKeyDown={onKeyDown}>
+    <div ref={exitRef} className="menu m-pop" role="menu" aria-label={label} style={position as React.CSSProperties} data-opened-by={opened} onKeyDown={onKeyDown}>
       {items.map((item, index) =>
         item === "separator" ? (
           // Separators are positional.

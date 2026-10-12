@@ -13,6 +13,7 @@ import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
 import { SnippetLibrary, type SnippetTarget, TargetIndicator } from "../snippets/SnippetLibrary";
 import { SCHEMES } from "../terminal/schemes";
+import { useExit } from "../../lib/exitGhost";
 
 export type PanelSection = "snippets" | "history" | "appearance";
 const SECTIONS: PanelSection[] = ["snippets", "history", "appearance"];
@@ -38,6 +39,8 @@ export function ConnectionPanel({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
+  // Closing, the panel fades and drifts back toward its edge (lib/exitGhost).
+  const exitRef = useExit<HTMLElement>({ transform: "translateX(4px)" }, ref);
   const tabsId = useId();
   const title = msgI.panel[section];
 
@@ -62,7 +65,7 @@ export function ConnectionPanel({
 
   return (
     <aside
-      ref={ref}
+      ref={exitRef}
       className="side-panel"
       aria-label={title}
       data-section={section}
