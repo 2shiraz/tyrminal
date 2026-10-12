@@ -89,7 +89,18 @@ for (const step of suite) {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const ok = run.status === 0;
   console.log(`${ok ? "ok     " : "FAILED "}  ${step.name}  (${seconds}s, exit ${run.status})\n         $ ${line}`);
-  if (!ok) console.log(`${run.stdout}${run.stderr}`.trim().split("\n").slice(-40).join("\n"));
+  if (!ok) {
+    const lines = `${run.stdout}${run.stderr}`.trim().split("\n");
+    // The causes (panics, assertion output, failing test names) first, then the tail.
+    const cause = /panicked at|^---- .* (stdout|stderr) ----|assertion|^error(\[|:)|FAILED|^failures:/;
+    const picked = new Set();
+    lines.forEach((line, i) => {
+      if (cause.test(line)) for (let j = i; j < Math.min(lines.length, i + 12); j++) picked.add(j);
+    });
+    const context = [...picked].sort((a, b) => a - b).slice(0, 200).map((i) => lines[i]);
+    if (context.length) console.log(`--- failure context ---\n${context.join("\n")}\n--- tail ---`);
+    console.log(lines.slice(-40).join("\n"));
+  }
   results.push({ name: step.name, command: line, status: ok ? "PASSED" : "FAILED", exitCode: run.status, seconds: Number(seconds) });
 }
 

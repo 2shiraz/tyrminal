@@ -15,7 +15,8 @@ export default defineConfig({
   outputDir: "../../docs/reports/raw/ui-results",
   snapshotPathTemplate: "{testDir}/__screenshots__/{arg}{ext}",
   expect: {
-    toHaveScreenshot: { maxDiffPixelRatio: 0.004, threshold: 0.15, animations: "disabled", caret: "hide", scale: "css" },
+    // timeout bounds capture time on a busy runner (software WebGL); it does not loosen matching.
+    toHaveScreenshot: { timeout: 15_000, maxDiffPixelRatio: 0.004, threshold: 0.15, animations: "disabled", caret: "hide", scale: "css" },
   },
   use: {
     baseURL: `http://127.0.0.1:${port}`,

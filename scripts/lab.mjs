@@ -40,7 +40,11 @@ const DOCKER_USERS = { user: "tyr", noForwardUser: "noforward", noSessionUser: "
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: "utf8", ...opts });
-  if (r.error) throw new Error(`${cmd}: ${r.error.message}`);
+  if (r.error) {
+    // A missing binary (e.g. no Docker on a container-free host) is "failed", not fatal, when allowed.
+    if (opts.allowFail) return "";
+    throw new Error(`${cmd}: ${r.error.message}`);
+  }
   if (r.status !== 0 && !opts.allowFail) {
     throw new Error(`${cmd} ${args.join(" ")} exited ${r.status}\n${r.stderr}`);
   }

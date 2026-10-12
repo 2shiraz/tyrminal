@@ -544,7 +544,13 @@ async fn run_ssh(
         Ok((conn, reader, writer)) => {
             ctx.state(SessionState::Connected);
             // Recent connections. Best effort: failing to record must not end a working session.
-            let _ = ctx.vault.mark_connected(generation, &host_id).await;
+            // Its own task, because closing the session drops this future: cancelled between the
+            // database commit and the in-memory revision update, the next edit of the host would
+            // see a false conflict.
+            let vault = Arc::clone(&ctx.vault);
+            tokio::spawn(async move {
+                let _ = vault.mark_connected(generation, &host_id).await;
+            });
             // `conn` stays alive for the whole pump; dropping it closes the transport.
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             conn.disconnect().await;

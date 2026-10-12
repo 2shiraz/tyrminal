@@ -860,3 +860,30 @@ async fn connecting_records_the_host_as_recent() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn closing_right_after_connect_leaves_the_host_editable() {
+    // Closing drops the session future while the recent-connection write may be in flight; that
+    // must never leave the vault's view of the host's revision behind the database.
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut trusted = false;
+    for _ in 0..5 {
+        let mut client = Client::open_ssh(&f.core, &host).await;
+        if !trusted {
+            let (_, prompt) = client.until_not_state().await;
+            client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+            trusted = true;
+        }
+        client.until_connected().await;
+        f.core.sessions.close(WINDOW, &client.session).unwrap();
+        client.until_closed().await;
+    }
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while f.core.vault.recent_hosts().await.unwrap().is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "host was not recorded as recent");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    f.core.vault.delete_host(&host).await.unwrap();
+}
