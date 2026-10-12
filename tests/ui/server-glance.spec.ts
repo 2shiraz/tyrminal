@@ -1,6 +1,6 @@
 // Server at a glance (P-32) against the UI test mock (UI evidence only; parsing and the
 // close/lock rules are tested in crates/core/src/server_glance.rs and
-// crates/core/tests/server_glance_lab.rs). The panel is offered for SSH sessions only, reads only
+// crates/core/tests/sessions_lab.rs). The panel is offered for SSH sessions only, reads only
 // while it is open, shows server text as plain text, and can be turned off for one host.
 
 import { type Page, expect, test } from "@playwright/test";
@@ -105,11 +105,11 @@ test("server panel: never offered for a Telnet session", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await page.getByRole("button", { name: "Add host" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary", { name: "New host" });
   await dialog.getByLabel("Name", { exact: true }).fill("old-switch");
   await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("telnet");
   await dialog.getByLabel("Address").fill("192.0.2.40");
-  await dialog.getByRole("button", { name: "Save" }).click();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Connect to old-switch" }).click();
   await expect(page.getByText("Telnet is not encrypted").first()).toBeVisible();
   await expect(page.locator('.statusbar [role="status"]')).toContainText(/Connected/i);

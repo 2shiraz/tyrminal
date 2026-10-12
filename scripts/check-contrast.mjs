@@ -87,6 +87,8 @@ for (const [theme, tokens] of [["dark", dark], ["light", light]]) {
   for (const [soft, text] of [["accent-soft", "accent-text"], ["success-soft", "success"], ["warning-soft", "warning"], ["danger-soft", "danger"]]) {
     for (const under of ["bg-surface", "bg-raised", "bg-overlay"]) check(theme, "badge", tokens, text, soft, 4.5, under);
   }
+  // Selected rows in file lists: accent text and icons on the selection tint.
+  for (const under of ["bg-surface", "bg-raised", "bg-inset"]) check(theme, "selected row", tokens, "accent-text", "bg-selected", 4.5, under);
   check(theme, "primary button", tokens, "text-on-accent", "accent", 4.5);
   check(theme, "primary button hover", tokens, "text-on-accent", "accent-hover", 4.5);
 }

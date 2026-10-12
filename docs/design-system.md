@@ -45,7 +45,10 @@ A generated subset of Lucide (ISC license, `lucide-static` 1.47.0) in
 `RangeField`, `SettingRow`, `IconButton` (requires a label; shows it as a tooltip), `Shortcut`
 and `Keys` (platform-aware key caps), `Avatar`, `EmptyState`, `SkeletonRows`, `ErrorNotice`,
 `Notice`. `Dialog.tsx` (native `<dialog>`, focus trap, `data-autofocus`), `Menu.tsx`,
-`Toasts.tsx` (polite live region; cleared on lock). Layout: `Sidebar`, `TabStrip`, `PaneGrid`,
+`Toasts.tsx` (polite live region; cleared on lock). `features/hosts/HostPanel.tsx` is the non-modal side panel
+pattern for editing a record next to its list: focus moves into it on open and back to the opener
+on close, Escape and the collapse button close it (asking first when there are unsaved changes),
+Save keeps it open, and below 760 px of view width it covers the list, which becomes inert. Layout: `Sidebar`, `TabStrip`, `PaneGrid`,
 `StatusBar`.
 
 States every list screen implements: empty (with a primary action), loading (skeleton rows),

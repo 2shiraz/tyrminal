@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     // sessions
     "session_open_ssh",
     "session_open_local",
+    "session_open_files",
     "session_write",
     "session_resize",
     "session_ack",
@@ -65,6 +66,10 @@ const COMMANDS: &[&str] = &[
     "files_upload_finish",
     "files_upload_abort",
     "files_local_list",
+    "files_local_mkdir",
+    "files_local_rename",
+    "files_local_remove",
+    "files_local_chmod",
     "files_copy",
     "files_edit_open",
     "files_edit_status",
@@ -102,6 +107,12 @@ const COMMANDS: &[&str] = &[
     "host_connection_get",
     "host_connection_set",
     "host_chain",
+    // agent C: workspaces
+    "layout_list",
+    "layout_save",
+    "layout_delete",
+    "window_detach",
+    "window_detach_take",
     // agent D: inventory and snippets
     "host_appearance_list",
     "host_set_os",
