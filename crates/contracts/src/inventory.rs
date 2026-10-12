@@ -118,3 +118,39 @@ pub struct PickedKeyFile {
     pub file_name: String,
     pub passphrase_protected: bool,
 }
+
+/// What importing one `known_hosts` entry would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum KnownHostImportStatus {
+    /// Trusted after import.
+    New,
+    /// Exactly this key is already trusted for this host and port.
+    AlreadyTrusted,
+    /// A different key of the same type is trusted for this host and port. Never replaced by an
+    /// import; use the explicit replace-trust flow.
+    Conflict,
+}
+
+/// One host key from an OpenSSH `known_hosts` file. Public data only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KnownHostImportEntry {
+    pub host: String,
+    pub port: u16,
+    pub algorithm: String,
+    pub fingerprint: String,
+    /// `<algorithm> <base64>`.
+    pub public_key: String,
+    pub status: KnownHostImportStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KnownHostImportPreview {
+    pub entries: Vec<KnownHostImportEntry>,
+    pub skipped: Vec<crate::ImportSkipped>,
+}

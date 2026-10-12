@@ -97,6 +97,8 @@ const COMMANDS: &[&str] = &[
     "key_import_pick_file",
     "key_import_picked",
     "key_import_pick_clear",
+    "known_hosts_import_preview",
+    "known_hosts_import",
 ];
 
 fn main() {

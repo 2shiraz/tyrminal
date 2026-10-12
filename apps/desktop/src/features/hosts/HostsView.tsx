@@ -693,6 +693,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             notify("success", msg.hosts.importDone(count));
             reload();
           }}
+          onTrusted={(count) => {
+            setImporting(false);
+            notify("success", msgD.import.trustDone(count));
+          }}
         />
       )}
 

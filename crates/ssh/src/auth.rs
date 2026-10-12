@@ -205,6 +205,20 @@ fn certificate_for(
     })
 }
 
+/// Parses one OpenSSH public key (`<algorithm> <base64> [comment]`) as a host key, for importing
+/// `known_hosts` entries. `None` if it does not parse or is not a host key type this client
+/// accepts (see `algorithms.rs`), so nothing is trusted that could never be negotiated.
+pub fn host_key_from_openssh(text: &str) -> Option<crate::PresentedHostKey> {
+    if text.len() > MAX_KEY_TEXT_LEN {
+        return None;
+    }
+    let key = PublicKey::from_openssh(text.trim()).ok()?;
+    if !crate::algorithms::accepts_host_key(key.algorithm().as_str()) {
+        return None;
+    }
+    crate::PresentedHostKey::from_public_key(&key)
+}
+
 /// What a checked user certificate says. `text` is the normalized certificate line (public data).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CertificateInfo {

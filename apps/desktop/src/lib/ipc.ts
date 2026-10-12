@@ -324,3 +324,9 @@ export const snippetsD = {
   move: (ids: string[], folder: string, copy: boolean) => call<SnippetSummary[]>("snippet_move", { ids, folder, copy }),
   renameFolder: (from: string, to: string) => call<number>("snippet_folder_rename", { from, to }),
 };
+
+/** Trust keys from an OpenSSH known_hosts file after a preview (text of a file the user picked). */
+export const knownHostsFile = {
+  preview: (text: string) => call<import("@tyrminal/contracts").KnownHostImportPreview>("known_hosts_import_preview", { text }),
+  run: (entries: import("@tyrminal/contracts").KnownHostImportEntry[]) => call<number>("known_hosts_import", { entries }),
+};

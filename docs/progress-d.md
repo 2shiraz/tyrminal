@@ -72,6 +72,13 @@ Updated: 2026-10-12.
   paste review; remote names with control characters cannot be inserted; paths are shell-quoted.
   Pause per session or everywhere for 15 minutes (in memory).
 
+- **known_hosts import (IMP-01):** an OpenSSH known_hosts file becomes trusted keys after a preview
+  that shows each key's fingerprint and whether it is new, already trusted, or conflicts with a
+  different trusted key of the same type (conflicts refuse the import; trust is only replaced
+  explicitly). Hashed names, patterns, `@cert-authority` and keys also listed as `@revoked` are
+  skipped with reasons. Lab test: the imported key lets a real connection skip the trust prompt.
+- **HST-01** moved to agent A (protocols with Telnet/Serial), per A's message.
+
 ## Evidence
 
 - `cargo test -p tyrminal-core --test inventory` — includes

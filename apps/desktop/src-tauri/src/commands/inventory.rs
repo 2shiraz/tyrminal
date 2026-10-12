@@ -310,3 +310,22 @@ mod key_file_tests {
         assert!(read_key_file(std::path::Path::new("/nonexistent/tyrminal/key")).is_err());
     }
 }
+
+/// Reads an OpenSSH known_hosts file (text of a file the user picked) into a preview of which keys
+/// would become trusted. Nothing is written.
+#[tauri::command]
+pub async fn known_hosts_import_preview(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<tyrminal_core::contracts::KnownHostImportPreview, IpcError> {
+    state.core()?.vault.known_hosts_file_preview(&text).await
+}
+
+/// Trusts previewed known_hosts keys in one transaction; conflicts refuse the whole import.
+#[tauri::command]
+pub async fn known_hosts_import(
+    state: State<'_, AppState>,
+    entries: Vec<tyrminal_core::contracts::KnownHostImportEntry>,
+) -> Result<u32, IpcError> {
+    state.core()?.vault.import_known_hosts(entries).await
+}

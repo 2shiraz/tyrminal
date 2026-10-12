@@ -93,6 +93,8 @@
     "allow-snippet-folder-rename",
     "allow-key-import-pick-file",
     "allow-key-import-picked",
-    "allow-key-import-pick-clear"
+    "allow-key-import-pick-clear",
+    "allow-known-hosts-import-preview",
+    "allow-known-hosts-import"
   ]
 }

@@ -766,6 +766,24 @@ export function installMockBackend(options) {
       }
       return n;
     },
+    // A small stand-in for the core known_hosts parser: plain "host type key" lines only.
+    known_hosts_import_preview: (a) => {
+      const entries = [];
+      const skipped = [];
+      a.text.split("\n").forEach((line, i) => {
+        const t = line.trim();
+        if (!t || t.startsWith("#")) return;
+        if (t.startsWith("|")) return skipped.push({ line: i + 1, text: t.slice(0, 40), reason: "hashed host name: which host it is for cannot be known" });
+        const [host, algorithm, key] = t.split(/\s+/);
+        const conflict = state.knownHosts.some((k) => k.host === host && k.port === 22 && k.algorithm === algorithm);
+        entries.push({ host, port: 22, algorithm, fingerprint: `SHA256:${key.slice(-12)}`, publicKey: `${algorithm} ${key}`, status: conflict ? "conflict" : "new" });
+      });
+      return { entries, skipped };
+    },
+    known_hosts_import: (a) => {
+      for (const e of a.entries) state.knownHosts.push({ id: id(980 + state.knownHosts.length), host: e.host, port: e.port, algorithm: e.algorithm, fingerprint: e.fingerprint, addedAt: now });
+      return a.entries.length;
+    },
     import_known_hosts_preview: () => {
       const used = new Set(state.hosts.map((h) => `${h.address}:${h.port}`));
       const hosts = state.knownHosts

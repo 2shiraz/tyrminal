@@ -29,4 +29,4 @@ pub use host_trust::{
 };
 pub use sftp::{FileError, RemoteAttrs, RemoteDirEntry, RemoteKind, RemoteReader, RemoteWriter, SFTP_CHUNK, Sftp};
 // agent D: key formats and certificates
-pub use auth::{CertificateInfo, KeyKind, check_user_certificate};
+pub use auth::{CertificateInfo, KeyKind, check_user_certificate, host_key_from_openssh};

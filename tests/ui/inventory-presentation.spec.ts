@@ -157,3 +157,24 @@ test("trusted known hosts without a host entry can be imported after a preview",
   await expect(page.getByText("Imported 1 host")).toBeVisible();
   await expect(hostCards(page)).toHaveCount(7);
 });
+
+test("keys from a known_hosts file are trusted only after review; conflicts are never imported", async ({ page }) => {
+  const dialog = await openImport(page);
+  await dialog.getByLabel("Format").selectOption({ label: "OpenSSH known_hosts (trust keys)" });
+  const file = [
+    "new.example.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsyntheticNewKey",
+    "10.20.0.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsyntheticOtherKey",
+    "|1|aGFzaA==|aGFzaA== ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsyntheticHashed",
+  ].join("\n");
+  await dialog.getByLabel("Choose file").setInputFiles({ name: "known_hosts", mimeType: "text/plain", buffer: Buffer.from(file) });
+  const preview = dialog.getByTestId("trust-preview");
+  await expect(preview).toContainText("1 key will be trusted");
+  await expect(preview.locator('[data-status="new"]')).toContainText("new.example.net");
+  await expect(preview.locator('[data-status="conflict"]')).toContainText("Different key already trusted");
+  await expect(dialog.getByTestId("import-skipped")).toContainText("1 line is not imported");
+  expect(await calls(page, "known_hosts_import")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Trust 1 key" }).click();
+  await expect(page.getByText("Trusted 1 key")).toBeVisible();
+  const [run] = (await calls(page, "known_hosts_import")) as { args: { entries: { host: string }[] } }[];
+  expect(run?.args.entries.map((e) => e.host)).toEqual(["new.example.net"]);
+});

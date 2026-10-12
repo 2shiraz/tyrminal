@@ -44,7 +44,10 @@ use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE, KIND_KEY_CERTIFICATE,
     KeyCertificateRecord,
 };
-use tyrminal_contracts::{ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, KeyCertificate, KeyKind};
+use tyrminal_contracts::{
+    ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, KeyCertificate, KeyKind, KnownHostImportEntry,
+    KnownHostImportPreview, KnownHostImportStatus,
+};
 
 struct Stored<T> {
     revision: u64,
@@ -2063,6 +2066,118 @@ impl VaultService {
             open.snippets.insert(id, Stored { revision, record });
         }
         Ok(out)
+    }
+
+    // ---------- known_hosts file import (IMP-01) ----------
+
+    fn known_host_status(
+        open: &Open,
+        host: &str,
+        port: u16,
+        key: &tyrminal_ssh::PresentedHostKey,
+    ) -> KnownHostImportStatus {
+        let same_endpoint = || open.known_hosts.values().filter(|k| k.record.host == host && k.record.port == port);
+        if same_endpoint().any(|k| k.record.public_key == key.public_key) {
+            KnownHostImportStatus::AlreadyTrusted
+        } else if same_endpoint().any(|k| k.record.algorithm == key.algorithm) {
+            KnownHostImportStatus::Conflict
+        } else {
+            KnownHostImportStatus::New
+        }
+    }
+
+    /// Reads an OpenSSH `known_hosts` file into a preview: which keys would become trusted, which
+    /// are trusted already, which conflict with a different trusted key, and what is skipped.
+    pub async fn known_hosts_file_preview(&self, text: &str) -> Result<KnownHostImportPreview, IpcError> {
+        let (lines, parsed) = crate::importers::parse_known_hosts(text)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut entries: Vec<KnownHostImportEntry> = Vec::new();
+        for l in lines {
+            if entries.iter().any(|e| e.host == l.host && e.port == l.port && e.public_key == l.key.public_key) {
+                continue;
+            }
+            let status = Self::known_host_status(open, &l.host, l.port, &l.key);
+            entries.push(KnownHostImportEntry {
+                host: l.host,
+                port: l.port,
+                algorithm: l.key.algorithm,
+                fingerprint: l.key.fingerprint,
+                public_key: l.key.public_key,
+                status,
+            });
+        }
+        Ok(KnownHostImportPreview { entries, skipped: parsed.skipped })
+    }
+
+    /// Trusts the previewed keys in one transaction. Everything is checked again here (the preview
+    /// came back through the renderer); a key that conflicts with a different trusted key of the
+    /// same type refuses the whole import, since trust is only ever replaced explicitly. Keys that
+    /// are trusted already are skipped. Returns how many keys became trusted.
+    pub async fn import_known_hosts(&self, entries: Vec<KnownHostImportEntry>) -> Result<u32, IpcError> {
+        if entries.len() > MAX_IMPORT_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many keys for one import."));
+        }
+        let bad = || invalid("An imported key is not valid. Preview the file again.");
+        let mut checked: Vec<(String, u16, tyrminal_ssh::PresentedHostKey)> = Vec::with_capacity(entries.len());
+        for e in entries {
+            let host = tyrminal_ssh::canonical_host(&validate::address(&e.host).map_err(|_| bad())?);
+            let key = tyrminal_ssh::host_key_from_openssh(&e.public_key).ok_or_else(bad)?;
+            if host != e.host || e.port == 0 || key.fingerprint != e.fingerprint {
+                return Err(bad());
+            }
+            checked.push((host, e.port, key));
+        }
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut new: Vec<(Id, KnownHostRecord)> = Vec::new();
+        for (host, port, key) in checked {
+            match Self::known_host_status(open, &host, port, &key) {
+                KnownHostImportStatus::Conflict => {
+                    return Err(err(
+                        ErrorCode::Conflict,
+                        "A different key is already trusted for one of these servers. Nothing was imported; remove that trust first if the server's key really changed.",
+                    ));
+                }
+                KnownHostImportStatus::AlreadyTrusted => continue,
+                KnownHostImportStatus::New => {}
+            }
+            if new.iter().any(|(_, r)| r.host == host && r.port == port && r.public_key == key.public_key) {
+                continue;
+            }
+            if new.iter().any(|(_, r)| r.host == host && r.port == port && r.algorithm == key.algorithm) {
+                return Err(invalid(
+                    "The file lists two different keys of one type for the same server. Nothing was imported.",
+                ));
+            }
+            let record = KnownHostRecord {
+                host,
+                port,
+                public_key: key.public_key,
+                algorithm: key.algorithm,
+                fingerprint: key.fingerprint,
+                added_at: now_unix(),
+            };
+            new.push((random_id().map_err(from_vault)?, record));
+        }
+        if open.known_hosts.len() + new.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many known hosts."));
+        }
+        let rows = new
+            .iter()
+            .map(|(id, r)| {
+                let len = r.host.len() + r.public_key.len() + r.algorithm.len() + r.fingerprint.len();
+                self.seal_row(open, *id, KIND_KNOWN_HOST, 1, Some((r, len)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let count = new.len() as u32;
+        for (id, record) in new {
+            open.known_hosts.insert(id, Stored { revision: 1, record });
+        }
+        Ok(count)
     }
 
     /// The OS recorded for each host that has one.

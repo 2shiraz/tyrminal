@@ -335,3 +335,53 @@ async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation
     v.lock().await;
     assert!(core.sessions.exec_snippet(WINDOW, &a, &check.id, "run-locked").await.is_err());
 }
+
+/// IMP-01: a `known_hosts` file the user picked makes the lab server's real host key trusted after
+/// a preview, so the first connection asks no trust question; a different key for the same server
+/// and key type is a conflict that refuses the whole import.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn a_known_hosts_file_imports_trust_that_a_real_connection_accepts() {
+    use tyrminal_core::contracts::KnownHostImportStatus;
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let port = lab.port("a");
+    let file = format!(
+        "# exported\n[127.0.0.1]:{port} {}\n|1|aGFzaA==|aGFzaA== {}\n",
+        lab.str("/servers/a/hostKeyEd25519"),
+        lab.str("/servers/a/hostKeyEd25519")
+    );
+
+    let preview = v.known_hosts_file_preview(&file).await.unwrap();
+    assert_eq!(preview.entries.len(), 1);
+    assert_eq!(preview.entries[0].status, KnownHostImportStatus::New);
+    assert_eq!(preview.entries[0].fingerprint, lab.str("/servers/a/hostKeyEd25519Fingerprint"));
+    assert_eq!(preview.skipped.len(), 1, "the hashed line is listed, not imported");
+    assert!(v.list_known_hosts().await.unwrap().is_empty(), "previewing trusts nothing");
+
+    // A tampered fingerprint on the way back is refused.
+    let mut tampered = preview.entries.clone();
+    tampered[0].fingerprint = "SHA256:forged".into();
+    assert_eq!(v.import_known_hosts(tampered).await.unwrap_err().code, ErrorCode::InvalidInput);
+    assert_eq!(v.import_known_hosts(preview.entries.clone()).await.unwrap(), 1);
+    assert_eq!(
+        v.known_hosts_file_preview(&file).await.unwrap().entries[0].status,
+        KnownHostImportStatus::AlreadyTrusted
+    );
+
+    // Server b's ed25519 key claimed for server a's address: a conflict, nothing changes.
+    let forged = format!("[127.0.0.1]:{port} {}\n", lab.str("/servers/b/hostKeyEd25519"));
+    let conflict = v.known_hosts_file_preview(&forged).await.unwrap();
+    assert_eq!(conflict.entries[0].status, KnownHostImportStatus::Conflict);
+    assert_eq!(v.import_known_hosts(conflict.entries).await.unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(v.list_known_hosts().await.unwrap().len(), 1);
+
+    // The imported trust is what a real connection checks: no trust prompt, straight to sign-in.
+    let host = v.save_host(host("lab a", port)).await.unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    assert!(matches!(next_prompt(&mut inbox).await, SessionEvent::AuthPrompt { .. }), "no trust prompt expected");
+    core.sessions.close(WINDOW, &opened.session_id).unwrap();
+}

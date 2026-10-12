@@ -581,6 +581,103 @@ pub(crate) fn parse_securecrt(text: &str) -> Result<Parsed, IpcError> {
     if text.trim_start().starts_with('<') { parse_securecrt_xml(text) } else { parse_securecrt_ini(text) }
 }
 
+// ---------- OpenSSH known_hosts ----------
+
+/// One parsed `known_hosts` key for one host, before it is compared with the vault.
+pub(crate) struct KnownHostLine {
+    pub line: usize,
+    pub host: String,
+    pub port: u16,
+    pub key: tyrminal_ssh::PresentedHostKey,
+}
+
+/// `host`, `[host]:port` → canonical host and port.
+fn known_host_name(name: &str) -> Option<(String, u16)> {
+    let (host, port) = match name.strip_prefix('[') {
+        Some(rest) => {
+            let (host, port) = rest.split_once("]:")?;
+            (host, port.parse::<u16>().ok().filter(|p| *p > 0)?)
+        }
+        None => (name, 22),
+    };
+    let host = crate::validate::address(host).ok()?;
+    Some((tyrminal_ssh::canonical_host(&host), port))
+}
+
+/// An OpenSSH `known_hosts` file (the user picked it; it is read as data). Hashed host names,
+/// patterns and negations cannot be mapped to one host and are skipped; `@cert-authority` lines
+/// are not supported yet; a key listed under `@revoked` anywhere in the file is never imported.
+pub(crate) fn parse_known_hosts(text: &str) -> Result<(Vec<KnownHostLine>, Parsed), IpcError> {
+    check_size(text)?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut out = Parsed::default();
+    let mut lines = Vec::new();
+    let mut revoked: Vec<String> = Vec::new();
+    for (index, raw) in text.lines().enumerate() {
+        let number = index + 1;
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.len() > tyrminal_contracts::limits::MAX_IMPORT_LINE_LEN {
+            out.skip(number, line, "line is too long");
+            continue;
+        }
+        let mut fields = line.split_whitespace();
+        let mut first = fields.next().unwrap_or_default();
+        let marker = first.strip_prefix('@').map(str::to_owned);
+        if marker.is_some() {
+            first = fields.next().unwrap_or_default();
+        }
+        let key_text = format!("{} {}", fields.next().unwrap_or_default(), fields.next().unwrap_or_default());
+        match marker.as_deref() {
+            Some("revoked") => {
+                if let Some(key) = tyrminal_ssh::host_key_from_openssh(&key_text) {
+                    revoked.push(key.public_key);
+                }
+                out.skip(number, line, "revocation entry: the key it names is never imported");
+                continue;
+            }
+            Some("cert-authority") => {
+                out.skip(number, line, "host certificate authorities are not supported yet");
+                continue;
+            }
+            Some(_) => {
+                out.skip(number, line, "unknown marker");
+                continue;
+            }
+            None => {}
+        }
+        let Some(key) = tyrminal_ssh::host_key_from_openssh(&key_text) else {
+            out.skip(number, line, "not a host key type Tyrminal accepts, or not a valid key");
+            continue;
+        };
+        if first.starts_with('|') {
+            out.skip(number, line, "hashed host name: which host it is for cannot be known");
+            continue;
+        }
+        for name in first.split(',').filter(|n| !n.is_empty()) {
+            if name.contains(['*', '?', '!']) {
+                out.skip(number, name, "host pattern: not one host");
+                continue;
+            }
+            let Some((host, port)) = known_host_name(name) else {
+                out.skip(number, name, "not a valid host name or address");
+                continue;
+            };
+            if lines.len() >= MAX_IMPORT_HOSTS {
+                return Err(invalid(TOO_MANY));
+            }
+            lines.push(KnownHostLine { line: number, host, port, key: key.clone() });
+        }
+    }
+    let (kept, dropped): (Vec<_>, Vec<_>) = lines.into_iter().partition(|l| !revoked.contains(&l.key.public_key));
+    for l in dropped {
+        out.skip(l.line, &l.host, "this key is also listed as revoked in the file; not imported");
+    }
+    Ok((kept, out))
+}
+
 // ---------- key files ----------
 
 /// Whether private-key text (OpenSSH, PEM or PuTTY) needs a passphrase to decode. Used to tell
@@ -703,5 +800,36 @@ mod tests {
         assert_eq!(parsed.hosts.len(), 1);
         assert_eq!((parsed.hosts[0].label.as_str(), parsed.hosts[0].port), ("bastion.example", 22));
         assert!(parse_securecrt("hello\n").is_err());
+    }
+
+    #[test]
+    fn known_hosts_skip_hashed_patterns_authorities_and_revoked_keys() {
+        let text =
+            std::fs::read_to_string(format!("{}/../../tests/fixtures/import/known_hosts", env!("CARGO_MANIFEST_DIR")))
+                .unwrap();
+        let (lines, parsed) = parse_known_hosts(&text).unwrap();
+        let got: Vec<(String, u16, String)> =
+            lines.iter().map(|l| (l.host.clone(), l.port, l.key.algorithm.clone())).collect();
+        assert_eq!(
+            got,
+            [
+                ("web.example.net".to_owned(), 22, "ssh-ed25519".to_owned()),
+                ("192.0.2.10".to_owned(), 22, "ssh-ed25519".to_owned()),
+                ("web.example.net".to_owned(), 22, "ecdsa-sha2-nistp256".to_owned()),
+            ]
+        );
+        let reasons: Vec<&str> = parsed.skipped.iter().map(|s| s.reason.as_str()).collect();
+        for expected in
+            ["hashed", "pattern", "certificate authorities", "revocation", "not a host key", "also listed as revoked"]
+        {
+            assert!(reasons.iter().any(|r| r.contains(expected)), "{expected}: {reasons:?}");
+        }
+        // The bracketed form carries the port; the revoked bastion key never appears.
+        assert!(lines.iter().all(|l| l.host != "bastion.example.net"));
+        let (bracketed, _) =
+            parse_known_hosts(&format!("[h.example]:2200 {}", text.lines().nth(1).unwrap().split_once(' ').unwrap().1))
+                .unwrap();
+        assert_eq!((bracketed[0].host.as_str(), bracketed[0].port), ("h.example", 2200));
+        assert!(parse_known_hosts(&"x".repeat(2 * 1024 * 1024)).is_err());
     }
 }

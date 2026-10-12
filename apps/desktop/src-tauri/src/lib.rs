@@ -213,6 +213,8 @@ pub fn run() {
             commands::inventory::key_import_pick_file,
             commands::inventory::key_import_picked,
             commands::inventory::key_import_pick_clear,
+            commands::inventory::known_hosts_import_preview,
+            commands::inventory::known_hosts_import,
         ])
         .build(tauri::generate_context!());
 

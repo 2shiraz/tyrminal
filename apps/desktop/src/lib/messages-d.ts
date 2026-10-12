@@ -62,6 +62,16 @@ export const msgD = {
     securecrtHint: "Choose the XML file from Tools → Export Settings, or one session's .ini file. SSH2 sessions become hosts in their folders; saved passwords are never imported.",
     knownHostsHint: "Servers whose keys you trusted on a connection but that have no host entry. Each becomes a host; set its user name before connecting.",
     knownHostsNone: "Every trusted known host already has a host entry.",
+    knownHostsFile: "OpenSSH known_hosts (trust keys)",
+    knownHostsFileHint:
+      "Choose a known_hosts file. Its keys become trusted server identities after you review them here. Hashed names, patterns and certificate-authority lines cannot be imported; a key that differs from one you already trust is never replaced.",
+    trustCount: (n: number) => (n === 1 ? "1 key will be trusted" : `${n} keys will be trusted`),
+    trustRun: (n: number) => (n === 1 ? "Trust 1 key" : `Trust ${n} keys`),
+    trustDone: (n: number) => (n === 1 ? "Trusted 1 key" : `Trusted ${n} keys`),
+    statusNew: "Will be trusted",
+    statusTrusted: "Already trusted",
+    statusConflict: "Different key already trusted — not imported",
+    conflictsNote: "Servers marked as conflicting keep the key you trusted before. Remove that trust in Known hosts first if the server's key really changed.",
   },
   keys: {
     emptyBody: "Generate an Ed25519, ECDSA or RSA key here, or import an existing private key.",

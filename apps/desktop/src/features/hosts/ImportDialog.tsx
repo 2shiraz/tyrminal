@@ -1,10 +1,10 @@
-import type { GroupSummary, ImportFormat, ImportPreview } from "@tyrminal/contracts";
+import type { GroupSummary, ImportFormat, ImportPreview, KnownHostImportPreview } from "@tyrminal/contracts";
 import { useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, Notice } from "../../components/ui/controls";
 import { IconFolderOpen, IconUpload } from "../../components/ui/icons";
-import { importer, knownHostImport } from "../../lib/ipc";
+import { importer, knownHostImport, knownHostsFile } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
@@ -13,9 +13,9 @@ import { groupPath } from "./HostEditor";
 const MAX_IMPORT_BYTES = 1024 * 1024;
 
 /** A file source, or the vault's own trusted known hosts (no file). */
-type Source = ImportFormat | "known_hosts";
+type Source = ImportFormat | "known_hosts" | "known_hosts_file";
 
-const ACCEPT: Partial<Record<ImportFormat, string>> = {
+const ACCEPT: Partial<Record<Source, string>> = {
   csv: ".csv,text/csv",
   putty_reg: ".reg",
   mobaxterm: ".ini,.mxtsessions",
@@ -42,17 +42,21 @@ export function ImportDialog({
   intoGroup,
   onClose,
   onImported,
+  onTrusted,
 }: {
   groups: GroupSummary[];
   intoGroup: string | null;
   onClose: () => void;
   onImported: (count: number) => void;
+  /** Keys from a known_hosts file became trusted. */
+  onTrusted?: (count: number) => void;
 }) {
   const [format, setFormat] = useState<Source>("openssh_config");
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [target, setTarget] = useState<string | null>(intoGroup);
   const [problem, setProblem] = useState<string | null>(null);
+  const [trust, setTrust] = useState<KnownHostImportPreview | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const { pending, error, run } = useAction();
 
@@ -66,8 +70,17 @@ export function ImportDialog({
       return;
     }
     if (format === "known_hosts") return;
-    const source = format;
     const text = decodeImportFile(await file.arrayBuffer());
+    if (format === "known_hosts_file") {
+      setTrust(null);
+      const result = await run(() => knownHostsFile.preview(text));
+      if (result) {
+        setTrust(result);
+        if (result.entries.length === 0) setProblem(msg.hosts.importNothing);
+      }
+      return;
+    }
+    const source = format;
     const result = await run(() => importer.preview(source, text));
     if (result) {
       setPreview(result);
@@ -84,6 +97,13 @@ export function ImportDialog({
       setPreview(result);
       if (result.hosts.length === 0) setProblem(msgD.import.knownHostsNone);
     }
+  }
+
+  async function confirmTrust() {
+    if (!trust || pending) return;
+    const fresh = trust.entries.filter((e) => e.status === "new");
+    const count = await run(() => knownHostsFile.run(fresh));
+    if (count !== undefined && count !== null) onTrusted?.(count);
   }
 
   async function confirm() {
@@ -107,6 +127,7 @@ export function ImportDialog({
               const value = event.target.value as Source;
               setFormat(value);
               setPreview(null);
+              setTrust(null);
               setFileName(null);
               setProblem(null);
               if (value === "known_hosts") void loadKnownHosts();
@@ -118,6 +139,7 @@ export function ImportDialog({
             <option value="mobaxterm">{msgD.import.mobaxterm}</option>
             <option value="securecrt">{msgD.import.securecrt}</option>
             <option value="known_hosts">{msgD.import.knownHosts}</option>
+            <option value="known_hosts_file">{msgD.import.knownHostsFile}</option>
           </select>
         </label>
         {format === "csv" && <p className="hint">{msg.hosts.importCsvHint}</p>}
@@ -125,6 +147,7 @@ export function ImportDialog({
         {format === "mobaxterm" && <p className="hint">{msgD.import.mobaxtermHint}</p>}
         {format === "securecrt" && <p className="hint">{msgD.import.securecrtHint}</p>}
         {format === "known_hosts" && <p className="hint">{msgD.import.knownHostsHint}</p>}
+        {format === "known_hosts_file" && <p className="hint">{msgD.import.knownHostsFileHint}</p>}
         {format !== "known_hosts" && (
           <div className="row-flex" style={{ flexWrap: "wrap" }}>
             <button type="button" className="btn" onClick={() => input.current?.click()} disabled={pending} data-autofocus>
@@ -193,6 +216,44 @@ export function ImportDialog({
           </div>
         )}
 
+        {trust && trust.entries.length > 0 && (
+          <div className="stack-sm" data-testid="trust-preview">
+            <Notice tone="success">
+              <strong>{msgD.import.trustCount(trust.entries.filter((e) => e.status === "new").length)}.</strong>
+            </Notice>
+            <ul className="list import-list">
+              {trust.entries.map((e) => (
+                <li key={`${e.host}:${e.port}:${e.publicKey}`} data-status={e.status}>
+                  <div className="row-main">
+                    <span className="row-title">{e.port === 22 ? e.host : `${e.host} port ${e.port}`}</span>
+                    <span className="row-sub mono selectable">
+                      {e.algorithm} · {e.fingerprint}
+                    </span>
+                  </div>
+                  <span className={`badge ${e.status === "new" ? "badge-success" : e.status === "conflict" ? "badge-danger" : ""}`}>
+                    {e.status === "new" ? msgD.import.statusNew : e.status === "conflict" ? msgD.import.statusConflict : msgD.import.statusTrusted}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {trust.entries.some((e) => e.status === "conflict") && <Notice tone="warning">{msgD.import.conflictsNote}</Notice>}
+          </div>
+        )}
+
+        {trust && trust.skipped.length > 0 && (
+          <details className="import-skipped" data-testid="import-skipped">
+            <summary>{msg.hosts.importSkipped(trust.skipped.length)}</summary>
+            <ul className="stack-xs" style={{ marginTop: 8 }}>
+              {trust.skipped.map((s, i) => (
+                <li key={`${s.line}-${i}`} className="hint">
+                  {s.line > 0 && <span className="mono">{msg.hosts.lineShort(s.line)} </span>}
+                  {s.text && <span className="mono selectable">{s.text}</span>} — {s.reason}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
         {preview && preview.skipped.length > 0 && (
           <details className="import-skipped" data-testid="import-skipped">
             <summary>{msg.hosts.importSkipped(preview.skipped.length)}</summary>
@@ -212,14 +273,25 @@ export function ImportDialog({
           <button type="button" className="btn" onClick={onClose}>
             {msg.common.cancel}
           </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!preview || preview.hosts.length === 0 || pending}
-            onClick={confirm}
-          >
-            {pending ? msg.common.working : msg.hosts.importRun(preview?.hosts.length ?? 0)}
-          </button>
+          {format === "known_hosts_file" ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!trust || !trust.entries.some((e) => e.status === "new") || pending}
+              onClick={confirmTrust}
+            >
+              {pending ? msg.common.working : msgD.import.trustRun(trust?.entries.filter((e) => e.status === "new").length ?? 0)}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!preview || preview.hosts.length === 0 || pending}
+              onClick={confirm}
+            >
+              {pending ? msg.common.working : msg.hosts.importRun(preview?.hosts.length ?? 0)}
+            </button>
+          )}
         </div>
       </div>
     </Dialog>
