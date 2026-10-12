@@ -26,8 +26,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
   cursor: default;
+}
+
+/* No link underlines in the app's own UI (owner: looks cheap); links are told apart by colour.
+   Terminal links (TRM-07) are drawn by the terminal and keep theirs. */
+a {
+  text-decoration: none;
 }
 
 h1,
@@ -111,6 +118,7 @@ textarea {
 }
 
 .selectable {
+  -webkit-user-select: text;
   user-select: text;
   cursor: text;
 }
@@ -358,6 +366,7 @@ kbd,
   background: var(--bg-inset);
   color: var(--text);
   font-size: var(--text-sm);
+  -webkit-user-select: text;
   user-select: text;
   transition:
     border-color var(--motion-fast) var(--ease-out),
@@ -989,6 +998,7 @@ kbd,
 }
 
 .kv dd {
+  -webkit-user-select: text;
   user-select: text;
   word-break: break-all;
 }
@@ -1006,6 +1016,7 @@ kbd,
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   letter-spacing: 0.02em;
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -1024,6 +1035,7 @@ kbd,
   font: var(--text-sm) / 1.55 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-all;
+  -webkit-user-select: text;
   user-select: text;
   font-variant-ligatures: none;
 }
@@ -1051,6 +1063,7 @@ kbd,
   background: var(--bg-inset);
   font: var(--text-xs) / 1.5 var(--font-mono);
   white-space: pre-wrap;
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -2012,6 +2025,7 @@ kbd,
   background: transparent;
   color: var(--text);
   font-size: var(--text-md);
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -2144,6 +2158,7 @@ mark {
   border: 0;
   background: transparent;
   font-size: var(--text-md);
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -2797,6 +2812,7 @@ button.home-row:focus-visible {
   border: 0;
   background: transparent;
   font-size: var(--text-sm);
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -2980,6 +2996,7 @@ button.home-row:focus-visible {
   background: var(--bg-inset);
   font: var(--weight-medium) 15px / 26px var(--font-mono);
   letter-spacing: 0.06em;
+  -webkit-user-select: text;
   user-select: text;
   counter-reset: group;
 }
@@ -4278,7 +4295,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-open:hover {
-  text-decoration: underline;
+  color: var(--accent-text);
 }
 
 .host-card[data-active="true"] {
@@ -4642,8 +4659,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--accent-text);
   font: inherit;
   text-align: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
   cursor: pointer;
 }
 
