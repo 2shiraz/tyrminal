@@ -171,6 +171,22 @@ starts and ends.
 - An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only
   when that prompt carries the integration's mark, and not if you start typing first.
 
+**Command history.** Open suggestions (Ctrl+Shift+E) → History… and turn on "Remember commands
+for suggestions". Tyrminal then remembers the commands you run on each host, encrypted in your
+vault, and lists them under History in the suggestion dialog. Picking one puts it on the command
+line; it is never run for you. This needs shell integration; only the command line at the shell
+prompt is kept, never what you type while a command runs. Start a line with a space to keep it
+out of history. Forget single commands or clear everything from the same view. Turning history
+off keeps what is stored.
+
+**Server at a glance.** In an SSH session, **Server** in the status bar opens a panel with the
+server's uptime, load, memory and disk use. It works on Linux servers; on other systems it says
+"Not available", and it is not offered for Telnet or serial sessions. Tyrminal reads the values
+with a fixed command on a separate channel of the same connection, so nothing is typed into your
+shell. It reads them every 5 s, and only while the panel is open. A value the server did not
+report in the expected form shows as "Unavailable" instead of a guess. Turn off "Show for this
+host" in the panel to stop it for one host.
+
 ## Files (SFTP)
 
 Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH session. You can:
