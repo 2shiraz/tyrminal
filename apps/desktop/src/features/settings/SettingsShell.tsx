@@ -199,7 +199,7 @@ export function SettingsView({
               </div>
             </div>
             {results.length > 0 && (
-              <ul className="settings-results" aria-labelledby="settings-results-title">
+              <ul className="box settings-results" aria-labelledby="settings-results-title">
                 {results.map((r) => (
                   <li key={r.id}>
                     <button type="button" onClick={() => open(r)}>
