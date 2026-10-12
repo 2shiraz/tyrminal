@@ -169,3 +169,19 @@ Never merge these by hand; regenerate them after resolving the sources:
   first). Suggest B 30–39 and D 40–49 so new kinds on parallel branches never collide.
 - **C → A (already done by C):** one row for `layout_list`/`layout_save`/`layout_delete` was added at the
   end of the command table in `docs/ipc-contract.md`.
+- **C → A (open, needed for TRM-02 detach-to-window):** a live session handoff between windows.
+  Today `Entry.owner` is fixed at open and the adapter's sink is bound to the opening window's
+  channels, so a tab cannot move to another window without ending its sessions. Proposed, in A's
+  files (C writes the UI, the window capability and the tests once it exists):
+  1. core `Sessions::offer_handoff(owner, session_id, to_label) -> token`: only the current owner
+     may offer; records `(session_id, to_label, token)` with a short expiry; one offer per session.
+  2. core `Sessions::accept_handoff(caller_label, token) -> session_id`: succeeds only when
+     `caller_label == to_label` and the token is unexpired; switches the owner atomically (owner
+     behind a mutex, still checked in `authorize`), so the old window is denied from then on.
+  3. adapter: the per-session sink becomes swappable; `session_attach(token, output, events)`
+     (called by the new window) accepts the handoff and swaps in its channels; output produced in
+     between is held under the existing unacknowledged-output bound, not dropped.
+  4. a session whose offer is not accepted (window closed, expiry) stays with its owner; closing
+     either window during the handoff ends nothing it does not own.
+  Lab tests C would add: the old window's write/resize/ack are denied after accept; a third window
+  cannot accept; a replayed or expired token is refused; closing the new window ends the session.
