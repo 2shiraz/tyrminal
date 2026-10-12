@@ -22,8 +22,8 @@ test("an OpenSSH config's ProxyJump becomes a jump host; ProxyCommand is ignored
 
   await page.getByRole("button", { name: "More actions for inner" }).click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  const editor = page.getByRole("dialog", { name: /Edit host/ });
-  // The Advanced section opens by itself when a jump host is set.
+  const editor = page.getByRole("complementary", { name: "Host details" });
+  // "Show more" opens by itself when a jump host is set.
   await expect(editor.getByRole("combobox", { name: "Jump host" })).toHaveValue(/.+/);
   await expect(editor).toContainText("Connects through bastion first");
 });

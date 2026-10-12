@@ -50,7 +50,7 @@ for (const theme of ["dark", "light"] as const) {
       await page.locator(".segmented label", { hasText: "List" }).click();
       await shot(page, `${theme}-07-hosts-list.png`);
       await page.getByRole("button", { name: "Add host" }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "New host" })).toBeVisible();
       await shot(page, `${theme}-08-host-editor.png`);
     });
 
@@ -107,6 +107,21 @@ for (const theme of ["dark", "light"] as const) {
       await page.getByRole("button", { name: "Connect to staging-web" }).click();
       await expect(page.getByRole("alertdialog", { name: "Verify this server before connecting" })).toBeVisible();
       await shot(page, `${theme}-17-trust-prompt.png`);
+    });
+
+    test(`sftp tab (${theme})`, async ({ page }) => {
+      await openApp(page, { theme });
+      await page.keyboard.press("Control+Shift+K");
+      await page.getByRole("combobox", { name: /Type a command/ }).fill("SFTP");
+      await page.keyboard.press("Enter");
+      const view = page.getByRole("region", { name: "SFTP file manager" });
+      await expect(view.getByRole("heading", { name: "Connect to host" })).toBeVisible();
+      await shot(page, `${theme}-18-sftp-picker.png`);
+      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
+      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await expect(view.getByRole("grid", { name: /on api-gateway/ })).toBeVisible();
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
+      await shot(page, `${theme}-19-sftp-panes.png`);
     });
   });
 }

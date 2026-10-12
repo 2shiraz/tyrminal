@@ -97,9 +97,11 @@ const SUITES = {
     { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "SFTP tab: files-only connection, transfers both ways", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/sftp.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],

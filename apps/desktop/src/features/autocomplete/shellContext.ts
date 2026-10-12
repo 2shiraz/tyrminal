@@ -32,7 +32,9 @@ const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
  */
 export type ShellMark =
   | { kind: "prompt"; sessionId: string }
-  | { kind: "command_start"; sessionId: string; command: string | null }
+  // command history: `leadingSpace` is set when the line started with a space or tab (the shell
+  // convention for "do not remember this"); `command` itself is trimmed.
+  | { kind: "command_start"; sessionId: string; command: string | null; leadingSpace?: boolean }
   | { kind: "command_end"; sessionId: string; command: string | null; exitStatus: number | null }
   | { kind: "folder"; sessionId: string; cwd: string };
 
@@ -131,6 +133,13 @@ function commandText(term: Terminal, start: { line: number; x: number }): string
   return command && !UNSAFE.test(command.replace(/\n/g, "")) ? command : null;
 }
 
+// command history
+/** Whether the command line starts with a space or tab right after the prompt end. */
+function startsWithSpace(term: Terminal, start: { line: number; x: number }): boolean {
+  const first = term.buffer.active.getLine(start.line)?.translateToString(false, start.x, start.x + 1);
+  return first === " " || first === "\t";
+}
+
 /**
  * Follows the marks of one terminal. `sessionId` is read when a mark arrives (the session id is
  * known once the session opened). Returns the cleanup that drops the handlers and the context.
@@ -160,11 +169,13 @@ export function attachShellContext(term: Terminal, sessionId: () => string | nul
       promptEnd = marker ? { marker, x: term.buffer.active.cursorX } : null;
     } else if (mark === "C") {
       const command = promptEnd && !promptEnd.marker.isDisposed ? commandText(term, { line: promptEnd.marker.line, x: promptEnd.x }) : null;
+      // command history
+      const leadingSpace = promptEnd !== null && !promptEnd.marker.isDisposed && startsWithSpace(term, { line: promptEnd.marker.line, x: promptEnd.x });
       promptEnd?.marker.dispose();
       promptEnd = null;
       running = true;
       publish(id, { atPrompt: false, command, exitStatus: null });
-      emit({ kind: "command_start", sessionId: id, command });
+      emit({ kind: "command_start", sessionId: id, command, leadingSpace });
     } else if (mark === "D" && running) {
       running = false;
       const status = arg !== undefined && /^\d{1,3}$/.test(arg) ? Number(arg) : null;
