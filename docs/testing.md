@@ -86,3 +86,13 @@ all passing.
   manual runs and the release workflow still build and inspect the real binary.
 - Debug builds keep line tables only (`[profile.dev] debug = "line-tables-only"`): readable
   panics and backtraces with much faster compiling and linking.
+
+## Upgrades and installers (Phase 09)
+
+- `crates/core/tests/upgrade.rs` opens vaults written by earlier releases
+  (`tests/fixtures/upgrade/`, synthetic data) and checks everything is still there; it runs
+  with the normal Rust tests. Add a fixture whenever a release changes the schema, a record
+  format or the preferences file.
+- `scripts/ci/installer-smoke.mjs` runs in the release workflow on each platform: install the
+  package as a user would, start the app, uninstall, and check the user's data folder is kept.
+  It refuses to run outside CI.
