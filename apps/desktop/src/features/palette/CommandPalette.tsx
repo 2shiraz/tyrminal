@@ -113,6 +113,7 @@ export function CommandPalette({
   onToggleTheme,
   onLocal,
   onSftp,
+  onSftpHost,
   onSnippet,
   onDeployKey,
   broadcast,
@@ -140,6 +141,8 @@ export function CommandPalette({
   onLocal: () => void;
   /** Opens a new SFTP tab. */
   onSftp?: (() => void) | undefined;
+  /** "SFTP: <host>": that host in an SFTP tab (SSH hosts only). */
+  onSftpHost?: ((host: HostSummary) => void) | undefined;
   onSnippet: (s: SnippetSummary) => void;
   /** Present only when the focused pane is a connected SSH session. */
   onDeployKey?: (() => void) | undefined;
@@ -285,6 +288,11 @@ export function CommandPalette({
     });
     list.push(action("local", msg.nav.localTerminal, <IconSquareTerminal size={16} />, onLocal, "newLocal"));
     if (onSftp) list.push({ ...action("sftp", msgSftp.open, <IconArrowLeftRight size={16} />, onSftp), keywords: `files transfer ${msgSftp.openHint}` });
+    if (onSftpHost)
+      for (const host of hosts.value ?? []) {
+        if (host.protocol.type !== "ssh") continue;
+        list.push({ ...action(`sftp-${host.id}`, msgSftp.openInHost(host.label), <IconArrowLeftRight size={16} />, () => onSftpHost(host)), keywords: `files transfer ${host.address}` });
+      }
     if (hasTerminal) {
       list.push(action("split-right", msg.palette.splitRight, <IconColumns2 size={16} />, () => onAction("splitRight"), "splitRight"));
       list.push(action("split-down", msg.palette.splitDown, <IconRows2 size={16} />, () => onAction("splitDown"), "splitDown"));
@@ -409,7 +417,7 @@ export function CommandPalette({
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;
-  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onSftpHost, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items

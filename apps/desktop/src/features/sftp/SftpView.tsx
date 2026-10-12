@@ -13,7 +13,8 @@ import { TransferDrawer } from "../files/TransferDrawer";
 import { type QueuedTransfer, type TransferJob, useTransferQueue } from "../files/useTransferQueue";
 import { msgSftp } from "./messages";
 import type { Endpoint } from "./model";
-import { type PaneHealth, type PaneTransfers, type Side, type Source, SftpPane } from "./SftpPane";
+import { type LocationRequest, MAX_LOCATIONS, type PaneHealth, type PaneTransfers, type Side, type Source, SftpPane } from "./SftpPane";
+import { sftpRequests } from "./requests";
 import "./sftp.css";
 
 /** Panes keep their identity (and connection) when they swap sides. */
@@ -56,6 +57,24 @@ export function SftpView({
   const queue = useTransferQueue(list, setList, visible);
   const [notice, setNotice] = useState<string | null>(null);
   const sideOf = (id: PaneId): Side => (order[0] === id ? "left" : "right");
+  const [requests, setRequests] = useState<Record<PaneId, LocationRequest | null>>({ a: null, b: null });
+  const seq = useRef(0);
+
+  // Open in SFTP: while this tab is in front, it shows each requested host in its right pane.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reads the panes' order when a request arrives.
+  useEffect(() => {
+    if (!visible) return;
+    const takeAll = () => {
+      const right = order[1];
+      for (const r of sftpRequests.take()) {
+        seq.current += 1;
+        setRequests((all) => ({ ...all, [right]: { source: r.source, path: r.path, seq: seq.current } }));
+        setActive(right);
+      }
+    };
+    takeAll();
+    return sftpRequests.subscribe(takeAll);
+  }, [visible, order]);
 
   const onEndpoint = {
     a: useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, a: e })), []),
@@ -163,6 +182,8 @@ export function SftpView({
               active={active === id}
               refreshKey={refresh[id]}
               transfers={transfersFor(id)}
+              request={requests[id]}
+              onFull={() => setNotice(msgSftp.full(MAX_LOCATIONS))}
               onFocusIn={() => setActive(id)}
               onEndpoint={onEndpoint[id]}
               onHealth={onHealth[id]}
