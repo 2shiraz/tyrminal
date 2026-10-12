@@ -12,7 +12,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // A step that hangs fails after this long instead of holding a CI runner until its job limit.
@@ -24,13 +24,24 @@ const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win
 
 const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
 // OpenSSH offers mlkem768x25519-sha256 from 9.9; the container lab has 10.0.
-const needsPostQuantumLab = () => {
-  const missing = needsLab();
-  if (missing) return missing;
-  const version = JSON.parse(readFileSync(labFile, "utf8")).serverVersion ?? "";
+// The end-to-end ML-KEM test needs a lab sshd from OpenSSH 9.9 on. TYRMINAL_PQ_LAB names a second
+// lab for it (Linux CI starts the 10.0 container lab beside the local one, whose sshd is 9.6).
+const pqLabFile = process.env.TYRMINAL_PQ_LAB ? resolve(root, process.env.TYRMINAL_PQ_LAB) : labFile;
+const labVersion = (file) => (existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")).serverVersion ?? "") : "");
+const offersPostQuantum = (version) => {
   const [major = 0, minor = 0] = (version.match(/\d+/g) ?? []).map(Number);
-  return major > 9 || (major === 9 && minor >= 9) ? null : `the lab's sshd (${version}) does not offer mlkem768x25519-sha256 (needs OpenSSH 9.9 or later)`;
+  return major > 9 || (major === 9 && minor >= 9);
 };
+const needsPostQuantumLab = () => {
+  if (!existsSync(pqLabFile)) return `the SSH lab is not running (${pqLabFile}); run pnpm lab:up`;
+  const version = labVersion(pqLabFile);
+  return offersPostQuantum(version) ? null : `the lab's sshd (${version}) does not offer mlkem768x25519-sha256 (needs OpenSSH 9.9 or later)`;
+};
+// On Windows the lab is Debian 12 in WSL 1 (OpenSSH 9.2) and the runner cannot run Linux
+// containers, so the end-to-end ML-KEM step is out of scope there: SEC-08 records it as BLOCKED
+// on windows-x64. Everywhere else a lab without ML-KEM stays BLOCKED (a failure).
+const postQuantumOutOfScope = () =>
+  process.platform === "win32" && !process.env.TYRMINAL_PQ_LAB && existsSync(labFile) && !offersPostQuantum(labVersion(labFile));
 const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
 const needsSecretStore = () => {
   if (process.platform === "darwin" || process.platform === "win32") return null;
@@ -89,18 +100,23 @@ const SUITES = {
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "sign-in with an OpenSSH user certificate (lab CA)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "cert_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "key exchange policy against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--skip", "negotiated_with_a_server_that_offers_it"), blockedBy: needsLab },
-    { name: "post-quantum key exchange negotiated end to end (lab sshd with ML-KEM)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--exact", "post_quantum_key_exchange_is_negotiated_with_a_server_that_offers_it"), blockedBy: needsPostQuantumLab },
+    ...(postQuantumOutOfScope()
+      ? []
+      : [{ name: "post-quantum key exchange negotiated end to end (lab sshd with ML-KEM)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "kex_lab", "--quiet", "--", "--ignored", "--exact", "post_quantum_key_exchange_is_negotiated_with_a_server_that_offers_it"), env: { TYRMINAL_LAB: pqLabFile }, blockedBy: needsPostQuantumLab }]),
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // privilege prompts (KEY-18)
     { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    // P-33: shells in a real container. The lab images have no engine, so this runs only where the
-    // lab user can use Docker or Podman and says so; otherwise it is BLOCKED (never a silent pass).
-    {
-      name: "container shells in a running container (lab with an engine)",
-      cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
-      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
-    },
+    // P-33: shells in a real container, on Linux only: the macOS and WSL labs have no container
+    // engine (B-10). Native CI gives the Linux lab user Docker and sets TYRMINAL_LAB_CONTAINERS;
+    // elsewhere on Linux it is BLOCKED until the lab user can use Docker or Podman (never a silent pass).
+    ...(process.platform === "linux"
+      ? [{
+          name: "container shells in a running container (lab with an engine)",
+          cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
+          blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
+        }]
+      : []),
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -123,6 +139,7 @@ const SUITES = {
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
     { name: "paste safety (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/paste.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "a refused key installed by password, then used (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/key-install.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "notes: inert Markdown, kept in the vault, code blocks only through the paste review (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/notes.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
@@ -142,6 +159,10 @@ if (!suite) {
   process.exit(2);
 }
 
+if (suiteName === "integration" && postQuantumOutOfScope()) {
+  console.log(`OUT OF SCOPE  post-quantum key exchange negotiated end to end\n         the WSL lab's sshd (${labVersion(labFile)}) has no ML-KEM; SEC-08 records this as BLOCKED on windows-x64`);
+}
+
 const results = [];
 for (const step of suite) {
   const [command, args] = step.cmd;
@@ -153,7 +174,7 @@ for (const step of suite) {
     continue;
   }
   const started = Date.now();
-  const run = spawnSync(command, args, { cwd: root, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024, timeout: STEP_TIMEOUT_MS });
+  const run = spawnSync(command, args, { cwd: root, env: { ...process.env, ...step.env }, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 64 * 1024 * 1024, timeout: STEP_TIMEOUT_MS });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const ok = run.status === 0;
   if (run.error?.code === "ETIMEDOUT") run.stderr = `${run.stderr ?? ""}\nstep timed out after ${STEP_TIMEOUT_MS / 60000} minutes`;

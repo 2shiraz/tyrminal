@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-notify-command-finished"
+description = "Enables the notify_command_finished command without any pre-configured scope."
+commands.allow = ["notify_command_finished"]
+
+[[permission]]
+identifier = "deny-notify-command-finished"
+description = "Denies the notify_command_finished command without any pre-configured scope."
+commands.deny = ["notify_command_finished"]

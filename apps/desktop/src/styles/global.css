@@ -422,7 +422,9 @@ kbd,
   pointer-events: none;
 }
 
-.input-with-icon > .input {
+/* Room for a leading icon only when there is one: plain fields (TextField, SecretField) share this
+   wrapper for their trailing button and keep the normal padding. */
+.input-with-icon > svg + .input {
   padding-left: 34px;
 }
 
@@ -1157,13 +1159,15 @@ kbd,
   border-radius: var(--radius-control);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
-  animation: menu-in var(--motion-base) var(--ease-out);
+  transform-origin: top left;
+  animation: menu-in var(--duration-pop) var(--ease-out);
 }
 
+/* Menus, the palette and tooltips: scale 0.98 to 1 with a fade, from their anchor. */
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    transform: scale(0.98);
   }
 }
 
@@ -1234,7 +1238,7 @@ kbd,
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
-  animation: toast-in var(--motion-slow) var(--ease-spring);
+  animation: toast-in var(--duration-fast) var(--ease-out);
 }
 
 .toast > svg {
@@ -1251,10 +1255,11 @@ kbd,
   color: var(--danger);
 }
 
+/* Toasts rise from the status bar edge. */
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.97);
+    transform: translateY(8px);
   }
 }
 
@@ -1610,14 +1615,6 @@ kbd,
   max-width: 1120px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-6) var(--space-7);
-  animation: page-in var(--motion-slow) var(--ease-out);
-}
-
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
 }
 
 .page-header {
@@ -1759,13 +1756,14 @@ kbd,
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--motion-slow) var(--ease-out);
+  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
+/* Side panels, the host panel and drawers slide 8 px in from their edge. */
 @keyframes panel-in {
   from {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(8px);
   }
 }
 
@@ -1949,7 +1947,8 @@ kbd,
 }
 
 .palette[open] {
-  animation: dialog-in var(--motion-base) var(--ease-out);
+  transform-origin: top center;
+  animation: menu-in var(--duration-pop) var(--ease-out);
 }
 
 .palette::backdrop {
@@ -2747,6 +2746,11 @@ button.home-row:focus-visible {
   border-radius: 50%;
 }
 
+/* A step appears as its event arrives (ConnectionSheet keys rows by their state). */
+.connect-steps li {
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
 .connect-steps li[data-kind="now"] {
   font-weight: var(--weight-medium);
 }
@@ -2873,7 +2877,15 @@ button.home-row:focus-visible {
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
   transform: translateX(-50%);
-  animation: toast-in var(--motion-slow) var(--ease-spring);
+  animation: banner-in var(--duration-fast) var(--ease-out);
+}
+
+/* Centred with translateX(-50%), so it rises with its own keyframes. */
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
 }
 
 .term-banner > svg {
@@ -3118,8 +3130,8 @@ button[data-tooltip]::after {
   opacity: 0;
   transform: translate(-50%, -2px);
   transition:
-    opacity var(--motion-fast) var(--ease-out) 0s,
-    transform var(--motion-fast) var(--ease-out) 0s;
+    opacity var(--duration-pop) var(--ease-out) 0s,
+    transform var(--duration-pop) var(--ease-out) 0s;
 }
 
 button[data-tooltip][data-tooltip-side="right"]::after {
@@ -3677,11 +3689,38 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .tabstrip-tabs {
+  position: relative;
   display: flex;
   flex: none;
   align-items: flex-end;
   gap: 2px;
   align-self: stretch;
+}
+
+
+/* A row that was just saved: one 400 ms tint (lib/motion.ts flashSaved). */
+[data-saved-flash] {
+  position: relative;
+}
+
+[data-saved-flash]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent-soft);
+  pointer-events: none;
+  animation: saved-flash 400ms var(--ease-out) forwards;
+}
+
+@keyframes saved-flash {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
 }
 
 .detached-shell {
@@ -3845,6 +3884,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   overflow-x: auto;
 }
 
+/* Highlighted links (TRM-07) are underlined, in the link color, just below the text. */
+.term-highlight[data-tone="url"] {
+  box-shadow: inset 0 -1px 0 var(--highlight-color, currentColor);
+}
+
 /* Command boundaries from shell integration (OSC 133): a hairline above each prompt, and a
    short bar in the gutter of a command that failed. Display only. */
 .cmd-separator {
@@ -3859,22 +3903,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   border-radius: 2px;
   background: var(--cmd-failed);
   pointer-events: none;
-}
-
-/* Connection details (CON-15): the core's lines, aligned as they come, scrollable. */
-.connection-details {
-  max-height: 50vh;
-  overflow: auto;
-  margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-inset);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  list-style: none;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* Session recording playback */
@@ -4057,6 +4085,18 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--warning);
 }
 
+/* A long command finished in this background tab (P-23). */
+.tab-finished {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--success);
+}
+
+.tab-finished[data-failed] {
+  color: var(--danger);
+}
+
 /* P-33: containers on the connected host (plain; the visual overhaul owns the look). */
 .containers {
   width: 100%;
@@ -4106,7 +4146,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--motion-base) var(--ease-out);
+  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
 /* Too narrow for the list and the panel side by side: the panel covers the list (made inert). */
@@ -4289,11 +4329,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 /* Empty: stays in the tree as a live region but takes no room. */
 .host-panel-status:empty {
   margin-bottom: calc(-1 * var(--space-2));
-}
-
-/* TextField wraps every input for an optional icon; without one, keep the normal inset. */
-.host-section .input-with-icon > .input:first-child {
-  padding-left: var(--space-3);
 }
 
 .host-panel-actions {
@@ -4499,6 +4534,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* tmux and screen session awareness (P-31) */
+.mux-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mux-sessions li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .glance-disks li,
@@ -4715,4 +4767,113 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: inline-flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* ---------- press and hover feedback (docs/design/interaction-polish.md, section 1) ----------
+   Hover appears at once and fades out over 120 ms. Pressed (data-pressed, set on pointer down by
+   lib/press.ts before any handler runs) shows with no transition. Reduced motion: no fade and no
+   scale. Only colour changes here; the press scale on buttons is the existing transform. */
+:root {
+  --hover-out: 120ms;
+  --press-tint: rgb(0 0 0 / 0.16);
+}
+
+:root[data-theme="light"] {
+  --press-tint: rgb(0 0 0 / 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --hover-out: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] {
+  --hover-out: 0ms;
+}
+
+:is(
+    .btn,
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  ) {
+  transition-duration: var(--hover-out);
+}
+
+:is(
+    .btn,
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  ):hover {
+  transition-duration: 0ms;
+}
+
+[data-pressed],
+[data-pressed] > .files-row {
+  transition: none !important;
+}
+
+.btn[data-pressed]:not(:disabled) {
+  background-image: linear-gradient(var(--press-tint), var(--press-tint));
+  transform: translateY(0.5px) scale(0.985);
+}
+
+:is(
+    .nav-item,
+    .chip,
+    .menu-item,
+    .tab,
+    .list > li,
+    .host-card,
+    .tile,
+    .snippet,
+    .status-button,
+    .scheme-card,
+    .sidebar-search,
+    .files-row,
+    .focus-item,
+    .folder-head
+  )[data-pressed] {
+  background-color: var(--bg-active);
+  background-image: linear-gradient(var(--press-tint), var(--press-tint));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn[data-pressed]:not(:disabled),
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+:root[data-reduce-motion="true"] :is(.btn[data-pressed], .btn:active):not(:disabled) {
+  transform: none;
+}
+
+/* Space held for a list that is still loading, before its skeleton shows (after 150 ms). */
+.skeleton-space {
+  border-radius: var(--radius-sm);
 }

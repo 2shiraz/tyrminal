@@ -1,8 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
+import { msgN } from "../../lib/messages-notify";
 import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { animateOut, useFlip } from "../../lib/motion";
 import { msgC } from "../../lib/messages-c";
 import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -58,6 +60,7 @@ export function TabStrip({
   onNewLocal,
   onNewSftp,
   onOpenPalette,
+  finished,
   layout,
   recent,
   production,
@@ -78,6 +81,8 @@ export function TabStrip({
   /** Opens a new SFTP tab. */
   onNewSftp?: () => void;
   onOpenPalette: () => void;
+  /** Tabs whose long command finished while out of view, with its exit status (P-23). */
+  finished?: ReadonlyMap<number, number | null> | undefined;
   /** The layout template the open tabs follow, and whether they changed since it was saved. */
   layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
   /** Recently connected hosts, reopened from the new-tab menu (UX-04). */
@@ -100,6 +105,12 @@ export function TabStrip({
     if (element && document.activeElement !== element) element.focus();
   });
   const PageIcon = PAGE_ICONS[destination];
+
+  // Tabs slide aside when one opens, closes or moves, and a new one fades in (lib/motion.ts).
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useFlip(tabsRef);
+  /** A tab closed with the pointer shrinks out first; from the keyboard it closes at once. */
+  const closeWithPointer = (id: number) => animateOut(tabRefs.current.get(id), () => onClose(id), "scale(0.94)");
 
   function focusTab(index: number) {
     const id = index < 0 ? null : ws.tabs[index]?.id;
@@ -158,7 +169,7 @@ export function TabStrip({
   return (
     <div className="tabstrip">
       {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
-      <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions}>
+      <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions} ref={tabsRef}>
         <div
           ref={(el) => {
             if (el) tabRefs.current.set(-1, el);
@@ -184,6 +195,7 @@ export function TabStrip({
           return (
             <div
               key={tab.id}
+              data-flip-key={tab.id}
               ref={(el) => {
                 if (el) tabRefs.current.set(tab.id, el);
                 else tabRefs.current.delete(tab.id);
@@ -201,7 +213,7 @@ export function TabStrip({
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}
               onAuxClick={(event) => {
-                if (event.button === 1) onClose(tab.id);
+                if (event.button === 1) closeWithPointer(tab.id);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -266,6 +278,7 @@ export function TabStrip({
               )}
               {isProduction && <span className="badge badge-production tab-production">{msgProduction.label}</span>}
               <span className="visually-hidden">{msgC.status.describe(status)}</span>
+              {finished?.has(tab.id) && <FinishedBadge exit={finished.get(tab.id) ?? null} />}
               {/* A pointer target only: a focusable control may not sit inside a tab. From the
                   keyboard a tab closes with Delete or from its menu (Shift+F10). */}
               <span
@@ -274,7 +287,7 @@ export function TabStrip({
                 title={msg.nav.closeTab(title)}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onClose(tab.id);
+                  closeWithPointer(tab.id);
                 }}
               >
                 <IconX size={14} />
@@ -344,5 +357,16 @@ export function TabStrip({
         />
       )}
     </div>
+  );
+}
+
+/** A finished command in a background tab (P-23): a check or a cross, with text, not color alone. */
+function FinishedBadge({ exit }: { exit: number | null }) {
+  const failed = exit !== null && exit !== 0;
+  return (
+    <span className="tab-finished" data-failed={failed || undefined}>
+      <span aria-hidden="true">{failed ? "✕" : "✓"}</span>
+      <span className="visually-hidden"> ({failed ? msgN.badgeFailed(exit) : msgN.badgeOk})</span>
+    </span>
   );
 }

@@ -174,6 +174,8 @@ const COMMANDS: &[&str] = &[
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    // terminal notifications (P-23)
+    "notify_command_finished",
     "note_get",
     "note_set",
     "note_for_host",
@@ -194,6 +196,8 @@ const COMMANDS: &[&str] = &[
     "glance_get",
     "glance_host_get",
     "glance_host_set",
+    // tmux and screen session awareness (P-31)
+    "multiplexer_list",
 ];
 
 /// Short hash of the commit being built: CI's `GITHUB_SHA`, else the local checkout, else `dev`.

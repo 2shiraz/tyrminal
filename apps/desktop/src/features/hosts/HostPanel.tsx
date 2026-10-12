@@ -12,6 +12,7 @@ import { AutosaveStatus, handleUndoKey } from "../../lib/autosave";
 import { toAppError } from "../../lib/ipc";
 import { msgSftp } from "../sftp/messages";
 import { msg } from "../../lib/messages";
+import type { Unsaved } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { useHostAutosave } from "./hostAutosave";
 import { NoteCard } from "../notes/NoteCard";
@@ -26,7 +27,7 @@ export function HostPanel({
   defaultGroupId,
   os,
   identity,
-  secretRef,
+  unsavedRef,
   onRequestClose,
   onSaved,
   onConnect,
@@ -42,8 +43,8 @@ export function HostPanel({
   defaultGroupId: string | null;
   os: HostOs | null;
   identity: { list: IdentitySummary[]; current: string | null } | undefined;
-  /** Mirrors whether a password was typed but not set, for the owner's guard. */
-  secretRef: MutableRefObject<boolean>;
+  /** Mirrors what is not autosaved (a typed, unset password; note edits), for the owner's guard. */
+  unsavedRef: MutableRefObject<Unsaved>;
   /** Escape or the collapse button: the owner asks before discarding a typed password. */
   onRequestClose: () => void;
   /** After every write of the host itself (the first one creates it). */
@@ -66,7 +67,7 @@ export function HostPanel({
   const [connecting, setConnecting] = useState(false);
   // An unsaved note counts too: closing asks first instead of dropping it.
   const [noteDirty, setNoteDirty] = useState(false);
-  secretRef.current = typedSecret || noteDirty;
+  unsavedRef.current = { password: typedSecret, note: noteDirty };
 
   // A serial host has no address field to start in: focus goes to the panel's heading so it stays
   // inside the panel.

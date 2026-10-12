@@ -7,6 +7,7 @@ import { IconCheck, IconCopy, IconFileCode, IconFolderOpen, IconKeyRound, IconPl
 import { keys as keysApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { useFlip } from "../../lib/motion";
 import { useVaultData } from "../../app/vaultData";
 import { useAction } from "../../lib/useAsync";
 import { IdentitiesSection } from "./IdentitiesSection";
@@ -15,6 +16,8 @@ import { InstallKeyDialog } from "./InstallKeyDialog";
 export function KeychainView() {
   // The shared list, so host views see a new or deleted key immediately.
   const { keys, hosts } = useVaultData();
+  const listRef = useRef<HTMLUListElement>(null);
+  useFlip(listRef);
   const [dialog, setDialog] = useState<"generate" | "import" | null>(null);
   const [deleting, setDeleting] = useState<KeySummary | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -87,9 +90,9 @@ export function KeychainView() {
         )}
 
         {total > 0 && (
-          <ul className="list">
+          <ul className="list" ref={listRef}>
             {(keys.value ?? []).map((key) => (
-              <li key={key.id}>
+              <li key={key.id} data-flip-key={key.id}>
                 <span className="tile-icon" aria-hidden="true">
                   <IconKeyRound size={17} />
                 </span>

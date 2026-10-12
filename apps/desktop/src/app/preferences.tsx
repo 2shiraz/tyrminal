@@ -10,6 +10,7 @@ const DEFAULTS: Preferences = {
   localShell: null,
   editorApps: [],
   diagnostics: false,
+  commandNotifications: { enabled: true, minSeconds: 10 },
   // compromised-password check (SEC-11): off until the user turns it on; the core supplies the address.
   passwordCheck: { enabled: false, endpoint: "" },
   productionTag: "prod",

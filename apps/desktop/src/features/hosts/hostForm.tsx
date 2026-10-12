@@ -355,9 +355,10 @@ function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | nul
         label={msg.hosts.address}
         value={form.fields.address}
         onChange={form.set.setAddress}
-        // A new host in the panel: says it is saved once the address is valid (in the field's own
-        // hint, so the panel does not shift when the host is created).
-        hint={form.live?.isNew ? msgAutosave.newHostHint : msg.hosts.addressHint}
+        // A panel opened for a new host says it is saved once the address is valid. The hint stays
+        // for the panel's life (form.host is the host it opened with), so nothing below it moves
+        // under the pointer when autosave creates the host.
+        hint={form.live && form.host === null ? msgAutosave.newHostHint : msg.hosts.addressHint}
         error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
         maxLength={253}
         autoFocus={autoFocus}

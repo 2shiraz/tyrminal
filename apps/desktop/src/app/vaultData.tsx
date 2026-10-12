@@ -1,10 +1,14 @@
-// Vault-backed lists shared by several views (home, hosts, palette, snippets panel). They live
-// under AppShell, which is keyed by the vault generation, so a lock discards all of them.
+// Vault-backed lists shared by several views (home, hosts, known hosts, keychain, palette, snippets
+// panel). They load once per unlock: they live under AppShell, which is keyed by the vault
+// generation, so a lock discards all of them. The native side sends no change events for vault
+// records (only "vault-status"), so the views that edit a record reload the list it belongs to
+// after the edit, and identities reload on `identityEvents`.
 
-import type { GroupSummary, HostSummary, KeySummary, SnippetSummary } from "@tyrminal/contracts";
-import { type ReactNode, createContext, useContext, useMemo, useRef } from "react";
+import type { GroupSummary, HostSummary, IdentitySummary, KeySummary, SnippetSummary } from "@tyrminal/contracts";
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useRef } from "react";
 
-import { groups as groupsApi, hosts as hostsApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
+import { identityEvents } from "../features/credentials/identityEvents";
+import { groups as groupsApi, hosts as hostsApi, identities as identitiesApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 
 type Loaded<T> = ReturnType<typeof useLoaded<T>>;
@@ -15,6 +19,7 @@ interface VaultData {
   keys: Loaded<KeySummary[]>;
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
+  identities: Loaded<IdentitySummary[]>;
   /** Derived, non-secret results computed once per unlock (Home's security review counts). */
   memo: Map<string, unknown>;
 }
@@ -27,8 +32,14 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   const keys = useLoaded(keysApi.list);
   const snippets = useLoaded(snippetsApi.list);
   const groups = useLoaded(groupsApi.list);
+  const identities = useLoaded(identitiesApi.list);
+  const reloadIdentities = identities.reload;
+  useEffect(() => identityEvents.subscribe(() => void reloadIdentities()), [reloadIdentities]);
   const memo = useRef(new Map<string, unknown>()).current;
-  const value = useMemo(() => ({ hosts, recent, keys, snippets, groups, memo }), [hosts, recent, keys, snippets, groups, memo]);
+  const value = useMemo(
+    () => ({ hosts, recent, keys, snippets, groups, identities, memo }),
+    [hosts, recent, keys, snippets, groups, identities, memo],
+  );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

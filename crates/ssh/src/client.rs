@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+
+use crate::rsa_sign::{ExactRsaSigner, RsaSignError};
 use russh::{ChannelMsg, Disconnect};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -544,8 +546,16 @@ impl VerifiedConnection {
 
     pub async fn authenticate_key(&mut self, username: &str, key: &ClientKey) -> Result<AuthOutcome, SshError> {
         let hash = self.rsa_hash(key).await?;
-        let with_alg = PrivateKeyWithHashAlg::new(Arc::new(key.private_key().clone()), hash);
         let timeout = self.request_timeout;
+        if key.is_rsa() {
+            // Signed here so the signature is exactly the modulus length (see `rsa_sign`).
+            let public = key.private_key().public_key().clone();
+            let mut signer = ExactRsaSigner::new(key.private_key());
+            let fut = self.handle.authenticate_publickey_with(username, public, hash, &mut signer);
+            let result = rsa_signed(tokio::time::timeout(timeout, fut).await)?;
+            return self.outcome(result);
+        }
+        let with_alg = PrivateKeyWithHashAlg::new(Arc::new(key.private_key().clone()), hash);
         let fut = self.handle.authenticate_publickey(username, with_alg);
         let result = match tokio::time::timeout(timeout, fut).await {
             Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
@@ -570,6 +580,13 @@ impl VerifiedConnection {
             return Err(SshError::Protocol);
         }
         let timeout = self.request_timeout;
+        if key.is_rsa() {
+            let hash = self.rsa_hash(key).await?;
+            let mut signer = ExactRsaSigner::new(key.private_key());
+            let fut = self.handle.authenticate_certificate_with(username, cert, hash, &mut signer);
+            let result = rsa_signed(tokio::time::timeout(timeout, fut).await)?;
+            return self.outcome(result);
+        }
         let fut = self.handle.authenticate_openssh_cert(username, Arc::new(key.private_key().clone()), cert);
         let result = match tokio::time::timeout(timeout, fut).await {
             Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
@@ -839,5 +856,15 @@ async fn within<T>(
         Err(_) => Err(SshError::Timeout(stage)),
         Ok(Err(err)) => Err(SshError::from_russh(&err, stage)),
         Ok(Ok(value)) => Ok(value),
+    }
+}
+
+/// The result of an RSA sign-in through [`ExactRsaSigner`], as the adapter's own error.
+fn rsa_signed<T>(result: Result<Result<T, RsaSignError>, tokio::time::error::Elapsed>) -> Result<T, SshError> {
+    match result {
+        Err(_) => Err(SshError::Timeout(Stage::Authenticating)),
+        Ok(Err(RsaSignError::Send)) => Err(SshError::Disconnected(Stage::Authenticating)),
+        Ok(Err(RsaSignError::Sign)) => Err(SshError::Internal),
+        Ok(Ok(result)) => Ok(result),
     }
 }

@@ -80,7 +80,7 @@ describe("privilege-prompt assistance in the real application", { concurrency: f
     await t.waitForText("tyr$");
 
     // A no-echo prompt like sudo's; the shell reports only a hash of what it read.
-    await t.type(`stty -echo; read typed; stty echo; printf 'G%sT:%s\\n' O "$(printf '%s' "$typed" | sha256sum | cut -c1-16)"\n`);
+    await t.type(`stty -echo; read typed; stty echo; printf 'G%sT:%s\\n' O "$(printf '%s' "$typed" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"\n`);
     await s.chord(insertChord);
     const dialog = await s.waitFor("dialog");
     await s.until(async () => /Types the password of identity “Lab identity” into Lab\./.test(await s.text(dialog)), {

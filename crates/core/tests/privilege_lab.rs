@@ -174,6 +174,10 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
         (ops.id.as_str(), "lab user", true)
     );
 
+    // Interactive Bash 3.2 (the macOS lab's /bin/sh) history-expands the `$!` below inside `$(…)`;
+    // dash has no history expansion, so the guard is a no-op there.
+    c.send("case $- in *H*) set +H;; esac\n").await;
+
     // A server-printed "sudo prompt" gets nothing on its own: after two seconds the terminal
     // input holds no bytes. (POSIX sh: the lab's login shell may be dash. The markers are split
     // in the command so its echo never matches. Some terminals, such as WSL's, block a read with
@@ -205,10 +209,11 @@ async fn an_identity_password_reaches_a_real_prompt_only_when_asked() {
     assert_eq!(foreign.code, ErrorCode::AccessDenied);
 
     // A real no-echo prompt (like sudo's): the explicit insert types the password, without
-    // Enter; the user's Enter submits it. The shell prints only a hash of what it read.
+    // Enter; the user's Enter submits it. The shell prints only a hash of what it read (macOS has
+    // shasum, not sha256sum).
     c.send(concat!(
         "stty -echo; read typed; stty echo; ",
-        "printf 'G%sT:%s\\n' O \"$(printf '%s' \"$typed\" | sha256sum | cut -c1-16)\"\n"
+        "printf 'G%sT:%s\\n' O \"$(printf '%s' \"$typed\" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)\"\n"
     ))
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;

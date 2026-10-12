@@ -1,6 +1,7 @@
 import type { IdentitySummary, KeySummary, SecretChange } from "@tyrminal/contracts";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 
+import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconPencil, IconPlus, IconTrash2, IconUser } from "../../components/ui/icons";
@@ -8,37 +9,16 @@ import { identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
+import { identityEvents } from "./identityEvents";
 // identity deletion (BUILD_SPEC §10.2)
 import { DeleteIdentityDialog } from "../identities/DeleteIdentityDialog";
 
-/** Notifies views that show identities (hosts, keychain) that they changed. */
-const listeners = new Set<() => void>();
-export const identityEvents = {
-  changed: () => {
-    for (const fn of listeners) fn();
-  },
-  subscribe: (fn: () => void) => {
-    listeners.add(fn);
-    return () => {
-      listeners.delete(fn);
-    };
-  },
-};
+export { identityEvents } from "./identityEvents";
 
-/** The identity list, reloaded whenever identities or their uses change. */
-export function useIdentities() {
-  const [list, setList] = useState<IdentitySummary[] | null>(null);
-  const reload = useCallback(() => {
-    identitiesApi
-      .list()
-      .then(setList)
-      .catch(() => setList([]));
-  }, []);
-  useEffect(() => {
-    reload();
-    return identityEvents.subscribe(reload);
-  }, [reload]);
-  return list;
+/** The identity list from the per-unlock cache (reloaded whenever identities or their uses change). */
+export function useIdentities(): IdentitySummary[] | null {
+  const { identities } = useVaultData();
+  return identities.value ?? (identities.error ? [] : null);
 }
 
 /** Reusable identities on the Keychain page (KEY-15/16). */

@@ -30,21 +30,28 @@ export interface BuiltinRule {
 }
 
 const IPV4 = /(?<![\w.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\/(?:3[0-2]|[12]?\d))?(?::\d{1,5})?(?![\w.]*\w)/g;
-const IPV6_CANDIDATE = /(?<![0-9A-Fa-f:])[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(?![0-9A-Fa-f:])/g;
+// Hex groups and colons, optionally ending in a dotted IPv4 part (`::ffff:192.0.2.128`).
+const IPV6_CANDIDATE = /(?<![0-9A-Fa-f:.])[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(?:\d{1,3}(?:\.\d{1,3}){3})?(?![0-9A-Fa-f:]|\.\d)/g;
+const IPV4_TAIL = /^(.*:)((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})$/;
 
 /**
- * A full (eight groups) or `::`-compressed IPv6 address. Times (12:30:45) and MAC addresses
- * (six groups) are not addresses and are not matched.
+ * A full (eight groups) or `::`-compressed IPv6 address, also with its last 32 bits written as an
+ * IPv4 address (`::ffff:192.0.2.128`). Times (12:30:45) and MAC addresses (six groups) are not
+ * addresses and are not matched.
  */
 export function isIpv6(text: string): boolean {
-  if (text.length < 3 || text.length > 39) return false;
-  const double = text.indexOf("::");
-  if (double !== text.lastIndexOf("::")) return false;
+  if (text.length < 3 || text.length > 45) return false;
+  // An IPv4 tail stands for the last two groups.
+  const tail = IPV4_TAIL.exec(text);
+  const hex = tail ? `${tail[1]}0:0` : text;
+  if (!tail && text.includes(".")) return false;
+  const double = hex.indexOf("::");
+  if (double !== hex.lastIndexOf("::")) return false;
   if (double >= 0) {
-    const parts = text.split("::").flatMap((half) => (half === "" ? [] : half.split(":")));
+    const parts = hex.split("::").flatMap((half) => (half === "" ? [] : half.split(":")));
     return parts.length <= 7 && parts.every((g) => /^[0-9A-Fa-f]{1,4}$/.test(g));
   }
-  const groups = text.split(":");
+  const groups = hex.split(":");
   return groups.length === 8 && groups.every((g) => /^[0-9A-Fa-f]{1,4}$/.test(g));
 }
 
@@ -62,8 +69,9 @@ export const BUILTIN_RULES: readonly BuiltinRule[] = [
     re: /(?<![\w.:-])\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:[.,]\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?(?![\w:-])/g,
   },
   { pref: "dates", kind: "date", re: /(?<![\w.:])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:[.,]\d{1,9})?)?(?![\w:])/g },
-  { pref: "ipAddresses", kind: "address", re: IPV4 },
+  // IPv6 before IPv4, so an IPv4-mapped address is one match (an IPv6 match always has a colon).
   { pref: "ipAddresses", kind: "address", re: IPV6_CANDIDATE, accept: isIpv6 },
+  { pref: "ipAddresses", kind: "address", re: IPV4 },
   { pref: "macAddresses", kind: "address", re: /(?<![\w:-])[0-9A-Fa-f]{2}(?:([:-])[0-9A-Fa-f]{2})(?:\1[0-9A-Fa-f]{2}){4}(?![\w:-])/g },
   // UUIDs, 0x values and commit hashes.
   { pref: "hex", kind: "hex", re: /(?<![\w-])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\w-])/g },

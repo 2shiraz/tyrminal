@@ -10,11 +10,16 @@ export interface OpenSshSession {
 export interface SnippetRunHost {
   /** Connected SSH sessions of this window right now (read on demand, never cached). */
   sessions: () => OpenSshSession[];
+  /**
+   * Changes whenever a pane's session connects, drops or closes (the panes' session events), so
+   * a consumer re-renders and reads `sessions()` again instead of polling.
+   */
+  version: string;
   /** Opens a session to a host in a new tab, through the normal connect path. */
   connect: (host: HostSummary) => void;
 }
 
-const none: SnippetRunHost = { sessions: () => [], connect: () => undefined };
+const none: SnippetRunHost = { sessions: () => [], connect: () => undefined, version: "" };
 
 /** Provided by the app shell; the default has no sessions, so runs are offered but skip every host. */
 export const SnippetRunContext = createContext<SnippetRunHost>(none);

@@ -44,6 +44,10 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    // terminal notifications (P-23): between one second and a day.
+    if !(1..=86_400).contains(&prefs.command_notifications.min_seconds) {
+        return Err(invalid("A command must run between 1 second and 24 hours to notify."));
+    }
     if let Some(shell) = &prefs.local_shell {
         let listed = tyrminal_pty::available_shells();
         if !listed.iter().any(|p| p.to_str() == Some(shell.as_str())) {
@@ -173,6 +177,18 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_notifications_are_on_by_default_and_bounded() {
+        let old: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert!(old.command_notifications.enabled);
+        assert_eq!(old.command_notifications.min_seconds, 10);
+        for bad in [0, 86_401] {
+            let mut p = Preferences::default();
+            p.command_notifications.min_seconds = bad;
+            assert!(sanitize(p).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn editors_are_added_natively_only_and_can_be_removed() {

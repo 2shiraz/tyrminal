@@ -890,3 +890,36 @@ describe("broadcast with a pane left out, on real shells (P-13)", { concurrency:
     }
   });
 });
+
+describe("command-finished notifications from real shell marks (P-23)", { concurrency: false }, () => {
+  test("a command finishing in a background tab marks it and is announced with status and duration only", async () => {
+    const app = await App.launch({ prefs: { ...DOM_RENDERER_PREFS, commandNotifications: { enabled: true, minSeconds: 2 } } });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      await t.type("export PS1='tyr$ '; clear\n");
+      await t.waitForText("tyr$");
+      // The marks an integrated shell prints, around a command that takes 4 seconds; the
+      // command text carries a fake secret that must never reach the notification.
+      await t.type(
+        "printf '\\033]133;A\\007$ \\033]133;B\\007echo TOKEN=s3cret\\n\\033]133;C\\007'; sleep 4; printf '\\033]133;D;3\\007'\n",
+      );
+      // Another tab in front while it runs.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      const announced = await s.until(() => s.execute(`return document.querySelector('[data-testid="command-finished"]')?.textContent || null`), {
+        describe: "finished announcement",
+        timeout: 20_000,
+      });
+      assert.match(announced, /^Lab: Command failed with exit status 3 after [45] s\.$/);
+      assert.doesNotMatch(announced, /TOKEN|s3cret|echo|sleep/);
+      const badge = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab")].find((e) => e.textContent.includes("Lab"))?.querySelector(".tab-finished")?.textContent ?? null`);
+      assert.match(badge, /command failed with exit status 3/);
+    } finally {
+      await app.quit();
+    }
+  });
+});

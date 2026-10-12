@@ -164,6 +164,7 @@
     "allow-startup-effective",
     "allow-group-defaults-get",
     "allow-group-defaults-set",
+    "allow-notify-command-finished",
     "allow-note-get",
     "allow-note-set",
     "allow-note-for-host",
@@ -180,6 +181,7 @@
     "allow-history-clear",
     "allow-glance-get",
     "allow-glance-host-get",
-    "allow-glance-host-set"
+    "allow-glance-host-set",
+    "allow-multiplexer-list"
   ]
 }
