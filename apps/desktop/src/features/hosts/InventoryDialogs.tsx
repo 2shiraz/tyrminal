@@ -5,7 +5,10 @@ import { Dialog } from "../../components/ui/Dialog";
 import { IconPlay, IconServer } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD, osNames } from "../../lib/messages-d";
+import { type OpenLayout } from "../../app/multiOpen";
+import { Segmented } from "../../components/ui/controls";
 import { msgProduction } from "../../lib/messages-production";
+import { msgSelect } from "../../lib/messages-select";
 import { OS_CHOICES } from "./OsIcon";
 import { ProductionConfirm } from "./ProductionConfirm";
 import { useIsProduction } from "./production";
@@ -18,6 +21,7 @@ export function ConnectAllDialog({
   hosts,
   groupName,
   free,
+  initialLayout = "tabs",
   onClose,
   onConfirm,
 }: {
@@ -26,9 +30,13 @@ export function ConnectAllDialog({
   groupName: string | null;
   /** How many more sessions can be open now. */
   free: number;
+  /** Preselected: Cmd/Ctrl+Enter on a selection asks for one split tab. */
+  initialLayout?: OpenLayout;
   onClose: () => void;
-  onConfirm: (hosts: HostSummary[]) => void;
+  /** `layout`: one tab per host (default) or one tab split in a grid. */
+  onConfirm: (hosts: HostSummary[], layout: OpenLayout) => void;
 }) {
+  const [layout, setLayout] = useState<OpenLayout>(initialLayout);
   const tooMany = hosts.length > free;
   const ready = hosts.length > 0 && !tooMany;
   const isProduction = useIsProduction();
@@ -56,8 +64,19 @@ export function ConnectAllDialog({
                 </li>
               ))}
             </ul>
+            {hosts.length > 1 && (
+              <Segmented<OpenLayout>
+                label={msgSelect.layout}
+                value={layout}
+                onChange={setLayout}
+                options={[
+                  { value: "tabs", label: msgSelect.tabs },
+                  { value: "split", label: msgSelect.split },
+                ]}
+              />
+            )}
             <p className="muted" style={{ fontSize: "var(--text-xs)" }}>
-              {msgD.inventory.connectAllNote}
+              {layout === "split" ? msgSelect.splitNote : msgD.inventory.connectAllNote}
             </p>
           </>
         )}
@@ -71,7 +90,7 @@ export function ConnectAllDialog({
             {msg.common.cancel}
           </button>
           <button type="button" className="btn btn-primary" disabled={!ready}
-            onClick={() => (production.length > 0 ? setConfirming(true) : onConfirm(hosts))}
+            onClick={() => (production.length > 0 ? setConfirming(true) : onConfirm(hosts, layout))}
             data-autofocus={ready || undefined}
           >
             <IconPlay size={14} />
@@ -88,7 +107,7 @@ export function ConnectAllDialog({
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             setConfirming(false);
-            onConfirm(hosts);
+            onConfirm(hosts, layout);
           }}
         />
       )}

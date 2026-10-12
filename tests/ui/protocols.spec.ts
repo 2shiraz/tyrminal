@@ -2,7 +2,7 @@
 // natively in crates/core/tests/protocols.rs (a real Telnet server; a pseudo-terminal pair).
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -79,6 +79,6 @@ test("protocols: notices from Tyrminal show in the session, not only inside a pa
   await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("telnet");
   await dialog.getByLabel("Address").fill("192.0.2.40");
   await lastSave(page);
-  await page.getByRole("button", { name: "Connect to old switch" }).first().click();
+  await connectHost(page, "old switch");
   await expect(page.getByText("Telnet is not encrypted: anything you type here")).toBeVisible();
 });

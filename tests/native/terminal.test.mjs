@@ -805,11 +805,11 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
 
       // Home lists it under Recent once the core has recorded the connection.
       await t.nav("Home");
-      const tile = await s.until(() => s.find('section[aria-labelledby="home-recent"] button[aria-label="Connect to Lab"]'), {
-        describe: "Lab under Recent on Home",
+      await s.until(() => s.execute(`return [...document.querySelectorAll("table.home-hosts .home-host")].some((b) => b.textContent.trim() === "Lab")`), {
+        describe: "Lab among the hosts on Home",
         timeout: 20_000,
       });
-      await s.click(tile);
+      await s.openHost("table.home-hosts", "Lab");
       await trustOnce();
       await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
 
