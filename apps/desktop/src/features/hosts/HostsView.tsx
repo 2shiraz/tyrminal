@@ -1001,9 +1001,10 @@ function HostsViewImpl({
                 <span className="count">{filtered.length}</span>
                 <span className="spacer" />
                 {!searching && filter.kind !== "group" && groupList.length > 0 && (
-                  <button type="button" className="chip" aria-pressed={filter.kind === "all"} onClick={() => setFilter({ kind: filter.kind === "all" ? "none" : "all" })}>
-                    {msgHv.showAll}
-                  </button>
+                  <label className="hosts-show-all">
+                    <span>{msgHv.showAll}</span>
+                    <input type="checkbox" role="switch" className="switch" checked={filter.kind === "all"} onChange={(e) => setFilter({ kind: e.target.checked ? "all" : "none" })} />
+                  </label>
                 )}
               </div>
             )}

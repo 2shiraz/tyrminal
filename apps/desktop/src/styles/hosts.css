@@ -151,10 +151,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.hosts-main .hosts-section-head .chip {
-  height: 24px;
-}
-
 .hosts-main .hosts-empty {
   margin: 0;
   padding: var(--space-4);
@@ -418,4 +414,39 @@
 .hosts-main .group-grid > .group-row:hover {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: var(--bg-raised-hover, var(--bg-hover));
+}
+
+/* "Show all hosts": a small switch with its label, quiet in the section header. */
+.hosts-main .hosts-show-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-end: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.hosts-main .hosts-show-all:hover {
+  color: var(--text);
+}
+
+.hosts-main .hosts-show-all .switch {
+  width: 28px;
+  height: 16px;
+}
+
+.hosts-main .hosts-show-all .switch::after {
+  width: 10px;
+  height: 10px;
+}
+
+.hosts-main .hosts-show-all .switch:checked::after {
+  transform: translateX(12px);
+}
+
+.hosts-main .hosts-show-all .switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
