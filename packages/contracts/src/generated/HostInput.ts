@@ -23,4 +23,8 @@ protocol: HostProtocol,
 /**
  * Encoding and terminal type (UTF-8 and xterm-256color unless chosen otherwise).
  */
-terminal: HostTerminal, };
+terminal: HostTerminal, 
+/**
+ * Let the server use this host's sign-in key while the session is open (agent forwarding).
+ */
+forwardAgent: boolean, };

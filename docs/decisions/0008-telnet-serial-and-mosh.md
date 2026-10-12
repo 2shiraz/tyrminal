@@ -43,3 +43,18 @@ DEFERRED_BY_SCOPE until such a client exists or the project funds one with an ex
 - Serial: settings validation; a byte exchange through a `socat` pseudo-terminal pair on Linux
   and macOS (integration suite). Windows serial is not exercised in CI (no virtual COM port on
   the runner); the matrix says so.
+
+## Addendum: agent forwarding (CON-11)
+
+Agent forwarding uses Tyrminal's own minimal agent (`crates/ssh/src/agent.rs`), never the system
+agent, and is **off by default** per host. When a host turns it on:
+- only the destination (never a jump host) gets an agent, and only for a session that signed in
+  with a key; only that one key is offered;
+- the agent answers only "list keys" and "sign"; add, remove, lock and every other request get a
+  failure reply, so a server can never change what the agent holds;
+- RSA signatures are SHA-2 only (`ssh-rsa`/SHA-1 is refused);
+- every signature is reported in the session and the connection log;
+- server-opened agent channels are still refused on every connection that did not turn it on.
+
+The host editor explains the risk before it can be turned on. The lab servers now allow agent
+forwarding so that the client-side refusal is what the tests exercise.

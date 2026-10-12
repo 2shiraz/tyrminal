@@ -244,6 +244,7 @@ impl Sessions {
         // Hosts reached over Telnet or a serial line open through their own transport.
         let endpoint = self.vault.host_endpoint(host_id).await?;
         let terminal = endpoint.terminal;
+        let forward_agent = endpoint.forward_agent;
         match endpoint.protocol {
             HostProtocol::Ssh => {}
             HostProtocol::Telnet => return self.open_telnet(owner, endpoint, cols, rows, sink),
@@ -257,7 +258,7 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let ctx = TaskContext { terminal, ..TaskContext::new(&this, &session_id, &entry, &sink) };
+            let ctx = TaskContext { terminal, forward_agent, ..TaskContext::new(&this, &session_id, &entry, &sink) };
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -1140,6 +1141,8 @@ struct TaskContext {
     sink: Arc<dyn SessionSink>,
     /// Encoding and terminal type of the host (UTF-8 and xterm-256color by default).
     terminal: tyrminal_contracts::HostTerminal,
+    /// Offer the host's key to the destination server's agent requests (CON-11; off by default).
+    forward_agent: bool,
     sessions: Arc<Sessions>,
     session_id: String,
     /// The jump-chain hop being connected, for prompts (`None` for a direct connection).
@@ -1154,6 +1157,7 @@ impl TaskContext {
             entry: Arc::clone(entry),
             sink: Arc::clone(sink),
             terminal: tyrminal_contracts::HostTerminal::default(),
+            forward_agent: false,
             sessions: Arc::clone(sessions),
             session_id: session_id.to_owned(),
             hop: Mutex::new(None),
@@ -1281,7 +1285,7 @@ async fn authenticate(
     conn: &mut VerifiedConnection,
     username: &str,
     auth: PlanAuth,
-) -> Result<(), IpcError> {
+) -> Result<Option<ClientKey>, IpcError> {
     match auth {
         PlanAuth::Key { private_key, passphrase } => {
             let mut passphrase = passphrase;
@@ -1304,19 +1308,20 @@ async fn authenticate(
                 }
             };
             match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
-                AuthOutcome::Success => Ok(()),
+                // The key is kept only for agent forwarding, if the host has it on.
+                AuthOutcome::Success => Ok(Some(key)),
                 AuthOutcome::Failure { .. } => Err(auth_failed()),
             }
         }
         PlanAuth::Password(stored) => {
             if conn.authenticate_password(username, stored).await.map_err(|e| from_ssh(&e))?.is_success() {
-                return Ok(());
+                return Ok(None);
             }
             // The stored password was refused: fall through to asking, never silently loop.
             ctx.entry.log.note("the server refused the stored password; asking instead");
-            ask_password(ctx, conn, username).await
+            ask_password(ctx, conn, username).await.map(|()| None)
         }
-        PlanAuth::Ask => ask_password(ctx, conn, username).await,
+        PlanAuth::Ask => ask_password(ctx, conn, username).await.map(|()| None),
     }
 }
 
@@ -1533,8 +1538,33 @@ async fn connect_ssh(
             PlanAuth::Ask => "a password or one-time code you enter",
         };
         log.note(&format!("{step}signing in as {} with {method}", username));
+        let is_destination = chain.len() + 1 == total as usize;
         match authenticate(ctx, &mut conn, &username, auth).await {
-            Ok(()) => log.note(&format!("{step}signed in")),
+            Ok(key) => {
+                log.note(&format!("{step}signed in"));
+                // Agent forwarding (CON-11): only to the destination, only when the host has it
+                // on, and only with the key the host signs in with.
+                if is_destination && ctx.forward_agent {
+                    match key {
+                        Some(key) => {
+                            let sink = Arc::clone(&ctx.sink);
+                            let entry = Arc::clone(&ctx.entry);
+                            conn.forward_agent(tyrminal_ssh::ForwardedAgent::new(
+                                &key,
+                                Arc::new(move || {
+                                    entry.log.note("the server used your forwarded key to sign");
+                                    sink.event(SessionEvent::Banner {
+                                        text: "The server used your forwarded key to sign in somewhere.\n".into(),
+                                    });
+                                }),
+                            ));
+                            log.note("agent forwarding is on for this session (only this host's key)");
+                        }
+                        None => log
+                            .note("agent forwarding is on but this host signs in without a key; nothing is forwarded"),
+                    }
+                }
+            }
             Err(e) => {
                 log.note(&format!("{step}sign-in failed: {}", e.message));
                 return Err(e);

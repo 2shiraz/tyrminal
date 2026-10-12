@@ -25,4 +25,4 @@ inherited: InheritedFields, groupId: string | null, tags: Array<string>,
 /**
  * Unix seconds of the last connection that reached the shell, if any (recent connections).
  */
-lastConnectedAt: number | null, protocol: HostProtocol, terminal: HostTerminal, };
+lastConnectedAt: number | null, protocol: HostProtocol, terminal: HostTerminal, forwardAgent: boolean, };

@@ -165,6 +165,9 @@ export const msg = {
   },
   hosts: {
     protocol: "Protocol",
+    forwardAgent: "Forward this host's key (agent forwarding)",
+    forwardAgentWarning:
+      "While the session is open, the server, and anyone with administrator rights on it, can use this key to sign in to other servers as you. Only this host's key is offered, and Tyrminal tells you each time it is used. Turn this on only for servers you trust.",
     encoding: "Character encoding",
     terminalType: "Terminal type",
     telnet: "Telnet (not encrypted)",

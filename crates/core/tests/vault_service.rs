@@ -37,6 +37,7 @@ fn host(label: &str, auth: HostAuthInput) -> HostInput {
         tags: Vec::new(),
         protocol: Default::default(),
         terminal: Default::default(),
+        forward_agent: false,
     }
 }
 
@@ -122,6 +123,7 @@ async fn no_plaintext_canary_reaches_any_file_on_disk() {
             tags: Vec::new(),
             protocol: Default::default(),
             terminal: Default::default(),
+            forward_agent: false,
         })
         .await
         .unwrap();
@@ -454,6 +456,7 @@ async fn hosts_keys_and_references_keep_their_integrity() {
             tags: Vec::new(),
             protocol: Default::default(),
             terminal: Default::default(),
+            forward_agent: false,
         };
         assert_eq!(
             code(v.save_host(input).await),

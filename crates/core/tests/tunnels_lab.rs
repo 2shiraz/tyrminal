@@ -168,6 +168,7 @@ impl Fixture {
             tags: Vec::new(),
             protocol: Default::default(),
             terminal: Default::default(),
+            forward_agent: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -650,6 +651,7 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         tags: Vec::new(),
         protocol: Default::default(),
         terminal: Default::default(),
+        forward_agent: false,
     };
     f.core.vault.save_host(input).await.unwrap();
     f.core.vault.lock().await;

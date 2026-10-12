@@ -46,6 +46,7 @@ fn host(label: &str, group: Option<&str>) -> HostInput {
         tags: Vec::new(),
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
+        forward_agent: false,
     }
 }
 

@@ -340,6 +340,7 @@ impl Fixture {
             tags: Vec::new(),
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
+            forward_agent: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -2131,4 +2132,77 @@ async fn the_connection_log_shows_each_step_and_never_a_secret() {
     assert!(text.contains("ended: "), "{text}");
     assert!(!text.contains("not-the-password-9"));
     assert!(f.core.sessions.diagnostics("other", &client.session).is_err());
+}
+
+/// Reads output until `needle`, collecting (not failing on) events such as notices.
+async fn output_with_events(client: &mut Client, needle: &str) -> Vec<SessionEvent> {
+    let mut events = Vec::new();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !strip_escapes(&client.text).contains(needle) {
+        match tokio::time::timeout_at(deadline, client.inbox.recv()).await {
+            Ok(Some(Message::Output(bytes))) => client.absorb(bytes).await,
+            Ok(Some(Message::Event(event))) => events.push(event),
+            Ok(None) => panic!("closed while waiting for {needle:?}"),
+            Err(_) => panic!("timed out waiting for {needle:?}; got {:?}", client.text),
+        }
+    }
+    events
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let user = f.lab.str("/user");
+    let save = |label: &str, forward_agent: bool| HostInput {
+        id: None,
+        label: label.into(),
+        address: "127.0.0.1".into(),
+        port: Some(f.lab.port("a")),
+        username: user.clone(),
+        auth: HostAuthInput::Key { key_id: key_id.clone() },
+        group_id: None,
+        tags: Vec::new(),
+        protocol: HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent,
+    };
+    let hop = format!(
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {} {user}@127.0.0.1 echo HOP-$((40+2))",
+        f.lab.port("b")
+    );
+
+    // Off (the default): the server gets no agent at all.
+    let off = f.core.vault.save_host(save("no agent", false)).await.unwrap().id;
+    let mut client = Client::open_ssh(&f.core, &off).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.send("ssh-add -l; echo AGENT-EXIT-$?\n").await;
+    client.output_until("AGENT-EXIT-2").await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // On: exactly the host's key is listed, the server can use it to reach another server, and
+    // each use is reported.
+    let on = f.core.vault.save_host(save("with agent", true)).await.unwrap();
+    assert!(on.forward_agent);
+    let mut client = Client::open_ssh(&f.core, &on.id).await;
+    client.until_connected().await;
+    client.send("ssh-add -l; echo LISTED-$((1+1))\n").await;
+    client.output_until("LISTED-2").await;
+    assert!(client.text.contains("tyrminal forwarded key"), "{}", client.text);
+    assert_eq!(client.text.matches("SHA256:").count(), 1, "only one key is offered: {}", client.text);
+    client.send(&format!("{hop}\n")).await;
+    let events = output_with_events(&mut client, "HOP-42").await;
+    assert!(
+        events.iter().any(|e| matches!(e, SessionEvent::Banner { text } if text.contains("forwarded key"))),
+        "the use is reported: {events:?}"
+    );
+    // The server cannot change what the agent holds.
+    client.send("ssh-add -D; echo REMOVE-EXIT-$?\n").await;
+    output_with_events(&mut client, "REMOVE-EXIT-1").await;
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(log.contains("agent forwarding is on") && log.contains("used your forwarded key"), "{log}");
 }

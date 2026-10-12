@@ -65,6 +65,7 @@ export function installMockBackend(options) {
       lastConnectedAt: last,
       protocol: { type: "ssh" },
       terminal: { encoding: "utf8", term: "xterm256color" },
+      forwardAgent: false,
     });
     state.groups = [
       { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
@@ -695,6 +696,7 @@ export function installMockBackend(options) {
         lastConnectedAt: existing?.lastConnectedAt ?? null,
         protocol: a.host.protocol ?? { type: "ssh" },
         terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        forwardAgent: a.host.forwardAgent ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
       };
@@ -788,6 +790,7 @@ export function installMockBackend(options) {
           lastConnectedAt: null,
           protocol: { type: "ssh" },
           terminal: { encoding: "utf8", term: "xterm256color" },
+          forwardAgent: false,
         });
       }
       return a.hosts.length;

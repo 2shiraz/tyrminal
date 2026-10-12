@@ -172,6 +172,7 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
         last_connected_at: record.last_connected_at,
         protocol: record.protocol.clone(),
         terminal: record.terminal,
+        forward_agent: record.forward_agent,
     }
 }
 
@@ -203,6 +204,7 @@ fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
 pub(crate) struct HostEndpoint {
     pub protocol: tyrminal_contracts::HostProtocol,
     pub terminal: tyrminal_contracts::HostTerminal,
+    pub forward_agent: bool,
     pub address: String,
     pub port: u16,
     pub generation: u32,
@@ -229,6 +231,7 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         last_connected_at: record.last_connected_at,
         protocol: record.protocol.clone(),
         terminal: record.terminal,
+        forward_agent: record.forward_agent,
         // agent B: tunnels and history
         connection: record.connection.clone(),
     }
@@ -999,6 +1002,7 @@ impl VaultService {
             last_connected_at,
             protocol,
             terminal: input.terminal,
+            forward_agent: input.forward_agent,
             connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
@@ -1247,6 +1251,7 @@ impl VaultService {
                 last_connected_at: None,
                 protocol: tyrminal_contracts::HostProtocol::Ssh,
                 terminal: tyrminal_contracts::HostTerminal::default(),
+                forward_agent: false,
                 // agent B: tunnels and history
                 connection: Default::default(),
             };
@@ -1720,6 +1725,7 @@ impl VaultService {
         Ok(HostEndpoint {
             protocol: host.protocol.clone(),
             terminal: host.terminal,
+            forward_agent: host.forward_agent,
             address: host.address.clone(),
             port,
             generation: self.generation(),

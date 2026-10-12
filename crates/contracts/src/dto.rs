@@ -125,6 +125,7 @@ pub struct HostSummary {
     pub last_connected_at: Option<u64>,
     pub protocol: HostProtocol,
     pub terminal: HostTerminal,
+    pub forward_agent: bool,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -273,6 +274,9 @@ pub struct HostInput {
     /// Encoding and terminal type (UTF-8 and xterm-256color unless chosen otherwise).
     #[serde(default)]
     pub terminal: HostTerminal,
+    /// Let the server use this host's sign-in key while the session is open (agent forwarding).
+    #[serde(default)]
+    pub forward_agent: bool,
 }
 
 /// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a

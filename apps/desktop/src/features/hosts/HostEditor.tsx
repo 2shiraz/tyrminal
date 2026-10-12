@@ -16,6 +16,7 @@ import {
   ProtocolSelect,
   SerialFields,
   TelnetWarning,
+  AgentForwarding,
   TerminalFields,
 } from "./ProtocolFields";
 
@@ -91,6 +92,7 @@ export function HostEditor({
   const [protocol, setProtocol] = useState<ProtocolKind>(host?.protocol.type ?? "ssh");
   const [serial, setSerial] = useState(host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL);
   const [terminal, setTerminal] = useState(host?.terminal ?? DEFAULT_TERMINAL);
+  const [forwardAgent, setForwardAgent] = useState(host?.forwardAgent ?? false);
 
   const inherited = useMemo(() => groupDefaults(groups, groupId), [groups, groupId]);
   const inheritedKey = inherited.keyId ? keys.find((k) => k.id === inherited.keyId) : undefined;
@@ -141,6 +143,7 @@ export function HostEditor({
           tags: tagList,
           protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
           terminal,
+          forwardAgent: false,
         });
       }
       // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
@@ -156,6 +159,7 @@ export function HostEditor({
         tags: tagList,
         protocol: { type: "ssh" },
         terminal,
+        forwardAgent: forwardAgent && authKind === "key",
       });
       await advanced.saveAfter(result.id);
       return result;
@@ -296,6 +300,9 @@ export function HostEditor({
         </fieldset>
         )}
 
+        {protocol === "ssh" && authKind === "key" && (
+          <AgentForwarding checked={forwardAgent} onChange={setForwardAgent} />
+        )}
         {/* agent B: tunnels and history */}
         {protocol === "ssh" && <HostAdvancedSection host={host} state={advanced} />}
 

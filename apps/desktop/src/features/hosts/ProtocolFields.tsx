@@ -10,7 +10,7 @@ import type {
 } from "@tyrminal/contracts";
 import { useEffect, useState } from "react";
 
-import { Notice, TextField } from "../../components/ui/controls";
+import { Notice, Switch, TextField } from "../../components/ui/controls";
 import { preferences as preferencesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 
@@ -164,6 +164,16 @@ export function TerminalFields({ value, onChange, showTerm }: { value: HostTermi
           </select>
         </label>
       )}
+    </div>
+  );
+}
+
+/** Agent forwarding (CON-11): off by default; only this host's sign-in key is offered. */
+export function AgentForwarding({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="stack-sm">
+      <Switch label={msg.hosts.forwardAgent} checked={checked} onChange={onChange} />
+      {checked && <Notice tone="warning">{msg.hosts.forwardAgentWarning}</Notice>}
     </div>
   );
 }
