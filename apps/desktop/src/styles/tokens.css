@@ -1,27 +1,42 @@
-/* Design tokens. Components use these variables only; no raw colors elsewhere.
-   Contrast is checked by scripts/check-contrast.mjs (WCAG 2.2 AA: 4.5:1 for text, 3:1 for
-   large text, icons and control boundaries) for every text/surface pair in both themes.
-   The terminal palette is separate (features/terminal/schemes.ts) and independent of the theme. */
+/* Design tokens. Components use these variables only; no raw colours elsewhere.
+   The values follow docs/design/overhaul.md. Older token names keep their meaning with the new
+   values (for example --text-md is the 13 px body size, --shadow-1 is "flat, no shadow") until the
+   component layer moves to the final names screen by screen.
+
+   Themes are two attributes on the root element:
+     data-theme   = "dark" | "light"              (resolved from the System setting)
+     data-palette = absent | "fjord" | "contrast"  (absent is the standard Graphite / Paper pair)
+   Every palette defines both modes. Contrast is checked by scripts/check-contrast.mjs (WCAG 2.2 AA:
+   4.5:1 for text, 3:1 for large text, icons and control boundaries) for every text/surface pair in
+   all six combinations. The terminal palette is separate (features/terminal/schemes.ts) and
+   independent of the theme. */
 
 :root {
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Inter", "Ubuntu", "Cantarell",
-    system-ui, sans-serif;
+  /* ---------- type ---------- */
+  /* System UI faces: SF Pro on macOS, Segoe UI Variable on Windows, the desktop face on Linux.
+     JetBrains Mono (bundled, OFL) is for machine text only: addresses, paths, fingerprints, commands. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, "Ubuntu", "Cantarell",
+    sans-serif;
   --font-mono: "JetBrains Mono", "Symbols Nerd Font Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
     "Liberation Mono", monospace;
 
+  /* Five sizes: 11, 12, 13, 15, 20. The older names map onto them. */
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 20px;
-  --text-2xl: 26px;
+  --text-md: 13px; /* body */
+  --text-lg: 15px; /* section and dialog titles */
+  --text-xl: 20px; /* the page title */
+  --text-2xl: 20px;
 
-  --weight-regular: 450;
-  --weight-medium: 550;
-  --weight-semibold: 620;
-  --weight-bold: 680;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 600;
+  --tracking-title: -0.011em;
 
+  /* ---------- space (4 px grid, 2 px for optical nudges) ---------- */
+  --space-0: 2px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -30,131 +45,351 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-control: 8px;
-  --radius-panel: 12px;
-  --radius-dialog: 16px;
-  --radius-pill: 999px;
+  /* ---------- radius, by hierarchy, capped at 10 ---------- */
+  --radius-inner: 3px; /* key hints, checkboxes, tags */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-control: 6px; /* buttons, inputs, rows, tabs, menu items */
+  --radius-panel: 8px; /* grouped lists, menus, popovers, toasts */
+  --radius-dialog: 10px; /* dialogs and the command palette */
+  --radius-pill: 999px; /* switches and status dots only */
+  --radius-round: 999px;
 
-  --control-height: 34px;
-  --control-height-sm: 28px;
-  --sidebar-width: 240px;
-  --sidebar-collapsed: 60px;
-  --tabstrip-height: 42px;
-  --statusbar-height: 28px;
-  --panel-width: 340px;
+  /* ---------- sizes ---------- */
+  --control-height: 30px;
+  --control-height-sm: 24px;
+  --row-height: 36px;
+  --row-height-2: 48px;
+  --icon: 16px;
+  --icon-sm: 14px;
+  --icon-stroke: 1.5;
+  --sidebar-width: 224px;
+  --sidebar-collapsed: 52px;
+  --tabstrip-height: 38px;
+  --statusbar-height: 26px;
+  --panel-width: 320px;
+  --page-max: 1080px;
+  --page-gutter: 32px;
 
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
-  --motion-fast: 120ms;
-  --motion-base: 180ms;
-  --motion-slow: 260ms;
+  /* ---------- focus: one ring everywhere ---------- */
+  --focus-width: 2px;
+  --focus-offset: 2px;
 
-  /* ---------- dark theme (default) ---------- */
+  /* ---------- layers ---------- */
+  --z-sticky: 10;
+  --z-panel: 20;
+  --z-menu: 30;
+  --z-dialog: 40;
+  --z-toast: 50;
+  --z-tooltip: 60;
+
+  /* ---------- motion (docs/design/overhaul.md, "Motion") ---------- */
+  --duration-press: 100ms;
+  --duration-fast: 140ms;
+  --duration-base: 180ms;
+  --duration-slow: 220ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-colour: ease;
+  /* Older names: no overshoot anywhere, and nothing over 220 ms. */
+  --ease-spring: var(--ease-out);
+  --motion-fast: var(--duration-press);
+  --motion-base: var(--duration-fast);
+  --motion-slow: var(--duration-base);
+
+  /* ---------- elevation: only things that float have a shadow ---------- */
+  --shadow-1: none; /* flat surfaces: buttons, cards, settings groups */
+  --shadow-2: var(--elevation-1); /* small floating things: tooltips, popovers */
+  --shadow-3: var(--elevation-2); /* dialogs, menus, palette, toasts */
+  --glow-accent: 0 0 0 1px var(--focus); /* focused fields: a ring, never a halo */
+  --app-backdrop: none;
+
+  /* =================== Graphite (dark, default) =================== */
   color-scheme: dark;
-  --bg-app: #080b10;
-  --bg-sidebar: #0c1017;
-  --bg-surface: #0f141c;
-  --bg-raised: #151b25;
-  --bg-raised-hover: #1a2230;
-  --bg-overlay: #181f2b;
-  --bg-inset: #0a0e14;
-  --bg-hover: rgb(255 255 255 / 0.055);
-  --bg-active: rgb(255 255 255 / 0.09);
-  --bg-selected: rgb(94 145 255 / 0.16);
+  --bg-app: #16181b; /* page canvas */
+  --bg-sidebar: #111315;
+  --bg-surface: #1a1c20; /* side panels, status bar, tab strip */
+  --bg-raised: #1f2226; /* grouped lists, cards, inputs */
+  --bg-raised-hover: #25282d;
+  --bg-overlay: #222529; /* menus, dialogs, palette, toasts */
+  --bg-inset: #121416; /* code blocks, fingerprints, path bars */
+  --bg-hover: rgb(255 255 255 / 0.045);
+  --bg-active: rgb(255 255 255 / 0.075);
+  --bg-selected: rgb(94 190 204 / 0.14);
 
   --border-subtle: rgb(255 255 255 / 0.06);
   --border: rgb(255 255 255 / 0.1);
-  --border-strong: rgb(255 255 255 / 0.2);
-  /* Control boundaries must reach 3:1 against their surface. */
-  --border-control: #6b7789;
+  --border-strong: rgb(255 255 255 / 0.16);
+  --border-control: #6f757e; /* 3:1 against every surface */
 
-  --text: #e8edf4;
-  --text-muted: #a2aebf;
-  --text-faint: #8693a6;
-  --text-on-accent: #050a14;
+  --text: #e7e9ec;
+  --text-muted: #a5aab2;
+  --text-faint: #8e949d;
+  --text-on-accent: #071416;
 
-  --accent: #6c9cff;
-  --accent-hover: #87afff;
-  --accent-soft: rgb(108 156 255 / 0.14);
-  --accent-text: #8fb3ff;
-  --focus: #8fb3ff;
+  --accent: #52b4c3;
+  --accent-hover: #6cc2ce;
+  --accent-soft: rgb(94 190 204 / 0.13);
+  --accent-text: #7ccfda;
+  --focus: #7ccfda;
+  /* The cursor marker: the one memorable element. Solid while the window is focused, hollow when not. */
+  --cursor: #7ccfda;
 
-  --success: #43d394;
-  --success-soft: rgb(67 211 148 / 0.13);
-  --warning: #f2b84b;
-  --warning-soft: rgb(242 184 75 / 0.13);
-  --danger: #ff7b7b;
-  --danger-soft: rgb(255 123 123 / 0.13);
-  --info: #6cc4ff;
+  --success: #5ccb8f;
+  --success-soft: rgb(92 203 143 / 0.12);
+  --warning: #e3b45a;
+  --warning-soft: rgb(227 180 90 / 0.12);
+  --danger: #f07b7b;
+  --danger-soft: rgb(240 123 123 / 0.12);
+  --info: #7ccfda;
 
-  --scrim: rgb(2 4 8 / 0.62);
-  --shadow-1: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-2: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 6px 16px -4px rgb(0 0 0 / 0.5), 0 2px 4px rgb(0 0 0 / 0.3);
-  --shadow-3: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 60px -12px rgb(0 0 0 / 0.65), 0 8px 20px -6px rgb(0 0 0 / 0.45);
-  --glow-accent: 0 0 0 1px rgb(108 156 255 / 0.5), 0 0 0 4px rgb(108 156 255 / 0.16);
-  --app-backdrop: radial-gradient(1200px 600px at 100% -10%, rgb(108 156 255 / 0.07), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgb(67 211 148 / 0.045), transparent 60%);
+  --scrim: rgb(8 9 10 / 0.56);
+  /* Elevation is for things that float. Lists and cards are flat and use borders. */
+  --elevation-1: 0 4px 12px -2px rgb(4 5 6 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.07);
+  --elevation-2: 0 16px 40px -8px rgb(4 5 6 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
 }
 
+/* =================== Paper (light) =================== */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-app: #e9edf3;
-  --bg-sidebar: #f3f5f8;
-  --bg-surface: #fbfcfd;
+  --bg-app: #fbfbfc;
+  --bg-sidebar: #f2f3f5;
+  --bg-surface: #f6f7f8;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #f6f8fb;
+  --bg-raised-hover: #f4f5f7;
   --bg-overlay: #ffffff;
-  --bg-inset: #eef1f5;
-  --bg-hover: rgb(15 30 55 / 0.05);
-  --bg-active: rgb(15 30 55 / 0.09);
-  --bg-selected: rgb(37 99 235 / 0.1);
+  --bg-inset: #f6f7f8;
+  --bg-hover: rgb(20 24 30 / 0.045);
+  --bg-active: rgb(20 24 30 / 0.08);
+  --bg-selected: rgb(8 112 132 / 0.1);
 
-  --border-subtle: rgb(15 30 55 / 0.07);
-  --border: rgb(15 30 55 / 0.12);
-  --border-strong: rgb(15 30 55 / 0.22);
-  --border-control: #7a8595;
+  --border-subtle: rgb(20 24 30 / 0.07);
+  --border: rgb(20 24 30 / 0.12);
+  --border-strong: rgb(20 24 30 / 0.2);
+  --border-control: #80868f;
 
-  --text: #101826;
-  --text-muted: #4a5568;
-  --text-faint: #5b6779;
+  --text: #16191d;
+  --text-muted: #4d535b;
+  --text-faint: #5d636c;
   --text-on-accent: #ffffff;
 
-  --accent: #2563eb;
-  --accent-hover: #1d55d6;
-  --accent-soft: rgb(37 99 235 / 0.1);
-  --accent-text: #1d4fc4;
-  --focus: #1d4fc4;
+  --accent: #0b7184;
+  --accent-hover: #095f6f;
+  --accent-soft: rgb(11 113 132 / 0.1);
+  --accent-text: #08687a;
+  --focus: #08687a;
+  --cursor: #0b7184;
 
-  --success: #11784a;
-  --success-soft: rgb(17 120 74 / 0.1);
-  --warning: #8a5a00;
+  --success: #14774a;
+  --success-soft: rgb(20 119 74 / 0.1);
+  --warning: #875800;
   --warning-soft: rgb(196 132 0 / 0.13);
-  --danger: #c0262d;
-  --danger-soft: rgb(192 38 45 / 0.09);
-  --info: #0b6aa8;
+  --danger: #be2a30;
+  --danger-soft: rgb(190 42 48 / 0.09);
+  --info: #08687a;
 
-  --scrim: rgb(16 24 38 / 0.36);
-  --shadow-1: 0 1px 2px rgb(16 24 38 / 0.08), 0 0 0 1px rgb(16 24 38 / 0.04);
-  --shadow-2: 0 6px 16px -6px rgb(16 24 38 / 0.18), 0 2px 4px rgb(16 24 38 / 0.06);
-  --shadow-3: 0 24px 60px -16px rgb(16 24 38 / 0.32), 0 8px 20px -8px rgb(16 24 38 / 0.16);
-  --glow-accent: 0 0 0 1px rgb(37 99 235 / 0.6), 0 0 0 4px rgb(37 99 235 / 0.14);
-  --app-backdrop: radial-gradient(1200px 600px at 100% -10%, rgb(37 99 235 / 0.06), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgb(17 120 74 / 0.04), transparent 60%);
+  --scrim: rgb(22 25 29 / 0.32);
+  --elevation-1: 0 4px 12px -4px rgb(22 25 29 / 0.16), 0 0 0 1px rgb(22 25 29 / 0.08);
+  --elevation-2: 0 16px 40px -12px rgb(22 25 29 / 0.28), 0 0 0 1px rgb(22 25 29 / 0.08);
+}
+
+/* =================== Fjord: blue slate, frost accent =================== */
+:root[data-palette="fjord"] {
+  color-scheme: dark;
+  --bg-app: #191e27;
+  --bg-sidebar: #141821;
+  --bg-surface: #1d222c;
+  --bg-raised: #222833;
+  --bg-raised-hover: #282f3b;
+  --bg-overlay: #262c37;
+  --bg-inset: #151920;
+  --bg-hover: rgb(216 226 240 / 0.05);
+  --bg-active: rgb(216 226 240 / 0.085);
+  --bg-selected: rgb(136 192 208 / 0.15);
+
+  --border-subtle: rgb(216 226 240 / 0.07);
+  --border: rgb(216 226 240 / 0.11);
+  --border-strong: rgb(216 226 240 / 0.18);
+  --border-control: #737d8e;
+
+  --text: #e5e9f0;
+  --text-muted: #a9b2c1;
+  --text-faint: #939cac;
+  --text-on-accent: #0f1620;
+
+  --accent: #88c0d0;
+  --accent-hover: #9dcbd9;
+  --accent-soft: rgb(136 192 208 / 0.14);
+  --accent-text: #93c8d7;
+  --focus: #93c8d7;
+  --cursor: #93c8d7;
+
+  --success: #a3c98a;
+  --success-soft: rgb(163 201 138 / 0.12);
+  --warning: #e8c47c;
+  --warning-soft: rgb(232 196 124 / 0.12);
+  --danger: #e5878f;
+  --danger-soft: rgb(229 135 143 / 0.12);
+  --info: #93c8d7;
+
+  --scrim: rgb(10 13 18 / 0.56);
+  --elevation-1: 0 4px 12px -2px rgb(6 9 14 / 0.5), 0 0 0 1px rgb(216 226 240 / 0.08);
+  --elevation-2: 0 16px 40px -8px rgb(6 9 14 / 0.6), 0 0 0 1px rgb(216 226 240 / 0.09);
+}
+
+:root[data-palette="fjord"][data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #f7f9fb;
+  --bg-sidebar: #edf0f4;
+  --bg-surface: #f2f4f7;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #f0f3f7;
+  --bg-overlay: #ffffff;
+  --bg-inset: #f3f5f8;
+  --bg-hover: rgb(30 44 66 / 0.05);
+  --bg-active: rgb(30 44 66 / 0.085);
+  --bg-selected: rgb(46 104 148 / 0.1);
+
+  --border-subtle: rgb(30 44 66 / 0.08);
+  --border: rgb(30 44 66 / 0.13);
+  --border-strong: rgb(30 44 66 / 0.21);
+  --border-control: #7c8698;
+
+  --text: #1b2230;
+  --text-muted: #4a5466;
+  --text-faint: #5a6476;
+  --text-on-accent: #ffffff;
+
+  --accent: #2e6894;
+  --accent-hover: #255780;
+  --accent-soft: rgb(46 104 148 / 0.1);
+  --accent-text: #285f88;
+  --focus: #285f88;
+  --cursor: #2e6894;
+
+  --success: #346d26;
+  --success-soft: rgb(52 109 38 / 0.1);
+  --warning: #84590a;
+  --warning-soft: rgb(196 140 30 / 0.14);
+  --danger: #b03a46;
+  --danger-soft: rgb(176 58 70 / 0.09);
+  --info: #285f88;
+
+  --scrim: rgb(27 34 48 / 0.32);
+  --elevation-1: 0 4px 12px -4px rgb(27 34 48 / 0.16), 0 0 0 1px rgb(27 34 48 / 0.08);
+  --elevation-2: 0 16px 40px -12px rgb(27 34 48 / 0.28), 0 0 0 1px rgb(27 34 48 / 0.08);
+}
+
+/* =================== High contrast: for low vision and bright rooms =================== */
+:root[data-palette="contrast"] {
+  color-scheme: dark;
+  --bg-app: #000000;
+  --bg-sidebar: #000000;
+  --bg-surface: #0a0a0a;
+  --bg-raised: #101010;
+  --bg-raised-hover: #1c1c1c;
+  --bg-overlay: #101010;
+  --bg-inset: #000000;
+  --bg-hover: rgb(255 255 255 / 0.1);
+  --bg-active: rgb(255 255 255 / 0.16);
+  --bg-selected: rgb(255 214 92 / 0.2);
+
+  --border-subtle: rgb(255 255 255 / 0.3);
+  --border: rgb(255 255 255 / 0.45);
+  --border-strong: rgb(255 255 255 / 0.7);
+  --border-control: #b4b4b4;
+
+  --text: #ffffff;
+  --text-muted: #dadada;
+  --text-faint: #c4c4c4;
+  --text-on-accent: #000000;
+
+  --accent: #ffd65c;
+  --accent-hover: #ffe08a;
+  --accent-soft: rgb(255 214 92 / 0.18);
+  --accent-text: #ffd65c;
+  --focus: #ffd65c;
+  --cursor: #ffd65c;
+
+  --success: #6ff0a8;
+  --success-soft: rgb(111 240 168 / 0.16);
+  --warning: #ffb86b;
+  --warning-soft: rgb(255 184 107 / 0.16);
+  --danger: #ff8f8f;
+  --danger-soft: rgb(255 143 143 / 0.16);
+  --info: #8fdcff;
+
+  --scrim: rgb(0 0 0 / 0.75);
+  --elevation-1: 0 0 0 1px rgb(255 255 255 / 0.7);
+  --elevation-2: 0 0 0 2px rgb(255 255 255 / 0.85);
+}
+
+:root[data-palette="contrast"][data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #ffffff;
+  --bg-sidebar: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #eeeeee;
+  --bg-overlay: #ffffff;
+  --bg-inset: #f2f2f2;
+  --bg-hover: rgb(0 0 0 / 0.07);
+  --bg-active: rgb(0 0 0 / 0.12);
+  --bg-selected: rgb(0 64 160 / 0.12);
+
+  --border-subtle: rgb(0 0 0 / 0.35);
+  --border: rgb(0 0 0 / 0.5);
+  --border-strong: rgb(0 0 0 / 0.75);
+  --border-control: #4d4d4d;
+
+  --text: #000000;
+  --text-muted: #262626;
+  --text-faint: #3b3b3b;
+  --text-on-accent: #ffffff;
+
+  --accent: #0040a0;
+  --accent-hover: #003380;
+  --accent-soft: rgb(0 64 160 / 0.1);
+  --accent-text: #00358a;
+  --focus: #00358a;
+  --cursor: #0040a0;
+
+  --success: #00602e;
+  --success-soft: rgb(0 96 46 / 0.1);
+  --warning: #6b4100;
+  --warning-soft: rgb(160 100 0 / 0.12);
+  --danger: #a1000b;
+  --danger-soft: rgb(161 0 11 / 0.08);
+  --info: #00358a;
+
+  --scrim: rgb(0 0 0 / 0.5);
+  --elevation-1: 0 0 0 1px rgb(0 0 0 / 0.8);
+  --elevation-2: 0 0 0 2px rgb(0 0 0 / 0.9);
+}
+
+/* Forced colours (Windows contrast themes): let the system palette win, keep the ring and marker. */
+@media (forced-colors: active) {
+  :root {
+    --focus: Highlight;
+    --cursor: Highlight;
+    --border-control: ButtonBorder;
+  }
 }
 
 /* Reduced motion: the OS setting or the in-app preference. */
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --motion-fast: 0ms;
-    --motion-base: 0ms;
-    --motion-slow: 0ms;
+    --duration-press: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
   }
 }
 
 :root[data-reduce-motion="true"] {
-  --motion-fast: 0ms;
-  --motion-base: 0ms;
-  --motion-slow: 0ms;
+  --duration-press: 0ms;
+  --duration-fast: 0ms;
+  --duration-base: 0ms;
+  --duration-slow: 0ms;
 }

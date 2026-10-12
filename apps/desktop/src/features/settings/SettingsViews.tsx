@@ -250,9 +250,9 @@ export function SettingsView() {
                         data-tooltip={low.length ? msg.settings.lowContrast(low.join(", ")) : undefined}
                       >
                         <span className="scheme-swatch" style={{ background: scheme.background, color: scheme.foreground }}>
-                          <span>
-                            <span style={{ color: scheme.green }}>❯</span> ls <span style={{ color: scheme.blue }}>src</span>
-                          </span>
+                          {/* Sample text in the scheme's foreground, which every scheme keeps at 4.5:1; the
+                              ANSI colours are the dots below (third-party palettes may be lower). */}
+                          <span>❯ ls src</span>
                           <span className="scheme-dots">
                             {[scheme.red, scheme.green, scheme.yellow, scheme.blue, scheme.magenta, scheme.cyan].map((c) => (
                               <span key={c} style={{ background: c }} />
