@@ -2130,16 +2130,23 @@ fn sftp_open_error(e: &SshError) -> IpcError {
     }
 }
 
-/// Types a host's startup snippets into its new shell, in order, each followed by Enter, through
-/// the session's own input queue (so they are encoded and ordered like typed input). Called only
-/// once the shell is open, which is after host trust and authentication, and only from inside the
-/// session body (see `run_ssh`). Every snippet is noted in the connection log by name; a deleted
-/// one is skipped and noted; `startup_left` tells the supervisor what was not typed.
+/// Types a host's startup snippets into its new shell, in order, each line followed by Enter,
+/// through the session's own input queue (so they are encoded and ordered like typed input).
+/// Called only once the shell is open, which is after host trust and authentication, and only
+/// from inside the session body (see `run_ssh`). Every snippet is noted in the connection log by
+/// name; a deleted one is skipped and noted; `startup_left` tells the supervisor what was not
+/// typed.
 async fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
     use std::sync::atomic::Ordering;
     entry.startup_left.store(startup.len(), Ordering::SeqCst);
+    let activity = tokio::sync::Mutex::new(entry.relay.output_activity());
+    let first = std::sync::atomic::AtomicBool::new(true);
     type_startup(
         startup,
+        || {
+            let (activity, first) = (&activity, first.swap(false, Ordering::SeqCst));
+            async move { settle(&mut *activity.lock().await, first).await }
+        },
         |chunk| {
             let input = entry.input.clone();
             async move { input.send(Input::Data(chunk)).await.is_ok() }
@@ -2153,10 +2160,42 @@ async fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
     .await;
 }
 
-/// The startup typing itself: `send` delivers one input chunk and reports whether the session
-/// still takes input; the first refusal ends the sequence.
-async fn type_startup<F>(startup: Vec<StartupItem>, mut send: impl FnMut(Vec<u8>) -> F, note: impl Fn(&str))
-where
+/// Output must pause this long before the next startup line is typed.
+const STARTUP_QUIET: Duration = Duration::from_millis(50);
+/// The longest wait before one startup line, for a shell that does not echo or never pauses.
+const STARTUP_SETTLE_MAX: Duration = Duration::from_secs(2);
+
+/// Waits until the shell is ready for the next startup line, as a person typing would: it has
+/// printed something since the last line (its prompt first, then the echo of each line) and then
+/// paused. Typing ahead is not safe everywhere: a macOS terminal keeps about 1 KiB of unread
+/// input, and Bash 3.2 switching between line and raw mode for every command mangles what
+/// waits there, so a long sequence typed at once is garbled. Paced like this, at most one line
+/// waits. Gives up after `STARTUP_SETTLE_MAX` and types anyway.
+async fn settle(activity: &mut watch::Receiver<u64>, first: bool) {
+    let deadline = tokio::time::Instant::now() + STARTUP_SETTLE_MAX;
+    let seen = first && *activity.borrow_and_update() > 0;
+    if !seen && !matches!(tokio::time::timeout_at(deadline, activity.changed()).await, Ok(Ok(()))) {
+        return;
+    }
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(STARTUP_QUIET, activity.changed()).await {
+            Ok(Ok(())) => {}
+            // Quiet, or the session is gone (its sequence is being dropped).
+            Err(_) | Ok(Err(_)) => return,
+        }
+    }
+}
+
+/// The startup typing itself: `ready` resolves when the next line may be typed, `send` delivers
+/// one input chunk and reports whether the session still takes input; the first refusal ends
+/// the sequence.
+async fn type_startup<R, F>(
+    startup: Vec<StartupItem>,
+    mut ready: impl FnMut() -> R,
+    mut send: impl FnMut(Vec<u8>) -> F,
+    note: impl Fn(&str),
+) where
+    R: Future<Output = ()>,
     F: Future<Output = bool>,
 {
     for item in startup {
@@ -2174,10 +2213,13 @@ where
             ));
             continue;
         }
-        let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
-        for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
-            if !send(chunk.to_vec()).await {
-                return;
+        for line in text.trim_end_matches('\n').split('\n') {
+            ready().await;
+            let bytes = snippet_bytes(line, SnippetSendMode::Run, false);
+            for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+                if !send(chunk.to_vec()).await {
+                    return;
+                }
             }
         }
         note(&format!("startup snippet \"{}\" typed", item.name));
@@ -2476,6 +2518,7 @@ async fn pump(
                             continue;
                         }
                     }
+                    sink.note_output();
                     // The output that arrived before a drop is still shown.
                     if !out.output(batch) {
                         return Outcome::ended(exit_status);
@@ -2766,6 +2809,7 @@ mod snippet_tests {
         // The session stops taking input after two chunks (it was closed or locked).
         type_startup(
             startup(&["one", "gone", "two", "three"]),
+            || async {},
             |chunk| {
                 let mut sent = sent.lock().unwrap();
                 let ok = sent.len() < 2;
@@ -2805,6 +2849,7 @@ mod snippet_tests {
                 item("fits", format!("{fits}\n{fits}\n")),
                 item("after", "echo after".into()),
             ],
+            || async {},
             |chunk| {
                 sent.lock().unwrap().extend_from_slice(&chunk);
                 async { true }
@@ -2841,6 +2886,7 @@ mod snippet_tests {
         let sent = std::sync::Mutex::new(Vec::<Vec<u8>>::new());
         let typing = type_startup(
             startup(&["first", "second", "third"]),
+            || async {},
             |chunk| {
                 let first = sent.lock().unwrap().is_empty();
                 sent.lock().unwrap().push(chunk);
@@ -2861,6 +2907,83 @@ mod snippet_tests {
         assert!(stopped);
         assert!(sent.lock().unwrap().len() <= 2, "nothing after the blocked snippet is sent");
         assert!(!sent.lock().unwrap().iter().any(|c| c.starts_with(b"echo third")));
+    }
+
+    #[tokio::test]
+    async fn every_startup_line_waits_until_the_shell_is_ready_for_it() {
+        let log = std::sync::Mutex::new(Vec::<String>::new());
+        let item = StartupItem { name: "two".into(), text: Some(Zeroizing::new("cd /tmp\nls\n".into())) };
+        type_startup(
+            vec![startup(&["one"]).remove(0), item],
+            || {
+                log.lock().unwrap().push("ready".into());
+                async {}
+            },
+            |chunk| {
+                log.lock().unwrap().push(String::from_utf8(chunk).unwrap());
+                async { true }
+            },
+            |_| {},
+        )
+        .await;
+        assert_eq!(*log.lock().unwrap(), ["ready", "echo one\r", "ready", "cd /tmp\r", "ready", "ls\r"]);
+    }
+
+    #[tokio::test]
+    async fn the_next_startup_line_waits_for_the_shell_to_print_and_pause() {
+        // Real time: lower bounds are exact, upper bounds leave room for a slow machine.
+        let slack = Duration::from_millis(400);
+        let within = |elapsed: Duration, low: Duration| {
+            assert!(elapsed >= low && elapsed < low + slack, "{elapsed:?} not within {low:?} + {slack:?}");
+        };
+
+        // Nothing printed yet: wait for the prompt, then for it to pause.
+        let (tx, mut rx) = watch::channel(0u64);
+        let at = tokio::time::Instant::now();
+        let shell = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            tx.send_modify(|n| *n += 1);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            tx.send_modify(|n| *n += 1);
+            tx
+        });
+        settle(&mut rx, true).await;
+        within(at.elapsed(), Duration::from_millis(220) + STARTUP_QUIET);
+        let tx = shell.await.unwrap();
+
+        // The prompt was already printed before typing began: only the pause is awaited.
+        let (_prompted, mut seen) = watch::channel(1u64);
+        let at = tokio::time::Instant::now();
+        settle(&mut seen, true).await;
+        within(at.elapsed(), Duration::ZERO);
+
+        // A later line waits for the echo of the one before it, then for the pause.
+        let at = tokio::time::Instant::now();
+        let echo = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tx.send_modify(|n| *n += 1);
+            tx
+        });
+        settle(&mut rx, false).await;
+        within(at.elapsed(), Duration::from_millis(100) + STARTUP_QUIET);
+        let tx = echo.await.unwrap();
+
+        // A shell that never echoes is waited for at most STARTUP_SETTLE_MAX.
+        let at = tokio::time::Instant::now();
+        settle(&mut rx, false).await;
+        within(at.elapsed(), STARTUP_SETTLE_MAX);
+
+        // Nor is one that never pauses.
+        let busy = tokio::spawn(async move {
+            while tx.send(0).is_ok() {
+                tokio::time::sleep(STARTUP_QUIET / 4).await;
+            }
+        });
+        let at = tokio::time::Instant::now();
+        settle(&mut rx, false).await;
+        within(at.elapsed(), STARTUP_SETTLE_MAX);
+        drop(rx);
+        busy.await.unwrap();
     }
 
     #[test]

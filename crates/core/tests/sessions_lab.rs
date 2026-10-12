@@ -2901,9 +2901,10 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     let host_id = f.key_host("a").await;
     let mut ids = Vec::new();
     for i in 0..16 {
-        // Enough text that typing it all takes more than an instant, in lines a terminal accepts.
+        // Lines a terminal accepts, as long as allowed. Typing waits for the shell after every
+        // line, so 48 lines take seconds: the close and the lock below land mid-sequence.
         let mut text = String::new();
-        for j in 0..16 {
+        for j in 0..2 {
             text.push_str(&format!("echo startup-{i}-{j} # {}\n", "x".repeat(MAX_STARTUP_LINE_LEN - 40)));
         }
         text.push_str(&format!("echo startup-{i}-done"));
@@ -2915,9 +2916,6 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     }
     v.set_startup_snippets(SettingsTarget::Host { host_id: host_id.clone() }, Some(ids)).await.unwrap();
 
-    let stopped_or_finished =
-        |log: &str| log.contains("startup snippets stopped with ") || log.contains("startup snippet \"s15\" typed");
-
     // Close as soon as the shell is open.
     let mut client = Client::open_ssh(&f.core, &host_id).await;
     let (_, prompt) = client.until_not_state().await;
@@ -2927,7 +2925,8 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     assert_eq!(client.until_closed().await.0, None);
     assert_eq!(f.core.sessions.count(), 0, "nothing keeps the session alive");
     let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
-    assert!(stopped_or_finished(&log), "{log}");
+    // Typing waits for the shell, so closing at once always ends the sequence early.
+    assert!(log.contains("startup snippets stopped with "), "{log}");
 
     // Lock as soon as the shell is open: the session ends as locked, and no input reaches it after.
     let mut client = Client::open_ssh(&f.core, &host_id).await;
@@ -2938,8 +2937,18 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     let write = f.core.sessions.write(WINDOW, &client.session, b"echo after-lock\r".to_vec()).await;
     assert!(write.is_err(), "a locked session takes no input");
 
-    // After unlocking, a new session runs the whole sequence from the start.
-    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    // After unlocking, a new session runs the whole sequence from the start. Work the locked
+    // session started (recording the connection) may still hold the vault for a moment, which
+    // the unlock reports as busy; like the app, try again.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        match v.unlock_with_passphrase(PASSPHRASE.into()).await {
+            Err(e) if e.code == ErrorCode::VaultBusy && tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            result => break result.unwrap(),
+        }
+    }
     let mut client = Client::open_ssh(&f.core, &host_id).await;
     client.until_connected().await;
     client.output_until("startup-0-done").await;
