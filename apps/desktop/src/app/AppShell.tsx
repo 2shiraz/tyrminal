@@ -193,7 +193,7 @@ function Shell() {
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
   // Named layout templates: listed from the vault, saved only on an explicit request.
-  const savedLayouts = useLoaded(layoutsApi.list);
+  const savedLayouts = useLoaded(layoutsApi.list, data.settled);
   const reloadLayouts = savedLayouts.reload;
   const [savingAs, setSavingAs] = useState(false);
   const [choosingEncoding, setChoosingEncoding] = useState<{ paneId: number; current: string; target: string } | null>(null);

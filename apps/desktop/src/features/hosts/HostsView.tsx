@@ -182,7 +182,7 @@ function HostsViewImpl({
   /** The new-tab page's Serial tile: open a new serial host, once per change of this number. */
   newSerial?: number;
 }) {
-  const { hosts, keys, recent, groups } = useVaultData();
+  const { hosts, keys, recent, groups, settled } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
   useFlip(listRef);
   const notify = useToast();
@@ -266,9 +266,9 @@ function HostsViewImpl({
     return ids;
   }, [ws]);
 
-  // OS icons live in their own records; reload them with the host list.
+  // OS icons live in their own records; reload them with the host list (after its first paint).
   useEffect(() => {
-    if (!hosts.value) return;
+    if (!hosts.value || !settled) return;
     let live = true;
     appearanceApi
       .list()
@@ -283,10 +283,10 @@ function HostsViewImpl({
     return () => {
       live = false;
     };
-  }, [hosts.value]);
+  }, [hosts.value, settled]);
 
   useEffect(() => {
-    if (!hosts.value) return;
+    if (!hosts.value || !settled) return;
     let live = true;
     const load = () =>
       identitiesApi
@@ -304,7 +304,7 @@ function HostsViewImpl({
       live = false;
       unsubscribe();
     };
-  }, [hosts.value, groups.value]);
+  }, [hosts.value, groups.value, settled]);
   const identityOf = (hostId: string) => {
     const id = assignments.get(`host:${hostId}`)?.effectiveIdentityId;
     const label = id ? identityList?.find((i) => i.id === id)?.label : undefined;
