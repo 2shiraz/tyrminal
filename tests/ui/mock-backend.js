@@ -259,6 +259,104 @@ export function installMockBackend(options) {
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
 
   const handlers = {
+    // agent B: tunnels and history
+    ...(() => {
+      // Synthetic rules and runs. Exposure is checked the way the native side does it, so the
+      // approval dialog is exercised; nothing here binds a socket.
+      const rules = [];
+      const runs = new Map();
+      let nextRule = 1;
+      let nextRun = 1;
+      const loopback = (h) => /^(localhost|::1|\[::1\]|127\.\d+\.\d+\.\d+)$/i.test(h.trim());
+      const exposed = (t) => t.bindHost.trim() !== "" && (t.bindHost.trim() === "*" || !loopback(t.bindHost));
+      const hostLabel = (hostId) => state.hosts.find((h) => h.id === hostId)?.label ?? null;
+      const summary = (t) => ({ ...t, hostLabel: hostLabel(t.hostId) });
+      const view = (r) => ({ ...r.view });
+      window.__mockTunnelRuns = runs;
+      return {
+        tunnel_list: () => rules.map(summary),
+        tunnel_save: (a) => {
+          const t = a.tunnel;
+          if (!t.name.trim()) throw { code: "INVALID_INPUT", message: "Enter a name." };
+          if (exposed(t) && !t.allowExternal) {
+            throw { code: "INVALID_INPUT", message: "This listener would be reachable from other computers. Confirm that exposure to save it." };
+          }
+          const bindHost = t.bindHost.trim() || (t.kind === "remote" ? "localhost" : "127.0.0.1");
+          const saved = { ...t, id: t.id ?? id(800 + nextRule++), bindHost, allowExternal: exposed(t), updatedAt: now };
+          delete saved.hostLabel;
+          const at = rules.findIndex((r) => r.id === saved.id);
+          if (at >= 0) rules[at] = saved;
+          else rules.push(saved);
+          return summary(saved);
+        },
+        tunnel_duplicate: (a) => {
+          const source = rules.find((r) => r.id === a.id);
+          if (!source) throw { code: "NOT_FOUND", message: "That tunnel no longer exists." };
+          const copy = { ...source, id: id(800 + nextRule++), name: `${source.name} (copy)`, autoStart: false };
+          rules.push(copy);
+          return summary(copy);
+        },
+        tunnel_delete: (a) => {
+          const at = rules.findIndex((r) => r.id === a.id);
+          if (at >= 0) rules.splice(at, 1);
+        },
+        tunnel_start: (a) => {
+          const session = state.sessions.get(a.sessionId);
+          const rule = rules.find((r) => r.id === a.tunnelId);
+          if (!session) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          if (!rule) throw { code: "NOT_FOUND", message: "That tunnel no longer exists." };
+          if (hostLabel(rule.hostId) !== session.host) throw { code: "INVALID_INPUT", message: "That tunnel belongs to a different host than this session." };
+          if ([...runs.values()].some((r) => r.view.state === "running" && r.view.tunnelId === rule.id && r.view.sessionId === a.sessionId)) {
+            throw { code: "CONFLICT", message: "That tunnel is already running on this session." };
+          }
+          if (rule.bindPort === 8080) {
+            throw { code: "IN_USE", message: "The listen port could not be opened. It may be in use, or need administrator rights." };
+          }
+          const runId = `${nextRun++}`.padStart(32, "c");
+          const run = {
+            view: {
+              runId,
+              tunnelId: rule.id,
+              sessionId: a.sessionId,
+              name: rule.name,
+              kind: rule.kind,
+              bindHost: rule.bindHost,
+              boundPort: rule.bindPort || 40000 + nextRun,
+              destHost: rule.destHost,
+              destPort: rule.destPort,
+              state: "running",
+              activeConnections: 0,
+              totalConnections: 0,
+              refusedConnections: 0,
+              failedConnections: 0,
+              bytesOut: 0,
+              bytesIn: 0,
+              error: null,
+            },
+          };
+          runs.set(runId, run);
+          return view(run);
+        },
+        tunnel_stop: (a) => {
+          const run = runs.get(a.runId);
+          if (!run || run.view.state !== "running") throw { code: "NOT_FOUND", message: "That tunnel is not running." };
+          run.view.state = "stopped";
+          run.view.activeConnections = 0;
+        },
+        tunnel_active: () => {
+          for (const run of runs.values()) {
+            if (run.view.state === "running" && !state.sessions.has(run.view.sessionId)) {
+              run.view.state = "session_ended";
+              run.view.activeConnections = 0;
+            }
+          }
+          return [...runs.values()].map(view).sort((x, y) => (x.state === "running" ? 0 : 1) - (y.state === "running" ? 0 : 1));
+        },
+        tunnel_clear_ended: () => {
+          for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
+        },
+      };
+    })(),
     files_list: (a) => {
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));

@@ -68,6 +68,14 @@
     "allow-backup-export",
     "allow-backup-choose",
     "allow-backup-preview",
-    "allow-backup-restore"
+    "allow-backup-restore",
+    "allow-tunnel-list",
+    "allow-tunnel-save",
+    "allow-tunnel-duplicate",
+    "allow-tunnel-delete",
+    "allow-tunnel-start",
+    "allow-tunnel-stop",
+    "allow-tunnel-active",
+    "allow-tunnel-clear-ended"
   ]
 }

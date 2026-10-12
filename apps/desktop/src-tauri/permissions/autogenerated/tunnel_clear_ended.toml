@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tunnel-clear-ended"
+description = "Enables the tunnel_clear_ended command without any pre-configured scope."
+commands.allow = ["tunnel_clear_ended"]
+
+[[permission]]
+identifier = "deny-tunnel-clear-ended"
+description = "Denies the tunnel_clear_ended command without any pre-configured scope."
+commands.deny = ["tunnel_clear_ended"]

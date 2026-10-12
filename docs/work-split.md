@@ -112,10 +112,27 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B |
 |---|---|---|
-| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | — |
-| Done since split | — | — |
+| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | Jump hosts (CON-09, FWD-09), then proxies (CON-10) |
+| Done since split | — | Port forwarding: local/remote/SOCKS5 adapter, saved rules, session-scoped runs, Tunnels page (FWD-01..08 IMPLEMENTED_UNVERIFIED on Linux; see `docs/progress-b.md`) |
 | Blocked | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
-None yet.
+**From agent B (notices of small additive edits in agent A's files, each in a block marked
+`agent B: tunnels and history`; please keep them when you touch these files):**
+
+1. `crates/ssh/src/client.rs`: `VerifiedConnection` fields `handle` and `request_timeout` are
+   `pub(crate)` and it gains a `routes` field; the handler refuses server-opened channels except
+   `forwarded-tcpip` for requested ports (ADR 0004 §3). No behaviour change for shells/SFTP.
+2. `crates/core/src/vault.rs`: an `Open.tunnels` map, one `load!` line for `KIND_TUNNEL`, and one
+   `impl VaultService` block (tunnel CRUD) placed just before the first test module.
+   `crates/core/src/records.rs`: `KIND_TUNNEL = 100` and `TunnelRecord`. B's kinds start at 100.
+3. `crates/core/src/sessions.rs` outside `run_ssh`: `Entry` gains `host_id`, `register` takes it,
+   `connection()` is `pub(crate)`, `supervise` calls `tunnel_runs.session_ended(..)`, and
+   `TaskContext` carries the session id and `Sessions`.
+4. `apps/desktop/src/lib/messages.ts`: `nav.tunnels`; `apps/desktop/src/components/layout/TabStrip.tsx`:
+   `tunnels` in `PAGE_ICONS` (both needed because `Destination` gained `"tunnels"`).
+5. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
+   `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`), and
+   `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
+   loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
