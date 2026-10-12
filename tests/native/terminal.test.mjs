@@ -440,4 +440,44 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
     await app.screenshot("w03-sixteen-panes");
   });
+
+  test("a saved layout restores disconnected; only Connect opens a new session", async () => {
+    const runCommand = async (name) => {
+      await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    // Close every tab, then start from one SSH tab to the lab.
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    await t.type("echo NOT-IN-TEMPLATE-$((3*3))\n");
+    await t.waitForText("NOT-IN-TEMPLATE-9");
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Lab layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(() => s.execute(`return document.querySelector(".tab-layout")?.textContent?.includes("Lab layout") || null`), { describe: "layout indicator" });
+
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout “Lab layout”");
+    await s.waitFor(".pane:not([hidden]) .overlay-card");
+    // No session exists for the restored pane: no terminal, no xterm, nothing received.
+    const restored = await s.execute(`return { xterm: document.querySelectorAll(".pane:not([hidden]) .xterm").length, status: document.querySelector(".statusbar")?.textContent ?? "" }`);
+    assert.equal(restored.xterm, 0, "no terminal was started");
+    assert.doesNotMatch(restored.status, /Connected/);
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the restored pane" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "restored pane connected" });
+    // A fresh session: the earlier output is not replayed.
+    await t.waitForText(/\$/, "a prompt");
+    assert.doesNotMatch(await t.terminalText(), /NOT-IN-TEMPLATE-9/);
+    await app.screenshot("w04-layout-restored");
+  });
 });

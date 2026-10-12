@@ -2,6 +2,8 @@
 // tree of splits. Panes are rendered flat and positioned from `paneRects`, so changing the tree
 // never remounts a terminal (its session survives splits, closes and moves).
 
+import type { LayoutNode, LayoutTab, LayoutTarget } from "@tyrminal/contracts";
+
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 
 export const MAX_PANES = 16;
@@ -24,6 +26,8 @@ export interface Pane {
   indicator: Indicator;
   /** Output arrived while this pane's tab was in the background. Cleared when the tab is shown. */
   unread: boolean;
+  /** Restored from a layout template: no session until the user chooses Connect. */
+  pending: boolean;
 }
 
 /**
@@ -48,9 +52,11 @@ export interface Workspace {
   /** `null` shows the navigation page instead of a terminal tab. */
   active: number | null;
   nextId: number;
+  /** The named layout this workspace was opened from or last saved as, with what was saved. */
+  template: { id: string; name: string; saved: string } | null;
 }
 
-export const emptyWorkspace: Workspace = { tabs: [], panes: {}, active: null, nextId: 1 };
+export const emptyWorkspace: Workspace = { tabs: [], panes: {}, active: null, nextId: 1, template: null };
 
 export function panesOf(layout: Layout): number[] {
   return layout.kind === "leaf" ? [layout.pane] : [...panesOf(layout.a), ...panesOf(layout.b)];
@@ -73,11 +79,11 @@ export function activePane(ws: Workspace): Pane | null {
   return tab ? (ws.panes[tab.focused] ?? null) : null;
 }
 
-type PaneSeed = Pick<Pane, "target" | "label" | "identity">;
+export type PaneSeed = Pick<Pane, "target" | "label" | "identity">;
 
-function newPane(ws: Workspace, seed: PaneSeed): [Workspace, number] {
+function newPane(ws: Workspace, seed: PaneSeed, pending = false): [Workspace, number] {
   const id = ws.nextId;
-  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: "busy", unread: false };
+  const pane: Pane = { id, ...seed, remoteTitle: "", indicator: pending ? "idle" : "busy", unread: false, pending };
   return [{ ...ws, panes: { ...ws.panes, [id]: pane }, nextId: id + 1 }, id];
 }
 
@@ -261,7 +267,7 @@ export function duplicateTab(ws: Workspace, tabId: number): Workspace {
   const map = new Map<number, number>();
   for (const id of ids) {
     const source = ws.panes[id] as Pane;
-    const [after, created] = newPane(next, { target: source.target, label: source.label, identity: source.identity });
+    const [after, created] = newPane(next, { target: source.target, label: source.label, identity: source.identity }, source.pending);
     next = after;
     map.set(id, created);
   }
@@ -440,4 +446,95 @@ export function neighbour(layout: Layout, from: number, towards: "left" | "right
     if (!best || distance < best.distance) best = { id, distance };
   }
   return best?.id ?? null;
+}
+
+// ---------- layout templates ----------
+
+function toNode(layout: Layout, index: Map<number, number>): LayoutNode {
+  if (layout.kind === "leaf") return { kind: "leaf", pane: index.get(layout.pane) as number };
+  return { kind: "split", dir: layout.dir, ratio: layout.ratio, a: toNode(layout.a, index), b: toNode(layout.b, index) };
+}
+
+function toTarget(target: TerminalTarget): LayoutTarget {
+  return target.kind === "ssh" ? { kind: "ssh", hostId: target.hostId } : { kind: "local" };
+}
+
+/**
+ * The open tabs as a template: arrangement, destinations, tab names and focus. Only that: no
+ * session, output, command or directory is part of a template.
+ */
+export function templateTabs(ws: Workspace): LayoutTab[] {
+  return ws.tabs.map((tab) => {
+    const ids = panesOf(tab.layout);
+    const index = new Map(ids.map((id, i) => [id, i]));
+    return {
+      title: tab.customTitle,
+      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target)),
+      layout: toNode(tab.layout, index),
+      focused: index.get(tab.focused) ?? 0,
+      focusMode: tab.focusMode,
+    };
+  });
+}
+
+/** A canonical text form (sorted keys) for comparing what is open with what was saved. */
+export function snapshot(tabs: LayoutTab[]): string {
+  return JSON.stringify(tabs, (_key, value: unknown) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value,
+  );
+}
+
+/** The open tabs differ from the template they came from (or were last saved as). */
+export function templateDirty(ws: Workspace): boolean {
+  return ws.template !== null && snapshot(templateTabs(ws)) !== ws.template.saved;
+}
+
+/** Records that the workspace now follows `template`, whose saved contents are `tabs`. */
+export function markSaved(ws: Workspace, template: { id: string; name: string; tabs: LayoutTab[] }): Workspace {
+  return { ...ws, template: { id: template.id, name: template.name, saved: snapshot(template.tabs) } };
+}
+
+function fromNode(node: LayoutNode, ids: number[]): Layout {
+  if (node.kind === "leaf") return { kind: "leaf", pane: ids[node.pane] as number };
+  return { kind: "split", dir: node.dir, ratio: node.ratio, a: fromNode(node.a, ids), b: fromNode(node.b, ids) };
+}
+
+/**
+ * Opens a template's tabs after the open ones. Every pane starts *pending*: nothing connects until
+ * the user chooses Connect, and nothing is run in it. Refused (unchanged) past MAX_PANES.
+ */
+export function restoreTemplate(ws: Workspace, tabs: LayoutTab[], seed: (target: LayoutTarget) => PaneSeed): Workspace {
+  const total = tabs.reduce((n, t) => n + t.panes.length, 0);
+  if (tabs.length === 0 || paneCount(ws) + total > MAX_PANES) return ws;
+  let next = ws;
+  let first: number | null = null;
+  for (const t of tabs) {
+    const ids: number[] = [];
+    for (const target of t.panes) {
+      const [after, id] = newPane(next, seed(target), true);
+      next = after;
+      ids.push(id);
+    }
+    const tab: Tab = {
+      id: next.nextId,
+      customTitle: t.title,
+      layout: fromNode(t.layout, ids),
+      focused: ids[t.focused] ?? (ids[0] as number),
+      focusMode: t.focusMode,
+    };
+    first ??= tab.id;
+    next = { ...next, tabs: [...next.tabs, tab], nextId: tab.id + 1 };
+  }
+  return activate(next, first);
+}
+
+/** The user chose Connect for these panes (one, or every pending pane of a tab). */
+export function connectPanes(ws: Workspace, ids: number[]): Workspace {
+  const pending = ids.filter((id) => ws.panes[id]?.pending);
+  if (pending.length === 0) return ws;
+  const panes = { ...ws.panes };
+  for (const id of pending) panes[id] = { ...(panes[id] as Pane), pending: false, indicator: "busy" };
+  return { ...ws, panes };
 }

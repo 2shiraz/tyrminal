@@ -15,3 +15,7 @@ mod error;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
+
+// agent C: workspaces
+mod layouts;
+pub use layouts::*;

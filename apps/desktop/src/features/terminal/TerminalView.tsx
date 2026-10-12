@@ -12,6 +12,7 @@ import {
   IconCopy,
   IconExternalLink,
   IconKeyRound,
+  IconPlug,
   IconRefreshCw,
   IconSearch,
   IconShieldAlert,
@@ -21,6 +22,7 @@ import {
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
 import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -78,6 +80,10 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
   /** Output arrived while this pane's tab was hidden (reported once until it is shown again). */
   onUnread?: (() => void) | undefined;
+  /** Restored from a layout: no session is opened until the user chooses Connect. */
+  pending?: boolean | undefined;
+  onConnect?: (() => void) | undefined;
+  onConnectAll?: (() => void) | undefined;
 }
 
 function Fingerprint({ value }: { value: string }) {
@@ -133,9 +139,15 @@ export function TerminalView(props: TerminalViewProps) {
     handlers.current.onStatus(status.current);
   }
 
+  const pending = props.pending === true;
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return;
+    if (pending) {
+      // Nothing is opened, started or sent while a restored pane waits for the user.
+      publish({ state: "closed", clipboardAllowed: false });
+      return;
+    }
     setState("connecting");
     setTrust(null);
     setAuth(null);
@@ -220,9 +232,9 @@ export function TerminalView(props: TerminalViewProps) {
       controller.dispose();
       controllerRef.current = null;
     };
-    // `target` is fixed for the life of a pane; `attempt` drives reconnects.
+    // `target` is fixed for the life of a pane; `attempt` drives reconnects; `pending` the first start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt]);
+  }, [attempt, pending]);
 
   // Counts down to the next automatic attempt; cancelled by unmount, Cancel or Reconnect now.
   useEffect(() => {
@@ -268,7 +280,7 @@ export function TerminalView(props: TerminalViewProps) {
   }, []);
 
   const needsAttention = trust !== null || auth !== null;
-  const indicator: TabIndicator = closed ? (closed.error ? "bad" : "idle") : needsAttention ? "attention" : state === "connected" ? "ok" : "busy";
+  const indicator: TabIndicator = pending ? "idle" : closed ? (closed.error ? "bad" : "idle") : needsAttention ? "attention" : state === "connected" ? "ok" : "busy";
   useEffect(() => {
     handlers.current.onIndicator(indicator);
   }, [indicator]);
@@ -304,7 +316,7 @@ export function TerminalView(props: TerminalViewProps) {
     "--pane-fg": scheme.foreground,
     "--term-padding": `${prefs.padding}px`,
   } as CSSProperties;
-  const connecting = !closed && state !== "connected" && !needsAttention;
+  const connecting = !pending && !closed && state !== "connected" && !needsAttention;
   const stepIndex = Math.max(0, STEPS.indexOf(state));
   const showPrompts = visible;
 
@@ -319,6 +331,31 @@ export function TerminalView(props: TerminalViewProps) {
       onFocusCapture={() => handlers.current.onFocus()}
     >
       <div className="terminal-host" ref={hostRef} data-pane={props.paneId} />
+
+      {pending && (
+        <div className="terminal-overlay">
+          <div className="overlay-card" role="group" aria-label={msgC.restore.waiting(label)}>
+            <div className="dialog-head">
+              <span className="dialog-icon" data-tone="accent" aria-hidden="true">
+                <IconPlug size={18} />
+              </span>
+              <h2>{msgC.restore.title}</h2>
+            </div>
+            <p className="muted">{msgC.restore.body(identity || label)}</p>
+            <div className="dialog-actions">
+              {props.onConnectAll && (
+                <button type="button" className="btn" onClick={() => props.onConnectAll?.()}>
+                  {msgC.restore.connectAll}
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => props.onConnect?.()} data-autofocus>
+                <IconPlug size={15} />
+                {msgC.restore.connect}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {findOpen && (
         <FindBar

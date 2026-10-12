@@ -185,6 +185,10 @@ pub fn run() {
             commands::backup::backup_choose,
             commands::backup::backup_preview,
             commands::backup::backup_restore,
+            // agent C: workspaces
+            commands::layouts::layout_list,
+            commands::layouts::layout_save,
+            commands::layouts::layout_delete,
         ])
         .build(tauri::generate_context!());
 

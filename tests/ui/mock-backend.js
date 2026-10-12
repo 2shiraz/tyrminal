@@ -276,6 +276,24 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // agent C: workspaces
+    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+    layout_save: (a) => {
+      state.layouts ??= [];
+      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
+      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
+      for (const t of a.layout.tabs)
+        for (const p of t.panes)
+          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
+      const existing = state.layouts.find((l) => l.id === a.layout.id);
+      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
+      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
+      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
+      return saved;
+    },
+    layout_delete: (a) => {
+      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
+    },
     files_local_list: (a) => {
       if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
       if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");

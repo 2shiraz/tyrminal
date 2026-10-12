@@ -77,6 +77,10 @@ const COMMANDS: &[&str] = &[
     "backup_choose",
     "backup_preview",
     "backup_restore",
+    // agent C: workspaces
+    "layout_list",
+    "layout_save",
+    "layout_delete",
 ];
 
 fn main() {

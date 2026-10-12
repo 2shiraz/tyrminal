@@ -12,9 +12,11 @@ import {
   IconFingerprint,
   IconHouse,
   IconKeyRound,
+  IconLayoutTemplate,
   IconPencil,
   IconPlus,
   IconRows2,
+  IconSave,
   IconScrollText,
   IconServer,
   IconSettings,
@@ -44,6 +46,7 @@ export function TabStrip({
   onDuplicate,
   onNewLocal,
   onOpenPalette,
+  layout,
 }: {
   ws: Workspace;
   destination: Destination;
@@ -58,7 +61,10 @@ export function TabStrip({
   onDuplicate: (id: number) => void;
   onNewLocal: () => void;
   onOpenPalette: () => void;
+  /** The layout template the open tabs follow, and whether they changed since it was saved. */
+  layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
 }) {
+  const [layoutMenu, setLayoutMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
   const [newMenu, setNewMenu] = useState<HTMLElement | null>(null);
   const [drag, setDrag] = useState<{ from: number; over: number | null; side: "before" | "after" } | null>(null);
@@ -259,6 +265,31 @@ export function TabStrip({
         <IconPlus size={16} />
       </IconButton>
       <span className="tab-spacer" />
+      {layout && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm tab-layout"
+          data-dirty={layout.dirty || undefined}
+          aria-haspopup="menu"
+          aria-label={`${msgC.layouts.current(layout.name)}${layout.dirty ? ` (${msgC.layouts.unsaved})` : ""}`}
+          onClick={(event) => setLayoutMenu(event.currentTarget)}
+        >
+          <IconLayoutTemplate size={14} />
+          <span className="truncate">{layout.name}</span>
+          {layout.dirty && <span className="tab-layout-dirty" aria-hidden="true" title={msgC.layouts.unsaved} />}
+        </button>
+      )}
+      {layout && layoutMenu && (
+        <Menu
+          label={msgC.layouts.menu(layout.name)}
+          anchor={layoutMenu}
+          items={[
+            { label: msgC.layouts.saveNamed(layout.name), icon: <IconSave size={15} />, disabled: !layout.dirty, onSelect: layout.onSave },
+            { label: msgC.layouts.saveAs, icon: <IconSave size={15} />, onSelect: layout.onSaveAs },
+          ]}
+          onClose={() => setLayoutMenu(null)}
+        />
+      )}
 
       {menu && (
         <Menu

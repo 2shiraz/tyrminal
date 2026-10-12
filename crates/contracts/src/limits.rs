@@ -74,3 +74,9 @@ pub const MAX_TRANSFERS: usize = 8;
 /// Entries (files and folders) and nesting depth of one folder transfer.
 pub const MAX_TREE_ENTRIES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 32;
+
+// agent C: workspaces
+/// Panes in one layout template (the same limit as open panes).
+pub const MAX_LAYOUT_PANES: usize = 16;
+/// A custom tab name in a layout template, in characters.
+pub const MAX_TAB_TITLE_LEN: usize = 80;

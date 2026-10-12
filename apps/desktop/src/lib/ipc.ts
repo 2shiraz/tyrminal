@@ -269,3 +269,12 @@ export const backup = {
     call<BackupPreview>("backup_restore", { kind, secret, replaceExisting }),
 };
 
+
+// agent C: workspaces
+/** Named layout templates. Saving is explicit; a restored layout connects nothing by itself. */
+export const layouts = {
+  list: () => call<import("@tyrminal/contracts").LayoutTemplateSummary[]>("layout_list"),
+  save: (layout: import("@tyrminal/contracts").LayoutTemplateInput) =>
+    call<import("@tyrminal/contracts").LayoutTemplateSummary>("layout_save", { layout }),
+  remove: (id: string) => call<void>("layout_delete", { id }),
+};

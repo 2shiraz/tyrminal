@@ -1,4 +1,4 @@
-import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
@@ -18,6 +18,9 @@ import { SnippetsView } from "../features/snippets/SnippetsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
+import { layouts as layoutsApi } from "../lib/ipc";
+import { useLoaded } from "../lib/useAsync";
+import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { msg } from "../lib/messages";
 import { msgC } from "../lib/messages-c";
 import { actionFor, tabIndexFor } from "../lib/shortcuts";
@@ -34,11 +37,13 @@ import {
   closeOtherTabs,
   closePane,
   closeTab,
+  connectPanes,
   cycleTab,
   duplicateTab,
   emptyWorkspace,
   focusPane,
   focusPaneInActiveTab,
+  markSaved,
   markUnread,
   movePane,
   moveTab,
@@ -49,12 +54,15 @@ import {
   panesOf,
   patchPane,
   renameTab,
+  restoreTemplate,
   selectTab,
   setFocusMode,
   setRatio,
   splitPane,
   swapPanes,
   tabTitle,
+  templateDirty,
+  templateTabs,
 } from "./workspace";
 
 export type Destination = "home" | "hosts" | "snippets" | "keychain" | "knownHosts" | "settings";
@@ -88,6 +96,9 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
+  // Named layout templates: listed from the vault, saved only on an explicit request.
+  const savedLayouts = useLoaded(layoutsApi.list);
+  const [savingAs, setSavingAs] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
@@ -191,6 +202,71 @@ function Shell() {
       else setWs(next);
     },
     [notify],
+  );
+
+  /** What a template pane shows before it connects; a deleted host stays visibly missing. */
+  const seedFor = useCallback(
+    (target: LayoutTarget) => {
+      if (target.kind === "local") return { target: { kind: "local" } as const, label: msg.nav.localTerminal, identity: msg.terminal.local };
+      const host = data.hosts.value?.find((h) => h.id === target.hostId);
+      return {
+        target: { kind: "ssh", hostId: target.hostId } as const,
+        label: host?.label ?? msgC.restore.missingHost,
+        identity: host ? hostIdentity(host) : "",
+      };
+    },
+    [data.hosts.value],
+  );
+
+  const openLayout = useCallback(
+    (layout: LayoutTemplateSummary) => {
+      const current = wsRef.current;
+      const next = restoreTemplate(current, layout.tabs, seedFor);
+      if (next === current) {
+        notify("danger", msgC.layouts.full(layout.tabs.reduce((n, t) => n + t.panes.length, 0)));
+        return;
+      }
+      setWs(markSaved(next, layout));
+    },
+    [notify, seedFor],
+  );
+
+  /** Saves the open tabs: into the current template, or as a new one when `name` is given. */
+  const saveLayout = useCallback(
+    async (name?: string): Promise<string | null> => {
+      const current = wsRef.current;
+      const target = name === undefined ? current.template : null;
+      if (!target && name === undefined) {
+        setSavingAs(true);
+        return null;
+      }
+      try {
+        const saved = await layoutsApi.save({ id: target?.id ?? null, name: target?.name ?? (name as string), tabs: templateTabs(current) });
+        setWs((now) => markSaved(now, saved));
+        void savedLayouts.reload();
+        notify("success", msgC.layouts.saved(saved.name));
+        return null;
+      } catch (error) {
+        const message = (error as Error).message;
+        if (name === undefined) notify("danger", message);
+        return message;
+      }
+    },
+    [notify, savedLayouts],
+  );
+
+  const deleteLayout = useCallback(
+    async (layout: LayoutTemplateSummary) => {
+      try {
+        await layoutsApi.remove(layout.id);
+        setWs((now) => (now.template?.id === layout.id ? { ...now, template: null } : now));
+        void savedLayouts.reload();
+        notify("info", msgC.layouts.deleted(layout.name));
+      } catch (error) {
+        notify("danger", (error as Error).message);
+      }
+    },
+    [notify, savedLayouts],
   );
 
   const arrange = useCallback((arrangement: Arrangement) => {
@@ -407,6 +483,11 @@ function Shell() {
           onDuplicate={duplicate}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}
+          layout={
+            ws.template
+              ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
+              : null
+          }
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
@@ -453,6 +534,7 @@ function Shell() {
                 onSwap={(a, b) => setWs((current) => swapPanes(current, a, b))}
                 onFocusMode={(tabId, on) => setWs((current) => setFocusMode(current, tabId, on))}
                 onToNewTab={(paneId) => setWs((current) => paneToNewTab(current, paneId))}
+                onConnect={(paneIds) => setWs((current) => connectPanes(current, paneIds))}
                 onClose={(paneId) => {
                   setWs((current) => closePane(current, paneId));
                   setStatuses((current) => {
@@ -532,6 +614,15 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          layouts={{
+            list: savedLayouts.value ?? [],
+            current: ws.template?.name ?? null,
+            canSave: ws.tabs.length > 0,
+            onOpen: openLayout,
+            onSave: () => void saveLayout(),
+            onSaveAs: () => setSavingAs(true),
+            onDelete: (layout) => void deleteLayout(layout),
+          }}
           workspace={
             terminalVisible && tab
               ? {
@@ -569,6 +660,22 @@ function Shell() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {savingAs && (
+        <SaveLayoutDialog
+          initialName={ws.template?.name ?? ""}
+          summary={msgC.layouts.summary(ws.tabs.length, paneCount(ws))}
+          onCancel={() => {
+            setSavingAs(false);
+            if (terminalVisible) focusedHandle()?.focus();
+          }}
+          onSave={async (name) => {
+            const failure = await saveLayout(name);
+            if (failure === null) setSavingAs(false);
+            return failure;
+          }}
         />
       )}
 

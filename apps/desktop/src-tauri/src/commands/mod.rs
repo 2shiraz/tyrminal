@@ -8,3 +8,5 @@ pub mod sessions;
 pub mod settings;
 pub mod snippets;
 pub mod vault;
+// agent C: workspaces
+pub mod layouts;

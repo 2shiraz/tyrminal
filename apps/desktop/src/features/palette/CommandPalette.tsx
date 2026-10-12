@@ -1,4 +1,4 @@
-import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
@@ -14,6 +14,9 @@ import {
   IconHouse,
   IconHardDrive,
   IconLayoutGrid,
+  IconLayoutTemplate,
+  IconSave,
+  IconTrash2,
   IconMaximize2,
   IconMinimize2,
   IconKeyRound,
@@ -96,6 +99,7 @@ export function CommandPalette({
   broadcast,
   onToggleBroadcast,
   workspace,
+  layouts,
   pick,
 }: {
   hasTerminal: boolean;
@@ -121,6 +125,18 @@ export function CommandPalette({
         onArrange: (arrangement: Arrangement) => void;
         onPaneToNewTab: () => void;
         onSplitWith: (dir: Direction) => void;
+      }
+    | undefined;
+  /** Saved layout templates and the actions on them. */
+  layouts?:
+    | {
+        list: LayoutTemplateSummary[];
+        current: string | null;
+        canSave: boolean;
+        onOpen: (layout: LayoutTemplateSummary) => void;
+        onSave: () => void;
+        onSaveAs: () => void;
+        onDelete: (layout: LayoutTemplateSummary) => void;
       }
     | undefined;
   /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
@@ -222,6 +238,39 @@ export function CommandPalette({
         list.push(action("pane-new-tab", msgC.panes.toNewTab, <IconArrowUpRight size={16} />, workspace.onPaneToNewTab));
       }
     }
+    if (layouts) {
+      const panes = (l: LayoutTemplateSummary) => l.tabs.reduce((n, t) => n + t.panes.length, 0);
+      for (const layout of layouts.list) {
+        list.push({
+          id: `layout-${layout.id}`,
+          group: msgC.layouts.group,
+          label: msgC.layouts.open(layout.name),
+          detail: msgC.layouts.summary(layout.tabs.length, panes(layout)),
+          icon: <IconLayoutTemplate size={16} />,
+          run: () => layouts.onOpen(layout),
+        });
+      }
+      if (layouts.canSave) {
+        list.push({
+          id: "layout-save",
+          group: msgC.layouts.group,
+          label: layouts.current ? msgC.layouts.saveNamed(layouts.current) : msgC.layouts.saveAs,
+          icon: <IconSave size={16} />,
+          run: layouts.current ? layouts.onSave : layouts.onSaveAs,
+        });
+        if (layouts.current)
+          list.push({ id: "layout-save-as", group: msgC.layouts.group, label: msgC.layouts.saveAs, icon: <IconSave size={16} />, run: layouts.onSaveAs });
+      }
+      for (const layout of layouts.list) {
+        list.push({
+          id: `layout-delete-${layout.id}`,
+          group: msgC.layouts.group,
+          label: msgC.layouts.delete(layout.name),
+          icon: <IconTrash2 size={16} />,
+          run: () => layouts.onDelete(layout),
+        });
+      }
+    }
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -243,7 +292,7 @@ export function CommandPalette({
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate, workspace, pick, broadcast, onToggleBroadcast, onDeployKey]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey]);
 
   const results = useMemo(() => {
     const scored = items

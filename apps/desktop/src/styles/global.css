@@ -3208,3 +3208,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+
+.tab-layout {
+  flex: none;
+  gap: var(--space-1);
+  max-width: 220px;
+  margin-right: var(--space-2);
+}
+
+/* Unsaved changes to the layout: a filled dot after its name. */
+.tab-layout-dirty {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}

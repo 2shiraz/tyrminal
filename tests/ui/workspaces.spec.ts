@@ -252,3 +252,133 @@ test("move a pane to its own tab: the session keeps running", async ({ page }) =
   await terminalTabs(page).nth(0).click();
   await expect(visiblePanes(page)).toHaveCount(1);
 });
+
+async function paletteRun(page: Page, text: string) {
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill(text);
+  await expect(page.getByRole("option").first()).toContainText(text);
+  await page.keyboard.press("Enter");
+}
+
+async function twoHostTab(page: Page) {
+  await connectFromPalette(page, "api-gateway");
+  await paletteRun(page, "Split right with");
+  await page.getByRole("combobox", { name: /Open in a new pane/ }).fill("db-primary");
+  await page.keyboard.press("Enter");
+  await expect(visiblePanes(page)).toHaveCount(2);
+  await page.keyboard.press("Control+Shift+R");
+  await page.getByRole("textbox", { name: "Rename tab" }).fill("prod");
+  await page.keyboard.press("Enter");
+}
+
+test("templates: explicit save stores the arrangement and destinations only; changes show as unsaved", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await twoHostTab(page);
+  await page.locator(".pane:not([hidden])").first().click();
+  await page.keyboard.type("echo TYPED-CANARY");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".pane:not([hidden])").first().locator(".xterm-rows")).toContainText("TYPED-CANARY: synthetic output");
+  // Nothing is saved by itself.
+  expect(await calls(page, "layout_save")).toHaveLength(0);
+  await expect(page.locator(".tab-layout")).toHaveCount(0);
+
+  await paletteRun(page, "Save layout as");
+  const dialog = page.getByRole("dialog", { name: "Save the open tabs as a layout" });
+  await expect(dialog).toContainText("1 tab, 2 panes");
+  await dialog.getByLabel("Layout name").fill("Ops");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved layout “Ops”.")).toBeVisible();
+  const indicator = page.getByRole("button", { name: /^Layout: Ops$/ });
+  await expect(indicator).toBeVisible();
+
+  const [first] = await calls(page, "layout_save");
+  const sent = JSON.stringify(first!.args);
+  expect(sent).not.toContain("TYPED-CANARY");
+  expect(sent).not.toMatch(/synthetic output|deploy@/);
+  expect((first!.args as { layout: { tabs: unknown[] } }).layout.tabs).toEqual([
+    {
+      title: "prod",
+      panes: [
+        { kind: "ssh", hostId: expect.any(String) },
+        { kind: "ssh", hostId: expect.any(String) },
+      ],
+      layout: { kind: "split", dir: "row", ratio: 0.5, a: { kind: "leaf", pane: 0 }, b: { kind: "leaf", pane: 1 } },
+      focused: 0,
+      focusMode: false,
+    },
+  ]);
+
+  // Resizing changes the arrangement: shown as unsaved until saved again, into the same template.
+  const splitter = page.getByRole("separator").first();
+  await splitter.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: "Layout: Ops (Unsaved changes)" })).toBeVisible();
+  await page.getByRole("button", { name: /Layout: Ops/ }).click();
+  await page.getByRole("menuitem", { name: "Save layout “Ops”" }).click();
+  await expect(page.getByRole("button", { name: /^Layout: Ops$/ })).toBeVisible();
+  const saves = await calls(page, "layout_save");
+  expect(saves).toHaveLength(2);
+  expect((saves[1]!.args as { layout: { id: string } }).layout.id).toBe((await page.evaluate(() => (window as unknown as { __mockState: { layouts: { id: string }[] } }).__mockState.layouts[0]!.id)));
+});
+
+test("templates: restore opens every pane disconnected; only Connect opens a session", async ({ page }) => {
+  await openApp(page);
+  await twoHostTab(page);
+  await paletteRun(page, "Save layout as");
+  await page.getByRole("dialog").getByLabel("Layout name").fill("Ops");
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("button", { name: /^Layout: Ops$/ })).toBeVisible();
+  await page.getByRole("button", { name: "Close prod" }).click();
+  await expect(terminalTabs(page)).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, "session_close")).length).toBe(2);
+  const opened = (await calls(page, "session_open_ssh")).length;
+
+  await paletteRun(page, "Open layout “Ops”");
+  await expect(terminalTabs(page)).toHaveCount(1);
+  await expect(terminalTabs(page).first()).toHaveText(/prod/);
+  await expect(visiblePanes(page)).toHaveCount(2);
+  const waiting = page.getByRole("group", { name: /not connected$/ });
+  await expect(waiting).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /^Layout: Ops$/ })).toBeVisible();
+  // Nothing connected on its own, even after a while.
+  await page.waitForTimeout(300);
+  expect(await calls(page, "session_open_ssh")).toHaveLength(opened);
+  // Broadcast is not offered while panes are not connected.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("every pane");
+  await expect(page.getByRole("option", { name: /Type into every pane/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.locator('.pane[aria-label="db-primary"]').getByRole("button", { name: "Connect", exact: true }).click();
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(opened + 1);
+  await expect(waiting).toHaveCount(1);
+  // With one pane left waiting, "Connect all" is no longer offered; Connect is.
+  await expect(page.getByRole("button", { name: "Connect all in this tab" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(opened + 2);
+  await expect(waiting).toHaveCount(0);
+});
+
+test("templates: Connect all, and a restore that would pass 16 panes is refused", async ({ page }) => {
+  await openApp(page);
+  await twoHostTab(page);
+  await paletteRun(page, "Save layout as");
+  await page.getByRole("dialog").getByLabel("Layout name").fill("Pair");
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("button", { name: /^Layout: Pair$/ })).toBeVisible();
+  const opened = (await calls(page, "session_open_ssh")).length;
+  await paletteRun(page, "Open layout “Pair”");
+  await expect(terminalTabs(page)).toHaveCount(2);
+  // Two tabs open now, so the workspace differs from the template.
+  await expect(page.getByRole("button", { name: "Layout: Pair (Unsaved changes)" })).toBeVisible();
+  await page.getByRole("button", { name: "Connect all in this tab" }).first().click();
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(opened + 2);
+
+  for (let i = 0; i < 12; i += 1) await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator(".pane")).toHaveCount(16);
+  await page.keyboard.press("Control+Shift+W");
+  await expect(page.locator(".pane")).toHaveCount(15);
+  await paletteRun(page, "Open layout “Pair”");
+  await expect(page.getByText("Not enough room: this layout has 2 panes and at most 16 can be open.")).toBeVisible();
+  await expect(page.locator(".pane")).toHaveCount(15);
+});

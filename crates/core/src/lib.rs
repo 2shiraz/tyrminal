@@ -11,7 +11,9 @@ mod error;
 mod files;
 mod folders;
 mod import;
+// agent C: workspaces
 mod inventory;
+mod layouts;
 mod preferences;
 mod records;
 mod sessions;

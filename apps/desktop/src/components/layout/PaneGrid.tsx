@@ -30,6 +30,7 @@ export function PaneGrid({
   onSwap,
   onFocusMode,
   onToNewTab,
+  onConnect,
   onOpenKnownHosts,
   register,
   broadcasting,
@@ -50,6 +51,8 @@ export function PaneGrid({
   onSwap: (a: number, b: number) => void;
   onFocusMode: (tab: number, on: boolean) => void;
   onToNewTab: (pane: number) => void;
+  /** Explicit Connect for restored panes that are waiting. */
+  onConnect: (panes: number[]) => void;
   onOpenKnownHosts: () => void;
   register: (pane: number, handle: PaneHandle | null) => void;
   /** Tabs whose typed input goes to every pane (an explicit, unsaved mode). */
@@ -166,6 +169,11 @@ export function PaneGrid({
                   onOpenKnownHosts={onOpenKnownHosts}
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
+                  pending={pane.pending}
+                  onConnect={() => onConnect([id])}
+                  onConnectAll={
+                    panesOf(tab.layout).filter((p) => ws.panes[p]?.pending).length > 1 ? () => onConnect(panesOf(tab.layout)) : undefined
+                  }
                 />
               </div>
             </section>
