@@ -8,6 +8,7 @@
 mod deploy;
 mod error;
 mod files;
+mod folders;
 mod import;
 mod inventory;
 mod preferences;

@@ -118,4 +118,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
-None yet.
+- **A → B (already done by A, keep it when merging):** in `crates/core/src/sessions.rs` `run_ssh`, the
+  connection is now stored in the registry entry *before* `SessionState::Connected` is reported
+  (it used to be stored after), so a file or key-install call made right after "connected" no
+  longer fails with "works in a connected SSH session only". Three lines moved; nothing else in the
+  connection path changed. If B restructures `run_ssh`, keep this ordering.

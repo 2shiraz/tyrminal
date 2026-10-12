@@ -47,7 +47,7 @@ pub(crate) fn from_file(e: FileError) -> IpcError {
     }
 }
 
-fn local_io(e: &std::io::Error) -> IpcError {
+pub(crate) fn local_io(e: &std::io::Error) -> IpcError {
     match e.kind() {
         std::io::ErrorKind::StorageFull => err(ErrorCode::StorageFull, "There is not enough space on this computer."),
         std::io::ErrorKind::PermissionDenied => {
@@ -58,7 +58,7 @@ fn local_io(e: &std::io::Error) -> IpcError {
     }
 }
 
-fn conflict() -> IpcError {
+pub(crate) fn conflict() -> IpcError {
     err(ErrorCode::Conflict, "Something with that name is already there.")
 }
 
@@ -140,20 +140,24 @@ pub(crate) fn local_name_ok(name: &str) -> bool {
     true
 }
 
-fn temp_name(name: &str, token: &str) -> String {
+pub(crate) fn temp_name(name: &str, token: &str) -> String {
     // Keeps the temporary name within the usual 255-byte limit whatever the target name is.
     let short: String = name.chars().take(64).collect();
     format!(".{short}.{}{TEMP_SUFFIX}", &token[..token.len().min(12)])
 }
 
 /// Sends progress at most every `PROGRESS_EVERY`.
-struct Progress<'a> {
+pub(crate) struct Progress<'a> {
     sink: &'a dyn TransferSink,
     last: Instant,
-    done: u64,
+    pub(crate) done: u64,
 }
 
-impl Progress<'_> {
+impl<'a> Progress<'a> {
+    pub(crate) fn new(sink: &'a dyn TransferSink) -> Self {
+        Self { sink, last: Instant::now(), done: 0 }
+    }
+
     fn add(&mut self, n: usize) {
         self.done += n as u64;
         if self.last.elapsed() >= PROGRESS_EVERY {
@@ -164,7 +168,7 @@ impl Progress<'_> {
 }
 
 /// Resolves when the transfer is cancelled (or its owner is gone).
-async fn cancelled(cancel: &mut watch::Receiver<bool>) {
+pub(crate) async fn cancelled(cancel: &mut watch::Receiver<bool>) {
     loop {
         if *cancel.borrow() {
             return;
@@ -175,7 +179,7 @@ async fn cancelled(cancel: &mut watch::Receiver<bool>) {
     }
 }
 
-enum Stop {
+pub(crate) enum Stop {
     Cancelled,
     Failed(IpcError),
 }
@@ -184,6 +188,83 @@ impl From<IpcError> for Stop {
     fn from(e: IpcError) -> Self {
         Self::Failed(e)
     }
+}
+
+/// Copies a remote file into `file` (already created), checking for cancellation per chunk.
+pub(crate) async fn pull(
+    sftp: &Sftp,
+    remote: &str,
+    file: &mut tokio::fs::File,
+    progress: &mut Progress<'_>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<(), Stop> {
+    let mut reader = sftp.open_read(remote).await.map_err(from_file)?;
+    let copied = async {
+        loop {
+            let chunk = tokio::select! {
+                () = cancelled(cancel) => return Err(Stop::Cancelled),
+                chunk = reader.next_chunk() => chunk.map_err(from_file)?,
+            };
+            let Some(chunk) = chunk else { break };
+            file.write_all(&chunk).await.map_err(|e| local_io(&e))?;
+            progress.add(chunk.len());
+        }
+        file.sync_all().await.map_err(|e| local_io(&e))?;
+        Ok::<(), Stop>(())
+    }
+    .await;
+    reader.close().await;
+    copied
+}
+
+/// Copies a local file to a new remote file `remote` (owner-only while incomplete), verifies the
+/// stored size, and returns the bytes written. On failure the remote file is removed.
+pub(crate) async fn push(
+    sftp: &Sftp,
+    local: &Path,
+    remote: &str,
+    progress: &mut Progress<'_>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<u64, Stop> {
+    let mut file = tokio::fs::File::open(local).await.map_err(|e| local_io(&e))?;
+    let mut writer = sftp.create_new(remote, 0o600).await.map_err(from_file)?;
+    let mut buf = vec![0u8; SFTP_CHUNK as usize * 4];
+    let copied = async {
+        loop {
+            let n = tokio::select! {
+                () = cancelled(cancel) => return Err(Stop::Cancelled),
+                n = file.read(&mut buf) => n.map_err(|e| local_io(&e))?,
+            };
+            if n == 0 {
+                break;
+            }
+            writer.write(&buf[..n]).await.map_err(from_file)?;
+            progress.add(n);
+        }
+        Ok::<(), Stop>(())
+    }
+    .await;
+    let result = match copied {
+        Err(stop) => {
+            writer.abandon().await;
+            Err(stop)
+        }
+        Ok(()) => {
+            async {
+                let bytes = writer.finish().await.map_err(from_file)?;
+                // The server must hold exactly what was sent.
+                if sftp.stat(remote).await.map_err(from_file)?.size != Some(bytes) {
+                    return Err(Stop::Failed(err(ErrorCode::IoError, "The server did not store the whole file.")));
+                }
+                Ok(bytes)
+            }
+            .await
+        }
+    };
+    if result.is_err() {
+        let _ = sftp.remove_file(remote).await;
+    }
+    result
 }
 
 pub(crate) struct Download {
@@ -220,7 +301,7 @@ pub(crate) async fn prepare_download(d: &Download) -> Result<Option<u64>, IpcErr
     }
 }
 
-async fn create_private(path: &Path) -> std::io::Result<tokio::fs::File> {
+pub(crate) async fn create_private(path: &Path) -> std::io::Result<tokio::fs::File> {
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -257,35 +338,20 @@ pub(crate) async fn run_download(d: Download, sink: &dyn TransferSink, mut cance
     let temp = d.local_dir.join(temp_name(&d.name, &d.token));
     let target = d.local_dir.join(&d.name);
     let result = async {
-        let mut reader = d.sftp.open_read(&d.remote).await.map_err(from_file)?;
         let mut file = create_private(&temp).await.map_err(|e| local_io(&e))?;
-        let mut progress = Progress { sink, last: Instant::now(), done: 0 };
-        let copied = async {
-            loop {
-                let chunk = tokio::select! {
-                    () = cancelled(&mut cancel) => return Err(Stop::Cancelled),
-                    chunk = reader.next_chunk() => chunk.map_err(from_file)?,
-                };
-                let Some(chunk) = chunk else { break };
-                file.write_all(&chunk).await.map_err(|e| local_io(&e))?;
-                progress.add(chunk.len());
-            }
-            file.sync_all().await.map_err(|e| local_io(&e))?;
-            Ok::<u64, Stop>(progress.done)
-        }
-        .await;
-        reader.close().await;
+        let mut progress = Progress::new(sink);
+        let copied = pull(&d.sftp, &d.remote, &mut file, &mut progress, &mut cancel).await;
         drop(file);
-        let bytes = copied?;
+        copied?;
         finish_local(&temp, &target, d.overwrite).await?;
-        Ok::<u64, Stop>(bytes)
+        Ok::<u64, Stop>(progress.done)
     }
     .await;
     if result.is_err() {
         let _ = tokio::fs::remove_file(&temp).await;
     }
     sink.event(match result {
-        Ok(bytes) => TransferEvent::Done { bytes },
+        Ok(bytes) => TransferEvent::Done { bytes, files: 1, skipped: 0 },
         Err(Stop::Cancelled) => TransferEvent::Cancelled,
         Err(Stop::Failed(error)) => TransferEvent::Failed { error },
     });
@@ -331,55 +397,29 @@ pub(crate) async fn run_upload(u: Upload, mode: u32, sink: &dyn TransferSink, mu
             return;
         }
     };
-    let mut created = false;
     let result = async {
-        let mut file = tokio::fs::File::open(&u.local).await.map_err(|e| local_io(&e))?;
-        // Owner-only while incomplete; the final permissions are applied once it is whole.
-        let mut writer = u.sftp.create_new(&temp, 0o600).await.map_err(from_file)?;
-        created = true;
-        let mut progress = Progress { sink, last: Instant::now(), done: 0 };
-        let mut buf = vec![0u8; SFTP_CHUNK as usize * 4];
-        let copied = async {
-            loop {
-                let n = tokio::select! {
-                    () = cancelled(&mut cancel) => return Err(Stop::Cancelled),
-                    n = file.read(&mut buf) => n.map_err(|e| local_io(&e))?,
-                };
-                if n == 0 {
-                    break;
-                }
-                writer.write(&buf[..n]).await.map_err(from_file)?;
-                progress.add(n);
+        let mut progress = Progress::new(sink);
+        let bytes = push(&u.sftp, &u.local, &temp, &mut progress, &mut cancel).await?;
+        let placed = async {
+            u.sftp.set_permissions(&temp, mode).await.map_err(from_file)?;
+            match u.sftp.lstat(&target).await {
+                Ok(attrs) if attrs.kind == RemoteKind::Dir || !u.overwrite => return Err(conflict()),
+                Ok(_) => u.sftp.remove_file(&target).await.map_err(from_file)?,
+                Err(FileError::NotFound) => {}
+                Err(e) => return Err(from_file(e)),
             }
-            Ok::<(), Stop>(())
+            u.sftp.rename(&temp, &target).await.map_err(from_file)
         }
         .await;
-        if let Err(stop) = copied {
-            writer.abandon().await;
-            return Err(stop);
+        if placed.is_err() {
+            let _ = u.sftp.remove_file(&temp).await;
         }
-        let bytes = writer.finish().await.map_err(from_file)?;
-        // The server must hold exactly what was sent.
-        let attrs = u.sftp.stat(&temp).await.map_err(from_file)?;
-        if attrs.size != Some(bytes) {
-            return Err(Stop::Failed(err(ErrorCode::IoError, "The server did not store the whole file.")));
-        }
-        u.sftp.set_permissions(&temp, mode).await.map_err(from_file)?;
-        match u.sftp.lstat(&target).await {
-            Ok(attrs) if attrs.kind == RemoteKind::Dir || !u.overwrite => return Err(Stop::Failed(conflict())),
-            Ok(_) => u.sftp.remove_file(&target).await.map_err(from_file)?,
-            Err(FileError::NotFound) => {}
-            Err(e) => return Err(Stop::Failed(from_file(e))),
-        }
-        u.sftp.rename(&temp, &target).await.map_err(from_file)?;
+        placed?;
         Ok::<u64, Stop>(bytes)
     }
     .await;
-    if result.is_err() && created {
-        let _ = u.sftp.remove_file(&temp).await;
-    }
     sink.event(match result {
-        Ok(bytes) => TransferEvent::Done { bytes },
+        Ok(bytes) => TransferEvent::Done { bytes, files: 1, skipped: 0 },
         Err(Stop::Cancelled) => TransferEvent::Cancelled,
         Err(Stop::Failed(error)) => TransferEvent::Failed { error },
     });

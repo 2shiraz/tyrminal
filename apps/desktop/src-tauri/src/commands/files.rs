@@ -56,6 +56,24 @@ async fn pick_files(app: &AppHandle) -> Result<Vec<PathBuf>, IpcError> {
     }
 }
 
+/// A folder to upload. Test builds read `TYRMINAL_E2E_UPLOAD_DIR`.
+async fn pick_upload_folder(app: &AppHandle) -> Result<Option<PathBuf>, IpcError> {
+    #[cfg(feature = "e2e")]
+    {
+        let _ = app;
+        Ok(std::env::var_os("TYRMINAL_E2E_UPLOAD_DIR").map(PathBuf::from))
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let dialog = app.dialog().file();
+        let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
+            .await
+            .map_err(|_| dialog_error())?;
+        Ok(picked.and_then(|p| p.into_path().ok()))
+    }
+}
+
 /// A folder to download into. Test builds read `TYRMINAL_E2E_DOWNLOAD_DIR`.
 async fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, IpcError> {
     #[cfg(feature = "e2e")]
@@ -91,6 +109,18 @@ pub async fn files_pick_upload(
     state.core()?;
     let paths = pick_files(&app).await?;
     paths.into_iter().map(|p| grant(&state, window.label(), GrantKind::File, p)).collect()
+}
+
+/// Lets the user choose a folder to upload (with everything in it). `None`: cancelled.
+#[tauri::command]
+pub async fn files_pick_upload_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<Option<LocalPick>, IpcError> {
+    state.core()?;
+    let Some(path) = pick_upload_folder(&app).await? else { return Ok(None) };
+    grant(&state, window.label(), GrantKind::UploadFolder, path).map(Some)
 }
 
 /// Lets the user choose a folder to download into. `None`: the dialog was cancelled.
@@ -161,7 +191,7 @@ pub async fn files_chmod(
     state.core()?.sessions.set_file_mode(window.label(), &session_id, &dir, &name, mode).await
 }
 
-/// Uploads a chosen local file into the remote folder `dir`, under its own name.
+/// Uploads a chosen local file or folder into the remote folder `dir`, under its own name.
 #[tauri::command]
 pub async fn files_upload(
     window: WebviewWindow,
@@ -172,13 +202,13 @@ pub async fn files_upload(
     overwrite: bool,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let path = state.grant(window.label(), &token, GrantKind::File)?;
+    let path = state.grant(window.label(), &token, &[GrantKind::File, GrantKind::UploadFolder])?;
     let name = file_name(&path);
     let sink = Arc::new(ChannelTransferSink(events));
     state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, overwrite, sink).await
 }
 
-/// Downloads the remote file `dir/name` into a chosen local folder.
+/// Downloads the remote file or folder `dir/name` into a chosen local folder.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn files_download(
@@ -191,7 +221,7 @@ pub async fn files_download(
     overwrite: bool,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let folder = state.grant(window.label(), &token, GrantKind::Folder)?;
+    let folder = state.grant(window.label(), &token, &[GrantKind::Folder])?;
     let sink = Arc::new(ChannelTransferSink(events));
     state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, overwrite, sink).await
 }

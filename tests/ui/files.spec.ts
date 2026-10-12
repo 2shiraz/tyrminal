@@ -150,3 +150,32 @@ test("files: a local terminal has no files to show", async ({ page }) => {
   await page.locator(".statusbar").getByRole("button", { name: "Files" }).click();
   await expect(panel(page)).toContainText("Files work with a connected SSH session");
 });
+
+test("files: whole folders upload and download, report skipped links, and are never merged", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+
+  await panel(page).getByRole("button", { name: "Upload folder…" }).click();
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("3.0 KB of 6.0 KB");
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done · 3 files, 1 link or special file skipped");
+  await expect(list(page).getByRole("button", { name: "Open site" })).toBeVisible();
+
+  // The same folder again is refused, not merged and not offered as a replacement.
+  await panel(page).getByRole("button", { name: "Upload folder…" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(transfers.getByTestId("transfer-state").nth(1)).toHaveText(/Failed: Something with that name is already there/);
+
+  // Download the folder being shown.
+  await list(page).getByRole("button", { name: "Open app" }).click();
+  await panel(page).getByRole("button", { name: "Download this folder…" }).click();
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
+  // At the root there is no folder above to download into.
+  await panel(page).getByRole("textbox", { name: "Folder on the server" }).fill("/");
+  await page.keyboard.press("Enter");
+  await expect(panel(page).getByRole("button", { name: "Download this folder…" })).toBeDisabled();
+});

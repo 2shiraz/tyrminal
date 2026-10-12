@@ -149,6 +149,7 @@ pub fn run() {
             commands::sessions::session_auth_answer,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
+            commands::files::files_pick_upload_folder,
             commands::files::files_list,
             commands::files::files_mkdir,
             commands::files::files_rename,

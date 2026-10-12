@@ -36,6 +36,7 @@ use zeroize::Zeroizing;
 use crate::deploy;
 use crate::error::{err, from_ssh, internal, invalid, not_found};
 use crate::files::{self, Download, TransferSink, Upload, from_file};
+use crate::folders;
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
 
@@ -382,8 +383,9 @@ impl Sessions {
         Ok((id, cancelled))
     }
 
-    /// Downloads `dir/name` into `local_dir` (a folder the user chose natively) under the same
-    /// name. Checks run before the transfer starts; progress and the result arrive on `sink`.
+    /// Downloads `dir/name` (a file, or a folder with everything in it) into `local_dir` (a
+    /// folder the user chose natively) under the same name. Folders are never merged into an
+    /// existing one, so `overwrite` applies to files only. Checks run before the transfer starts; progress and the result arrive on `sink`.
     #[allow(clippy::too_many_arguments)]
     pub async fn download(
         &self,
@@ -397,7 +399,21 @@ impl Sessions {
     ) -> Result<TransferStarted, IpcError> {
         let remote = files::join(files::remote_dir(dir)?, name)?;
         let (_, sftp) = self.sftp(owner, session_id).await?;
-        let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let token = random_token()?;
+        // A folder is copied as a whole tree; anything else must be a regular file.
+        if sftp.stat(&remote).await.map_err(from_file)?.kind == tyrminal_ssh::RemoteKind::Dir {
+            let job = folders::prepare_download(sftp, remote, local_dir, name, token).await?;
+            let total = job.tree.bytes();
+            let (id, cancel) = self.start_transfer(owner)?;
+            let transfers = Arc::clone(&self.transfers);
+            let done_id = id.clone();
+            tokio::spawn(async move {
+                folders::run_download(job, sink.as_ref(), cancel).await;
+                transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+            });
+            return Ok(files::started(id, name.to_owned(), TransferDirection::Download, Some(total)));
+        }
+        let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token };
         let total = files::prepare_download(&job).await?;
         let (id, cancel) = self.start_transfer(owner)?;
         let transfers = Arc::clone(&self.transfers);
@@ -409,7 +425,8 @@ impl Sessions {
         Ok(files::started(id, name.to_owned(), TransferDirection::Download, total))
     }
 
-    /// Uploads a local file (chosen natively) into the remote folder `dir` under `name`.
+    /// Uploads a local file or folder (chosen natively) into the remote folder `dir` under
+    /// `name`. Folders are never merged into an existing one.
     #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
@@ -423,7 +440,22 @@ impl Sessions {
     ) -> Result<TransferStarted, IpcError> {
         let dir = files::remote_dir(dir)?.to_owned();
         let (_, sftp) = self.sftp(owner, session_id).await?;
-        let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let token = random_token()?;
+        let is_dir = tokio::fs::metadata(&local).await.is_ok_and(|m| m.is_dir());
+        if is_dir {
+            files::remote_name(name)?;
+            let job = folders::prepare_upload(sftp, local, dir, name, token).await?;
+            let total = job.tree.bytes();
+            let (id, cancel) = self.start_transfer(owner)?;
+            let transfers = Arc::clone(&self.transfers);
+            let done_id = id.clone();
+            tokio::spawn(async move {
+                folders::run_upload(job, sink.as_ref(), cancel).await;
+                transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+            });
+            return Ok(files::started(id, name.to_owned(), TransferDirection::Upload, Some(total)));
+        }
+        let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token };
         let (total, mode) = files::prepare_upload(&job).await?;
         let (id, cancel) = self.start_transfer(owner)?;
         let transfers = Arc::clone(&self.transfers);
@@ -843,6 +875,11 @@ async fn run_ssh(
                     strict_kex: n.strict_kex,
                 });
             }
+            // Shared before `Connected` is reported, so side operations (files, key install) work
+            // as soon as the renderer sees the session connected. `conn` stays alive for the whole
+            // pump; dropping it closes the transport. It is taken back when the shell ends.
+            let conn = Arc::new(conn);
+            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             ctx.state(SessionState::Connected);
             // Recent connections. Best effort: failing to record must not end a working session.
             // Its own task, because closing the session drops this future: cancelled between the
@@ -852,10 +889,6 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
-            // `conn` stays alive for the whole pump; dropping it closes the transport. It is
-            // shared with the registry entry for side channels and taken back when the shell ends.
-            let conn = Arc::new(conn);
-            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
             ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();

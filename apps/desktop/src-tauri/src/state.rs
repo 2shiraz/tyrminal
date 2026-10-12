@@ -8,7 +8,11 @@ const MAX_GRANTS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantKind {
+    /// A file to upload.
     File,
+    /// A folder to upload (with everything in it).
+    UploadFolder,
+    /// A folder to download into.
     Folder,
 }
 
@@ -55,12 +59,12 @@ impl AppState {
         grants.push((token, grant));
     }
 
-    /// The path behind a token, if the token was issued to `owner` for this kind of use.
-    pub fn grant(&self, owner: &str, token: &str, kind: GrantKind) -> Result<PathBuf, IpcError> {
+    /// The path behind a token, if the token was issued to `owner` for one of `kinds`.
+    pub fn grant(&self, owner: &str, token: &str, kinds: &[GrantKind]) -> Result<PathBuf, IpcError> {
         let grants = self.grants.lock().unwrap_or_else(|p| p.into_inner());
         grants
             .iter()
-            .find(|(t, g)| t == token && g.owner == owner && g.kind == kind)
+            .find(|(t, g)| t == token && g.owner == owner && kinds.contains(&g.kind))
             .map(|(_, g)| g.path.clone())
             .ok_or_else(|| IpcError::new(ErrorCode::AccessDenied, "Choose the file or folder again."))
     }

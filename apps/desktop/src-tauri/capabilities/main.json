@@ -49,6 +49,7 @@
     "allow-session-auth-answer",
     "allow-files-pick-upload",
     "allow-files-pick-folder",
+    "allow-files-pick-upload-folder",
     "allow-files-list",
     "allow-files-mkdir",
     "allow-files-rename",

@@ -371,7 +371,9 @@ export const msg = {
     refresh: "Refresh",
     newFolder: "New folder",
     upload: "Upload…",
+    uploadFolder: "Upload folder…",
     download: "Download…",
+    downloadFolder: "Download this folder…",
     rename: "Rename",
     permissions: "Permissions",
     delete: "Delete",
@@ -404,6 +406,10 @@ export const msg = {
     uploading: "Uploading",
     downloading: "Downloading",
     done: "Done",
+    doneSummary: (files: number, skipped: number) =>
+      `Done${files === 1 && skipped === 0 ? "" : ` · ${files === 1 ? "1 file" : `${files} files`}`}${
+        skipped > 0 ? `, ${skipped === 1 ? "1 link or special file" : `${skipped} links or special files`} skipped` : ""
+      }`,
     cancelled: "Cancelled",
     failed: "Failed",
     progress: (done: string, total: string | null) => (total ? `${done} of ${total}` : done),

@@ -704,10 +704,13 @@ pub enum TransferEvent {
         #[ts(type = "number")]
         done: u64,
     },
-    /// The file is complete under its final name.
+    /// The file or folder is complete under its final name. `files` counts files copied;
+    /// `skipped` counts links and special files inside a folder, which are never copied.
     Done {
         #[ts(type = "number")]
         bytes: u64,
+        files: u32,
+        skipped: u32,
     },
     /// Nothing was left under the final name; temporary data was removed where possible.
     Failed {

@@ -202,8 +202,10 @@ export const files = {
   chmod: (sessionId: string, dir: string, name: string, mode: number) => call<void>("files_chmod", { sessionId, dir, name, mode }),
   /** Native file picker; empty if cancelled. */
   pickUpload: () => call<LocalPick[]>("files_pick_upload"),
-  /** Native folder picker; null if cancelled. */
+  /** Native folder picker for a download destination; null if cancelled. */
   pickFolder: () => call<LocalPick | null>("files_pick_folder"),
+  /** Native folder picker for a folder to upload; null if cancelled. */
+  pickUploadFolder: () => call<LocalPick | null>("files_pick_upload_folder"),
   upload: (sessionId: string, token: string, dir: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
     call<TransferStarted>("files_upload", { sessionId, token, dir, overwrite, events: transferChannel(onEvent) }),
   download: (sessionId: string, dir: string, name: string, token: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>

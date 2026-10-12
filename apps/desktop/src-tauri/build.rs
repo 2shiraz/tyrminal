@@ -48,6 +48,7 @@ const COMMANDS: &[&str] = &[
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
+    "files_pick_upload_folder",
     "files_list",
     "files_mkdir",
     "files_rename",

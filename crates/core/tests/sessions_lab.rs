@@ -1132,6 +1132,11 @@ async fn transfer_end(rx: &mut mpsc::UnboundedReceiver<TransferEvent>) -> Transf
     }
 }
 
+/// The final event of a one-file transfer of `bytes` bytes.
+fn done(bytes: u64) -> TransferEvent {
+    TransferEvent::Done { bytes, files: 1, skipped: 0 }
+}
+
 /// Deterministic, incompressible-looking test data.
 fn pattern(len: usize, seed: u64) -> Vec<u8> {
     let mut x = seed | 1;
@@ -1189,7 +1194,7 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
         assert_eq!(started.name, name);
         let end = transfer_end(&mut rx).await;
         let expected = std::fs::metadata(local.path().join(name)).unwrap().len();
-        assert_eq!(end, TransferEvent::Done { bytes: expected }, "{name}");
+        assert_eq!(end, done(expected), "{name}");
     }
     let listing = s.list_files(WINDOW, id, Some(&dir)).await.unwrap();
     let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
@@ -1205,21 +1210,21 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     std::fs::write(local.path().join("big.bin"), pattern(1000, 9)).unwrap();
     let (sink, mut rx) = transfer_sink();
     s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
-    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: 1000 });
+    assert_eq!(transfer_end(&mut rx).await, done(1000));
     std::fs::write(local.path().join("big.bin"), &big).unwrap();
     let (sink, mut rx) = transfer_sink();
     s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
-    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+    assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
 
     // Download into another folder: byte for byte.
     let down = TempDir::new().unwrap();
     let (sink, mut rx) = transfer_sink();
     s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), false, sink).await.unwrap();
-    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+    assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
     assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big, "downloaded bytes differ");
     let (sink, mut rx) = transfer_sink();
     s.download(WINDOW, id, &dir, strange, down.path().to_path_buf(), false, sink).await.unwrap();
-    assert!(matches!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: 8 }));
+    assert_eq!(transfer_end(&mut rx).await, done(8));
     assert_eq!(std::fs::read(down.path().join(strange)).unwrap(), b"strange\n");
     // An existing local file is a conflict; replacing it is explicit.
     std::fs::write(down.path().join("big.bin"), b"local edit").unwrap();
@@ -1229,14 +1234,10 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     assert_eq!(std::fs::read(down.path().join("big.bin")).unwrap(), b"local edit");
     let (sink, mut rx) = transfer_sink();
     s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), true, sink).await.unwrap();
-    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+    assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
     assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big);
     let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(leftovers.len(), 2, "no temporary files: {leftovers:?}");
-    // Folders are not downloaded as files.
-    let (sink, _rx) = transfer_sink();
-    let err = s.download(WINDOW, id, &home.path, &folder_name, down.path().to_path_buf(), false, sink).await;
-    assert_eq!(err.unwrap_err().code, ErrorCode::InvalidInput);
 
     // A remote name that is legal on the server but unusable locally is refused, not altered.
     s.make_dir(WINDOW, id, &dir, "back\\slash").await.unwrap();
@@ -1288,4 +1289,95 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     let local_session = Client::open_local(&f.core).await;
     let err = s.list_files(WINDOW, &local_session.session, None).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidInput);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folders() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let s = &f.core.sessions;
+    let id = &client.session.clone();
+    let home = s.list_files(WINDOW, id, None).await.unwrap().path;
+    let base_name = format!("tyr-folders-{}", std::process::id());
+    let base = format!("{}/{base_name}", home.trim_end_matches('/'));
+    client.send(&format!("rm -rf {base}; mkdir -p {base} && echo MK-$((40+2))\n")).await;
+    client.output_until("MK-42").await;
+
+    // A local tree: nested folders, an empty folder, several files and a link (never followed).
+    let local = TempDir::new().unwrap();
+    let src = local.path().join("project");
+    std::fs::create_dir_all(src.join("src/deep/er")).unwrap();
+    std::fs::create_dir_all(src.join("empty")).unwrap();
+    let big = pattern(3 * 1024 * 1024 + 7, 11);
+    std::fs::write(src.join("src/deep/er/data.bin"), &big).unwrap();
+    std::fs::write(src.join("README"), b"readme\n").unwrap();
+    std::fs::write(src.join("src/main.rs"), b"fn main() {}\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc/passwd", src.join("src/link")).unwrap();
+    let expected_bytes = big.len() as u64 + 7 + 13;
+
+    let (sink, mut rx) = transfer_sink();
+    let started = s.upload(WINDOW, id, src.clone(), &base, "project", false, sink).await.unwrap();
+    assert_eq!(started.total, Some(expected_bytes));
+    let skipped = u32::from(cfg!(unix));
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: expected_bytes, files: 3, skipped });
+    let top: Vec<_> =
+        s.list_files(WINDOW, id, Some(&base)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(top, ["project"], "no temporary folder is left behind");
+    let inner = s.list_files(WINDOW, id, Some(&format!("{base}/project/src"))).await.unwrap();
+    let names: Vec<_> = inner.entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["deep", "main.rs"], "the link was not copied");
+    assert!(s.list_files(WINDOW, id, Some(&format!("{base}/project/empty"))).await.unwrap().entries.is_empty());
+
+    // The same folder again: never merged into the existing one.
+    let (sink, _rx) = transfer_sink();
+    let err = s.upload(WINDOW, id, src.clone(), &base, "project", true, sink).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+
+    // Download the tree back: byte for byte, same shape.
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, id, &base, "project", down.path().to_path_buf(), false, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: expected_bytes, files: 3, skipped: 0 });
+    let back = down.path().join("project");
+    assert!(std::fs::read(back.join("src/deep/er/data.bin")).unwrap() == big);
+    assert_eq!(std::fs::read(back.join("README")).unwrap(), b"readme\n");
+    assert!(back.join("empty").is_dir());
+    let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(leftovers, [std::ffi::OsString::from("project")]);
+    // An existing local folder is a conflict too.
+    let (sink, _rx) = transfer_sink();
+    let err = s.download(WINDOW, id, &base, "project", down.path().to_path_buf(), true, sink).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+
+    // A name inside the tree that cannot exist locally stops the download before anything is written.
+    client.send(&format!("mkdir -p '{base}/odd' && touch '{base}/odd/back\\slash' && echo ODD-$((40+2))\n")).await;
+    client.output_until("ODD-42").await;
+    let (sink, _rx) = transfer_sink();
+    let err = s.download(WINDOW, id, &base, "odd", down.path().to_path_buf(), false, sink).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert!(!down.path().join("odd").exists());
+
+    // Cancelling a large folder upload removes everything it created on the server.
+    let heavy = local.path().join("heavy");
+    std::fs::create_dir_all(heavy.join("a")).unwrap();
+    for i in 0..4 {
+        std::fs::write(heavy.join(format!("a/part{i}.bin")), pattern(32 * 1024 * 1024, i)).unwrap();
+    }
+    let (sink, mut rx) = transfer_sink();
+    let started = s.upload(WINDOW, id, heavy, &base, "heavy", false, sink).await.unwrap();
+    s.cancel_transfer(WINDOW, &started.transfer_id).unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Cancelled);
+    let mut top: Vec<_> =
+        s.list_files(WINDOW, id, Some(&base)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    top.sort();
+    assert_eq!(top, ["odd", "project"], "nothing of the cancelled folder remains");
+
+    client.send(&format!("rm -rf {base} && echo RM-$((40+2))\n")).await;
+    client.output_until("RM-42").await;
 }

@@ -9,6 +9,7 @@ import {
   IconFile,
   IconFolder,
   IconFolderPlus,
+  IconFolderUp,
   IconHardDrive,
   IconLink2,
   IconPanelRightClose,
@@ -36,6 +37,9 @@ interface Transfer {
   done: number;
   state: "running" | "done" | "cancelled" | "failed";
   error?: string;
+  /** Files copied and links/special files skipped (folders only). */
+  files?: number;
+  skipped?: number;
   /** Remote folder the transfer touches (refreshed when an upload finishes there). */
   dir: string;
 }
@@ -139,7 +143,7 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
           case "progress":
             return { ...t, done: event.done };
           case "done":
-            return { ...t, done: event.bytes, state: "done" };
+            return { ...t, done: event.bytes, state: "done", files: event.files, skipped: event.skipped };
           case "cancelled":
             return { ...t, state: "cancelled" };
           case "failed":
@@ -171,14 +175,15 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
     };
   }
 
-  async function startUpload(token: string, name: string, dir: string, overwrite: boolean) {
+  async function startUpload(token: string, name: string, dir: string, overwrite: boolean, folder = false) {
     if (!sessionId) return;
     const events = listener(dir, true);
     try {
       events.bind(await filesApi.upload(sessionId, token, dir, overwrite, events.onEvent));
     } catch (caught) {
       const e = toAppError(caught);
-      if (e.code === "CONFLICT" && !overwrite) {
+      // Folders are never merged into an existing one, so a folder conflict is just reported.
+      if (e.code === "CONFLICT" && !overwrite && !folder) {
         setPrompt({ kind: "replace", name, remote: true, retry: () => void startUpload(token, name, dir, true) });
       } else {
         failNow(name, "upload", dir, e);
@@ -193,7 +198,7 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
       events.bind(await filesApi.download(sessionId, dir, entry.name, token, overwrite, events.onEvent));
     } catch (caught) {
       const e = toAppError(caught);
-      if (e.code === "CONFLICT" && !overwrite) {
+      if (e.code === "CONFLICT" && !overwrite && entry.kind !== "dir") {
         setPrompt({ kind: "replace", name: entry.name, remote: false, retry: () => void startDownload(entry, dir, token, true) });
       } else {
         failNow(entry.name, "download", dir, e);
@@ -213,6 +218,23 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
     if (!current) return;
     const picks = await run(() => filesApi.pickUpload());
     for (const pick of picks ?? []) await startUpload(pick.token, pick.name, current, false);
+  }
+
+  async function uploadFolder() {
+    if (!current) return;
+    const pick = await run(() => filesApi.pickUploadFolder());
+    if (pick) await startUpload(pick.token, pick.name, current, false, true);
+  }
+
+  /** Downloads the folder being shown, with everything in it. */
+  async function downloadFolder() {
+    if (!listing?.parent) return;
+    const name = listing.path.slice(listing.path.lastIndexOf("/") + 1);
+    const folder = await run(() => filesApi.pickFolder());
+    if (folder) {
+      const entry: RemoteEntry = { name, kind: "dir", size: null, permissions: null, modified: null };
+      await startDownload(entry, listing.parent, folder.token, false);
+    }
   }
 
   async function download() {
@@ -289,6 +311,12 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
             <div className="files-actions">
               <button type="button" className="btn btn-sm" onClick={() => void upload()} disabled={!current || pending}>
                 <IconUpload size={14} /> {msg.files.upload}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => void uploadFolder()} disabled={!current || pending}>
+                <IconFolderUp size={14} /> {msg.files.uploadFolder}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => void downloadFolder()} disabled={!listing?.parent || pending}>
+                <IconDownload size={14} /> {msg.files.downloadFolder}
               </button>
               <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "mkdir" })} disabled={!current || pending}>
                 <IconFolderPlus size={14} /> {msg.files.newFolder}
@@ -375,7 +403,7 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
                       {t.state === "running"
                         ? msg.files.progress(formatSize(t.done), t.total == null ? null : formatSize(t.total))
                         : t.state === "done"
-                          ? msg.files.done
+                          ? msg.files.doneSummary(t.files ?? 1, t.skipped ?? 0)
                           : t.state === "cancelled"
                             ? msg.files.cancelled
                             : `${msg.files.failed}: ${t.error ?? ""}`}
