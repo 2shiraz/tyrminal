@@ -81,6 +81,7 @@ const COMMANDS: &[&str] = &[
     "terminal_choices",
     "editor_pick_app",
     "diagnostics_report",
+    "terminal_output_save",
     "serial_ports",
     "host_recent",
     "link_open",

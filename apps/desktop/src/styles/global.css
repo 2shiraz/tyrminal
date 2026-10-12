@@ -3324,3 +3324,56 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .var-refs li[data-state="refused"] {
   color: var(--warning);
 }
+
+/* ===================================================================== search and command output */
+
+.search-results {
+  display: grid;
+  gap: var(--space-3);
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.search-results h3 {
+  margin: 0 0 var(--space-1);
+}
+
+.search-matches {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-match {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.search-match:hover,
+.search-match:focus-visible {
+  background: var(--bg-inset);
+}
+
+.command-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.command-list .row-title {
+  overflow-wrap: anywhere;
+}

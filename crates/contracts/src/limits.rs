@@ -44,6 +44,8 @@ pub const MAX_SNIPPET_LEN: usize = 64 * 1024;
 pub const MAX_FOLDER_LEN: usize = 256;
 /// Startup snippets on one host or group (SNP-08).
 pub const MAX_STARTUP_SNIPPETS: usize = 16;
+/// One command's output saved to a file (P-29), in bytes.
+pub const MAX_SAVED_OUTPUT_LEN: usize = 32 * 1024 * 1024;
 /// A URL the user asked to open from terminal output, in bytes.
 pub const MAX_LINK_LEN: usize = 2048;
 /// Terminal scrollback lines a user may configure.
