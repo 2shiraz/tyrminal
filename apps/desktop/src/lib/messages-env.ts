@@ -2,7 +2,6 @@
 // (SNP-14), kept apart from messages.ts so parallel branches never edit the same object.
 
 export const msgEnv = {
-  save: "Save",
   startup: "Startup snippets",
   startupHint: "Typed into the shell once it opens, in this order, each followed by Enter. Never before the server's host key is trusted. Each one is noted in the connection log.",
   startupInherit: "Use the group's list",

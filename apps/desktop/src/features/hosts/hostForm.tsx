@@ -147,45 +147,12 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
     tags: validTags(tags) ? undefined : msgAutosave.tags,
   };
   const fieldsValid = !errors.address && !errors.label && !errors.username && !errors.tags;
-  /** What still stops a save, in the order of the cards, for the footer's explanation. */
-  const missing = (
-    protocol === "serial"
-      ? [label.trim() === "" && msg.hosts.label, serial.path.trim() === "" && msg.hosts.serialPort]
-      : protocol === "telnet"
-        ? [address.trim() === "" && msg.hosts.address, label.trim() === "" && msg.hosts.label, port !== "" && !portValid && msg.hosts.port]
-        : [
-            address.trim() === "" && msg.hosts.address,
-            label.trim() === "" && msg.hosts.label,
-            !portValid && msg.hosts.port,
-            effectiveUser === "" && msg.hosts.username,
-            !authValid && (authKind === "stored_password" ? msg.hosts.password : msg.hosts.auth),
-            !advanced.valid && msgD.hostPanel.more,
-          ]
-  ).filter((x): x is string => typeof x === "string");
   /** Follows the protocol's usual port unless the user chose another. */
   const setProtocol = (next: ProtocolKind) => {
     if (next === "telnet" && port === "22") setPort("23");
     if (next === "ssh" && port === "23") setPort("22");
     setProtocolState(next);
   };
-  const dirty =
-    groupId !== start.groupId ||
-    label !== start.label ||
-    address !== start.address ||
-    port !== start.port ||
-    username !== start.username ||
-    tags !== start.tags ||
-    authKind !== start.authKind ||
-    (authKind === "key" && keyId !== start.keyId) ||
-    password.length > 0 ||
-    identityId !== start.identityId ||
-    protocol !== start.protocol ||
-    (protocol === "serial" && JSON.stringify(serial) !== JSON.stringify(start.serial)) ||
-    terminal.encoding !== start.terminal.encoding ||
-    terminal.term !== start.terminal.term ||
-    forwardAgent !== start.forwardAgent ||
-    advanced.changed;
-
   /** Undo: puts every non-secret field back to `to` (a typed, unset password stays). */
   function restore(to: HostFields) {
     setGroupId(to.groupId);
@@ -295,8 +262,6 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
     effectiveUser,
     effectivePort,
     ready: ready && fieldsValid,
-    missing,
-    dirty,
     pending,
     error,
     save,

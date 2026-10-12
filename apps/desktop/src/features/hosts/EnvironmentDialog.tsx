@@ -42,6 +42,9 @@ export function EnvironmentDialog({
   const stored = useRef<EnvVar[] | null>(null);
   const latest = useRef({ rows, startupState });
   latest.current = { rows, startupState };
+  // The startup list as last written: a write queued behind another can run before React
+  // re-renders, while the list still looks changed; this keeps it from being written twice.
+  const startupWritten = useRef<string | null>(null);
   const [, setVersion] = useState(0);
 
   useEffect(() => {
@@ -72,7 +75,7 @@ export function EnvironmentDialog({
     const { rows: current, startupState: st } = latest.current;
     const vars = current === null || stored.current === null ? null : envDraft(current);
     const varsChanged = vars !== null && JSON.stringify(vars) !== JSON.stringify(envDraft(stored.current ?? []));
-    const startupChanged = st.changed && st.valid;
+    const startupChanged = st.changed && st.valid && JSON.stringify(st.value) !== startupWritten.current;
     return { vars, varsChanged, startupChanged, startup: st.value };
   }
 
@@ -82,7 +85,10 @@ export function EnvironmentDialog({
     const prevVars = stored.current ?? [];
     const prevStartup = latest.current.startupState.loaded;
     if (p.varsChanged && p.vars) stored.current = await environment.set(target, p.vars);
-    if (p.startupChanged) await latest.current.startupState.save();
+    if (p.startupChanged) {
+      await latest.current.startupState.save();
+      startupWritten.current = JSON.stringify(p.startup);
+    }
     setVersion((v) => v + 1);
     return () => {
       if (p.varsChanged) setRows(prevVars);

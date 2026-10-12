@@ -264,8 +264,6 @@ export const msgD = {
     fromGroup: (group: string) => `from ${group}`,
     overridden: "overridden here",
     none: "No variables.",
-    save: "Save variables",
-    saved: "Environment saved",
     rejected: (names: string[]) =>
       `The server refused ${names.length === 1 ? "the environment variable" : "these environment variables"} ${names.join(", ")} (not allowed by its AcceptEnv). ${names.length === 1 ? "It was" : "They were"} not set.`,
     runRejected: (names: string[]) => `Not set by the server: ${names.join(", ")}`,
@@ -305,13 +303,5 @@ export const msgD = {
     more: "Show more",
     environment: "Environment variables…",
     connect: "Connect",
-    saveConnect: "Save and connect",
-    saved: "Saved",
-    unsaved: "Unsaved changes",
-    needs: (fields: string[]) => `To save, fill in: ${fields.join(", ")}.`,
-    discardTitle: (label: string) => `Discard changes to “${label}”?`,
-    discardBody: "Your edits to this host have not been saved.",
-    discard: "Discard changes",
-    keepEditing: "Keep editing",
   },
 };

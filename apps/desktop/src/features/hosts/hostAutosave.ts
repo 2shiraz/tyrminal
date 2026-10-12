@@ -145,6 +145,9 @@ export function useHostAutosave(form: HostForm, { host, onSaved }: { host: HostS
   const [passwordStored, setPasswordStored] = useState(host?.auth.kind === "stored_password" && !host.inherited.auth);
   const passwordStoredRef = useRef(passwordStored);
   passwordStoredRef.current = passwordStored;
+  // The route as last written (no secret). A write queued behind another can run before React
+  // re-renders, while the route still looks changed; this keeps it from being written twice.
+  const routeWritten = useRef<string | null>(null);
   // Re-render after a write so the pending key is computed against the new stored record.
   const [, setVersion] = useState(0);
 
@@ -166,12 +169,15 @@ export function useHostAutosave(form: HostForm, { host, onSaved }: { host: HostS
     const adv = f.advanced;
     const ssh = draft.protocol === "ssh";
     const routeOk = ssh && adv.ready && adv.valid && (!adv.dropsPassword || options.releaseProxy === true || options.proxyPassword !== undefined);
-    const route = routeOk && (adv.routeChanged || options.proxyPassword !== undefined) ? routeInput(adv.input(), options.proxyPassword) : null;
+    const routeKey = JSON.stringify(routeInput(adv.input()));
+    const explicit = options.proxyPassword !== undefined || options.releaseProxy === true;
+    const routeDue = explicit || (adv.routeChanged && routeKey !== routeWritten.current);
+    const route = routeOk && routeDue ? routeInput(adv.input(), options.proxyPassword) : null;
     const before = stored.current ? JSON.stringify(hostInput(stored.current, id)) : null;
     const basics = hostInput(draft, id, options.password);
     const basicsChanged = id === null || options.password !== undefined || JSON.stringify(hostInput(draft, id)) !== before;
     const identityChanged = ssh && f.identity !== undefined && draft.identityId !== (stored.current ?? f.start).identityId;
-    return { draft, route, basics, basicsChanged, identityChanged };
+    return { draft, route, routeKey, basics, basicsChanged, identityChanged };
   }
 
   async function write(options: WriteOptions = {}): Promise<SaveResult> {
@@ -185,6 +191,7 @@ export function useHostAutosave(form: HostForm, { host, onSaved }: { host: HostS
     // Existing host: the route first (one unit), so a refused route changes nothing else.
     if (!created && p.route) {
       await tunnelsApi.setConnection(idRef.current as string, p.route);
+      routeWritten.current = p.routeKey;
       f.advanced.markStored(p.route, options.proxyPassword !== undefined);
     }
     if (p.basicsChanged) {
@@ -199,6 +206,7 @@ export function useHostAutosave(form: HostForm, { host, onSaved }: { host: HostS
     }
     if (created && p.route) {
       await tunnelsApi.setConnection(idRef.current as string, p.route);
+      routeWritten.current = p.routeKey;
       f.advanced.markStored(p.route, options.proxyPassword !== undefined);
     }
     if (p.identityChanged) {

@@ -108,6 +108,9 @@ export function GroupEditor({
   const stored = useRef<GroupFields | null>(group ? start : null);
   const live = useRef({ fields, defaults });
   live.current = { fields, defaults };
+  // The defaults as last written (no secret): a write queued behind another can run before React
+  // re-renders, while they still look changed; this keeps them from being written twice.
+  const defaultsWritten = useRef<string | null>(null);
   const [, setVersion] = useState(0);
 
   const excluded = group ? descendantsOf(groups, group.id) : new Set<string>();
@@ -124,8 +127,10 @@ export function GroupEditor({
     // The route is one unit: this editor's, once valid (and not dropping a stored password unless asked).
     const routeOk = d.ready && d.valid && (!d.dropsPassword || options.releaseProxy === true || options.proxyPassword !== undefined);
     const routeWrite = routeOk && (d.routeChanged || options.proxyPassword !== undefined);
-    const defaultsChanged = d.ready && (routeWrite || d.osChanged);
-    return { draft, basicsChanged, defaultsChanged, defaultsInput: d.inputFor(routeWrite, options.proxyPassword) };
+    const defaultsKey = JSON.stringify(d.inputFor(routeWrite));
+    const explicit = options.proxyPassword !== undefined || options.releaseProxy === true;
+    const defaultsChanged = d.ready && (routeWrite || d.osChanged) && (explicit || defaultsKey !== defaultsWritten.current);
+    return { draft, basicsChanged, defaultsChanged, defaultsKey, defaultsInput: d.inputFor(routeWrite, options.proxyPassword) };
   }
 
   async function write(options: WriteOptions = {}): Promise<SaveResult> {
@@ -135,7 +140,10 @@ export function GroupEditor({
     const prev = stored.current;
     const prevDefaults: GroupDefaults | null = d.loaded;
     const isNew = idRef.current === null;
-    if (!isNew && p.defaultsChanged) d.setLoaded(await groupDefaultsApi.set(idRef.current as string, p.defaultsInput));
+    if (!isNew && p.defaultsChanged) {
+      d.setLoaded(await groupDefaultsApi.set(idRef.current as string, p.defaultsInput));
+      defaultsWritten.current = p.defaultsKey;
+    }
     if (p.basicsChanged) {
       const saved = await groupsApi.save(groupInput(p.draft, idRef.current));
       idRef.current = saved.id;
@@ -143,7 +151,10 @@ export function GroupEditor({
       stored.current = p.draft;
       onSaved(saved);
     }
-    if (isNew && p.defaultsChanged) d.setLoaded(await groupDefaultsApi.set(idRef.current as string, p.defaultsInput));
+    if (isNew && p.defaultsChanged) {
+      d.setLoaded(await groupDefaultsApi.set(idRef.current as string, p.defaultsInput));
+      defaultsWritten.current = p.defaultsKey;
+    }
     if (options.proxyPassword !== undefined) d.setProxyPassword("");
     stored.current = p.draft;
     setVersion((v) => v + 1);
