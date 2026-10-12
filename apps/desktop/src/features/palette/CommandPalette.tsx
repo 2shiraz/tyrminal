@@ -92,6 +92,7 @@ export function CommandPalette({
   broadcast,
   onToggleBroadcast,
   onShellIntegration,
+  onConnectionLog,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -109,6 +110,8 @@ export function CommandPalette({
   onToggleBroadcast?: (() => void) | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  /** The focused SSH pane's connection log; present when it has a session. */
+  onConnectionLog?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -172,6 +175,7 @@ export function CommandPalette({
       // agent D: inventory and snippets
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
+      if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
     }
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));

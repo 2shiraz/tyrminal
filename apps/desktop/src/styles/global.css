@@ -3324,3 +3324,16 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .var-refs li[data-state="refused"] {
   color: var(--warning);
 }
+
+.connection-log {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

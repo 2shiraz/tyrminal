@@ -19,6 +19,7 @@ import { SnippetsView } from "../features/snippets/SnippetsView";
 import { TunnelsView } from "../features/tunnels/TunnelsView";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
+import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
 import { insertionBytes } from "../features/autocomplete/suggest";
@@ -99,6 +100,7 @@ function Shell() {
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
+  const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -549,6 +551,14 @@ function Shell() {
                 }
               : undefined
           }
+          onConnectionLog={
+            pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (sessionId) setConnectionLog({ sessionId, label: pane.label });
+                }
+              : undefined
+          }
           onShellIntegration={
             pane && paneStatus?.state === "connected"
               ? () => {
@@ -604,6 +614,17 @@ function Shell() {
               .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
               .then(() => handle.focus())
               .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {connectionLog && (
+        <ConnectionLogDialog
+          sessionId={connectionLog.sessionId}
+          title={connectionLog.label}
+          onClose={() => {
+            setConnectionLog(null);
+            focusedHandle()?.focus();
           }}
         />
       )}

@@ -23,6 +23,7 @@ import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
 import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -118,6 +119,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
@@ -450,6 +452,11 @@ export function TerminalView(props: TerminalViewProps) {
                       {msg.terminal.cancelAutoReconnect}
                     </button>
                   )}
+                  {target.kind === "ssh" && controllerRef.current?.id && (
+                    <button type="button" className="btn" onClick={() => setLogOpen(true)}>
+                      {msgD.connectionLog.open}
+                    </button>
+                  )}
                   <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
                     <IconRefreshCw size={15} />
                     {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
@@ -459,6 +466,10 @@ export function TerminalView(props: TerminalViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {logOpen && controllerRef.current?.id && (
+        <ConnectionLogDialog sessionId={controllerRef.current.id} title={props.label} onClose={() => setLogOpen(false)} />
       )}
 
       {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}
