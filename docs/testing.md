@@ -11,6 +11,7 @@ All commands run from the repository root. Only the commands listed here exist.
 | `pnpm lab:up` / `pnpm lab:down` | Start/stop the SSH lab (`TYRMINAL_LAB_MODE=local` runs host OpenSSH instead of Docker) | Docker, or OpenSSH server |
 | `pnpm test:ui` | Browser UI behavior and visual regression (Playwright, mock backend; never native evidence) | Chromium for Playwright 1.56.1 |
 | `pnpm test:ui:container` / `pnpm test:ui:update:container` | The same inside the pinned Playwright image CI uses; the only place visual baselines are recorded | Docker |
+| `TYR_UI_PORT=<port> pnpm test:ui` | The same on another preview port (default 4319), so parallel runs in several worktrees each test their own build | — |
 | `node scripts/check-contrast.mjs` | WCAG 2.2 AA contrast for every theme token pair and terminal scheme | Node |
 | `pnpm test:integration` | SSH adapter and core session flows against the lab; LAN discovery against a DNS-SD responder on loopback; OS secret store round trip; container shells in a running container (P-33) only with `TYRMINAL_LAB_CONTAINERS=1`, otherwise BLOCKED | lab; for P-33 also Docker or Podman usable by the lab user, with `alpine:3.22` |
 | `pnpm test:security` | Vault, storage and core negative tests; host-trust and session-ownership lab tests; release-policy check | lab |
