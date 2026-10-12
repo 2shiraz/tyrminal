@@ -1,5 +1,5 @@
 import type { LocalListing, RemoteEntry } from "@tyrminal/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
 import { IconFile, IconFolder, IconFolderOpen, IconLink2, IconRefreshCw } from "../../components/ui/icons";
@@ -21,39 +21,30 @@ export const DRAG_TYPE = "application/x-tyrminal-file";
  * native dialog; the native side refuses names that would leave it and never follows links.
  */
 export function LocalPane({
-  refreshKey,
+  listing,
+  onListing,
   selected,
   onSelect,
-  onLocation,
   onDropRemote,
 }: {
-  refreshKey: number;
+  /** What the pane shows; the owner keeps it, so it survives the pane being unmounted. */
+  listing: LocalListing | null;
+  /** A new listing (the selection is cleared with it). */
+  onListing: (listing: LocalListing) => void;
   selected: string | null;
   onSelect: (entry: RemoteEntry | null) => void;
-  onLocation: (location: LocalLocation | null) => void;
   onDropRemote: (name: string) => void;
 }) {
-  const [listing, setListing] = useState<LocalListing | null>(null);
   const [dropping, setDropping] = useState(false);
   const { pending, error, run } = useAction();
 
   const load = useCallback(
     async (token: string, path: string[]) => {
       const result = await run(() => filesApi.localList(token, path));
-      if (result) {
-        setListing(result);
-        onLocation({ token: result.token, path: result.path });
-        onSelect(null);
-      }
+      if (result) onListing(result);
     },
-    [run, onLocation, onSelect],
+    [run, onListing],
   );
-
-  useEffect(() => {
-    if (listing && refreshKey > 0) void load(listing.token, listing.path);
-    // Only a new refresh request reloads; the listing itself is not a trigger.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: see above
-  }, [refreshKey]);
 
   async function choose() {
     const pick = await run(() => filesApi.pickFolder());
