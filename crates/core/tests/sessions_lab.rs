@@ -210,10 +210,10 @@ impl Client {
         let mut states = Vec::new();
         loop {
             match self.event().await {
-                SessionEvent::State { state } if state != SessionState::Connected => states.push(state),
+                SessionEvent::State { state, .. } if state != SessionState::Connected => states.push(state),
                 event @ SessionEvent::Negotiated { .. } => self.negotiated = Some(event),
                 other => {
-                    if let SessionEvent::State { state } = &other {
+                    if let SessionEvent::State { state, .. } = &other {
                         states.push(*state);
                     }
                     return (states, other);
@@ -224,7 +224,11 @@ impl Client {
 
     async fn until_connected(&mut self) -> Vec<SessionState> {
         let (states, last) = self.until_not_state().await;
-        assert_eq!(last, SessionEvent::State { state: SessionState::Connected }, "states so far: {states:?}");
+        assert_eq!(
+            last,
+            SessionEvent::State { state: SessionState::Connected, hop: None },
+            "states so far: {states:?}"
+        );
         states
     }
 
@@ -389,7 +393,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
 
     let mut client = Client::open_ssh(&f.core, &host_id).await;
     let (states, prompt) = client.until_not_state().await;
-    assert_eq!(states, [SessionState::Connecting, SessionState::VerifyingHost]);
+    assert_eq!(states, [SessionState::Resolving, SessionState::Connecting, SessionState::VerifyingHost]);
     match &prompt {
         SessionEvent::TrustPrompt { host, port, resolved_address, algorithm, fingerprint, .. } => {
             assert_eq!((host.as_str(), *port), ("127.0.0.1", f.lab.port("a")));
@@ -406,7 +410,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(states, [SessionState::Authenticating, SessionState::OpeningChannel, SessionState::Connected]);
     // The negotiated algorithms are reported, and each one is from this client's own offer.
     match client.negotiated.as_ref().expect("negotiated algorithms are reported") {
-        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex } => {
+        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex, .. } => {
             let offer = tyrminal_ssh::negotiation_summary();
             for value in [kex, host_key, cipher] {
                 assert!(offer.contains(value.as_str()), "{value} is not in the offer:\n{offer}");
@@ -447,6 +451,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(
         states,
         [
+            SessionState::Resolving,
             SessionState::Connecting,
             SessionState::VerifyingHost,
             SessionState::Authenticating,
@@ -2566,6 +2571,54 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
     assert!(log.find("host key").unwrap() < log.find("environment:").unwrap(), "environment after trust");
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
+}
+
+/// A transfer holds its own SFTP handle, but it must not outlive its session: closing the
+/// session, or locking the vault, stops a download at once and leaves no file behind.
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_transfer_stops_when_its_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = fixture().await;
+        let host = f.key_host("a").await;
+        let mut client = Client::open_ssh(&f.core, &host).await;
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+        client.until_connected().await;
+        let id = client.session.clone();
+        let s = &f.core.sessions;
+        let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+        let name = format!("tyr-stop-{}-{lock}.bin", std::process::id());
+        client.send(&format!("head -c 268435456 /dev/zero > ~/{name} && echo BIG-$((40+2))\n")).await;
+        client.output_until("BIG-42").await;
+
+        let down = TempDir::new().unwrap();
+        let (sink, mut rx) = transfer_sink();
+        s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+        match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
+            Some(TransferEvent::Progress { .. }) => {}
+            other => panic!("transfer ended before the session did: {other:?}"),
+        }
+        let started = std::time::Instant::now();
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            s.close(WINDOW, &id).unwrap();
+        }
+        let end = transfer_end(&mut rx).await;
+        assert!(matches!(end, TransferEvent::Cancelled), "lock={lock}: {end:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "stopped with the session: {:?}", started.elapsed());
+        let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert!(leftovers.is_empty(), "no partial or temporary file is left: {leftovers:?}");
+
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let mut again = Client::open_ssh(&f.core, &host).await;
+        again.until_connected().await;
+        again.send(&format!("rm -f ~/{name}; echo RM-$((40+2))\n")).await;
+        again.output_until("RM-42").await;
+    }
 }
 
 /// Names in a local folder, temporary files included.
