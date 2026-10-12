@@ -109,11 +109,34 @@ describe("terminal with real applications", { concurrency: false }, () => {
     assert.ok(Math.abs(xs[4] - xs[5]) <= 1, `combining mark: ${xs[4]} vs ${xs[5]}`);
   });
 
+  test("every terminal row is inside the visible terminal area", async () => {
+    // A row pitch larger than the one the size was fitted with pushes the last rows under the
+    // status bar, where a full-screen application's bottom line (htop's F10 Quit) is hidden.
+    const m = await s.execute(`
+      const host = document.querySelector(".terminal-pane:not([hidden]) .terminal-host");
+      const rows = [...host.querySelectorAll(".xterm-rows > div")];
+      const h = host.getBoundingClientRect();
+      const last = rows.at(-1).getBoundingClientRect();
+      const first = rows[0].getBoundingClientRect();
+      const bar = document.querySelector(".statusbar")?.getBoundingClientRect();
+      return { count: rows.length, hostTop: h.top, hostBottom: h.bottom, firstTop: first.top, lastBottom: last.bottom,
+        rowHeight: first.height, barTop: bar?.top ?? null, dpr: devicePixelRatio,
+        hit: String(document.elementFromPoint(last.left + 4, last.top + last.height / 2)?.className ?? "").slice(0, 60) };`);
+    const detail = JSON.stringify(m);
+    assert.ok(m.lastBottom <= m.hostBottom + 0.5, `last row ends below the terminal area: ${detail}`);
+    assert.ok(m.barTop === null || m.lastBottom <= m.barTop + 0.5, `last row overlaps the status bar: ${detail}`);
+    assert.doesNotMatch(m.hit, /statusbar/, detail);
+  });
+
   test("Ctrl+C interrupts a running command", async () => {
-    await t.type("sleep 30; echo NOT-INTERRUPTED\n");
+    // `&&`, not `;`: after an interrupted command some shells (zsh) go on with the rest of a
+    // `;` list, others (bash) abandon it. With `&&` the echo runs only if sleep was not killed.
+    const started = Date.now();
+    await t.type("sleep 30 && echo NOT-INTERRUPTED\n");
     await new Promise((r) => setTimeout(r, 300));
     await s.chord([KEYS.ctrl, "C"]);
     await run("echo after-$((20+22))", "after-42");
+    assert.ok(Date.now() - started < 20_000, "the sleep was interrupted, not waited out");
     // The command line itself contains the word; the output line must not appear.
     assert.doesNotMatch(await t.terminalText(), /^NOT-INTERRUPTED\s*$/m);
   });
