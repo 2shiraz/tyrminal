@@ -56,11 +56,6 @@ export function lineCount(text: string): number {
   return text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").length;
 }
 
-/** A paste is reviewed when it spans several lines or is large. */
-export function needsPasteReview(text: string): boolean {
-  return lineCount(text) > 1 || text.length > PASTE_REVIEW_BYTES;
-}
-
 export interface LinkCheck {
   ok: boolean;
   /** The scheme and host exactly as the browser would see them, for the confirmation dialog. */
@@ -141,3 +136,27 @@ export function reconnectDelayMs(attempt: number, random: () => number = Math.ra
 export function shouldAutoReconnect(kind: "ssh" | "local", wasConnected: boolean, code: string | null): boolean {
   return kind === "ssh" && wasConnected && code !== null && ["DISCONNECTED", "TIMEOUT", "UNREACHABLE"].includes(code);
 }
+
+/**
+ * The working directory from an OSC 7 report (`file://host/path`, percent-encoded), or null.
+ * Remote output is untrusted: only an absolute, bounded path without control or invisible
+ * characters is kept. Nothing acts on it except an explicit restore the user confirms.
+ */
+export function parseOsc7(data: string): string | null {
+  const match = /^file:\/\/[^/]*(\/.*)$/.exec(data);
+  if (!match) return null;
+  let path: string;
+  try {
+    path = decodeURIComponent(match[1] as string);
+  } catch {
+    return null;
+  }
+  if (path.length > 4096 || /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(path)) return null;
+  return path;
+}
+
+/** `cd` to `path` for a POSIX shell, quoted so the path is never interpreted. */
+export function cdCommand(path: string): string {
+  return `cd -- '${path.replaceAll("'", "'\\''")}'`;
+}
+

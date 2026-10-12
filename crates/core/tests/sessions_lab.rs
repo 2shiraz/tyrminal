@@ -16,6 +16,7 @@ use tempfile::TempDir;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tyrminal_core::contracts::limits::MAX_STARTUP_LINE_LEN;
 use tyrminal_core::contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, HostProtocol, KeyImportInput, SessionEvent,
     SessionState, TransferEvent, TrustDecision, VaultState,
@@ -192,11 +193,13 @@ impl Client {
 
     async fn absorb(&mut self, bytes: Vec<u8>) {
         self.received += bytes.len();
-        self.text.push_str(&String::from_utf8_lossy(&bytes));
         // Answer cursor-position queries as a terminal would: Windows ConPTY sends one when a
         // console starts and waits for the reply before the shell produces output. (In the
-        // app, xterm.js answers it.)
-        let queries = bytes.windows(4).filter(|w| *w == b"\x1b[6n").count();
+        // app, xterm.js answers it.) Counted over everything received, so a query split across
+        // two chunks is still answered.
+        let before = self.text.matches("\x1b[6n").count();
+        self.text.push_str(&String::from_utf8_lossy(&bytes));
+        let queries = self.text.matches("\x1b[6n").count() - before;
         for _ in 0..queries {
             let _ = self.core.sessions.write(self.window, &self.session, b"\x1b[1;1R".to_vec()).await;
         }
@@ -2735,8 +2738,12 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     let host_id = f.key_host("a").await;
     let mut ids = Vec::new();
     for i in 0..16 {
-        // Long enough lines that typing them all takes more than an instant.
-        let text = format!("echo startup-{i}-done # {}", "x".repeat(16 * 1024));
+        // Enough text that typing it all takes more than an instant, in lines a terminal accepts.
+        let mut text = String::new();
+        for j in 0..16 {
+            text.push_str(&format!("echo startup-{i}-{j} # {}\n", "x".repeat(MAX_STARTUP_LINE_LEN - 40)));
+        }
+        text.push_str(&format!("echo startup-{i}-done"));
         let saved = v
             .save_snippet(SnippetInput { id: None, name: format!("s{i}"), folder: String::new(), text })
             .await
@@ -2776,4 +2783,134 @@ async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
     client.output_until("startup-15-done").await;
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_startup_snippet_with_a_line_too_long_for_the_terminal_is_skipped_and_the_rest_run() {
+    use tyrminal_core::contracts::{SettingsTarget, SnippetInput};
+    let f = fixture().await;
+    let v = &f.core.vault;
+    let host_id = f.key_host("a").await;
+    let mut ids = Vec::new();
+    for (name, text) in [
+        ("before", "echo startup-before-done".to_owned()),
+        // Typed as it is, the excess would be dropped by a macOS terminal and the lines after it garbled.
+        ("long", format!("echo startup-long-ran # {}", "x".repeat(16 * 1024))),
+        ("after", "echo startup-after-done".to_owned()),
+    ] {
+        let saved =
+            v.save_snippet(SnippetInput { id: None, name: name.into(), folder: String::new(), text }).await.unwrap();
+        ids.push(saved.id);
+    }
+    v.set_startup_snippets(SettingsTarget::Host { host_id: host_id.clone() }, Some(ids)).await.unwrap();
+
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.output_until("startup-before-done").await;
+    client.output_until("startup-after-done").await;
+    assert!(!client.text.contains("startup-long-ran"), "the over-long snippet was not typed");
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(
+        log.contains(&format!("line 1 of startup snippet \"long\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed")),
+        "{log}"
+    );
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
+
+// server at a glance
+fn glance_stats(glance: tyrminal_core::contracts::ServerGlance) -> tyrminal_core::contracts::ServerStats {
+    match glance {
+        tyrminal_core::contracts::ServerGlance::Available { stats } => stats,
+        other => panic!("expected values from the Linux lab server, got {other:?}"),
+    }
+}
+
+/// Server at a glance (P-32) reads a real Linux server over its own channel, asks it at most every
+/// 5 s, stays within the owning window, and can be turned off for the host.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn server_glance_reads_the_lab_server_at_most_every_five_seconds() {
+    use tyrminal_core::contracts::ServerGlance;
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let client = connected(&f, "a", &key_id).await;
+    let s = &f.core.sessions;
+
+    let first = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+    let uptime = first.uptime_seconds.expect("uptime");
+    assert!(uptime > 0);
+    let load = first.load.expect("load");
+    assert!(load.iter().all(|v| v.is_finite() && *v >= 0.0));
+    let memory = first.memory.expect("memory");
+    assert!(memory.available_kib <= memory.total_kib && memory.total_kib > 0);
+    let disks = first.disks.expect("disks");
+    assert!(disks.iter().any(|d| d.mount == "/"), "{disks:?}");
+    assert!(disks.iter().all(|d| d.used_kib <= d.total_kib && d.mount.starts_with('/')));
+
+    // Asked again within 5 s, the server is not asked again: the answer is the same, to the second.
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let cached = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+    assert_eq!(cached.uptime_seconds, Some(uptime));
+    tokio::time::sleep(Duration::from_millis(4_000)).await;
+    let fresh = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+    assert!(fresh.uptime_seconds.unwrap() >= uptime + 5, "{fresh:?}");
+
+    // Another window learns nothing, the same as for a guessed session.
+    let foreign = s.server_glance("detached-1", &client.session).await.unwrap_err();
+    let guessed = s.server_glance("detached-1", &"f".repeat(32)).await.unwrap_err();
+    assert_eq!(foreign, guessed);
+
+    // Off for this host: nothing is read until it is turned on again.
+    let host_id = f.core.vault.list_hosts().await.unwrap()[0].id.clone();
+    f.core.vault.set_glance_enabled(&host_id, false).await.unwrap();
+    assert!(!f.core.vault.glance_enabled(&host_id).await.unwrap());
+    assert_eq!(s.server_glance(WINDOW, &client.session).await.unwrap(), ServerGlance::Off);
+    f.core.vault.set_glance_enabled(&host_id, true).await.unwrap();
+    glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+}
+
+/// Nothing is read for a session that is not SSH, after it closes, or once the vault locks.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
+    let f = fixture().await;
+    let s = &f.core.sessions;
+
+    // A local terminal has no verified SSH connection (nor do Telnet and serial sessions).
+    let mut local = Client::open_local(&f.core).await;
+    local.until_connected().await;
+    assert_eq!(s.server_glance(WINDOW, &local.session).await.unwrap_err().code, ErrorCode::InvalidInput);
+    s.close(WINDOW, &local.session).unwrap();
+
+    let key_id = f.import("ed25519", None, false).await;
+    let mut closing = connected(&f, "a", &key_id).await;
+    glance_stats(s.server_glance(WINDOW, &closing.session).await.unwrap());
+    s.close(WINDOW, &closing.session).unwrap();
+    closing.until_closed().await;
+    assert_eq!(s.server_glance(WINDOW, &closing.session).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // A read racing the lock either finishes first or stops with the lock; none starts after it.
+    // The host is trusted by now, so this connection asks nothing.
+    let host_id = f.core.vault.list_hosts().await.unwrap()[0].id.clone();
+    let mut locking = Client::open_ssh(&f.core, &host_id).await;
+    locking.until_connected().await;
+    let session = locking.session.clone();
+    let racing = {
+        let core = f.core.clone();
+        let session = session.clone();
+        tokio::spawn(async move { core.sessions.server_glance(WINDOW, &session).await })
+    };
+    f.core.vault.lock().await;
+    match racing.await.unwrap() {
+        Ok(glance) => drop(glance_stats(glance)),
+        Err(e) => {
+            assert!([ErrorCode::VaultLocked, ErrorCode::Cancelled, ErrorCode::AccessDenied].contains(&e.code), "{e:?}")
+        }
+    }
+    assert_eq!(locking.until_closed().await.0, Some(ErrorCode::VaultLocked));
+    assert_eq!(s.server_glance(WINDOW, &session).await.unwrap_err().code, ErrorCode::AccessDenied);
 }

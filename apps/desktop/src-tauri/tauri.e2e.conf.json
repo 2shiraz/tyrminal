@@ -5,10 +5,11 @@
     "security": {
       "capabilities": [
         "main",
+        "detached",
         {
           "identifier": "e2e-automation",
-          "description": "Test builds only: lets the embedded WebDriver server drive the main window.",
-          "windows": ["main"],
+          "description": "Test builds only: lets the embedded WebDriver server drive the main window and detached tab windows.",
+          "windows": ["main", "detached-*"],
           "permissions": ["wdio-webdriver:default"]
         }
       ]

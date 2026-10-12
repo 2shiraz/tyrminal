@@ -10,6 +10,8 @@ const DEFAULTS: Preferences = {
   localShell: null,
   editorApps: [],
   diagnostics: false,
+  // compromised-password check (SEC-11): off until the user turns it on; the core supplies the address.
+  passwordCheck: { enabled: false, endpoint: "" },
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",
@@ -18,7 +20,7 @@ const DEFAULTS: Preferences = {
     letterSpacing: 0,
     cursorStyle: "block",
     cursorBlink: true,
-    padding: 10,
+    padding: 12,
     scrollback: 5000,
     ligatures: false,
     renderer: "auto",

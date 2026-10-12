@@ -18,8 +18,8 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tyrminal_contracts::limits::{
     AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_DIR_ENTRIES, MAX_SECRET_LEN,
-    MAX_SESSIONS, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS, MAX_UNACKED_OUTPUT,
-    TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
+    MAX_SESSIONS, MAX_STARTUP_LINE_LEN, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS,
+    MAX_UNACKED_OUTPUT, TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostProtocol, IpcError, KeyDeployPreview, RemoteEntryKind,
@@ -53,6 +53,9 @@ pub trait SessionSink: Send + Sync + 'static {
 
 enum Input {
     Data(Vec<u8>),
+    // privilege prompts (KEY-18)
+    /// Bytes that hold a secret (an inserted password): written like `Data`, zeroized on drop.
+    Secret(Zeroizing<Vec<u8>>),
     Resize(u16, u16),
     /// Bytes the owning window processed, with the handoff epoch it was authorized in.
     Ack(usize, u64),
@@ -92,6 +95,9 @@ pub(crate) struct Entry {
     pub(crate) host_id: Option<String>,
     /// Startup snippets not yet typed (SNP-08); the supervisor notes them if the session ends first.
     startup_left: std::sync::atomic::AtomicUsize,
+    // server at a glance
+    /// The last server-panel answer and when it was read; also lets only one read run at a time.
+    glance: tokio::sync::Mutex<Option<(tokio::time::Instant, tyrminal_contracts::ServerGlance)>>,
 }
 
 impl Entry {
@@ -234,6 +240,8 @@ impl Sessions {
             ended: watch::channel(None).0,
             host_id,
             startup_left: std::sync::atomic::AtomicUsize::new(0),
+            // server at a glance
+            glance: tokio::sync::Mutex::new(None),
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -292,11 +300,37 @@ impl Sessions {
         host_id: &str,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        self.open_files_with(owner, host_id, sink, false).await
+    }
+
+    /// A files-only connection that signs in to the host with a password the user types, whatever
+    /// the host is set to use, to install a key the server does not accept yet (with
+    /// [`Sessions::deploy_key_preview`] and [`Sessions::deploy_key`]). Host-key trust and the
+    /// password prompt are the normal ones; jump hosts sign in as they are set to.
+    pub async fn open_for_key_install(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        self.open_files_with(owner, host_id, sink, true).await
+    }
+
+    async fn open_files_with(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        sink: Arc<dyn SessionSink>,
+        ask_password: bool,
+    ) -> Result<SessionOpened, IpcError> {
         let endpoint = self.vault.host_endpoint(host_id).await?;
         if !matches!(endpoint.protocol, HostProtocol::Ssh) {
             return Err(invalid("Files are available for SSH hosts only."));
         }
-        let plan = self.vault.connection_plan(host_id).await?;
+        let mut plan = self.vault.connection_plan(host_id).await?;
+        if ask_password {
+            plan.auth = PlanAuth::Ask;
+        }
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
         // Nothing is ever sent to a terminal here: input, resize and snippets are refused before
         // they would reach this channel.
@@ -1036,6 +1070,40 @@ impl Sessions {
         Ok(())
     }
 
+    // privilege prompts (KEY-18)
+    /// The identity whose password this session can insert: the one its host uses now. `None`
+    /// for local terminals and hosts without an identity.
+    pub async fn session_identity(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<Option<tyrminal_contracts::SessionIdentity>, IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let Some(host_id) = entry.host_id.as_deref() else { return Ok(None) };
+        self.vault.session_identity(entry.generation, host_id).await
+    }
+
+    /// Types the stored password of `identity_id` into a session, without Enter (BUILD_SPEC
+    /// §4.5, AUT-05). Only ever reached from an explicit user action: nothing in the core
+    /// watches terminal output for password prompts, because a server can print anything. The
+    /// password is read from the vault here, never passes through the renderer, and is refused
+    /// unless the host still uses that identity.
+    pub async fn insert_identity_password(
+        &self,
+        owner: &str,
+        session_id: &str,
+        identity_id: &str,
+    ) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let host_id = entry
+            .host_id
+            .as_deref()
+            .ok_or_else(|| err(ErrorCode::InvalidInput, "This works in an SSH session to a saved host only."))?;
+        let password = self.vault.identity_password(entry.generation, host_id, identity_id).await?;
+        let bytes = Zeroizing::new(password.as_bytes().to_vec());
+        entry.input.send(Input::Secret(bytes)).await.map_err(|_| denied())
+    }
+
     pub async fn resize(&self, owner: &str, session_id: &str, cols: u16, rows: u16) -> Result<(), IpcError> {
         if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION {
             return Err(invalid("The terminal size is out of range."));
@@ -1444,7 +1512,7 @@ async fn authenticate(
     auth: PlanAuth,
 ) -> Result<Option<ClientKey>, IpcError> {
     match auth {
-        PlanAuth::Key { private_key, passphrase } => {
+        PlanAuth::Key { private_key, passphrase, key_id, label } => {
             let mut passphrase = passphrase;
             let mut attempt = 0;
             let key = loop {
@@ -1464,10 +1532,33 @@ async fn authenticate(
                     Err(_) => return Err(err(ErrorCode::KeyInvalid, "The stored key could not be read.")),
                 }
             };
+            // Public facts only, so a refusal can be traced to the key that was offered.
+            let signs_with = conn.key_signature_algorithm(&key).await.map_err(|e| from_ssh(&e))?;
+            ctx.entry.log.note(&format!(
+                "offering the key \"{label}\" ({}, {}), signing with {signs_with}",
+                key.algorithm(),
+                key.fingerprint()
+            ));
             match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
                 // The key is kept only for agent forwarding, if the host has it on.
                 AuthOutcome::Success => Ok(Some(key)),
-                AuthOutcome::Failure { .. } => Err(auth_failed()),
+                AuthOutcome::Failure { remaining_methods, .. } => {
+                    ctx.entry.log.note(&crate::connlog::remaining_methods_line(&remaining_methods));
+                    // Say which key was refused, so the user can install it (or choose another).
+                    let hop = ctx.hop.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    let message = match hop.as_ref().filter(|h| h.index < h.total) {
+                        Some(jump) => format!(
+                            "The jump host \"{}\" did not accept the key \"{label}\". Its public key may not be installed there.",
+                            jump.label
+                        ),
+                        None => format!(
+                            "The server did not accept the key \"{label}\". Its public key may not be installed on this server."
+                        ),
+                    };
+                    ctx.entry.log.note(&format!("the server did not accept the key \"{label}\""));
+                    ctx.sink.event(SessionEvent::KeyRejected { key_id, label, hop });
+                    Err(IpcError { code: ErrorCode::AuthFailed, message })
+                }
             }
         }
         PlanAuth::Password(stored) => {
@@ -1862,6 +1953,16 @@ where
             note("startup snippet skipped: it was deleted");
             continue;
         };
+        // A line longer than the terminal's line buffer is cut or garbled, not run (macOS keeps
+        // 1024 bytes of an unfinished line while the shell is not reading), so it is not typed.
+        if let Some(line) = text.trim_end_matches('\n').split('\n').position(|l| l.len() > MAX_STARTUP_LINE_LEN) {
+            note(&format!(
+                "line {} of startup snippet \"{}\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed",
+                line + 1,
+                item.name
+            ));
+            continue;
+        }
         let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
         for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
             if !send(chunk.to_vec()).await {
@@ -2118,6 +2219,12 @@ async fn pump(
                         return lost();
                     }
                 }
+                // privilege prompts (KEY-18)
+                Some(Input::Secret(data)) => {
+                    if !transport.write(&data).await {
+                        return lost();
+                    }
+                }
                 Some(Input::Resize(cols, rows)) => transport.resize(cols, rows).await,
                 Some(Input::Ack(bytes, epoch)) => sink.ack(epoch, bytes),
                 Some(Input::Wake) => {}
@@ -2239,6 +2346,47 @@ impl Sessions {
     }
 }
 
+// server at a glance
+impl Sessions {
+    /// Uptime, load, memory and disk use of the server behind an SSH session the caller owns
+    /// (P-32). Telnet, serial and local sessions have no verified connection and are refused. The
+    /// server is asked at most once per [`GLANCE_MIN_INTERVAL_MS`](tyrminal_contracts::limits::GLANCE_MIN_INTERVAL_MS):
+    /// a sooner call gets the last answer. A read stops when the session closes or the vault locks.
+    pub async fn server_glance(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::ServerGlance, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        if let Some(host_id) = &entry.host_id
+            && !self.vault.glance_enabled_for(entry.generation, host_id).await?
+        {
+            return Ok(tyrminal_contracts::ServerGlance::Off);
+        }
+        let min = Duration::from_millis(tyrminal_contracts::limits::GLANCE_MIN_INTERVAL_MS);
+        // Calls that arrive during a read wait for it and get its answer.
+        let mut last = entry.glance.lock().await;
+        if let Some((at, glance)) = last.as_ref()
+            && at.elapsed() < min
+        {
+            return Ok(glance.clone());
+        }
+        let mut closed = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        let glance = tokio::select! {
+            glance = crate::server_glance::fetch(&conn) => glance,
+            _ = closed.wait_for(|closed| *closed) => {
+                return Err(err(ErrorCode::Cancelled, "The session was closed."));
+            }
+            () = locked_since(&mut vault, entry.generation) => {
+                return Err(err(ErrorCode::VaultLocked, "The vault was locked."));
+            }
+        };
+        *last = Some((tokio::time::Instant::now(), glance.clone()));
+        Ok(glance)
+    }
+}
+
 #[cfg(test)]
 mod start_folder_tests {
     use super::*;
@@ -2303,6 +2451,52 @@ mod snippet_tests {
                 "startup snippet \"one\" typed",
                 "startup snippet skipped: it was deleted",
                 "startup snippet \"two\" typed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_startup_snippet_with_a_line_too_long_for_a_terminal_is_skipped_not_garbled() {
+        let item = |name: &str, text: String| StartupItem { name: name.into(), text: Some(Zeroizing::new(text)) };
+        let fits = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 5));
+        let too_long = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 4));
+        assert_eq!(fits.len(), MAX_STARTUP_LINE_LEN);
+        let sent = std::sync::Mutex::new(Vec::<u8>::new());
+        let notes = std::sync::Mutex::new(Vec::<String>::new());
+        type_startup(
+            vec![
+                item("before", "echo before".into()),
+                // Every line counts, not just the first.
+                item("long", format!("echo ok\n{too_long}\necho never")),
+                item("multibyte", format!("echo {}", "é".repeat(MAX_STARTUP_LINE_LEN / 2))),
+                item("fits", format!("{fits}\n{fits}\n")),
+                item("after", "echo after".into()),
+            ],
+            |chunk| {
+                sent.lock().unwrap().extend_from_slice(&chunk);
+                async { true }
+            },
+            |line| notes.lock().unwrap().push(line.to_owned()),
+        )
+        .await;
+        let sent = String::from_utf8(sent.into_inner().unwrap()).unwrap();
+        assert!(
+            !sent.contains("echo ok") && !sent.contains("never") && !sent.contains('é'),
+            "nothing of a refused snippet is typed"
+        );
+        assert_eq!(sent, format!("echo before\r{fits}\r{fits}\recho after\r"));
+        assert_eq!(
+            *notes.lock().unwrap(),
+            [
+                "startup snippet \"before\" typed".to_owned(),
+                format!(
+                    "line 2 of startup snippet \"long\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                format!(
+                    "line 1 of startup snippet \"multibyte\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                "startup snippet \"fits\" typed".to_owned(),
+                "startup snippet \"after\" typed".to_owned(),
             ]
         );
     }

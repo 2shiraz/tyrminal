@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 
 import type { Destination } from "../../app/AppShell";
-import { type Workspace, tabTitle } from "../../app/workspace";
+import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { versionLabel } from "../../lib/version";
+import { msgC } from "../../lib/messages-c";
 import { Shortcut } from "../ui/controls";
 import {
   // agent B: tunnels and history
@@ -63,6 +65,7 @@ export function Sidebar({
   onSftp,
   onToggleCollapsed,
   onLock,
+  onOpenAbout,
   hostCount,
   snippetCount,
 }: {
@@ -77,6 +80,7 @@ export function Sidebar({
   onSftp?: () => void;
   onToggleCollapsed: () => void;
   onLock: () => void;
+  onOpenAbout: () => void;
   hostCount: number;
   snippetCount: number;
 }) {
@@ -122,7 +126,7 @@ export function Sidebar({
           <div className="nav-group-label eyebrow">{msg.nav.sessionsGroup}</div>
           <ul aria-label={msg.nav.sessions}>
             {ws.tabs.map((tab) => {
-              const pane = ws.panes[tab.focused];
+              const status = tabStatus(ws, tab);
               return (
                 <li key={tab.id}>
                   <button
@@ -133,8 +137,9 @@ export function Sidebar({
                     data-tooltip-side="right"
                     onClick={() => onSelectTab(tab.id)}
                   >
-                    <span className="status-dot" data-tone={pane?.indicator ?? "idle"} aria-hidden="true" />
+                    <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
                     <span className="nav-label truncate">{tabTitle(ws, tab)}</span>
+                    <span className="visually-hidden">{msgC.status.describe(status)}</span>
                   </button>
                 </li>
               );
@@ -170,6 +175,9 @@ export function Sidebar({
         >
           <IconSidebar size={17} />
           <span className="nav-label">{msg.nav.collapse}</span>
+        </button>
+        <button type="button" className="sidebar-version" onClick={onOpenAbout} aria-label={msg.about.open(versionLabel(__APP_VERSION__))}>
+          {versionLabel(__APP_VERSION__)}
         </button>
       </div>
     </nav>

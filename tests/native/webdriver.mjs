@@ -194,6 +194,19 @@ export class Session {
     return this.#call("GET", "/window/rect");
   }
 
+  // agent C: workspaces — several application windows (a detached tab).
+  windowHandles() {
+    return this.#call("GET", "/window/handles");
+  }
+
+  windowHandle() {
+    return this.#call("GET", "/window");
+  }
+
+  switchToWindow(handle) {
+    return this.#call("POST", "/window", { handle });
+  }
+
   /** PNG screenshot of the WebView contents as a Buffer. */
   async screenshot() {
     return Buffer.from(await this.#call("GET", "/screenshot"), "base64");
