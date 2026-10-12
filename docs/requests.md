@@ -7,3 +7,5 @@ agent (see `docs/work-split.md`); a request with no matching row gets a new `P-`
 |---|---|---|---|---|---|
 | 2026-10-12 | Import a private key from a key file (not only pasted text) | KEY-01 (key import: file or pasted text) | 04 | D | requested |
 | 2026-10-12 | Terminal output highlighting like Termius (IPs, numbers, keywords) | TRM-07 (output highlighting) | 05 | terminal input | first priority |
+| 2026-10-12 | Files panel must not reconnect and reload when switching tabs | FIL-10 (terminal/SFTP switching) | 06 | SFTP tab | done (per-session panel memory) |
+| 2026-10-12 | A dedicated SFTP tab like Termius: two switchable panes, host picker, transfers | FIL-02 (two-pane file manager) | 06 | SFTP tab | in progress |

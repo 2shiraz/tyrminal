@@ -12,7 +12,7 @@ import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
-import { FilesPanel } from "../features/files/FilesPanel";
+import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
@@ -141,6 +141,16 @@ function Shell() {
       }
       return next ?? current;
     });
+  }, [ws, statuses]);
+
+  // The files panel remembers each session's folder while that session lives.
+  useEffect(() => {
+    const live = new Set<string>();
+    for (const p of Object.values(ws.panes)) {
+      const id = handles.current.get(p.id)?.sessionId();
+      if (id) live.add(id);
+    }
+    panelMemory.retain(live);
   }, [ws, statuses]);
 
   const relayInput = useCallback(

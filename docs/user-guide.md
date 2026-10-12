@@ -144,6 +144,10 @@ Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH ses
 - **Copy to another server** between two connected sessions, without saving anything on this
   computer.
 
+The panel remembers each session's place: switch to another tab and back and you find the same
+folder, selection, scroll position, toggles and transfers, without the folder being listed
+again. **Refresh** lists it again. The panel forgets a session when the session ends.
+
 Every transfer is written under a temporary name and renamed into place only when complete, so
 a cancelled, failed or interrupted transfer never leaves a half-written file. If the name
 exists, Tyrminal asks: **Replace** or **Keep both** (which adds " (1)" and so on). Folders are
