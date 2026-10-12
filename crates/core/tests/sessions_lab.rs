@@ -3473,6 +3473,121 @@ async fn a_key_accepted_with_a_keyboard_interactive_step_shows_the_servers_quest
     client.until_closed().await;
 }
 
+// ---------- OS auto-detection ----------
+
+/// The OS the lab server should report: Alpine in the container lab, else this machine's.
+fn expected_lab_os(f: &Fixture) -> Option<tyrminal_core::contracts::HostOs> {
+    use tyrminal_core::contracts::HostOs;
+    if f.lab.str("/mode") == "docker" {
+        return Some(HostOs::Alpine);
+    }
+    if cfg!(target_os = "macos") {
+        return Some(HostOs::Macos);
+    }
+    let release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    let id = release.lines().find_map(|l| l.strip_prefix("ID=")).map(|v| v.trim_matches('"').to_owned());
+    match id.as_deref() {
+        Some("ubuntu") => Some(HostOs::Ubuntu),
+        Some("debian") => Some(HostOs::Debian),
+        Some("fedora") => Some(HostOs::Fedora),
+        _ => None,
+    }
+}
+
+async fn detected(f: &Fixture, host_id: &str) -> Option<tyrminal_core::contracts::HostAppearance> {
+    f.core.vault.list_host_appearances().await.unwrap().into_iter().find(|a| a.host_id == host_id)
+}
+
+/// Exec ("command") sessions this test's own connections started on server "a".
+fn command_sessions(f: &Fixture, forwarder: &Forwarder, log_before: usize) -> usize {
+    forwarder
+        .own_lines(&new_log_lines(&f.lab, "a", log_before))
+        .iter()
+        .filter(|l| l.contains("Starting session: command"))
+        .count()
+}
+
+/// After a connection opens, the server's OS is read once on its own channel and becomes the
+/// host's icon unless the user chose one; a manual choice, or detection turned off, means
+/// nothing is read at all.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn the_servers_os_is_detected_unless_chosen_or_turned_off() {
+    let f = fixture().await;
+    let forwarder = Forwarder::start(f.lab.addr("a")).await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host_id = f.host("os", forwarder.port, &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    assert!(f.core.vault.os_detection_enabled().await.unwrap(), "on unless turned off");
+    assert!(detected(&f, &host_id).await.is_none());
+
+    // The first connection trusts the lab key for good; later ones are not asked.
+    let connect = |first: bool| {
+        let (f, host_id) = (&f, host_id.clone());
+        async move {
+            let mut client = Client::open_ssh(&f.core, &host_id).await;
+            if first {
+                let (_, prompt) = client.until_not_state().await;
+                client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+            }
+            client.until_connected().await;
+            client
+        }
+    };
+
+    // Detected: the appearance says so, and it is the lab server's OS.
+    let log_before = f.lab.server_log("a").lines().count();
+    let mut client = connect(true).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let appearance = loop {
+        if let Some(a) = detected(&f, &host_id).await {
+            break a;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no OS was detected");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert!(appearance.detected && !appearance.inherited, "{appearance:?}");
+    if let Some(expected) = expected_lab_os(&f) {
+        assert_eq!(appearance.os, expected);
+    }
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(command_sessions(&f, &forwarder, log_before), 1, "one read, on its own channel");
+
+    // A manual choice wins and nothing is read for it.
+    f.core
+        .vault
+        .set_host_os(std::slice::from_ref(&host_id), Some(tyrminal_core::contracts::HostOs::Debian))
+        .await
+        .unwrap();
+    let chosen = detected(&f, &host_id).await.unwrap();
+    assert_eq!((chosen.os, chosen.detected), (tyrminal_core::contracts::HostOs::Debian, false));
+    let log_before = f.lab.server_log("a").lines().count();
+    let mut client = connect(false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(command_sessions(&f, &forwarder, log_before), 0, "nothing is read for a host with a chosen OS");
+
+    // Back to automatic: the earlier detection shows again.
+    f.core.vault.set_host_os(std::slice::from_ref(&host_id), None).await.unwrap();
+    assert!(detected(&f, &host_id).await.unwrap().detected);
+
+    // Turned off: what was detected is forgotten and nothing is read.
+    assert!(!f.core.vault.set_os_detection_enabled(false).await.unwrap());
+    assert!(!f.core.vault.os_detection_enabled().await.unwrap());
+    assert!(detected(&f, &host_id).await.is_none());
+    let log_before = f.lab.server_log("a").lines().count();
+    let mut client = connect(false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(command_sessions(&f, &forwarder, log_before), 0, "nothing is read while detection is off");
+    assert!(detected(&f, &host_id).await.is_none());
+}
+
 // quick connect
 impl Client {
     async fn open_quick(core: &Core, input: tyrminal_core::contracts::QuickConnectInput) -> Self {

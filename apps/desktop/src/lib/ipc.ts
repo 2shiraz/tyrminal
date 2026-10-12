@@ -352,6 +352,11 @@ export const snippets = {
     call<void>("snippet_send", { snippetId, sessionId, mode, bracketed }),
 };
 
+/** The interface size of this window (native web view zoom, 0.5–2). */
+export const ui = {
+  setZoom: (scale: number) => call<void>("ui_zoom_set", { scale }),
+};
+
 export const preferences = {
   get: () => call<Preferences>("prefs_get"),
   /** Stores preferences; returns them as validated and clamped by the native side. */
@@ -634,6 +639,13 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+// OS auto-detection: read once per connection unless turned off; the result shows in host appearances.
+export const osDetection = {
+  enabled: () => call<boolean>("os_detection_get"),
+  /** Turning it off also forgets every detected OS. */
+  setEnabled: (enabled: boolean) => call<boolean>("os_detection_set", { enabled }),
 };
 
 // tmux and screen session awareness (P-31)

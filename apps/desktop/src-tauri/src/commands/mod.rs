@@ -23,6 +23,8 @@ pub mod password_check;
 pub mod security_review;
 // tmux and screen session awareness (P-31)
 pub mod multiplexers;
+// OS auto-detection
+pub mod os_detection;
 // agent C: workspaces
 pub mod layouts;
 // command history

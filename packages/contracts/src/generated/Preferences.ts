@@ -50,6 +50,11 @@ noPortSuggestions: boolean,
  */
 hostsView?: HostsViewPreferences, 
 /**
+ * Interface size in percent, one of [`INTERFACE_SCALES`]. `None`: automatic, from the
+ * window size.
+ */
+interfaceScale: number | null, 
+/**
  * Widths the user dragged side panels to, in CSS pixels; kept across restarts. Absent in
  * files written before it existed. Clamped natively per panel in core `preferences::sanitize`.
  */

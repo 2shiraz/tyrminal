@@ -11,7 +11,12 @@ const calls = (page: Page, cmd: string) =>
 const field = (page: Page) => page.getByRole("searchbox", { name: "Search hosts" });
 /** Types into the Hosts search and waits for the core's search to answer (no host matches). */
 async function search(page: Page, text: string) {
+  const before = (await calls(page, "host_search")).length;
   await field(page).fill(text);
+  // The search is debounced: wait for this query's answer, then a frame for its render, so a
+  // missing offer means the text was refused rather than not yet searched.
+  await expect.poll(async () => (await calls(page, "host_search")).slice(before).some((c) => c.args.query === text.trim())).toBe(true);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.getByText("No hosts match")).toBeVisible();
 }
 const sheet = (page: Page, address: string) => page.getByRole("dialog", { name: `Connect to ${address}` });
@@ -33,6 +38,32 @@ test("an address offers quick connect only when no saved host matches", async ({
     await search(page, text);
     await expect(offer, text).toHaveCount(0);
   }
+});
+
+test("an ssh command line opens the sheet with its user and port; options it cannot honour do not", async ({ page }) => {
+  await openApp(page);
+  const offer = page.getByRole("button", { name: /^Connect to .*…$/ });
+  for (const [text, shown] of [
+    ["ssh ops@db.example.org -p 2222", "ops@db.example.org:2222"],
+    ["ssh -p2222 -l ops db.example.org", "ops@db.example.org:2222"],
+    ["ssh -p 2200 2001:db8::5", "[2001:db8::5]:2200"],
+    ["ssh backup01", "backup01"],
+  ]) {
+    await search(page, text as string);
+    await expect(offer, text).toHaveText(`Connect to ${shown}…`);
+  }
+  for (const text of ["ssh -i id_ed25519 db.example.org", "ssh db.example.org:2222", "ssh -l ops root@db.example.org", "ssh -p 70000 db.example.org", "ssh a.example.org b.example.org", "ssh -p"]) {
+    await search(page, text);
+    await expect(offer, text).toHaveCount(0);
+  }
+
+  await search(page, "ssh ops@db.example.org -p 2222");
+  await page.keyboard.press("Enter");
+  const dialog = sheet(page, "db.example.org");
+  await expect(dialog.getByLabel("SSH port", { exact: true })).toHaveValue("2222");
+  await expect(dialog.getByTestId("quick-preview-ssh")).toHaveText("Will run: ssh ops@db.example.org -p 2222");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(dialog.getByLabel("User name")).toHaveValue("ops");
 });
 
 test("Continue connects without saving anything: protocol, user and a typed password", async ({ page }) => {

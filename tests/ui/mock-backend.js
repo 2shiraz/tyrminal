@@ -26,6 +26,7 @@ export function installMockBackend(options) {
       // compromised-password check (SEC-11)
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
+      interfaceScale: null,
       ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
@@ -1093,6 +1094,12 @@ export function installMockBackend(options) {
       state.lastBackupAt = Math.floor(Date.now() / 1000);
       return "tyrminal-backup-2026-10-11.tyrbackup";
     },
+    // The native web view zoom, emulated with CSS zoom so layout (and terminal fit) follow it.
+    ui_zoom_set: (a) => {
+      if (!(a.scale >= 0.5 && a.scale <= 2)) throw { code: "INVALID_INPUT", message: "That interface size is not allowed." };
+      window.__mockZoom = [...(window.__mockZoom ?? []), a.scale];
+      document.documentElement.style.zoom = String(a.scale);
+    },
     backup_status: () => ({ lastExportAt: state.lastBackupAt ?? null }),
     backup_choose: () => ({ fileName: "tyrminal-backup-2026-10-11.tyrbackup", size: 48213 }),
     backup_preview: (a) => {
@@ -1572,7 +1579,17 @@ export function installMockBackend(options) {
           }
         }
       }
+      // OS auto-detection: what the server reported, when nobody chose an OS for the host.
+      for (const [hostId, os] of Object.entries(state.detectedOs ?? {})) {
+        if (!own.some((a) => a.hostId === hostId)) own.push({ hostId, os, inherited: false, detected: true });
+      }
       return own;
+    },
+    os_detection_get: () => state.osDetection !== false,
+    os_detection_set: (a) => {
+      state.osDetection = a.enabled;
+      if (!a.enabled) state.detectedOs = {};
+      return a.enabled;
     },
     group_defaults_get: (a) => groupDefaultsView(a.groupId),
     group_defaults_set: (a) => {

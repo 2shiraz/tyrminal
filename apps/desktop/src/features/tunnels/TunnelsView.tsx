@@ -102,7 +102,7 @@ export function TunnelsView({ sessions, onConnect }: { sessions: ConnectedSessio
 
   return (
     <div className="page">
-      <section className="page-inner stack" aria-labelledby="tunnels-title" style={{ maxWidth: 960 }}>
+      <section className="page-inner stack" aria-labelledby="tunnels-title">
         <div className="page-header">
           <div className="page-title">
             <h1 id="tunnels-title">{msgB.tunnels.title}</h1>

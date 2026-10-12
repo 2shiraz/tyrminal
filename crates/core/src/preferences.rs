@@ -44,6 +44,9 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    if prefs.interface_scale.is_some_and(|s| !tyrminal_contracts::INTERFACE_SCALES.contains(&s)) {
+        return Err(invalid("That interface size is not one of the choices."));
+    }
     // terminal notifications (P-23): between one second and a day.
     if !(1..=86_400).contains(&prefs.command_notifications.min_seconds) {
         return Err(invalid("A command must run between 1 second and 24 hours to notify."));
@@ -249,6 +252,18 @@ mod tests {
             assert!(sanitize(prefs).is_ok());
         }
         assert!(sanitize(Preferences::default()).is_ok(), "no choice means the login shell");
+    }
+
+    #[test]
+    fn the_interface_size_is_automatic_by_default_and_only_a_listed_choice() {
+        assert_eq!(Preferences::default().interface_scale, None, "automatic");
+        let with = |scale| sanitize(Preferences { interface_scale: Some(scale), ..Preferences::default() });
+        for scale in tyrminal_contracts::INTERFACE_SCALES {
+            assert_eq!(with(scale).unwrap().interface_scale, Some(scale));
+        }
+        for scale in [0, 50, 99, 120, 151, 1000] {
+            assert!(with(scale).is_err(), "{scale}");
+        }
     }
 
     #[test]

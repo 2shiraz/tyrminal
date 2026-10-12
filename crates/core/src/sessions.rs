@@ -1868,11 +1868,23 @@ async fn run_ssh(
             // Its own task, because closing the session drops this future: cancelled between the
             // database commit and the in-memory revision update, the next edit of the host would
             // see a false conflict.
-            // A quick connection (no saved host) has neither recents nor saved tunnels.
+            // A quick connection (no saved host) has neither recents nor saved tunnels, and no
+            // OS to detect for a host.
             if let Some(host_id) = host_id {
                 let vault = Arc::clone(&ctx.vault);
+                let recent_host = host_id.clone();
                 tokio::spawn(async move {
-                    let _ = vault.mark_connected(generation, &host_id).await;
+                    let _ = vault.mark_connected(generation, &recent_host).await;
+                });
+                // OS auto-detection: one fixed read on its own exec channel, only when detection
+                // is on and nobody chose an OS for the host. Best effort and in the background.
+                let (vault, detect_conn) = (Arc::clone(&ctx.vault), Arc::clone(&conn));
+                tokio::spawn(async move {
+                    if vault.wants_os_detection(generation, &host_id).await.unwrap_or(false)
+                        && let Some(os) = crate::os_detect::detect(&detect_conn).await
+                    {
+                        let _ = vault.record_detected_os(generation, &host_id, os).await;
+                    }
                 });
             }
             // Saved tunnels that start with every connection to this host. Their own task, so

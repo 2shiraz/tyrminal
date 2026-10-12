@@ -61,6 +61,8 @@ use crate::records::{HistoryRecord, HistorySettingsRecord, KIND_HISTORY, KIND_HI
 use tyrminal_contracts::{HistoryEntry, HistorySettings};
 // server at a glance
 use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
+// OS auto-detection
+use crate::records::{KIND_OS_DETECTION, OsDetectionRecord};
 // agent D: inventory and snippets
 use crate::records::StoredProxy;
 use crate::records::{
@@ -109,6 +111,8 @@ struct Open {
     history_settings: BTreeMap<Id, Stored<HistorySettingsRecord>>,
     // server at a glance
     glance_settings: BTreeMap<Id, Stored<GlanceSettingsRecord>>,
+    // OS auto-detection
+    os_detection: BTreeMap<Id, Stored<OsDetectionRecord>>,
 }
 
 impl Open {
@@ -138,6 +142,7 @@ impl Open {
             history_settings: BTreeMap::new(),
             // server at a glance
             glance_settings: BTreeMap::new(),
+            os_detection: BTreeMap::new(),
         }
     }
 }
@@ -630,6 +635,8 @@ impl VaultService {
                 KIND_HISTORY_SETTINGS => load!(HistorySettingsRecord, open.history_settings),
                 // server at a glance
                 KIND_GLANCE_SETTINGS => load!(GlanceSettingsRecord, open.glance_settings),
+                // OS auto-detection
+                KIND_OS_DETECTION => load!(OsDetectionRecord, open.os_detection),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -2906,7 +2913,12 @@ impl VaultService {
         let mut list: Vec<HostAppearance> = open
             .appearances
             .values()
-            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os, inherited: false })
+            .map(|s| HostAppearance {
+                host_id: s.record.host_id.clone(),
+                os: s.record.os,
+                inherited: false,
+                detected: false,
+            })
             .collect();
         // Hosts without their own OS get their nearest group's (HST-05).
         for (id, host) in &open.hosts {
@@ -2918,7 +2930,10 @@ impl VaultService {
                 .into_iter()
                 .find_map(|(group_id, _)| Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.os));
             if let Some(os) = os {
-                list.push(HostAppearance { host_id, os, inherited: true });
+                list.push(HostAppearance { host_id, os, inherited: true, detected: false });
+            } else if let Some(os) = Self::detected_os(open, &host_id) {
+                // Nothing chosen by the user or a group: what the server reported (OS auto-detection).
+                list.push(HostAppearance { host_id, os, inherited: false, detected: true });
             }
         }
         list.sort_by(|a, b| a.host_id.cmp(&b.host_id));
@@ -4456,5 +4471,100 @@ mod privilege_tests {
             v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
             ErrorCode::VaultLocked
         );
+    }
+}
+
+// OS auto-detection
+impl VaultService {
+    fn os_detection_of(open: &Open) -> Option<&Stored<OsDetectionRecord>> {
+        open.os_detection.values().next()
+    }
+
+    fn detected_os(open: &Open, host_id: &str) -> Option<HostOs> {
+        Self::os_detection_of(open)?.record.detected.iter().find(|(h, _)| h == host_id).map(|(_, os)| *os)
+    }
+
+    /// Whether the OS of a host is read when connecting to it (on unless turned off).
+    pub async fn os_detection_enabled(&self) -> Result<bool, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::os_detection_of(open).is_some_and(|s| s.record.off))
+    }
+
+    /// Turns detection on or off. Turning it off also forgets every detected OS.
+    pub async fn set_os_detection_enabled(&self, enabled: bool) -> Result<bool, IpcError> {
+        self.change_os_detection(None, |record| {
+            record.off = !enabled;
+            if !enabled {
+                record.detected.clear();
+            }
+        })
+        .await?;
+        Ok(enabled)
+    }
+
+    /// Whether a session under `generation` should read this host's OS: detection is on and the
+    /// host has no OS chosen by the user or a group (a manual choice always wins, so nothing is
+    /// read for it).
+    pub(crate) async fn wants_os_detection(&self, generation: u32, host_id: &str) -> Result<bool, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if Self::os_detection_of(open).is_some_and(|s| s.record.off) {
+            return Ok(false);
+        }
+        let Some(host) = open.hosts.get(&id) else { return Ok(false) };
+        let host_id = validate::id_text(&id);
+        let chosen = Self::appearance_of(open, &host_id).is_some()
+            || Self::group_chain(open, &host.record).into_iter().any(|(group_id, _)| {
+                Self::workflow_of_group(open, &group_id).is_some_and(|(_, w)| w.record.os.is_some())
+            });
+        Ok(!chosen)
+    }
+
+    /// Records what a host reported, under the session's generation. Nothing is stored while
+    /// detection is off or for a host that no longer exists.
+    pub(crate) async fn record_detected_os(&self, generation: u32, host_id: &str, os: HostOs) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let host_id = validate::id_text(&id);
+        self.change_os_detection(Some(generation), |record| {
+            if record.off {
+                return;
+            }
+            record.detected.retain(|(h, _)| h != &host_id);
+            record.detected.push((host_id.clone(), os));
+        })
+        .await
+    }
+
+    async fn change_os_detection(
+        &self,
+        generation: Option<u32>,
+        change: impl FnOnce(&mut OsDetectionRecord),
+    ) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        if generation.is_some_and(|g| g != self.generation()) {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (record_id, revision, mut record) = match open.os_detection.iter().next() {
+            Some((rid, s)) => (*rid, s.revision + 1, s.record.clone()),
+            None => (random_id().map_err(from_vault)?, 1, OsDetectionRecord::default()),
+        };
+        let before = (record.off, record.detected.clone());
+        change(&mut record);
+        // Deleted hosts drop out, which also bounds the list by the number of hosts.
+        record.detected.retain(|(h, _)| validate::id(h).is_ok_and(|h| open.hosts.contains_key(&h)));
+        if revision > 1 && (record.off, &record.detected) == (before.0, &before.1) {
+            return Ok(());
+        }
+        let len = record.content_len();
+        self.write(open, record_id, KIND_OS_DETECTION, revision, Some((&record, len))).await?;
+        open.os_detection.clear();
+        open.os_detection.insert(record_id, Stored { revision, record });
+        Ok(())
     }
 }
