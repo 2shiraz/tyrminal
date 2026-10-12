@@ -34,6 +34,7 @@ jobs:
       TYRMINAL_LAB_MODE: ${{ matrix.lab }}
       # Disposable runner: the local lab may create its accounts and run sshd.
       TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES: "1"
+      TYRMINAL_LAB_WSL_DISTRO: Debian-12
     defaults:
       run:
         shell: bash
@@ -56,20 +57,27 @@ jobs:
       - name: Full-screen applications for the macOS lab server
         if: runner.os == 'macOS'
         run: brew install tmux htop midnight-commander nano
+      # The app under test is a background process on an unattended desktop; App Nap then pauses
+      # its WebView's rendering, so the screen stops updating while bytes still arrive. Disposable
+      # runner only: turn App Nap off for every app.
+      - name: No App Nap on the test desktop
+        if: runner.os == 'macOS'
+        run: defaults write -g NSAppSleepDisabled -bool YES
       - name: Full-screen applications for the Linux lab server
         if: runner.os == 'Linux'
         run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc
       # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
       # the Windows loopback interface: the same server, PAM and full-screen applications as on
       # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.
-      - name: WSL lab server (Ubuntu 24.04, WSL 1)
+      # Debian 12: Ubuntu 24.04's binaries fail to execute under WSL 1 (ENOEXEC on node).
+      - name: WSL lab server (Debian 12, WSL 1)
         if: runner.os == 'Windows'
         uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
         with:
-          distribution: Ubuntu-24.04
+          distribution: Debian-12
           wsl-version: 1
           use-cache: "false"
-          additional-packages: openssh-server nodejs vim nano tmux htop mc
+          additional-packages: openssh-server nodejs procps vim nano tmux htop mc
           wsl-conf: |
             [automount]
             options = "metadata,umask=022"
@@ -84,7 +92,7 @@ jobs:
       - name: Keep the WSL instance running for the whole job
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d','Ubuntu-24.04','-u','root','--','sleep','infinity'
+        run: Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d','Debian-12','-u','root','--','sleep','infinity'
       - name: Start SSH lab
         run: pnpm run lab:up
 

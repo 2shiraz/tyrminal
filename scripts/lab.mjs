@@ -2,7 +2,7 @@
 //
 //   docker (default where a Docker daemon is reachable): pinned OpenSSH containers.
 //   wsl    (Windows, TYRMINAL_LAB_MODE=wsl): runs the local mode inside a WSL distribution
-//          (TYRMINAL_LAB_WSL_DISTRO, default Ubuntu-24.04), so Windows clients are tested against
+//          (TYRMINAL_LAB_WSL_DISTRO, default Debian-12), so Windows clients are tested against
 //          the same Linux OpenSSH server, PAM and full-screen applications as elsewhere. WSL 1
 //          shares the Windows loopback interface; lab.json records Windows paths.
 //   local  (TYRMINAL_LAB_MODE=local, or --local): the host's own OpenSSH sshd, one process per
@@ -572,7 +572,7 @@ function delegateToWsl() {
   if (process.env.TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES !== "1") {
     throw new Error("The WSL lab creates accounts and runs sshd in the WSL distribution. Set TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1 (CI runners only).");
   }
-  const distro = process.env.TYRMINAL_LAB_WSL_DISTRO || "Ubuntu-24.04";
+  const distro = process.env.TYRMINAL_LAB_WSL_DISTRO || "Debian-12";
   const self = run("wsl.exe", ["-d", distro, "-u", "root", "--", "wslpath", "-a", fileURLToPath(import.meta.url).replaceAll("\\", "/")]);
   const r = spawnSync(
     "wsl.exe",
