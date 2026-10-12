@@ -29,6 +29,7 @@ mod transcode;
 mod validate;
 mod vault;
 // agent B: tunnels and history
+mod recording;
 mod tunnels;
 // terminal input: highlight patterns
 mod highlight;
@@ -97,16 +98,19 @@ impl Core {
     ) -> Result<Self, IpcError> {
         let db = Database::open(db_path).map_err(error::from_storage)?;
         let preferences = PreferencesStore::open(&db_path.with_file_name("preferences.json"));
-        Ok(Self::with_database(db, preferences, secret_store))
+        // Session recordings live beside the database.
+        let logs_dir = db_path.with_file_name("logs");
+        Ok(Self::with_database(db, preferences, secret_store, logs_dir))
     }
 
     fn with_database(
         db: Database,
         preferences: PreferencesStore,
         secret_store: Arc<dyn tyrminal_platform::SecretStore>,
+        logs_dir: std::path::PathBuf,
     ) -> Self {
         let vault = Arc::new(VaultService::new(db, secret_store));
-        let sessions = Sessions::new(Arc::clone(&vault));
+        let sessions = Sessions::new(Arc::clone(&vault), logs_dir);
         Self { vault, sessions, preferences: Arc::new(preferences), discovery: Discovery::new() }
     }
 }

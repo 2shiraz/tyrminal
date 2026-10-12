@@ -1,0 +1,23 @@
+[package]
+name = "tyrminal-session-log"
+description = "Tyrminal session recordings: encrypted, bounded, tamper-evident output logs and safe playback data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aead-stream = { version = "0.6.0", default-features = false, features = ["alloc"] }
+chacha20poly1305 = { version = "0.11.0", default-features = false, features = ["alloc", "zeroize"] }
+getrandom = "0.4.3"
+hkdf = "0.13.0"
+sha2 = "0.11.0"
+thiserror = "2.0.21"
+zeroize = "1.9.1"
+
+[dev-dependencies]
+proptest = "1.12.0"

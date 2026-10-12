@@ -30,6 +30,8 @@ pub struct ConnectOptions {
     /// Limit for each authentication round trip and channel request.
     pub request_timeout: Duration,
     pub keepalive_interval: Option<Duration>,
+    /// Post-quantum key exchange: preferred unless the host says otherwise.
+    pub key_exchange: crate::algorithms::KeyExchangePolicy,
 }
 
 impl ConnectOptions {
@@ -40,6 +42,7 @@ impl ConnectOptions {
             handshake_timeout: Duration::from_secs(15),
             request_timeout: Duration::from_secs(20),
             keepalive_interval: Some(Duration::from_secs(30)),
+            key_exchange: crate::algorithms::KeyExchangePolicy::default(),
         }
     }
 }
@@ -153,7 +156,7 @@ impl<V: HostKeyVerifier> Handler<V> {
 
 fn config(options: &ConnectOptions) -> Arc<client::Config> {
     Arc::new(client::Config {
-        preferred: algorithms::preferred(),
+        preferred: algorithms::preferred(options.key_exchange),
         keepalive_interval: options.keepalive_interval,
         keepalive_max: 3,
         nodelay: true,
@@ -515,21 +518,59 @@ impl VerifiedConnection {
 
     /// Public-key authentication. RSA keys use the strongest SHA-2 signature the server announced;
     /// SHA-1 `ssh-rsa` signatures are never produced.
+    /// The SHA-2 hash an RSA key signs with on this connection (`None` for other keys).
+    async fn rsa_hash(&self, key: &ClientKey) -> Result<Option<russh::keys::HashAlg>, SshError> {
+        if !key.is_rsa() {
+            return Ok(None);
+        }
+        let best = self.bounded(Stage::Authenticating, self.handle.best_supported_rsa_hash()).await?;
+        // `Some(None)` means the server only does SHA-1 ssh-rsa; refuse rather than downgrade.
+        match best {
+            Some(Some(hash)) => Ok(Some(hash)),
+            Some(None) => Err(SshError::NoCommonAlgorithm),
+            None => Ok(Some(russh::keys::HashAlg::Sha256)),
+        }
+    }
+
+    /// The signature algorithm `key` signs with here: `rsa-sha2-512` or `rsa-sha2-256` for an RSA
+    /// key (SHA-1 is never used), otherwise the key's own algorithm. Public information only.
+    pub async fn key_signature_algorithm(&self, key: &ClientKey) -> Result<String, SshError> {
+        Ok(match self.rsa_hash(key).await? {
+            Some(russh::keys::HashAlg::Sha512) => "rsa-sha2-512".to_owned(),
+            Some(_) => "rsa-sha2-256".to_owned(),
+            None => key.algorithm(),
+        })
+    }
+
     pub async fn authenticate_key(&mut self, username: &str, key: &ClientKey) -> Result<AuthOutcome, SshError> {
-        let hash = if key.is_rsa() {
-            let best = self.bounded(Stage::Authenticating, self.handle.best_supported_rsa_hash()).await?;
-            // `Some(None)` means the server only does SHA-1 ssh-rsa; refuse rather than downgrade.
-            match best {
-                Some(Some(hash)) => Some(hash),
-                Some(None) => return Err(SshError::NoCommonAlgorithm),
-                None => Some(russh::keys::HashAlg::Sha256),
-            }
-        } else {
-            None
-        };
+        let hash = self.rsa_hash(key).await?;
         let with_alg = PrivateKeyWithHashAlg::new(Arc::new(key.private_key().clone()), hash);
         let timeout = self.request_timeout;
         let fut = self.handle.authenticate_publickey(username, with_alg);
+        let result = match tokio::time::timeout(timeout, fut).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
+            Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
+            Ok(Ok(result)) => result,
+        };
+        self.outcome(result)
+    }
+
+    /// Public-key authentication with an OpenSSH user certificate for `key`
+    /// (`<type>-cert-v01@openssh.com <base64> [comment]`). The server decides whether it trusts
+    /// the certificate's CA, principals and validity; a certificate for a different key is
+    /// refused here without contacting the server.
+    pub async fn authenticate_key_with_certificate(
+        &mut self,
+        username: &str,
+        key: &ClientKey,
+        certificate: &str,
+    ) -> Result<AuthOutcome, SshError> {
+        let cert = russh::keys::Certificate::from_openssh(certificate.trim()).map_err(|_| SshError::Protocol)?;
+        if cert.public_key() != key.private_key().public_key().key_data() {
+            return Err(SshError::Protocol);
+        }
+        let timeout = self.request_timeout;
+        let fut = self.handle.authenticate_openssh_cert(username, Arc::new(key.private_key().clone()), cert);
         let result = match tokio::time::timeout(timeout, fut).await {
             Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
             Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
