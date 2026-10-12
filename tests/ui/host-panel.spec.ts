@@ -550,3 +550,15 @@ test("the port suggestions switch autosaves, even while the route is incomplete,
   await settled(page);
   await expect(suggestions).toBeChecked();
 });
+
+test("Host details never scroll sideways, even at their narrowest, with long values", async ({ page }) => {
+  await openHosts(page);
+  await page.setViewportSize({ width: 1024, height: 760 });
+  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  const panel = page.getByTestId("host-panel");
+  await panel.getByLabel("Name", { exact: true }).fill("a-very-long-host-name-that-keeps-going-".repeat(4));
+  await panel.getByText("Show more").click();
+  const body = panel.locator(".host-panel-body");
+  const { scroll, client } = await body.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(scroll).toBeLessThanOrEqual(client);
+});

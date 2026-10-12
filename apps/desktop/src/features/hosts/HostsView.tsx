@@ -722,7 +722,7 @@ function HostsViewImpl({
               else if (filtered[0]) focusHost(filtered[0].id);
             }}
           />
-          <button type="submit" className="btn btn-primary" title={msgHv.connectHint} disabled={!canSubmit}>
+          <button type="submit" className="btn btn-primary" title={filtered.length === 0 && quickTarget ? msgQuick.option(formatTarget(quickTarget)) : msgHv.connectHint} disabled={!canSubmit}>
             <IconPlay size={14} />
             {msgHv.connect}
           </button>
@@ -822,17 +822,8 @@ function HostsViewImpl({
           )}
 
           {total > 0 && filtered.length === 0 && searching && (
-            <p className="muted hosts-empty">
-              {msg.hosts.noMatch}
-              {quickTarget && onQuickConnect && (
-                <>
-                  {" "}
-                  <button type="button" className="btn btn-sm" onClick={() => setQuick(quickTarget)}>
-                    {msgQuick.option(formatTarget(quickTarget))}
-                  </button>
-                </>
-              )}
-            </p>
+            // Short: Connect in the search box (or Enter) starts quick connect for an address.
+            <p className="muted hosts-empty">{msgHv.noSavedMatch}</p>
           )}
           {quick && onQuickConnect && (
             <QuickConnectDialog

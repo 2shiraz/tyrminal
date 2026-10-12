@@ -331,3 +331,29 @@
 .hosts-main .bulk-bar .btn {
   height: 28px;
 }
+
+/* ------------------------------------------------------------ Host details: never wider than itself */
+
+.host-panel .host-panel-body {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.host-panel .host-panel-body *,
+.host-panel .host-panel-body *::before,
+.host-panel .host-panel-body *::after {
+  min-width: 0;
+}
+
+.host-panel .host-panel-body :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, .choice, .card, .host-section, fieldset, details) {
+  max-width: 100%;
+}
+
+.host-panel .host-panel-body :is(select, textarea, .choice) {
+  width: 100%;
+}
+
+.host-panel .host-panel-body :is(p, span, label, .hint, .row-sub, code, .mono) {
+  overflow-wrap: anywhere;
+}
