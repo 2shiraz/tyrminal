@@ -357,3 +357,30 @@
 .host-panel .host-panel-body :is(p, span, label, .hint, .row-sub, code, .mono) {
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------------------------ polish */
+
+/* An empty list draws nothing (no stray border under an empty state or "no matches"). */
+.hosts-main [data-testid="host-list"]:empty {
+  display: none;
+}
+
+/* The message closes the box its strip opened. */
+.hosts-main .hosts-empty {
+  border-end-start-radius: var(--radius-box);
+  border-end-end-radius: var(--radius-box);
+  background: var(--bg-box);
+}
+
+/* Keyboard focus shows on the whole row or card, not as a box around the name. */
+.hosts-main .host-open:focus-visible,
+.hosts-main .group-open:focus-visible {
+  outline: none;
+}
+
+.hosts-main .list > li:has(:is(.host-open, .group-open):focus-visible),
+.hosts-main .host-card:has(.host-open:focus-visible),
+.hosts-main .group-grid > .group-row:has(.group-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
