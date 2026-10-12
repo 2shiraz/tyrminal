@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { SessionEvent, TerminalPreferences } from "@tyrminal/contracts";
+import type { HighlightTone, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -20,11 +20,15 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 
-import { sessions, toAppError } from "../../lib/ipc";
+import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import { SessionEncoding } from "./encoding";
+import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
-import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
+import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { CommandOutputs } from "./commandOutput";
+import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
@@ -45,6 +49,12 @@ export interface TerminalCallbacks {
   onSearchResults(index: number, total: number): void;
   /** Bytes the user typed or pasted here (never the terminal's own replies), for broadcast. */
   onUserInput?(bytes: Uint8Array): void;
+  /** Output arrived (no content: only that something was received). */
+  onOutput?(): void;
+  /** Typed characters the session's encoding cannot represent; they were not sent. */
+  onUnencodable?(chars: string[]): void;
+  /** The shell reported its working directory (OSC 7), already validated. */
+  onDirectory?(path: string): void;
 }
 
 const INPUT_CHUNK = 32 * 1024;
@@ -168,6 +178,8 @@ export class TerminalController {
   private joiner: number | null = null;
   private renderer: RendererKind = "dom";
   private sessionId: string | null = null;
+  /** P-29: command output ranges from shell-integration marks. */
+  readonly commandOutputs: CommandOutputs;
   private disposed = false;
   private pendingAck = 0;
   private ackTimer: number | undefined;
@@ -188,6 +200,8 @@ export class TerminalController {
   private pendingFolder: { command: string; until: number } | null = null;
   /** Whether user input can be told apart from terminal replies (see the data handler). */
   broadcastable = false;
+  private readonly highlighter: OutputHighlighter;
+  private encoding = new SessionEncoding("utf-8");
 
   private publishCounters(): void {
     const d = this.container.dataset;
@@ -222,6 +236,7 @@ export class TerminalController {
       allowNonHttpProtocols: false,
     };
     this.term.open(container);
+    this.highlighter = new OutputHighlighter(this.term, this.toneColors());
     this.applyRenderer();
     this.applyLigatures();
     this.fitNow();
@@ -236,13 +251,13 @@ export class TerminalController {
     this.broadcastable = userInput !== undefined;
     if (userInput) this.cleanups.push(() => userInput.dispose());
     this.term.onData((text) => {
-      const bytes = this.encoder.encode(text);
       const fromUser = this.fromUser;
       this.fromUser = false;
       // Once the user types, the shell is theirs: no folder change is typed in after that.
       if (fromUser) this.pendingFolder = null;
-      this.send(bytes);
-      if (fromUser) this.callbacks.onUserInput?.(bytes);
+      this.sendText(text);
+      // Broadcast relays the typed text (as UTF-8); each pane encodes it for its own session.
+      if (fromUser) this.callbacks.onUserInput?.(this.encoder.encode(text));
     });
     this.term.onBinary((binary) => this.send(Uint8Array.from(binary, (ch) => ch.charCodeAt(0) & 0xff)));
     // The remote side controls the title: treat it as untrusted text.
@@ -261,6 +276,9 @@ export class TerminalController {
     });
     // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
     this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+    // P-29: the output of each command between its shell-integration marks.
+    this.commandOutputs = new CommandOutputs(this.term, () => this.sessionId);
+    this.cleanups.push(() => this.commandOutputs.dispose());
     this.cleanups.push(
       shellContexts.onMark((mark) => {
         const pending = this.pendingFolder;
@@ -269,6 +287,14 @@ export class TerminalController {
         if (Date.now() <= pending.until) this.send(this.encoder.encode(pending.command));
       }),
     );
+
+    // OSC 7: the shell's working directory, remembered for layout templates only.
+    this.term.parser.registerOscHandler(7, (data) => {
+      const path = parseOsc7(data);
+      if (path !== null) this.callbacks.onDirectory?.(path);
+      // Observe only: shell integration (autocomplete/shellContext.ts) reads the same report.
+      return false;
+    });
 
     this.term.attachCustomKeyEventHandler((event) => this.onKey(event));
 
@@ -298,11 +324,12 @@ export class TerminalController {
   }
 
   /**
-   * Opens the session. Events (state, prompts, close) arrive through the callbacks. `startIn`
-   * (a duplicated tab's folder): a local shell starts there; an SSH shell is sent `cd` to it at
-   * its first prompt, and only when that prompt carries the shell integration's mark.
+   * Opens the session, or with `attachToken` takes over one handed to this window (a detached
+   * tab). Events (state, prompts, close) arrive through the callbacks. `startIn` (a duplicated
+   * tab's folder): a local shell starts there; an SSH shell is sent `cd` to it at its first
+   * prompt, and only when that prompt carries the shell integration's mark.
    */
-  async start(target: TerminalTarget, startIn: string | null = null): Promise<void> {
+  async start(target: TerminalTarget, startIn: string | null = null, attachToken?: string): Promise<void> {
     await fontsReady(this.prefs);
     if (this.disposed) return;
     this.fitNow();
@@ -316,8 +343,9 @@ export class TerminalController {
       if (!this.disposed) this.callbacks.onEvent(event);
     };
     try {
-      const opened =
-        target.kind === "ssh"
+      const opened = attachToken
+        ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
+        : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
           : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
       if (this.disposed) {
@@ -326,10 +354,29 @@ export class TerminalController {
         return;
       }
       this.sessionId = opened.sessionId;
+      if (attachToken) {
+        // Only connected sessions are handed over, and the handoff sends no state event; a close
+        // that happened meanwhile still arrives as its own event. The size may differ here.
+        this.callbacks.onEvent({ type: "state", state: "connected", hop: null });
+        void sessions.resize(opened.sessionId, cols, rows).catch(() => undefined);
+      }
     } catch (error) {
       const appError = toAppError(error);
       this.callbacks.onEvent({ type: "closed", error: { code: appError.code, message: appError.message }, exitStatus: null });
     }
+  }
+
+  /** P-28: matches for `query` in this terminal's scrollback (in memory only). */
+  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult {
+    const buffer = this.term.buffer.normal;
+    return searchLines((y) => buffer.getLine(y), buffer.length, query, caseSensitive);
+  }
+
+  /** P-28: scrolls a match into view and selects it. */
+  revealMatch(match: { row: number; col: number; length: number }): void {
+    if (this.disposed || this.term.buffer.active.type !== "normal") return;
+    this.term.scrollToLine(Math.max(0, match.row - Math.floor(this.term.rows / 2)));
+    this.term.select(match.col, match.row, match.length);
   }
 
   get id(): string | null {
@@ -380,6 +427,18 @@ export class TerminalController {
         this.scheduleResize();
       }
     });
+  }
+
+  private toneColors(): Record<HighlightTone, string> {
+    const s = schemeById(this.prefs.scheme);
+    return { danger: s.brightRed, warning: s.brightYellow, success: s.brightGreen, info: s.brightCyan };
+  }
+
+  /** Workspace preferences: output highlighting, Option as Meta, right click. Display only. */
+  setWorkspace(ws: WorkspacePreferences): void {
+    this.term.options.macOptionIsMeta = isMac && ws.optionAsMeta;
+    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord;
+    this.highlighter.update(ws.highlight, this.toneColors());
   }
 
   setZoom(step: "in" | "out" | "reset"): void {
@@ -545,7 +604,8 @@ export class TerminalController {
     if (this.disposed) return;
     this.counters.rx += bytes.length;
     this.publishCounters();
-    this.term.write(bytes, () => {
+    this.callbacks.onOutput?.();
+    this.term.write(this.encoding.decode(bytes), () => {
       this.counters.parsed += bytes.length;
       this.publishCounters();
       this.acknowledge(bytes.length);
@@ -571,8 +631,28 @@ export class TerminalController {
     }
   }
 
-  /** Input typed in another pane of a broadcasting tab; sent as if typed here. */
+  /** Input typed in another pane of a broadcasting tab (UTF-8 text); sent as if typed here. */
   receiveBroadcast(bytes: Uint8Array): void {
+    this.sendText(new TextDecoder().decode(bytes));
+  }
+
+  /** The session's character encoding (output decoding and input encoding). */
+  setEncoding(id: string): void {
+    this.encoding = new SessionEncoding(id);
+  }
+
+  get encodingId(): string {
+    return this.encoding.option.id;
+  }
+
+  /** Sends a command the user confirmed (for example returning to a saved directory). */
+  sendConfirmedCommand(command: string): void {
+    this.sendText(`${command}\r`);
+  }
+
+  private sendText(text: string): void {
+    const { bytes, unsupported } = this.encoding.encode(text);
+    if (unsupported.length > 0) this.callbacks.onUnencodable?.(unsupported);
     this.send(bytes);
   }
 
@@ -632,7 +712,14 @@ export class TerminalController {
     }, RESIZE_DEBOUNCE_MS);
   }
 
-  /** Releases everything exactly once and closes the session. */
+  private released = false;
+
+  /** The session is moving to another window: disposing this terminal must not close it. */
+  release(on: boolean): void {
+    this.released = on;
+  }
+
+  /** Releases everything exactly once and closes the session (unless it was handed over). */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -641,7 +728,8 @@ export class TerminalController {
     window.clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();
     for (const cleanup of this.cleanups) cleanup();
-    if (this.sessionId) void sessions.close(this.sessionId).catch(() => undefined);
+    this.highlighter.dispose();
+    if (this.sessionId && !this.released) void sessions.close(this.sessionId).catch(() => undefined);
     this.sessionId = null;
     this.disposeWebgl();
     this.term.dispose();

@@ -1,15 +1,28 @@
-import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
+import type { Arrangement, Direction } from "../../app/workspace";
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
 import {
+  // agent B: tunnels and history
+  IconRoute,
+  IconArrowLeftRight,
   IconColumns2,
   IconCornerDownLeft,
   IconFingerprint,
+  IconAppWindow,
+  IconArrowUpRight,
+  IconCopy,
   IconHouse,
   IconHardDrive,
+  IconLayoutGrid,
+  IconLayoutTemplate,
+  IconSave,
+  IconTrash2,
+  IconMaximize2,
+  IconMinimize2,
   IconKeyRound,
   IconLock,
   IconPlay,
@@ -22,18 +35,21 @@ import {
   IconSidebar,
   IconSquareTerminal,
   IconSun,
+  IconType,
   IconX,
   IconZoomIn,
   IconZoomOut,
-  // agent B: tunnels and history
-  IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 // privilege prompts (KEY-18)
 import { msgP } from "../../lib/messages-privilege";
+import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
+import { msgSftp } from "../sftp/messages";
 
 interface Item {
   id: string;
@@ -89,12 +105,20 @@ export function CommandPalette({
   onAction,
   onToggleTheme,
   onLocal,
+  onSftp,
   onSnippet,
   onDeployKey,
   broadcast,
   onToggleBroadcast,
+  workspace,
+  layouts,
+  pick,
+  openTabs,
   onShellIntegration,
   onInsertPassword,
+  onConnectionLog,
+  onSearchSessions,
+  onCommandOutput,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -104,22 +128,59 @@ export function CommandPalette({
   onAction: (a: ActionId) => void;
   onToggleTheme: () => void;
   onLocal: () => void;
+  /** Opens a new SFTP tab. */
+  onSftp?: (() => void) | undefined;
   onSnippet: (s: SnippetSummary) => void;
   /** Present only when the focused pane is a connected SSH session. */
   onDeployKey?: (() => void) | undefined;
   /** Whether the active tab broadcasts input; toggle offered only for split, connected tabs. */
   broadcast?: boolean | undefined;
   onToggleBroadcast?: (() => void) | undefined;
+  /** Tab and pane actions for the tab in front (absent on a page). */
+  workspace?:
+    | {
+        split: boolean;
+        focusLayout: boolean;
+        onDuplicate: () => void;
+        onArrange: (arrangement: Arrangement) => void;
+        onPaneToNewTab: () => void;
+        onSplitWith: (dir: Direction) => void;
+        onEncoding: () => void;
+        onDetach: () => void;
+      }
+    | undefined;
+  /** Saved layout templates and the actions on them. */
+  layouts?:
+    | {
+        list: LayoutTemplateSummary[];
+        current: string | null;
+        canSave: boolean;
+        onOpen: (layout: LayoutTemplateSummary) => void;
+        onSave: () => void;
+        onSaveAs: () => void;
+        onDelete: (layout: LayoutTemplateSummary) => void;
+      }
+    | undefined;
+  /** Open tabs, so the palette can switch to one by name or destination. */
+  openTabs?: { id: number; title: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
+  pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
   // privilege prompts (KEY-18)
   /** Present only when the focused pane is a connected SSH session. */
   onInsertPassword?: (() => void) | undefined;
+  /** The focused SSH pane's connection log; present when it has a session. */
+  onConnectionLog?: (() => void) | undefined;
+  /** P-28: search every open terminal's scrollback; present while any terminal is open. */
+  onSearchSessions?: (() => void) | undefined;
+  /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
+  onCommandOutput?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const { hosts, snippets } = useVaultData();
+  const { hosts, snippets, recent } = useVaultData();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
 
@@ -132,7 +193,48 @@ export function CommandPalette({
 
   const items = useMemo<Item[]>(() => {
     const list: Item[] = [];
+    if (pick) {
+      for (const host of hosts.value ?? []) {
+        list.push({
+          id: `host-${host.id}`,
+          group: msg.palette.groupHosts,
+          label: host.label,
+          detail: msg.hosts.destination(host.username, host.address, host.port),
+          keywords: `${host.address} ${host.username}`,
+          icon: <Avatar label={host.label} size="sm" />,
+          run: () => pick.onPick(host),
+        });
+      }
+      list.push({ id: "local", group: msg.palette.groupActions, label: msg.nav.localTerminal, icon: <IconSquareTerminal size={16} />, run: () => pick.onPick("local") });
+      return list;
+    }
+    // agent C: workspaces — open tabs first, then recent connections (UX-03, UX-04).
+    for (const t of openTabs ?? []) {
+      list.push({
+        id: `tab-${t.id}`,
+        group: msgC.palette.groupTabs,
+        label: t.title,
+        detail: t.detail,
+        keywords: t.detail,
+        icon: <IconSquareTerminal size={16} />,
+        run: t.onSelect,
+      });
+    }
+    const recentIds = new Set<string>();
+    for (const host of (recent.value ?? []).slice(0, 5)) {
+      recentIds.add(host.id);
+      list.push({
+        id: `recent-${host.id}`,
+        group: msgC.palette.groupRecent,
+        label: host.label,
+        detail: msg.hosts.destination(host.username, host.address, host.port),
+        keywords: `${host.address} ${host.username}`,
+        icon: <Avatar label={host.label} size="sm" />,
+        run: () => onConnect(host),
+      });
+    }
     for (const host of hosts.value ?? []) {
+      if (recentIds.has(host.id)) continue;
       list.push({
         id: `host-${host.id}`,
         group: msg.palette.groupHosts,
@@ -165,6 +267,7 @@ export function CommandPalette({
       shortcut,
     });
     list.push(action("local", msg.nav.localTerminal, <IconSquareTerminal size={16} />, onLocal, "newLocal"));
+    if (onSftp) list.push({ ...action("sftp", msgSftp.open, <IconArrowLeftRight size={16} />, onSftp), keywords: `files transfer ${msgSftp.openHint}` });
     if (hasTerminal) {
       list.push(action("split-right", msg.palette.splitRight, <IconColumns2 size={16} />, () => onAction("splitRight"), "splitRight"));
       list.push(action("split-down", msg.palette.splitDown, <IconRows2 size={16} />, () => onAction("splitDown"), "splitDown"));
@@ -178,7 +281,66 @@ export function CommandPalette({
       // agent D: inventory and snippets
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
+      if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
+      if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
+    // agent C: workspaces
+    if (workspace) {
+      list.push(action("split-right-with", msgC.panes.splitRightWith, <IconColumns2 size={16} />, () => workspace.onSplitWith("row")));
+      list.push(action("split-down-with", msgC.panes.splitDownWith, <IconRows2 size={16} />, () => workspace.onSplitWith("column")));
+      list.push(action("duplicate-tab", msgC.tabs.duplicate, <IconCopy size={16} />, workspace.onDuplicate));
+      list.push(action("encoding", msgC.encoding.action, <IconType size={16} />, workspace.onEncoding));
+      list.push(action("detach-tab", msgC.detach.action, <IconAppWindow size={16} />, workspace.onDetach));
+      if (workspace.split) {
+        list.push(
+          action(
+            "focus-layout",
+            workspace.focusLayout ? msgC.panes.leaveFocus : msgC.panes.focusLayout,
+            workspace.focusLayout ? <IconMinimize2 size={16} /> : <IconMaximize2 size={16} />,
+            () => onAction("toggleFocusLayout"),
+            "toggleFocusLayout",
+          ),
+        );
+        list.push(action("arrange-grid", msgC.panes.arrangeGrid, <IconLayoutGrid size={16} />, () => workspace.onArrange("grid")));
+        list.push(action("arrange-columns", msgC.panes.arrangeColumns, <IconColumns2 size={16} />, () => workspace.onArrange("columns")));
+        list.push(action("arrange-rows", msgC.panes.arrangeRows, <IconRows2 size={16} />, () => workspace.onArrange("rows")));
+        list.push(action("pane-new-tab", msgC.panes.toNewTab, <IconArrowUpRight size={16} />, workspace.onPaneToNewTab));
+      }
+    }
+    if (layouts) {
+      const panes = (l: LayoutTemplateSummary) => l.tabs.reduce((n, t) => n + t.panes.length, 0);
+      for (const layout of layouts.list) {
+        list.push({
+          id: `layout-${layout.id}`,
+          group: msgC.layouts.group,
+          label: msgC.layouts.open(layout.name),
+          detail: msgC.layouts.summary(layout.tabs.length, panes(layout)),
+          icon: <IconLayoutTemplate size={16} />,
+          run: () => layouts.onOpen(layout),
+        });
+      }
+      if (layouts.canSave) {
+        list.push({
+          id: "layout-save",
+          group: msgC.layouts.group,
+          label: layouts.current ? msgC.layouts.saveNamed(layouts.current) : msgC.layouts.saveAs,
+          icon: <IconSave size={16} />,
+          run: layouts.current ? layouts.onSave : layouts.onSaveAs,
+        });
+        if (layouts.current)
+          list.push({ id: "layout-save-as", group: msgC.layouts.group, label: msgC.layouts.saveAs, icon: <IconSave size={16} />, run: layouts.onSaveAs });
+      }
+      for (const layout of layouts.list) {
+        list.push({
+          id: `layout-delete-${layout.id}`,
+          group: msgC.layouts.group,
+          label: msgC.layouts.delete(layout.name),
+          icon: <IconTrash2 size={16} />,
+          run: () => layouts.onDelete(layout),
+        });
+      }
+    }
+    if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -201,10 +363,21 @@ export function CommandPalette({
     list.push(nav("keychain", <IconKeyRound size={16} />));
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
+    list.push({
+      id: "nav-shortcuts",
+      group: msg.palette.groupNavigate,
+      label: msgC.keys.title,
+      keywords: "keybindings keys hotkeys",
+      icon: <IconSettings size={16} />,
+      run: () => {
+        requestShortcutsSection();
+        onNavigate("settings");
+      },
+    });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs]);
 
   const results = useMemo(() => {
     const scored = items
@@ -247,7 +420,7 @@ export function CommandPalette({
     <dialog
       ref={ref}
       className="palette"
-      aria-label={msg.palette.label}
+      aria-label={pick?.title ?? msg.palette.label}
       onCancel={(event) => {
         event.preventDefault();
         dismiss();
@@ -263,8 +436,8 @@ export function CommandPalette({
           aria-expanded="true"
           aria-controls={listId}
           aria-activedescendant={results[selected] ? `${listId}-${results[selected].item.id}` : undefined}
-          aria-label={msg.palette.placeholder}
-          placeholder={msg.palette.placeholder}
+          aria-label={pick?.title ?? msg.palette.placeholder}
+          placeholder={pick?.title ?? msg.palette.placeholder}
           value={query}
           autoFocus
           spellCheck={false}

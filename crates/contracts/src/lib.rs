@@ -24,12 +24,18 @@ mod privilege;
 mod identity_removal;
 // compromised-password check (SEC-11)
 mod password_check;
+// command history
+mod command_history;
 
 pub use discovery::*;
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
 pub use tunnels::*;
+
+// agent C: workspaces
+mod layouts;
+pub use layouts::*;
 // agent D: inventory and snippets
 pub use defaults::*;
 pub use inventory::*;
@@ -39,3 +45,5 @@ pub use privilege::*;
 pub use identity_removal::*;
 // compromised-password check (SEC-11)
 pub use password_check::*;
+// command history
+pub use command_history::*;

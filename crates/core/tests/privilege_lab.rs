@@ -88,7 +88,7 @@ impl Client {
                 Message::Event(SessionEvent::TrustPrompt { prompt_id, .. }) => {
                     self.core.sessions.answer_trust(WINDOW, &self.session, &prompt_id, TrustDecision::Once).unwrap();
                 }
-                Message::Event(SessionEvent::State { state: SessionState::Connected }) => return,
+                Message::Event(SessionEvent::State { state: SessionState::Connected, hop: None }) => return,
                 Message::Event(event @ (SessionEvent::AuthPrompt { .. } | SessionEvent::Closed { .. })) => {
                     panic!("the identity did not sign in: {event:?}")
                 }

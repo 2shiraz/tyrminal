@@ -26,6 +26,9 @@ pub(crate) const KIND_KNOWN_HOST: u16 = 3;
 pub(crate) const KIND_TRUST_EVENT: u16 = 4;
 pub(crate) const KIND_SNIPPET: u16 = 5;
 pub(crate) const KIND_GROUP: u16 = 6;
+// agent C: workspaces (kinds 20-29)
+/// Named layout templates (`crate::layouts`).
+pub(crate) const KIND_LAYOUT: u16 = 20;
 
 const MARKER_TOMBSTONE: u8 = 0x00;
 const MARKER_LIVE_V1: u8 = 0x01;
@@ -300,6 +303,40 @@ impl WorkflowRecord {
                 .content_len()
             + 16
     }
+}
+
+// command history
+// Kinds 60–69 belong to command history.
+/// The commands of one host, or of local terminals (one record each).
+pub(crate) const KIND_HISTORY: u16 = 60;
+/// Whether history is on (one record).
+pub(crate) const KIND_HISTORY_SETTINGS: u16 = 61;
+
+/// Remembered commands of one scope, least recently used first.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct HistoryRecord {
+    /// A host id, or `local` for local terminals.
+    pub scope: String,
+    pub commands: Vec<HistoryEntryRecord>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct HistoryEntryRecord {
+    pub command: String,
+    pub last_used: u64,
+    pub uses: u32,
+}
+
+impl HistoryRecord {
+    pub fn content_len(&self) -> usize {
+        self.scope.len() + self.commands.iter().map(|c| c.command.len() + 48).sum::<usize>()
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+pub(crate) struct HistorySettingsRecord {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does

@@ -15,7 +15,9 @@ mod files;
 mod folders;
 mod handoff;
 mod import;
+// agent C: workspaces
 mod inventory;
+mod layouts;
 mod preferences;
 mod records;
 mod remote_copy;
@@ -34,10 +36,12 @@ pub mod shell_integration;
 mod snippet_runs;
 // compromised-password check (SEC-11)
 pub mod password_check;
+// command history
+mod command_history;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
-pub use files::{TransferSink, list_local, local_within};
+pub use files::{TransferSink, list_local, local_make_dir, local_remove, local_rename, local_set_mode, local_within};
 pub use preferences::PreferencesStore;
 pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
@@ -48,6 +52,8 @@ pub use tyrminal_platform::{
 };
 pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
+// agent C: workspaces
+pub use layouts::validate_detach;
 // agent D: inventory and snippets
 pub use importers::key_text_is_encrypted;
 

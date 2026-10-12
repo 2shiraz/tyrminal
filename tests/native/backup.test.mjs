@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { PASSPHRASE, ui } from "./flows.mjs";
+import { HOST_PANEL, PASSPHRASE, saveAndCloseHostPanel, ui } from "./flows.mjs";
 import { App } from "./harness.mjs";
 
 describe("backup and restore in the real application", { concurrency: false }, () => {
@@ -30,11 +30,10 @@ describe("backup and restore in the real application", { concurrency: false }, (
       recoveryKey = await t.createVault();
       await t.nav("Hosts");
       await s.clickButton("Add host");
-      await s.fill("Name", "backup-host-alpha", { within: "dialog" });
-      await s.fill("Address", "192.0.2.44", { within: "dialog" });
-      await s.fill("User name", "deploy", { within: "dialog" });
-      await s.clickButton("Save", { within: "dialog" });
-      await s.waitGone("dialog");
+      await s.fill("Name", "backup-host-alpha", { within: HOST_PANEL });
+      await s.fill("Address", "192.0.2.44", { within: HOST_PANEL });
+      await s.fill("User name", "deploy", { within: HOST_PANEL });
+      await saveAndCloseHostPanel(s);
       await t.nav("Settings");
       await s.clickButton("Save a backup…");
       await s.until(async () => /Backup saved as lab\.tyrbackup/.test(await s.execute("return document.body.innerText")), { describe: "saved toast" });

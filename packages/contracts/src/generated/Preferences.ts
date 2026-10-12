@@ -3,6 +3,7 @@ import type { EditorApp } from "./EditorApp";
 import type { PasswordCheckPreferences } from "./PasswordCheckPreferences";
 import type { TerminalPreferences } from "./TerminalPreferences";
 import type { ThemePreference } from "./ThemePreference";
+import type { WorkspacePreferences } from "./WorkspacePreferences";
 
 export type Preferences = { theme: ThemePreference, 
 /**
@@ -16,7 +17,7 @@ localShell: string | null,
 /**
  * Applications chosen (in a native dialog) for editing remote files, by extension.
  */
-editorApps: Array<EditorApp>, 
+editorApps: Array<EditorApp>, workspace?: WorkspacePreferences, 
 /**
  * Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
  * separate from session recording and command history.
