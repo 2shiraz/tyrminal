@@ -53,6 +53,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `import_hosts` | `ImportHost[]`, target group or null | count | Re-validated; hosts and missing groups created in one transaction |
 | `key_list` | — | `KeySummary[]` | Never includes key material |
 | `key_import` / `key_generate` / `key_delete` | `KeyImportInput` / `KeyGenerateInput` / id | `KeySummary` / — | |
+| `key_deploy_preview` / `key_deploy` | session id, key id | `KeyDeployPreview` | Owned, connected SSH session only; fixed remote commands, key line on stdin, append-only to `~/.ssh/authorized_keys` |
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |
 | `session_open_ssh` | host id, size, output channel, event channel | session id | Host-key trust and auth prompts arrive as events |
 | `session_open_local` | size, channels | session id | Local PTY |

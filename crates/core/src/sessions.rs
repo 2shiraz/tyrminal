@@ -21,8 +21,8 @@ use tyrminal_contracts::limits::{
     TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, SnippetSendMode, TrustDecision,
-    VaultStatus,
+    AuthPromptKind, ErrorCode, IpcError, KeyDeployPreview, SessionEvent, SessionOpened, SessionState, SnippetSendMode,
+    TrustDecision, VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -32,6 +32,7 @@ use tyrminal_ssh::{
 };
 use zeroize::Zeroizing;
 
+use crate::deploy;
 use crate::error::{err, from_ssh, internal, invalid, not_found};
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
@@ -61,6 +62,9 @@ struct Entry {
     input: mpsc::Sender<Input>,
     close: watch::Sender<bool>,
     prompts: Mutex<Prompts>,
+    /// The authenticated SSH connection while the session is connected (SSH sessions only),
+    /// for side operations on their own channels such as installing a public key.
+    connection: Mutex<Option<Arc<VerifiedConnection>>>,
 }
 
 impl Entry {
@@ -129,6 +133,7 @@ impl Sessions {
             input,
             close,
             prompts: Mutex::new(Prompts::default()),
+            connection: Mutex::new(None),
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -210,6 +215,39 @@ impl Sessions {
             state: if outcome.error.is_some() { SessionState::Failed } else { SessionState::Closed },
         });
         sink.event(closed_event(outcome.error, outcome.exit_status));
+    }
+
+    /// The connected SSH link of a session the caller owns.
+    fn connection(&self, owner: &str, session_id: &str) -> Result<(Arc<Entry>, Arc<VerifiedConnection>), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let conn = entry
+            .connection
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .ok_or_else(|| err(ErrorCode::InvalidInput, "This works in a connected SSH session only."))?;
+        Ok((entry, conn))
+    }
+
+    /// Reads the server's authorized keys over the session's verified connection and reports
+    /// what installing `key_id` would change. Nothing is written.
+    pub async fn deploy_key_preview(
+        &self,
+        owner: &str,
+        session_id: &str,
+        key_id: &str,
+    ) -> Result<KeyDeployPreview, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let line = self.vault.public_key_line(entry.generation, key_id).await?;
+        deploy::preview(&conn, &line).await
+    }
+
+    /// Appends the key's public line to the server's authorized keys (unless it is already
+    /// there), keeping every other line, then reads the file again to confirm.
+    pub async fn deploy_key(&self, owner: &str, session_id: &str, key_id: &str) -> Result<KeyDeployPreview, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let line = self.vault.public_key_line(entry.generation, key_id).await?;
+        deploy::install(&conn, &line).await
     }
 
     pub async fn write(&self, owner: &str, session_id: &str, data: Vec<u8>) -> Result<(), IpcError> {
@@ -617,9 +655,15 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
-            // `conn` stays alive for the whole pump; dropping it closes the transport.
+            // `conn` stays alive for the whole pump; dropping it closes the transport. It is
+            // shared with the registry entry for side channels and taken back when the shell ends.
+            let conn = Arc::new(conn);
+            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
-            conn.disconnect().await;
+            ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
+            if let Ok(conn) = Arc::try_unwrap(conn) {
+                conn.disconnect().await;
+            }
             outcome
         }
         Err(error) => Outcome::failed(error),

@@ -83,6 +83,7 @@ export function CommandPalette({
   onToggleTheme,
   onLocal,
   onSnippet,
+  onDeployKey,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -93,6 +94,8 @@ export function CommandPalette({
   onToggleTheme: () => void;
   onLocal: () => void;
   onSnippet: (s: SnippetSummary) => void;
+  /** Present only when the focused pane is a connected SSH session. */
+  onDeployKey?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -153,6 +156,7 @@ export function CommandPalette({
       list.push(action("zoom-reset", msg.palette.zoomReset, <IconZoomIn size={16} />, () => onAction("zoomReset"), "zoomReset"));
       list.push(action("close-pane", msg.palette.closePane, <IconX size={16} />, () => onAction("closePane"), "closePane"));
     }
+    if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
     list.push(action("theme", msg.palette.toggleTheme, <IconSun size={16} />, onToggleTheme));
     list.push(action("sidebar", msg.palette.toggleSidebar, <IconSidebar size={16} />, () => onAction("toggleSidebar"), "toggleSidebar"));
     list.push(action("lock", msg.nav.lock, <IconLock size={16} />, () => onAction("lock"), "lock"));

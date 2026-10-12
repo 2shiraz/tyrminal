@@ -1,7 +1,7 @@
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tyrminal_core::contracts::{
     BulkHostChange, GroupInput, GroupSummary, HostInput, HostSummary, ImportFormat, ImportHost, ImportPreview,
-    IpcError, KeyImportInput, KeySummary, KnownHostSummary,
+    IpcError, KeyDeployPreview, KeyImportInput, KeySummary, KnownHostSummary,
 };
 
 use crate::state::AppState;
@@ -99,4 +99,27 @@ pub async fn import_hosts(
     into_group: Option<String>,
 ) -> Result<u32, IpcError> {
     state.core()?.vault.import_hosts(hosts, into_group).await
+}
+
+/// Reads the server's authorized keys over a connected SSH session this window owns and reports
+/// what installing the key would change. Writes nothing.
+#[tauri::command]
+pub async fn key_deploy_preview(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    key_id: String,
+) -> Result<KeyDeployPreview, IpcError> {
+    state.core()?.sessions.deploy_key_preview(window.label(), &session_id, &key_id).await
+}
+
+/// Appends the key to the server's authorized keys over that session (an explicit user action).
+#[tauri::command]
+pub async fn key_deploy(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    key_id: String,
+) -> Result<KeyDeployPreview, IpcError> {
+    state.core()?.sessions.deploy_key(window.label(), &session_id, &key_id).await
 }

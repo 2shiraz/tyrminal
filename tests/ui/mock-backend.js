@@ -356,6 +356,16 @@ export function installMockBackend(options) {
         });
       return a.ids.length;
     },
+    key_deploy_preview: (a) => {
+      const key = state.keys.find((k) => k.id === a.keyId);
+      return { path: "~/.ssh/authorized_keys", existingKeys: 2, alreadyPresent: Boolean(state.deployed?.has(a.keyId)), line: key.publicKey };
+    },
+    key_deploy: (a) => {
+      state.deployed ??= new Set();
+      state.deployed.add(a.keyId);
+      const key = state.keys.find((k) => k.id === a.keyId);
+      return { path: "~/.ssh/authorized_keys", existingKeys: 3, alreadyPresent: true, line: key.publicKey };
+    },
     group_list: () => structuredClone(state.groups),
     group_save: (a) => {
       const existing = state.groups.find((g) => g.id === a.group.id);

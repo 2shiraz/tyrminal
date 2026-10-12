@@ -20,6 +20,7 @@ import type {
   ImportHost,
   ImportPreview,
   IpcError,
+  KeyDeployPreview,
   KeyImportInput,
   KeySummary,
   KnownHostSummary,
@@ -132,6 +133,10 @@ export const keys = {
   import: (key: KeyImportInput) => call<KeySummary>("key_import", { key }),
   generate: (label: string) => call<KeySummary>("key_generate", { label }),
   remove: (id: string) => call<void>("key_delete", { id }),
+  /** Over a connected SSH session this window owns; nothing is written. */
+  deployPreview: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy_preview", { sessionId, keyId }),
+  /** Appends the key to the server's authorized keys (an explicit user action). */
+  deploy: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy", { sessionId, keyId }),
 };
 
 export const knownHosts = {

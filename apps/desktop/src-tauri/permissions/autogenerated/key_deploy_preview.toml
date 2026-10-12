@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-deploy-preview"
+description = "Enables the key_deploy_preview command without any pre-configured scope."
+commands.allow = ["key_deploy_preview"]
+
+[[permission]]
+identifier = "deny-key-deploy-preview"
+description = "Denies the key_deploy_preview command without any pre-configured scope."
+commands.deny = ["key_deploy_preview"]

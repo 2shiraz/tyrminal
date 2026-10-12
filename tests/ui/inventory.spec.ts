@@ -129,3 +129,36 @@ test("import shows a preview with what is left out before anything is added", as
   await expect(page.getByText("Imported 2 hosts")).toBeVisible();
   await expect(hostCards(page)).toHaveCount(8);
 });
+
+test("install a public key from the palette: check, see the line, install, then switch the host", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  // db-primary asks for a password; after installing a key it can be switched to the key.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("db-primary");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("install a public key");
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("dialog", { name: "Install a public key on this server" });
+  await expect(dialog).toContainText("db-primary");
+  expect(await calls(page, "key_deploy")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Check the server" }).click();
+  await expect(dialog.getByTestId("deploy-preview")).toContainText("The 2 keys already there stay as they are");
+  await expect(dialog.getByTestId("deploy-preview")).toContainText("ssh-ed25519 AAAA");
+  expect(await calls(page, "key_deploy")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Install key" }).click();
+  await expect(dialog).toContainText("Installed in ~/.ssh/authorized_keys");
+  await dialog.getByRole("button", { name: "Use this key" }).click();
+  await expect(dialog).toContainText("db-primary now signs in with this key");
+  const saves = await calls(page, "host_save");
+  expect(saves.at(-1)?.args).toMatchObject({ host: { label: "db-primary", auth: { kind: "key" } } });
+});
+
+test("the palette offers key installation only for a connected SSH session", async ({ page }) => {
+  await openApp(page);
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("install a public key");
+  await expect(page.getByRole("option", { name: /Install a public key/ })).toHaveCount(0);
+});

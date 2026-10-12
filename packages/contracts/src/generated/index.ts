@@ -18,6 +18,7 @@ export type { ImportPreview } from "./ImportPreview";
 export type { ImportSkipped } from "./ImportSkipped";
 export type { InheritedFields } from "./InheritedFields";
 export type { IpcError } from "./IpcError";
+export type { KeyDeployPreview } from "./KeyDeployPreview";
 export type { KeyImportInput } from "./KeyImportInput";
 export type { KeySummary } from "./KeySummary";
 export type { KnownHostSummary } from "./KnownHostSummary";

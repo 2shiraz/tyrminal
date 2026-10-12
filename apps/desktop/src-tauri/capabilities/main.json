@@ -27,6 +27,8 @@
     "allow-key-import",
     "allow-key-generate",
     "allow-key-delete",
+    "allow-key-deploy-preview",
+    "allow-key-deploy",
     "allow-known-host-list",
     "allow-known-host-remove",
     "allow-group-list",

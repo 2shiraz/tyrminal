@@ -1390,6 +1390,19 @@ impl VaultService {
         Ok(keys)
     }
 
+    /// The OpenSSH public-key line of a key, read under `generation` (nothing after a lock).
+    pub(crate) async fn public_key_line(&self, generation: u32, key_id: &str) -> Result<String, IpcError> {
+        let id = validate::id(key_id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let key = open.ssh_keys.get(&id).ok_or_else(|| not_found("That key no longer exists."))?;
+        // The same line the keychain shows: the label (spaces replaced) as the comment.
+        Ok(format!("{} {}", key.record.public_key, key.record.label.replace(char::is_whitespace, "-")))
+    }
+
     async fn store_key(&self, record: KeyRecord) -> Result<KeySummary, IpcError> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;

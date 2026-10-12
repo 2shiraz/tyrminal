@@ -1053,3 +1053,54 @@ async fn a_dropped_connection_is_reported_as_lost_and_a_normal_exit_is_not() {
     client.send("kill -9 $PPID\n").await;
     assert_eq!(client.until_closed().await, (Some(ErrorCode::Disconnected), None));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn deploying_a_public_key_appends_one_line_and_keeps_the_others() {
+    // The lab account is disposable; the lab's sshd reads authorized keys from its own file,
+    // so this touches only the account's ~/.ssh.
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    // An existing entry without a final newline.
+    client.send("mkdir -p ~/.ssh && printf 'ssh-rsa AAAAB3NzaUnrelated keep-me' > ~/.ssh/authorized_keys && echo PREP-$((40+2))\n").await;
+    client.output_until("PREP-42").await;
+
+    let key = f.core.vault.generate_key("deployed").await.unwrap();
+    let s = &f.core.sessions;
+    let preview = s.deploy_key_preview(WINDOW, &client.session, &key.id).await.unwrap();
+    assert_eq!((preview.existing_keys, preview.already_present), (1, false));
+    assert_eq!(preview.line, key.public_key);
+
+    // Another window cannot use this session's connection.
+    assert_eq!(s.deploy_key("other-window", &client.session, &key.id).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let done = s.deploy_key(WINDOW, &client.session, &key.id).await.unwrap();
+    assert_eq!((done.existing_keys, done.already_present), (2, true));
+    // Idempotent: a second install changes nothing.
+    let again = s.deploy_key(WINDOW, &client.session, &key.id).await.unwrap();
+    assert_eq!((again.existing_keys, again.already_present), (2, true));
+
+    client.send("echo FILE-BEGIN; cat ~/.ssh/authorized_keys; echo FILE-END; ls -l ~/.ssh/authorized_keys; echo LS1-$((40+2))\n").await;
+    client.output_until("LS1-42").await;
+    let expected = format!("keep-me\r\n{}\r\nFILE-END", key.public_key);
+    assert!(client.text.contains(&expected), "{:?}", client.text);
+    assert!(client.text.contains("-rw-r--r--"), "an existing file keeps its permissions: {:?}", client.text);
+
+    // No file at all: deploying creates it owner-only.
+    client.send("rm -f ~/.ssh/authorized_keys && echo GONE-$((40+2))\n").await;
+    client.output_until("GONE-42").await;
+    s.deploy_key(WINDOW, &client.session, &key.id).await.unwrap();
+    client.text.clear();
+    client.send("ls -l ~/.ssh/authorized_keys; echo LS-$((40+2))\n").await;
+    client.output_until("LS-42").await;
+    assert!(client.text.contains("-rw-------"), "a new file is owner-only: {:?}", client.text);
+    client.send("rm -f ~/.ssh/authorized_keys\n").await;
+
+    // A local terminal has no SSH connection to install over.
+    let local = Client::open_local(&f.core).await;
+    assert_eq!(s.deploy_key(WINDOW, &local.session, &key.id).await.unwrap_err().code, ErrorCode::InvalidInput);
+}

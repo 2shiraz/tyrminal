@@ -24,6 +24,8 @@ const COMMANDS: &[&str] = &[
     "key_import",
     "key_generate",
     "key_delete",
+    "key_deploy_preview",
+    "key_deploy",
     "known_host_list",
     "known_host_remove",
     "group_list",

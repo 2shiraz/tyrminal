@@ -127,6 +127,8 @@ pub fn run() {
             commands::inventory::key_import,
             commands::inventory::key_generate,
             commands::inventory::key_delete,
+            commands::inventory::key_deploy_preview,
+            commands::inventory::key_deploy,
             commands::inventory::known_host_list,
             commands::inventory::known_host_remove,
             commands::inventory::group_list,

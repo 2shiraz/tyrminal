@@ -310,6 +310,22 @@ impl core::fmt::Debug for KeyImportInput {
 
 // ---------- known hosts ----------
 
+/// What installing a public key on a server would do (or did), read from the server over an
+/// open, verified session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KeyDeployPreview {
+    /// The file on the server, as the server's shell names it.
+    pub path: String,
+    /// Keys already in that file (other lines are kept as they are).
+    pub existing_keys: u32,
+    /// The key is already authorized; deploying changes nothing.
+    pub already_present: bool,
+    /// The exact line that is (or would be) appended.
+    pub line: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

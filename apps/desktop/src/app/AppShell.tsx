@@ -8,6 +8,7 @@ import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
 import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
+import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
@@ -70,6 +71,7 @@ function Shell() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
+  const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -370,6 +372,30 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          onDeployKey={
+            pane?.target.kind === "ssh" && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (sessionId && pane.target.kind === "ssh") setDeploying({ sessionId, hostId: pane.target.hostId });
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {deploying && (
+        <DeployKeyDialog
+          sessionId={deploying.sessionId}
+          host={data.hosts.value?.find((h) => h.id === deploying.hostId) ?? null}
+          keys={data.keys.value ?? []}
+          onClose={() => {
+            setDeploying(null);
+            focusedHandle()?.focus();
+          }}
+          onHostChanged={() => {
+            void data.hosts.reload();
+            void data.keys.reload();
+          }}
         />
       )}
 

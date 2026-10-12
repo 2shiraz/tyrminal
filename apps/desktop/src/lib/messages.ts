@@ -101,6 +101,23 @@ export const msg = {
     welcomeTitle: "Welcome to Tyrminal",
     welcomeBody: "Add a server to get started. Everything you save is encrypted in your local vault.",
   },
+  deploy: {
+    title: "Install a public key on this server",
+    body: (server: string) =>
+      `Adds a key from your keychain to ${server}'s authorized keys over this connection, so you can sign in with the key next time. You see the change before anything is written.`,
+    thisServer: "this server",
+    key: "Key",
+    noKeys: "There are no keys in the keychain yet. Generate or import one first.",
+    check: "Check the server",
+    install: "Install key",
+    willAppend: (path: string, existing: number) =>
+      `This line will be added to ${path}. ${existing === 1 ? "The 1 key already there stays" : `The ${existing} keys already there stay`} as they are.`,
+    present: (path: string) => `This key is already in ${path}. Nothing needs to change.`,
+    done: (path: string) => `Installed in ${path}.`,
+    switchPrompt: (label: string) => `Sign in to ${label} with this key from now on?`,
+    switch: "Use this key",
+    switched: (label: string) => `${label} now signs in with this key.`,
+  },
   palette: {
     label: "Command palette",
     placeholder: "Type a command, host or snippet…",
@@ -123,6 +140,7 @@ export const msg = {
     closePane: "Close pane",
     toggleSnippets: "Show / hide snippets panel",
     toggleSidebar: "Show / hide sidebar",
+    deployKey: "Install a public key on this server…",
   },
   status: {
     noSession: "No terminal selected",
