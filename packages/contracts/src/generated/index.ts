@@ -8,6 +8,8 @@ export type { BackupPreview } from "./BackupPreview";
 export type { BulkHostChange } from "./BulkHostChange";
 export type { ChainHop } from "./ChainHop";
 export type { ChainPosition } from "./ChainPosition";
+export type { CommandNotice } from "./CommandNotice";
+export type { CommandNotifications } from "./CommandNotifications";
 export type { ConflictChoice } from "./ConflictChoice";
 export type { ContainerEngine } from "./ContainerEngine";
 export type { ContainerInfo } from "./ContainerInfo";

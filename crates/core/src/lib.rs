@@ -38,6 +38,8 @@ mod highlight;
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// terminal notifications (P-23)
+mod notify;
 // compromised-password check (SEC-11)
 pub mod password_check;
 // security review (P-27)
@@ -166,3 +168,5 @@ impl Core {
 pub fn validate_link(url: &str) -> Result<String, IpcError> {
     validate::link(url)
 }
+// terminal notifications (P-23)
+pub use notify::command_finished_notice;

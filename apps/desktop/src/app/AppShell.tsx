@@ -59,6 +59,7 @@ import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
+import { useCommandFinished } from "../features/notify/useCommandFinished";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -195,6 +196,36 @@ function Shell() {
   const tab = activeTab(ws);
   const pane = activePane(ws);
   const paneStatus = pane ? statuses[pane.id] : undefined;
+
+  // terminal notifications (P-23): tabs whose long command finished out of view, until shown.
+  const [finished, setFinished] = useState<ReadonlyMap<number, number | null>>(new Map());
+  const [finishedNotice, setFinishedNotice] = useState("");
+  useEffect(() => {
+    if (ws.active !== null && finished.has(ws.active)) {
+      const next = new Map(finished);
+      next.delete(ws.active);
+      setFinished(next);
+    }
+  }, [ws.active, finished]);
+  useCommandFinished(
+    prefs.commandNotifications ?? { enabled: true, minSeconds: 10 },
+    (sessionId) => {
+      const current = wsRef.current;
+      for (const t of current.tabs) {
+        for (const id of panesOf(t.layout)) {
+          if (handles.current.get(id)?.sessionId() !== sessionId) continue;
+          const inView = current.active === t.id && document.visibilityState === "visible" && document.hasFocus();
+          return { tabId: t.id, title: tabTitle(current, t), inView };
+        }
+      }
+      return null;
+    },
+    (tabId, exitStatus, notice) => {
+      setFinished((current) => new Map(current).set(tabId, exitStatus));
+      setFinishedNotice(notice);
+    },
+    (tabId) => setWs((current) => (current.tabs.some((t) => t.id === tabId) ? selectTab(current, tabId) : current)),
+  );
 
   /** Panes of a tab that can take part in broadcast: connected, and able to tell user input apart. */
   const broadcastPanes = useCallback(
@@ -769,6 +800,7 @@ function Shell() {
           onNewLocal={openLocal}
           onNewSftp={openSftp}
           onOpenPalette={() => setPaletteOpen(true)}
+          finished={finished}
           recent={(data.recent.value ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) }))}
           layout={
             ws.template
@@ -777,6 +809,10 @@ function Shell() {
           }
           production={productionPanes}
         />
+        {/* terminal notifications (P-23): announced to assistive technology as well */}
+        <div className="visually-hidden" role="status" data-testid="command-finished">
+          {finishedNotice}
+        </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
           {!terminalVisible && destination === "home" && (

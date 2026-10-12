@@ -13,6 +13,8 @@ pub mod vault;
 // agent B: tunnels and history
 pub mod history;
 pub mod tunnels;
+// terminal notifications (P-23)
+pub mod notify;
 // privilege prompts (KEY-18)
 pub mod privilege;
 // compromised-password check (SEC-11)

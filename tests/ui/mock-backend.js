@@ -22,6 +22,7 @@ export function installMockBackend(options) {
       reduceMotion: true,
       localShell: null,
       editorApps: [],
+      commandNotifications: { enabled: true, minSeconds: 10 },
       // compromised-password check (SEC-11)
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
@@ -1098,6 +1099,14 @@ export function installMockBackend(options) {
       setTimeout(() => emit("vault-status", state.vault), 10);
       return { createdAt: 1760140800, hosts: state.hosts.length, keys: 2, knownHosts: 3, snippets: 5 };
     },
+    // terminal notifications (P-23): mirrors the native text; records what was asked.
+    notify_command_finished: (a) => {
+      (window.__mockNotices ??= []).push(structuredClone(a));
+      const s = Math.floor(a.durationMs / 1000);
+      const took = s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+      const body = a.exitStatus === 0 ? `Command finished successfully after ${took}.` : a.exitStatus === null ? `Command finished after ${took}.` : `Command failed with exit status ${a.exitStatus} after ${took}.`;
+      return { title: a.tabTitle.trim() || "Tyrminal", body, shown: true };
+    },
     prefs_get: () => {
       // Like the preferences file, what was saved survives a reload of the page.
       try {
@@ -1933,6 +1942,11 @@ export function installMockBackend(options) {
       loginShell: target.kind === "session" ? "sh" : null,
     };
   }
+  // terminal notifications: output to the n-th open session (creation order).
+  window.__mockOutputAt = (index, text) => {
+    const s = [...state.sessions.values()][index];
+    if (s) channelSend(s.output, new TextEncoder().encode(text).buffer);
+  };
   window.__mockCalls = calls;
   window.__mockFileSessions = window.__mockFileSessions ?? [];
   window.__mockOpenedLinks = [];

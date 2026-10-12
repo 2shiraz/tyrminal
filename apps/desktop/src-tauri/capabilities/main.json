@@ -164,6 +164,7 @@
     "allow-startup-effective",
     "allow-group-defaults-get",
     "allow-group-defaults-set",
+    "allow-notify-command-finished",
     "allow-note-get",
     "allow-note-set",
     "allow-note-for-host",

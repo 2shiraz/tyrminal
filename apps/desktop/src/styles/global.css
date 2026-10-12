@@ -3897,6 +3897,18 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--warning);
 }
 
+/* A long command finished in this background tab (P-23). */
+.tab-finished {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--success);
+}
+
+.tab-finished[data-failed] {
+  color: var(--danger);
+}
+
 /* P-33: containers on the connected host (plain; the visual overhaul owns the look). */
 .containers {
   width: 100%;

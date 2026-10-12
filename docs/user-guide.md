@@ -223,6 +223,12 @@ terminal (Ctrl+Shift+T, ⌘T on macOS). Settings → Terminal sets the color sch
 cursor and scrollback, and the shell for local terminals (only shells installed on this computer
 are offered).
 
+**Long commands.** With shell integration on, Tyrminal shows a desktop notification when a command
+that ran for at least 10 seconds finishes in a tab you are not looking at, and marks that tab
+(✓, or ✕ when it failed) until you open it. The notification names the tab, the exit status and
+how long it took; it never contains the command or its output. Change the time or turn it off in
+Settings → Terminal.
+
 Safety features:
 
 - Links open only after you confirm the real destination (http and https only).

@@ -589,6 +589,13 @@ export const startup = {
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };
 
+// terminal notifications (P-23)
+/** Command-finished notifications: the native side builds the text and shows it. */
+export const notices = {
+  commandFinished: (tabTitle: string, exitStatus: number | null, durationMs: number) =>
+    call<import("@tyrminal/contracts").CommandNotice>("notify_command_finished", { tabTitle, exitStatus, durationMs: Math.round(durationMs) }),
+};
+
 /** LAN discovery (HST-14): user-started, time-limited browsing for SSH servers on one network. */
 export const discovery = {
   /** Local network interfaces to choose from; sends nothing. */
