@@ -172,6 +172,7 @@ pub fn run() {
             commands::sessions::session_handoff_offer,
             commands::sessions::session_attach,
             commands::sessions::session_diagnostics,
+            commands::sessions::session_open_key_install,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
             commands::files::files_pick_upload_folder,
@@ -210,6 +211,7 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::settings::app_info,
             commands::discovery::discovery_networks,
             commands::discovery::discovery_start,
             commands::discovery::discovery_status,
@@ -230,6 +232,12 @@ pub fn run() {
             commands::tunnels::host_connection_get,
             commands::tunnels::host_connection_set,
             commands::tunnels::host_chain,
+            // agent C: workspaces
+            commands::layouts::layout_list,
+            commands::layouts::layout_save,
+            commands::layouts::layout_delete,
+            commands::layouts::window_detach,
+            commands::layouts::window_detach_take,
             // agent D: inventory and snippets
             commands::inventory::host_appearance_list,
             commands::inventory::host_set_os,
@@ -260,6 +268,14 @@ pub fn run() {
             commands::inventory::env_get,
             commands::inventory::env_set,
             commands::inventory::env_effective,
+            // privilege prompts (KEY-18)
+            commands::privilege::session_identity,
+            commands::privilege::session_insert_identity_password,
+            // identity deletion (BUILD_SPEC §10.2)
+            commands::inventory::identity_usage,
+            // compromised-password check (SEC-11)
+            commands::password_check::password_check_status,
+            commands::password_check::password_check_run,
             commands::inventory::startup_get,
             commands::inventory::startup_set,
             commands::inventory::startup_effective,
@@ -273,6 +289,10 @@ pub fn run() {
             commands::command_history::history_list,
             commands::command_history::history_delete,
             commands::command_history::history_clear,
+            // server at a glance
+            commands::server_glance::glance_get,
+            commands::server_glance::glance_host_get,
+            commands::server_glance::glance_host_set,
         ])
         .build(tauri::generate_context!());
 

@@ -26,6 +26,9 @@ pub(crate) const KIND_KNOWN_HOST: u16 = 3;
 pub(crate) const KIND_TRUST_EVENT: u16 = 4;
 pub(crate) const KIND_SNIPPET: u16 = 5;
 pub(crate) const KIND_GROUP: u16 = 6;
+// agent C: workspaces (kinds 20-29)
+/// Named layout templates (`crate::layouts`).
+pub(crate) const KIND_LAYOUT: u16 = 20;
 
 const MARKER_TOMBSTONE: u8 = 0x00;
 const MARKER_LIVE_V1: u8 = 0x01;
@@ -334,6 +337,24 @@ impl HistoryRecord {
 pub(crate) struct HistorySettingsRecord {
     #[serde(default)]
     pub enabled: bool,
+}
+
+// server at a glance
+// Kinds 70–79 belong to server at a glance.
+/// Hosts whose server panel is turned off (one record).
+pub(crate) const KIND_GLANCE_SETTINGS: u16 = 70;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct GlanceSettingsRecord {
+    /// Ids of saved hosts with the panel off. Ids of deleted hosts are dropped on the next change.
+    #[serde(default)]
+    pub off_hosts: Vec<String>,
+}
+
+impl GlanceSettingsRecord {
+    pub fn content_len(&self) -> usize {
+        self.off_hosts.iter().map(|h| h.len() + 4).sum::<usize>() + 8
+    }
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does

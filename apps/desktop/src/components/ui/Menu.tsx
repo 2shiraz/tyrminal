@@ -1,12 +1,16 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { IconCheck } from "./icons";
+
 export interface MenuItem {
   label: string;
   icon?: ReactNode;
   shortcut?: ReactNode;
   tone?: "danger";
   disabled?: boolean;
+  /** A setting the item turns on and off: shown with a check, announced as a checkbox. */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -31,6 +35,8 @@ export function Menu({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
+  // What had focus before the menu took it (read while rendering, before the menu focuses itself).
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
 
   useLayoutEffect(() => {
     const menu = ref.current;
@@ -51,16 +57,16 @@ export function Menu({
   }, [anchor, point]);
 
   useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     function onPointer(event: PointerEvent) {
       if (!ref.current?.contains(event.target as Node)) onClose();
     }
     window.addEventListener("pointerdown", onPointer, true);
     return () => {
       window.removeEventListener("pointerdown", onPointer, true);
-      (anchor ?? opener)?.focus?.();
+      // Back to whatever had focus (a row, for a menu opened from the keyboard), else the anchor.
+      (opener?.isConnected && opener !== document.body ? opener : anchor)?.focus?.();
     };
-  }, [anchor, onClose]);
+  }, [anchor, opener, onClose]);
 
   function onKeyDown(event: React.KeyboardEvent) {
     const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
@@ -89,7 +95,8 @@ export function Menu({
           <button
             key={item.label}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked}
             className="menu-item"
             data-tone={item.tone}
             disabled={item.disabled}
@@ -98,7 +105,7 @@ export function Menu({
               item.onSelect();
             }}
           >
-            {item.icon}
+            {item.checked === undefined ? item.icon : <span className="menu-check" aria-hidden="true">{item.checked && <IconCheck size={14} />}</span>}
             <span>{item.label}</span>
             {item.shortcut}
           </button>

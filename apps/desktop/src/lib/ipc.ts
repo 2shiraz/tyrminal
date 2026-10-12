@@ -7,6 +7,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  AppInfo,
   BackupCredentialKind,
   BackupFile,
   BackupPreview,
@@ -206,6 +207,15 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_files", { hostId, events });
   },
+  /**
+   * A files-only connection that signs in with a password typed at the prompt, whatever the host
+   * uses, to install a key the server does not accept yet. Trust and prompts arrive as events.
+   */
+  openForKeyInstall(hostId: string, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_key_install", { hostId, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -330,6 +340,11 @@ export const links = {
   open: (url: string) => call<void>("link_open", { url }),
 };
 
+export const app = {
+  /** Static build and platform facts (commit, build date, OS, architecture, runtime versions). */
+  info: () => call<AppInfo>("app_info"),
+};
+
 /** Portable backups. Files are picked in native dialogs; paths and bytes never reach the page. */
 export const backup = {
   /** Saves a backup of the unlocked vault; resolves to the file name, or null if cancelled. */
@@ -382,6 +397,26 @@ export const tunnels = {
     call<ChainHopDto[]>("host_connection_set", { hostId, connection }),
   /** The hosts a connection goes through, first hop first, the host itself last. */
   chain: (hostId: string) => call<ChainHopDto[]>("host_chain", { hostId }),
+};
+
+// agent C: workspaces
+/** Named layout templates. Saving is explicit; a restored layout connects nothing by itself. */
+export const layouts = {
+  list: () => call<import("@tyrminal/contracts").LayoutTemplateSummary[]>("layout_list"),
+  save: (layout: import("@tyrminal/contracts").LayoutTemplateInput) =>
+    call<import("@tyrminal/contracts").LayoutTemplateSummary>("layout_save", { layout }),
+  remove: (id: string) => call<void>("layout_delete", { id }),
+};
+
+/** Moving a tab with its live sessions into a new window (TRM-02). */
+export const detach = {
+  /** Main window: opens the window and hands the tab's sessions to it; returns its label. */
+  open: (tab: import("@tyrminal/contracts").DetachTabInput) => call<string>("window_detach", { tab }),
+  /** Detached window: the tab it was opened for (once). */
+  take: () => call<import("@tyrminal/contracts").DetachedTab>("window_detach_take"),
+  /** Detached window: takes over one handed-over session with this window's own channels. */
+  attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
+    call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
 };
 
 // agent D: inventory and snippets
@@ -461,6 +496,31 @@ export const environment = {
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
 };
 
+// privilege prompts (KEY-18)
+export const privilege = {
+  /** The identity whose password the session could type in, or null. */
+  forSession: (sessionId: string) => call<import("@tyrminal/contracts").SessionIdentity | null>("session_identity", { sessionId }),
+  /** Types that identity's password into the session (an explicit user action; no Enter). */
+  insertPassword: (sessionId: string, identityId: string) =>
+    call<void>("session_insert_identity_password", { sessionId, identityId }),
+};
+
+// identity deletion (BUILD_SPEC §10.2)
+export const identityDeletion = {
+  /** Hosts and groups the identity applies to, and how each host signs in without it. */
+  usage: (id: string) => call<import("@tyrminal/contracts").IdentityUse[]>("identity_usage", { id }),
+  /** Refused while the identity is in use unless `references` says what they use instead. */
+  remove: (id: string, references: import("@tyrminal/contracts").IdentityReferences | null) =>
+    call<number>("identity_delete", { id, references }),
+};
+
+// compromised-password check (SEC-11)
+export const passwordCheck = {
+  status: () => call<import("@tyrminal/contracts").PasswordCheckStatus>("password_check_status"),
+  /** Sends one 5-character hash prefix per distinct stored password; refused while off. */
+  run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
+};
+
 /** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
 export const startup = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
@@ -492,4 +552,12 @@ export const history = {
   list: () => call<HistoryEntryDto[]>("history_list"),
   remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
   clear: () => call<number>("history_clear"),
+};
+
+// server at a glance
+/** Server at a glance (P-32): values read with a fixed command; the server is asked at most every 5 s. */
+export const glance = {
+  get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
+  hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
+  setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
 };

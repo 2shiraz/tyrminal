@@ -44,6 +44,10 @@ pub const MAX_SNIPPET_LEN: usize = 64 * 1024;
 pub const MAX_FOLDER_LEN: usize = 256;
 /// Startup snippets on one host or group (SNP-08).
 pub const MAX_STARTUP_SNIPPETS: usize = 16;
+/// Longest line of a startup snippet, in bytes. Startup snippets are typed while the shell may not
+/// be reading yet, when the terminal holds an unfinished line in a fixed buffer (1024 bytes on
+/// macOS, 4096 on Linux); a longer line is cut or garbled, so such a snippet is not typed.
+pub const MAX_STARTUP_LINE_LEN: usize = 1000;
 /// One command's output saved to a file (P-29), in bytes.
 pub const MAX_SAVED_OUTPUT_LEN: usize = 32 * 1024 * 1024;
 /// A URL the user asked to open from terminal output, in bytes.
@@ -93,9 +97,29 @@ pub const MAX_ENDED_TUNNELS: usize = 32;
 /// Hosts in one connection chain, the destination included.
 pub const MAX_CHAIN_HOPS: usize = 8;
 
+// agent C: workspaces
+/// Panes in one layout template (the same limit as open panes).
+pub const MAX_LAYOUT_PANES: usize = 16;
+/// A custom tab name in a layout template, in characters.
+pub const MAX_TAB_TITLE_LEN: usize = 80;
+// terminal input: highlight patterns
+/// Highlight rules that are regular expressions (of `MAX_HIGHLIGHT_KEYWORDS` rules in all).
+pub const MAX_HIGHLIGHT_PATTERNS: usize = 8;
+/// A highlight pattern's length, in characters.
+pub const MAX_HIGHLIGHT_PATTERN_LEN: usize = 128;
+/// Unbounded repetitions (`*`, `+`, `{n,}`) in one highlight pattern.
+pub const MAX_PATTERN_UNBOUNDED: usize = 3;
+/// The largest count in a bounded repetition (`{n,m}`) of a highlight pattern.
+pub const MAX_PATTERN_REPEAT: u32 = 256;
 // command history
 /// Commands kept per host (and for local terminals), and the length of one command in bytes.
 pub const MAX_HISTORY_ENTRIES: usize = 1_000;
 pub const MAX_HISTORY_COMMAND_LEN: usize = 1_024;
 /// Suggestions returned for one query.
 pub const MAX_HISTORY_SUGGESTIONS: usize = 8;
+
+// server at a glance
+/// Filesystems shown in the server panel.
+pub const MAX_GLANCE_DISKS: usize = 16;
+/// The shortest time between two reads of one server's values, in milliseconds.
+pub const GLANCE_MIN_INTERVAL_MS: u64 = 5_000;

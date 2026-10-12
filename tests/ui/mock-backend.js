@@ -22,6 +22,8 @@ export function installMockBackend(options) {
       reduceMotion: true,
       localShell: null,
       editorApps: [],
+      // compromised-password check (SEC-11)
+      passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -30,7 +32,7 @@ export function installMockBackend(options) {
         letterSpacing: 0,
         cursorStyle: "block",
         cursorBlink: false,
-        padding: 10,
+        padding: 12,
         scrollback: 5000,
         ligatures: false,
         renderer: options.renderer ?? "auto",
@@ -64,7 +66,7 @@ export function installMockBackend(options) {
       tags,
       lastConnectedAt: last,
       protocol: { type: "ssh" },
-      terminal: { encoding: "utf8", term: "xterm256color" },
+      terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
     });
     state.groups = [
@@ -131,7 +133,7 @@ export function installMockBackend(options) {
     const files = kind === "files";
     if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
     if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
@@ -140,16 +142,18 @@ export function installMockBackend(options) {
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
+    const keyRejected = kind === "ssh" && options.keyRejectedFor === host?.label && host.auth.kind === "key" && !state.deployed?.has(host.auth.keyId);
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked || passwordPrompt
+        ? trustPrompt || blocked || passwordPrompt || keyRejected
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
     let delay = 10;
     for (const step of steps) {
       if (step === "connected" && kind === "ssh") {
-        setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+        // Like the core: only an SSH connection reports what it negotiated (not Telnet or serial).
+        if (host?.protocol?.type !== "telnet" && host?.protocol?.type !== "serial") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
         // Startup snippets are typed once the shell is open (SNP-08).
         setTimeout(() => window.__mockRunStartup?.(s, host), delay + 40);
       }
@@ -160,6 +164,22 @@ export function installMockBackend(options) {
       }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
+    }
+    // The server refuses the host's key until it has been installed (key_deploy).
+    if (keyRejected) {
+      const key = state.keys.find((k) => k.id === host.auth.keyId);
+      setTimeout(() => {
+        channelSend(s.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(s.events, { type: "key_rejected", keyId: key.id, label: key.label, hop: null });
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed", hop: null });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "AUTH_FAILED", message: `The server did not accept the key "${key.label}". Its public key may not be installed on this server.` },
+          exitStatus: null,
+        });
+      }, 40);
+      return { sessionId };
     }
     if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
       setTimeout(() => {
@@ -235,6 +255,8 @@ export function installMockBackend(options) {
     const text = new TextDecoder().decode(bytes);
     // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
     window.__mockReceived = (window.__mockReceived ?? "") + text;
+    // terminal input: the same per session, in order (IME, broadcast exclusion tests).
+    (window.__mockInputBySession ??= {})[sessionId] = (window.__mockInputBySession[sessionId] ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -326,6 +348,74 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // server at a glance
+    ...(() => {
+      // Values as the core would parse them; a test can replace them with window.__mockGlance.
+      const offHosts = new Set();
+      const sample = {
+        kind: "available",
+        stats: {
+          uptimeSeconds: 93_784,
+          load: [0.15, 0.3, 0.45],
+          memory: { totalKib: 2_048_000, availableKib: 512_000 },
+          disks: [
+            { mount: "/", totalKib: 61_202_244, usedKib: 21_893_584, availableKib: 36_167_700 },
+            { mount: "/srv/<b>data</b>", totalKib: 1_000_000, usedKib: 250_000, availableKib: 750_000 },
+          ],
+        },
+      };
+      return {
+        glance_get: (a) => {
+          const s = state.sessions.get(a.sessionId);
+          if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          const host = state.hosts.find((h) => h.label === s.host);
+          if (!host || host.protocol?.type === "telnet" || host.protocol?.type === "serial")
+            throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
+          if (offHosts.has(host.id)) return { kind: "off" };
+          return window.__mockGlance ?? sample;
+        },
+        glance_host_get: (a) => !offHosts.has(a.hostId),
+        glance_host_set: (a) => {
+          if (a.enabled) offHosts.delete(a.hostId);
+          else offHosts.add(a.hostId);
+          return a.enabled;
+        },
+      };
+    })(),
+    // agent C: workspaces
+    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+    layout_save: (a) => {
+      state.layouts ??= [];
+      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
+      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
+      for (const t of a.layout.tabs)
+        for (const p of t.panes)
+          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
+      const existing = state.layouts.find((l) => l.id === a.layout.id);
+      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
+      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
+      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
+      return saved;
+    },
+    layout_delete: (a) => {
+      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
+    },
+    // Detach: the main window hands sessions to a new window. The mock records the request; a
+    // page opened as a detached window (options.detached) receives that tab and attaches.
+    window_detach: (a) => {
+      window.__mockDetached = a.tab;
+      return "detached-0000000000000001";
+    },
+    window_detach_take: () => {
+      const tab = options.detached;
+      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
+      options.detached = null;
+      return tab;
+    },
+    session_attach: (a) => {
+      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return openSession({ ...a }, "local").sessionId;
+    },
     // command history
     ...(() => {
       // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).
@@ -518,6 +608,7 @@ export function installMockBackend(options) {
       window.__mockTransfers.set(transferId, {
         finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -621,6 +712,11 @@ export function installMockBackend(options) {
       edits.delete(a.editId);
     },
     files_list: (a) => {
+      // Tests make the next listings fail to see the error state and its retry.
+      if ((window.__mockListFail ?? 0) > 0) {
+        window.__mockListFail -= 1;
+        fsErr("ACCESS_DENIED", "The server refused to list this folder.");
+      }
       const path = a.path ?? "/home/deploy";
       const node = fs.get(path.replace(/(.)\/+$/, "$1"));
       if (!node) fsErr("NOT_FOUND", "That file or folder does not exist on the server.");
@@ -703,6 +799,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: total, files: pick.folder?.files ?? 1, skipped: pick.folder?.skipped ?? 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -729,6 +826,7 @@ export function installMockBackend(options) {
           channelSend(a.events, { type: "done", bytes: size, files: isDir ? inside.length : 1, skipped: 0 });
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
+        progress: (done) => channelSend(a.events, { type: "progress", done }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },
@@ -825,7 +923,7 @@ export function installMockBackend(options) {
         tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
         lastConnectedAt: existing?.lastConnectedAt ?? null,
         protocol: a.host.protocol ?? { type: "ssh" },
-        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color" },
+        terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: a.host.forwardAgent ?? false,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
@@ -934,7 +1032,7 @@ export function installMockBackend(options) {
           tags: h.tags,
           lastConnectedAt: null,
           protocol: { type: "ssh" },
-          terminal: { encoding: "utf8", term: "xterm256color" },
+          terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
           forwardAgent: false,
         });
       }
@@ -960,6 +1058,17 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_open_files: (a) => openSession(a, "files"),
+    // Signs in with a typed password, whatever the host uses (to install a key).
+    session_open_key_install: (a) => {
+      const host = state.hosts.find((h) => h.id === a.hostId);
+      const sessionId = `${state.nextSession++}`.padStart(32, "a");
+      state.sessions.set(sessionId, { id: sessionId, output: null, events: a.events, user: host.username, host: host.label, line: "", files: true });
+      setTimeout(() => {
+        channelSend(a.events, { type: "state", state: "authenticating", hop: null });
+        channelSend(a.events, { type: "auth_prompt", promptId: "k1", kind: "password", username: host.username, attempt: 1, maxAttempts: 3, message: null, echo: false, hop: null });
+      }, 20);
+      return { sessionId };
+    },
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
@@ -974,7 +1083,11 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
-    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
+    session_diagnostics: () => {
+      // terminal input: tests can replace the lines or make the request fail.
+      if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
+      return window.__mockDiagnostics ?? ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"];
+    },
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {
@@ -990,6 +1103,54 @@ export function installMockBackend(options) {
         if (host && !s.files) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
+    // compromised-password check (SEC-11): unavailable like the real build unless a test says so.
+    password_check_status: () => ({
+      enabled: state.prefs.passwordCheck.enabled,
+      endpoint: state.prefs.passwordCheck.endpoint,
+      available: Boolean(options.passwordCheckAvailable),
+      unavailableReason: options.passwordCheckAvailable
+        ? null
+        : "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does.",
+      storedPasswords: state.hosts.filter((h) => h.auth.kind === "stored_password").length,
+    }),
+    password_check_run: () => {
+      if (!state.prefs.passwordCheck.enabled) throw { code: "INVALID_INPUT", message: "Turn on the compromised-password check first. It is off until you do." };
+      if (!options.passwordCheckAvailable)
+        throw { code: "UNREACHABLE", message: "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does." };
+      return {
+        items: [
+          { kind: "host", label: "edge-cache", breachCount: 10434004 },
+          { kind: "identity", label: "Ops", breachCount: 0 },
+        ],
+        requests: 2,
+      };
+    },
+    // privilege prompts (KEY-18)
+    session_identity: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      if (!s.hostId) return null;
+      const effective = identityAssignment({ kind: "host", hostId: s.hostId }).effectiveIdentityId;
+      const identity = identityState.list.find((i) => i.id === effective);
+      return identity ? { identityId: identity.id, label: identity.label, hasPassword: identity.password !== null } : null;
+    },
+    session_insert_identity_password: (a) => {
+      const current = handlers.session_identity({ sessionId: a.sessionId });
+      if (!current || current.identityId !== a.identityId)
+        throw { code: "CONFLICT", message: "The identity of this host changed. Check which identity it uses and try again." };
+      const password = identityState.list.find((i) => i.id === a.identityId)?.password;
+      if (!password) throw { code: "INVALID_INPUT", message: "This identity has no stored password." };
+      // Typed by the "core": the renderer never receives the password, and no Enter is added.
+      write(a.sessionId, new TextEncoder().encode(password));
+    },
+    app_info: () => ({
+      commit: "1a2b3c4",
+      buildDate: "2026-10-12",
+      os: "linux",
+      arch: "x86_64",
+      tauriVersion: "2.12.1",
+      webviewVersion: "2.50.1",
+    }),
     // LAN discovery: synthetic announcements (documentation addresses), never a real network.
     discovery_networks: () => options.discoveryNetworks ?? [{ id: "en0", addresses: ["192.0.2.20", "fe80::1"] }],
     discovery_start: (a) => {
@@ -1217,13 +1378,44 @@ export function installMockBackend(options) {
       return handlers.identity_list().find((i) => i.id === record.id);
     },
     identity_delete: (a) => {
+      // identity deletion (BUILD_SPEC §10.2): refused while in use unless the caller chooses.
+      const users = [...identityState.uses].filter(([, v]) => v === a.id).map(([k]) => k);
+      if (users.length > 0 && !a.references)
+        throw { code: "IN_USE", message: "Hosts or groups use this identity. Choose another identity for them or remove it from them." };
+      const replacement = a.references?.kind === "reassign" ? a.references.identityId : null;
       identityState.list = identityState.list.filter((i) => i.id !== a.id);
-      let n = 0;
-      for (const [k, v] of identityState.uses) if (v === a.id) {
-        identityState.uses.delete(k);
-        n += 1;
+      for (const k of users) {
+        if (replacement) identityState.uses.set(k, replacement);
+        else identityState.uses.delete(k);
       }
-      return n;
+      return users.length;
+    },
+    // identity deletion (BUILD_SPEC §10.2)
+    identity_usage: (a) => {
+      const uses = [];
+      for (const g of state.groups)
+        if (identityState.uses.get(`group:${g.id}`) === a.id) uses.push({ target: { kind: "group", groupId: g.id }, label: g.name, direct: true, afterRemoval: null });
+      for (const h of state.hosts) {
+        const target = { kind: "host", hostId: h.id };
+        const now = identityAssignment(target);
+        if (now.effectiveIdentityId !== a.id) continue;
+        // What the host uses without it: the same resolution with the identity's uses removed.
+        const saved = new Map(identityState.uses);
+        for (const [k, v] of saved) if (v === a.id) identityState.uses.delete(k);
+        const next = identityAssignment(target).effectiveIdentityId;
+        identityState.uses = saved;
+        const other = identityState.list.find((i) => i.id === next);
+        const key = h.auth.kind === "key" ? state.keys.find((k) => k.id === h.auth.keyId) : null;
+        const afterRemoval = other
+          ? { kind: "identity", identityId: other.id, label: other.label }
+          : key
+            ? { kind: "key", keyId: key.id, label: key.label }
+            : h.auth.kind === "stored_password"
+              ? { kind: "stored_password" }
+              : { kind: "ask_password" };
+        uses.push({ target, label: h.label, direct: now.origin?.kind === "host", afterRemoval });
+      }
+      return uses.sort((x, y) => x.label.toLowerCase().localeCompare(y.label.toLowerCase()));
     },
     identity_assignments: () => [
       ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
@@ -1251,6 +1443,11 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
   };
+  // agent C: workspaces — raw output bytes (legacy encodings) to the most recent session.
+  window.__mockOutputBytes = (bytes) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
+  };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {
     if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
@@ -1262,6 +1459,14 @@ export function installMockBackend(options) {
     state.sessions.delete(last.id);
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
+  };
+  // terminal input: drop the n-th open session (creation order), not only the newest.
+  window.__mockDropAt = (index) => {
+    const s = [...state.sessions.values()][index];
+    if (!s) return;
+    state.sessions.delete(s.id);
+    channelSend(s.events, { type: "state", state: "failed" });
+    channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);
@@ -1372,7 +1577,11 @@ export function installMockBackend(options) {
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   window.__TAURI_INTERNALS__ = {
-    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    // agent C: workspaces — a page can play a detached window (options.windowLabel).
+    metadata: {
+      currentWindow: { label: options.windowLabel ?? "main" },
+      currentWebview: { windowLabel: options.windowLabel ?? "main", label: options.windowLabel ?? "main" },
+    },
     transformCallback(callback, once = false) {
       const cid = nextCallback++;
       callbacks.set(cid, (payload) => {

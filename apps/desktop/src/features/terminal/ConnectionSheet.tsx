@@ -2,11 +2,13 @@ import type { ChainPosition, IpcError, SessionEvent, SessionState } from "@tyrmi
 import { type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { useWindowFocused } from "../../components/ui/Wordmark";
-import { Notice, SecretField, TextField } from "../../components/ui/controls";
+import { SecretField, TextField } from "../../components/ui/controls";
 import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconShieldAlert, IconX } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgConnect } from "../../lib/messages-connect";
+import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { msgI } from "../../lib/messages-input";
 import { HopNotice } from "../tunnels/HopNotice";
 import { RECONNECT_MAX_ATTEMPTS, groupFingerprint } from "./terminalPolicy";
 
@@ -241,6 +243,12 @@ export function ConnectionSheet(props: {
   onCloseTab: () => void;
   onOpenKnownHosts: () => void;
   onOpenLog: (() => void) | null;
+  /** Connection details (algorithms, addresses), offered on a failed SSH connection. */
+  onOpenDetails: (() => void) | null;
+  /** Offered when the server refused the host's key: install it on the server. */
+  onInstallKey: (() => void) | null;
+  /** False in a detached window: reconnecting happens from the main window. */
+  canReconnect: boolean;
 }) {
   const { ssh, label, identity, timeline, startedAt, trust, auth, changed, closed, autoRetry, banner, interactive } = props;
   const [now, setNow] = useState(() => Date.now());
@@ -278,6 +286,17 @@ export function ConnectionSheet(props: {
     if (trust) props.onTrust("cancel");
     else cancel();
   }
+
+  // In a detached window, reconnecting happens from the main window.
+  const reconnect = (label: string) =>
+    props.canReconnect ? (
+      <button type="button" className="btn btn-primary" onClick={props.onReconnect} autoFocus={interactive} data-autofocus>
+        <IconRefreshCw size={15} />
+        {label}
+      </button>
+    ) : (
+      <span className="connect-hint">{msgC.detach.reconnectInMain}</span>
+    );
 
   let role: "alertdialog" | "alert" | "status" | "dialog" = "dialog";
   let tone: "danger" | "plain" = "plain";
@@ -336,10 +355,7 @@ export function ConnectionSheet(props: {
         <button type="button" className="btn" onClick={props.onCloseTab}>
           {msg.terminal.closeTab}
         </button>
-        <button type="button" className="btn btn-primary" onClick={props.onReconnect} autoFocus={interactive} data-autofocus>
-          <IconRefreshCw size={15} />
-          {msg.terminal.reconnect}
-        </button>
+        {reconnect(msg.terminal.reconnect)}
       </>
     );
   } else if (closed?.error) {
@@ -361,6 +377,13 @@ export function ConnectionSheet(props: {
         <p className="connect-hint">
           {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
         </p>
+        {props.onOpenDetails && (
+          <div>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={props.onOpenDetails}>
+              {msgI.details.link}
+            </button>
+          </div>
+        )}
       </>
     );
     actions = (
@@ -370,15 +393,17 @@ export function ConnectionSheet(props: {
         <button type="button" className="btn" onClick={props.onCloseTab}>
           {msg.terminal.closeTab}
         </button>
+        {props.onInstallKey && (
+          <button type="button" className="btn" onClick={props.onInstallKey}>
+            {msgD.installKey.fromFailure}
+          </button>
+        )}
         {autoRetry && (
           <button type="button" className="btn" onClick={props.onStopRetry}>
             {msg.terminal.cancelAutoReconnect}
           </button>
         )}
-        <button type="button" className="btn btn-primary" onClick={props.onReconnect} autoFocus={interactive} data-autofocus>
-          <IconRefreshCw size={15} />
-          {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
-        </button>
+        {reconnect(autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect)}
       </>
     );
   } else if (closed) {
@@ -391,10 +416,7 @@ export function ConnectionSheet(props: {
         <button type="button" className="btn" onClick={props.onCloseTab}>
           {msg.terminal.closeTab}
         </button>
-        <button type="button" className="btn btn-primary" onClick={props.onReconnect} autoFocus={interactive} data-autofocus>
-          <IconRefreshCw size={15} />
-          {msg.terminal.reconnect}
-        </button>
+        {reconnect(msg.terminal.reconnect)}
       </>
     );
   } else if (trust) {
@@ -487,7 +509,6 @@ export function ConnectionSheet(props: {
             {body}
           </>
         )}
-        {closed?.error && !props.everConnected && !changed && <Notice tone="danger">{closed.error.message}</Notice>}
         {/* Keyed by what the sheet shows, so its buttons mount afresh and the right one takes focus. */}
         <div className="connect-actions" key={mode}>
           {actions}

@@ -54,8 +54,8 @@ test("sftp: opens from the palette with this computer on the left and a host pic
   const all = await calls(page);
   expect(all.filter((c) => c.cmd === "session_open_files")).toHaveLength(1);
   expect(all.filter((c) => c.cmd === "session_open_ssh" || c.cmd === "session_write" || c.cmd === "session_resize")).toHaveLength(0);
-  // Columns, folders first, permissions under the name.
-  await expect(remote.getByRole("columnheader")).toHaveText(["Name", "Date Modified", "Size", "Kind"]);
+  // Columns, folders first, permissions in their own column.
+  await expect(remote.getByRole("columnheader")).toHaveText(["Name", "Date Modified", "Size", "Permissions"]);
   await expect(remote.getByRole("button", { name: /^(Open|Select) / })).toHaveText([/app/, /logs/, /backup\.tar\.gz/, /deploy\.sh/, /README\.md/]);
   await expect(remote.getByRole("row", { name: /deploy\.sh/ })).toContainText("-rwxr-xr-x");
   await expect(remote.getByRole("row", { name: /backup\.tar\.gz/ })).toContainText("700 MB");
@@ -94,7 +94,7 @@ test("sftp: sorting, filter, breadcrumbs and back/forward in a pane", async ({ p
   await expect(pane.getByRole("button", { name: "Up one folder" })).toBeDisabled();
 });
 
-test("sftp: actions menu creates, renames, changes permissions and deletes with confirmation", async ({ page }) => {
+test("sftp: the pane and row menus create, rename in place, change permissions and delete with confirmation", async ({ page }) => {
   await openApp(page);
   await openSftp(page);
   await connectRight(page, "api-gateway");
@@ -103,24 +103,24 @@ test("sftp: actions menu creates, renames, changes permissions and deletes with 
   const actions = () => pane.getByRole("button", { name: "Actions for the right pane" }).click();
 
   await actions();
-  await page.getByRole("menuitem", { name: "Show hidden files" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Show hidden files" }).click();
   await expect(remote.getByRole("button", { name: "Select .bashrc" })).toBeVisible();
 
   await actions();
-  await page.getByRole("menuitem", { name: "New folder…" }).click();
+  await page.getByRole("menuitem", { name: "New folder" }).click();
   await page.getByRole("dialog", { name: "New folder" }).getByRole("textbox", { name: "Name" }).fill("releases");
   await page.getByRole("dialog", { name: "New folder" }).getByRole("button", { name: "Create" }).click();
   await expect(remote.getByRole("button", { name: "Open releases" })).toBeVisible();
 
-  await remote.getByRole("button", { name: "Select README.md" }).click();
-  await actions();
-  await page.getByRole("menuitem", { name: "Rename…" }).click();
-  await page.getByRole("dialog", { name: "Rename “README.md”" }).getByRole("textbox", { name: "Name" }).fill("NOTES.md");
-  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
-  await expect(remote.getByRole("button", { name: "Select NOTES.md" })).toBeVisible();
+  await remote.getByRole("button", { name: "Select README.md" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  await remote.getByRole("textbox", { name: "New name for README.md" }).fill("NOTES.md");
+  await page.keyboard.press("Enter");
+  await expect(remote.getByRole("row", { name: /NOTES\.md/ })).toHaveAttribute("aria-selected", "true");
+  // The right pane's controls (and their tooltips) stay inside the window.
+  expect(await page.locator("main.content").evaluate((el) => [el.scrollWidth - el.clientWidth, el.scrollLeft])).toEqual([0, 0]);
 
-  await remote.getByRole("button", { name: "Select NOTES.md" }).click();
-  await actions();
+  await remote.getByRole("button", { name: "Select NOTES.md" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Permissions…" }).click();
   const perms = page.getByRole("dialog", { name: "Permissions of “NOTES.md”" });
   await perms.getByRole("textbox", { name: "Mode (octal)" }).fill("9");
@@ -137,8 +137,7 @@ test("sftp: actions menu creates, renames, changes permissions and deletes with 
   await expect(confirm.getByRole("button", { name: "Cancel" })).toBeFocused();
   await confirm.getByRole("button", { name: "Cancel" }).click();
   await expect(remote.getByRole("button", { name: "Select NOTES.md" })).toBeVisible();
-  await remote.getByRole("button", { name: "Select NOTES.md" }).click();
-  await actions();
+  await remote.getByRole("button", { name: "Select NOTES.md" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete…" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
   await expect(remote.getByRole("button", { name: "Select NOTES.md" })).toHaveCount(0);
@@ -169,12 +168,16 @@ test("sftp: dragging between panes transfers through the queue and asks before r
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").nth(1)).toHaveText("Done");
 
-  // Server → this computer, by the actions menu; the local pane lists again.
-  await remote.getByRole("button", { name: "Select README.md" }).click();
-  await right(page).getByRole("button", { name: "Actions for the right pane" }).click();
+  // Server → this computer, by the row menu; the local pane lists again.
+  await remote.getByRole("button", { name: "Select README.md" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Copy to This computer" }).click();
   await finishLatest(page);
   await expect(local.getByRole("button", { name: "Select README.md" })).toBeVisible();
+  // And by F5, the two-pane convention.
+  await remote.getByRole("button", { name: "Select deploy.sh" }).click();
+  await page.keyboard.press("F5");
+  await finishLatest(page);
+  await expect(local.getByRole("button", { name: "Select deploy.sh" })).toBeVisible();
   const upload = (await calls(page)).find((c) => c.cmd === "files_upload");
   expect(upload?.args.path).toEqual(["notes.md"]);
 });
@@ -229,8 +232,8 @@ test("sftp: a password is asked for in a dialog and the session closes with the 
   expect(answer).toBeTruthy();
 
   const opened = (await page.evaluate(() => (window as unknown as { __mockFileSessions: { sessionId: string }[] }).__mockFileSessions)).at(-1);
-  await page.getByRole("tab", { name: /SFTP/ }).hover();
-  await page.getByRole("button", { name: "Close SFTP" }).click();
+  // The close control is a pointer target inside the tab (keyboard: Delete or the tab menu).
+  await page.getByRole("tab", { name: /SFTP/ }).locator(".tab-close").click();
   await expect(view(page)).toHaveCount(0);
   await expect.poll(async () => (await calls(page)).some((c) => c.cmd === "session_close" && c.args.sessionId === opened?.sessionId)).toBe(true);
 });
@@ -263,7 +266,7 @@ test("sftp: the local pane changes only inside the chosen folder", async ({ page
   const local = table(pane);
   await expect(local).toHaveAccessibleName("Contents of Projects on this computer");
   await pane.getByRole("button", { name: "Actions for the left pane" }).click();
-  await page.getByRole("menuitem", { name: "New folder…" }).click();
+  await page.getByRole("menuitem", { name: "New folder" }).click();
   await page.getByRole("dialog", { name: "New folder" }).getByRole("textbox", { name: "Name" }).fill("drafts");
   await page.getByRole("dialog", { name: "New folder" }).getByRole("button", { name: "Create" }).click();
   await expect(local.getByRole("button", { name: "Open drafts" })).toBeVisible();
@@ -272,8 +275,7 @@ test("sftp: the local pane changes only inside the chosen folder", async ({ page
   expect(typeof mkdir?.args.token).toBe("string");
 
   // A folder with something in it is not deleted.
-  await local.getByRole("button", { name: "Open photos" }).click();
-  await pane.getByRole("button", { name: "Actions for the left pane" }).click();
+  await local.getByRole("button", { name: "Open photos" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete…" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Delete “photos”?" });
   await expect(confirm).toContainText("removed from this computer");
@@ -341,4 +343,71 @@ test("sftp: a click visibly selects, multi-select and keys work, and opening a f
   await expect(pane.getByRole("progressbar", { name: "Opening folder" })).toBeVisible();
   await expect(remote).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
   await expect(pane.getByRole("progressbar")).toHaveCount(0);
+});
+
+test("sftp: the pane in use is marked, Swap exchanges sides without reconnecting, and a server path can be typed", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await chooseLocal(page);
+  await connectRight(page, "api-gateway");
+  const remote = table(right(page));
+  await expect(remote).toBeVisible();
+
+  // The pane last used is the active one; the other keeps its selection in grey.
+  await table(left(page)).getByRole("button", { name: "Select notes.md" }).click();
+  await expect(left(page)).toHaveAttribute("data-active", "true");
+  await expect(right(page)).not.toHaveAttribute("data-active", "true");
+  await remote.getByRole("button", { name: "Select README.md" }).click();
+  await expect(right(page)).toHaveAttribute("data-active", "true");
+  await expect(left(page)).not.toHaveAttribute("data-active", "true");
+  await expect(left(page).locator(".ft")).toHaveAttribute("data-inactive", "true");
+  await expect(table(left(page)).getByRole("row", { name: /notes\.md/ })).toHaveAttribute("aria-selected", "true");
+
+  // Swap: the host moves to the left and keeps its connection, folder and selection.
+  const opened = (await calls(page)).filter((c) => c.cmd === "session_open_files").length;
+  await view(page).getByRole("button", { name: "Swap panes" }).click();
+  await expect(left(page).getByRole("button", { name: "Location: api-gateway" })).toBeVisible();
+  await expect(right(page).getByRole("button", { name: "Location: This computer" })).toBeVisible();
+  await expect(table(left(page)).getByRole("row", { name: /README\.md/ })).toHaveAttribute("aria-selected", "true");
+  expect((await calls(page)).filter((c) => c.cmd === "session_open_files")).toHaveLength(opened);
+  expect((await calls(page)).filter((c) => c.cmd === "session_close")).toHaveLength(0);
+  // Keyboard order follows what is shown: the left pane comes first.
+  const regions = await view(page).locator(".sftp-pane").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+  expect(regions).toEqual(["Left pane", "Right pane"]);
+
+  // The server pane's path can be typed; the local one is breadcrumbs only.
+  const pane = left(page);
+  await pane.getByRole("button", { name: "Edit path" }).click();
+  await pane.getByRole("textbox", { name: "Folder on the server" }).fill("/home/deploy/app");
+  await page.keyboard.press("Enter");
+  await expect(table(pane)).toHaveAccessibleName("Contents of /home/deploy/app on api-gateway");
+  await expect(right(page).getByRole("button", { name: "Edit path" })).toHaveCount(0);
+  // Back works across a typed path too.
+  await pane.getByRole("button", { name: "Back" }).click();
+  await expect(table(pane)).toHaveAccessibleName("Contents of /home/deploy on api-gateway");
+});
+
+test("sftp: the filter, an empty folder and a folder of hidden files each say what is going on", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await connectRight(page, "api-gateway");
+  const pane = right(page);
+  await expect(table(pane)).toBeVisible();
+  await pane.getByRole("searchbox", { name: "Filter" }).fill("zzz");
+  await expect(pane).toContainText("Nothing here matches the filter.");
+  await pane.getByRole("searchbox", { name: "Filter" }).fill("");
+  await page.evaluate(() => {
+    const fs = (window as unknown as { __mockFs: Map<string, unknown> }).__mockFs;
+    fs.set("/home/deploy/cfg", { kind: "dir", size: null, permissions: 0o755, modified: 0 });
+    fs.set("/home/deploy/cfg/.env", { kind: "file", size: 3, permissions: 0o600, modified: 0 });
+    fs.set("/home/deploy/none", { kind: "dir", size: null, permissions: 0o755, modified: 0 });
+  });
+  await pane.getByRole("button", { name: "Refresh" }).click();
+  await table(pane).getByRole("button", { name: "Open cfg" }).dblclick();
+  await expect(pane).toContainText("1 hidden item.");
+  await pane.locator(".ft-state").getByRole("button", { name: "Show hidden files" }).click();
+  await expect(table(pane).getByRole("button", { name: "Select .env" })).toBeVisible();
+  await pane.getByRole("button", { name: "Up one folder" }).click();
+  await table(pane).getByRole("button", { name: "Open none" }).dblclick();
+  await expect(pane).toContainText("This folder is empty");
 });

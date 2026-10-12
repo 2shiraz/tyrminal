@@ -1,11 +1,15 @@
 import type { LocalListing, RemoteEntry } from "@tyrminal/contracts";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
-import { IconFile, IconFolder, IconFolderOpen, IconLink2, IconRefreshCw } from "../../components/ui/icons";
+import { IconFolderOpen, IconFolderUp, IconHardDrive, IconRefreshCw } from "../../components/ui/icons";
 import { files as filesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { visibleEntries } from "../sftp/model";
+import { FileTable } from "./FileTable";
+import { PathBar } from "./PathBar";
+import { NO_SELECTION, single } from "./selection";
 
 /** Where the local pane is: a folder the user chose (by token) and names below it. */
 export interface LocalLocation {
@@ -26,6 +30,7 @@ export function LocalPane({
   selected,
   onSelect,
   onDropRemote,
+  showHidden,
 }: {
   /** What the pane shows; the owner keeps it, so it survives the pane being unmounted. */
   listing: LocalListing | null;
@@ -34,6 +39,7 @@ export function LocalPane({
   selected: string | null;
   onSelect: (entry: RemoteEntry | null) => void;
   onDropRemote: (name: string) => void;
+  showHidden: boolean;
 }) {
   const [dropping, setDropping] = useState(false);
   const { pending, error, run } = useAction();
@@ -52,6 +58,8 @@ export function LocalPane({
   }
 
   const where = listing ? [listing.rootName, ...listing.path].join(" / ") : "";
+  const entries = useMemo(() => (listing ? visibleEntries(listing.entries, showHidden, "", { key: "name", ascending: true }) : []), [listing, showHidden]);
+  const selection = selected ? single(selected) : NO_SELECTION;
 
   return (
     <section
@@ -64,7 +72,9 @@ export function LocalPane({
           setDropping(true);
         }
       }}
-      onDragLeave={() => setDropping(false)}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+      }}
       onDrop={(event) => {
         setDropping(false);
         const raw = event.dataTransfer.getData(DRAG_TYPE);
@@ -74,68 +84,60 @@ export function LocalPane({
         if (data.side === "remote") onDropRemote(data.name);
       }}
     >
-      <div className="files-local-head">
-        <span className="files-local-where" title={where}>
-          {listing ? where : msg.files.localNone}
-        </span>
-        <button type="button" className="btn btn-sm" onClick={() => void choose()} disabled={pending}>
-          <IconFolderOpen size={14} /> {listing ? msg.files.localChange : msg.files.localChoose}
-        </button>
+      <div className="fp-nav">
+        <IconButton size="sm" label={msg.files.localUp} onClick={() => listing && void load(listing.token, listing.path.slice(0, -1))} disabled={!listing || listing.path.length === 0}>
+          <IconFolderUp size={15} />
+        </IconButton>
+        {listing ? (
+          <PathBar
+            crumbs={[listing.rootName, ...listing.path].map((label, i) => ({ label, onGo: () => void load(listing.token, listing.path.slice(0, i)) }))}
+            busy={pending}
+          />
+        ) : (
+          <span className="fp-local-none">{msg.files.localNone}</span>
+        )}
+        <IconButton size="sm" label={listing ? msg.files.localChange : msg.files.localChoose} onClick={() => void choose()} disabled={pending}>
+          <IconFolderOpen size={15} />
+        </IconButton>
         {listing && (
-          <>
-            <IconButton label={msg.files.localUp} onClick={() => void load(listing.token, listing.path.slice(0, -1))} disabled={listing.path.length === 0}>
-              <span aria-hidden="true">↑</span>
-            </IconButton>
-            <IconButton label={msg.files.localRefresh} onClick={() => void load(listing.token, listing.path)}>
-              <IconRefreshCw size={15} />
-            </IconButton>
-          </>
+          <IconButton size="sm" data-tooltip-side="bottom-end" label={msg.files.localRefresh} onClick={() => void load(listing.token, listing.path)} disabled={pending}>
+            <IconRefreshCw size={14} />
+          </IconButton>
         )}
       </div>
-      <ErrorNotice error={error} />
-      {listing && (
-        <ul className="files-list" aria-label={msg.files.localListLabel(where)}>
-          {listing.entries.map((entry) => (
-            <li key={entry.name} data-selected={entry.name === selected || undefined}>
-              <button
-                type="button"
-                className="files-row"
-                draggable={entry.kind === "file" || entry.kind === "dir"}
-                onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ side: "local", name: entry.name }))}
-                aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
-                aria-pressed={entry.name === selected}
-                onClick={() => onSelect(entry.name === selected ? null : entry)}
-                onDoubleClick={() => entry.kind === "dir" && void load(listing.token, [...listing.path, entry.name])}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && entry.kind === "dir") {
-                    event.preventDefault();
-                    void load(listing.token, [...listing.path, entry.name]);
-                  }
-                }}
-              >
-                <span className={`files-icon files-icon-${entry.kind}`}>
-                  {entry.kind === "dir" ? <IconFolder size={15} /> : entry.kind === "symlink" ? <IconLink2 size={15} /> : <IconFile size={15} />}
-                </span>
-                <span className="files-name">{entry.name}</span>
-                <span className="files-meta mono">{entry.size == null ? "" : formatBytes(entry.size)}</span>
-                <span className="files-meta mono" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="fp-body">
+        <ErrorNotice error={error} />
+        {listing ? (
+          <FileTable
+            label={msg.files.localListLabel(where)}
+            entries={entries}
+            columns={["name", "size"]}
+            selection={selection}
+            onSelection={(next) => {
+              const name = next.cursor && next.names.includes(next.cursor) ? next.cursor : (next.names[0] ?? null);
+              onSelect(name ? (entries.find((e) => e.name === name) ?? null) : null);
+            }}
+            onActivate={(entry) => {
+              if (entry.kind === "dir") void load(listing.token, [...listing.path, entry.name]);
+              else onSelect(entry);
+            }}
+            onKey={(key) => {
+              if (key === "up" && listing.path.length > 0) void load(listing.token, listing.path.slice(0, -1));
+            }}
+            canDrag={(entry) => entry.kind === "file" || entry.kind === "dir"}
+            onDragStart={(event, entry) => event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ side: "local", name: entry.name }))}
+            empty={<p className="ft-state">{msg.files.empty}</p>}
+          />
+        ) : (
+          <div className="ft-state">
+            <IconHardDrive size={24} />
+            <span>{msg.files.localNone}</span>
+            <button type="button" className="btn btn-sm" onClick={() => void choose()} disabled={pending}>
+              <IconFolderOpen size={14} /> {msg.files.localChoose}
+            </button>
+          </div>
+        )}
+      </div>
     </section>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }

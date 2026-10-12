@@ -12,7 +12,8 @@ AllowUsers tyr noforward nosession
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
-AuthorizedKeysFile /etc/ssh/lab/authorized_keys
+# The lab's own file, and the user's own one, so a key the app installs is the key that signs in.
+AuthorizedKeysFile /etc/ssh/lab/authorized_keys .ssh/authorized_keys
 StrictModes yes
 MaxAuthTries 6
 MaxStartups 200:30:400
