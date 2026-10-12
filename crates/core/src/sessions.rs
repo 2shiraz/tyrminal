@@ -1588,12 +1588,12 @@ async fn connect_ssh(
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
     let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
+    ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
     if !env.is_empty() {
         let sent: Vec<String> = env.iter().map(|(n, _)| n.clone()).collect();
         ctx.entry.log.note(&crate::connlog::environment_line(&sent, &rejected));
         ctx.sink.event(SessionEvent::Environment { sent, rejected });
     }
-    ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
     Ok((Linked { conn, hops: chain }, reader, writer, startup))
 }
 
