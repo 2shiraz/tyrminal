@@ -68,6 +68,7 @@ export const msgSftp = {
   localToLocal: "Both panes show this computer. Copying within this computer is done in your file manager.",
   sameFolder: "That is the folder it is already in.",
   notReady: "Open a folder in the other pane first.",
+  deleteMany: (n: number) => `Delete ${n} items?`,
   deleteLocalBody: "It is removed from this computer. A folder is removed only when it is empty. This cannot be undone.",
   deleteRemoteBody: "It is removed from the server. A folder is removed only when it is empty. This cannot be undone.",
   closeConnection: "Disconnect",

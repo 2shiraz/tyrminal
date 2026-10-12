@@ -119,8 +119,8 @@ for (const theme of ["dark", "light"] as const) {
       await shot(page, `${theme}-18-sftp-picker.png`);
       await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
       await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
-      await expect(view.getByRole("table", { name: /on api-gateway/ })).toBeVisible();
-      await view.getByRole("table", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
+      await expect(view.getByRole("grid", { name: /on api-gateway/ })).toBeVisible();
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
       await shot(page, `${theme}-19-sftp-panes.png`);
     });
   });

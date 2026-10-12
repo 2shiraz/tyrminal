@@ -16,7 +16,7 @@ const finishLatest = (page: Page) =>
 const view = (page: Page) => page.getByRole("region", { name: "SFTP file manager" });
 const left = (page: Page) => view(page).getByRole("region", { name: "Left pane" });
 const right = (page: Page) => view(page).getByRole("region", { name: "Right pane" });
-const table = (pane: ReturnType<typeof left>) => pane.getByRole("table", { name: /^Contents of / });
+const table = (pane: ReturnType<typeof left>) => pane.getByRole("grid", { name: /^Contents of / });
 
 async function openSftp(page: Page) {
   await page.keyboard.press("Control+Shift+K");
@@ -287,4 +287,58 @@ test("sftp: the local pane changes only inside the chosen folder", async ({ page
   await right(page).getByRole("button", { name: "Choose folder…" }).click();
   await local.getByRole("button", { name: "Select notes.md" }).dragTo(right(page).locator(".sftp-body"));
   await expect(view(page)).toContainText("Copying within this computer is done in your file manager.");
+});
+
+test("sftp: a click visibly selects, multi-select and keys work, and opening a folder shows it is loading", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await connectRight(page, "api-gateway");
+  const pane = right(page);
+  const remote = table(pane);
+  const row = (name: RegExp) => remote.getByRole("row", { name });
+  const footer = pane.getByRole("status", { name: "Selection" });
+  await expect(footer).toHaveText("5 items");
+
+  await remote.getByRole("button", { name: "Select README.md" }).click();
+  await expect(row(/README\.md/)).toHaveAttribute("aria-selected", "true");
+  await expect(row(/README\.md/)).toHaveClass(/is-selected/);
+  await pane.getByRole("searchbox", { name: "Filter" }).focus();
+  await expect(row(/README\.md/)).toHaveClass(/is-selected/);
+  await expect(footer).toHaveText("1 selected · 5.0 KB");
+
+  await remote.getByRole("button", { name: "Select deploy.sh" }).hover();
+  await page.mouse.down();
+  await expect(row(/deploy\.sh/)).toHaveAttribute("data-pressed", "true");
+  await page.mouse.up();
+
+  await remote.getByRole("button", { name: "Select README.md" }).click();
+  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  await expect(footer).toHaveText(/^2 selected/);
+  await remote.getByRole("button", { name: "Open app" }).click({ modifiers: ["Shift"] });
+  // The anchor moved to deploy.sh with the Ctrl click: the range runs from there up to app.
+  await expect(remote.locator('tr[aria-selected="true"]')).toHaveCount(4);
+
+  // Several items: one confirmation names how many.
+  await remote.getByRole("button", { name: "Select README.md" }).click();
+  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  await page.keyboard.press("Delete");
+  await expect(page.getByRole("alertdialog", { name: "Delete 2 items?" })).toBeVisible();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+
+  // Keys: arrows move the selection with focus; Enter on a folder opens it.
+  await remote.getByRole("button", { name: "Select backup.tar.gz" }).click();
+  await page.keyboard.press("ArrowUp");
+  await expect(row(/Open logs/)).toHaveAttribute("aria-selected", "true");
+  await expect(remote.getByRole("button", { name: "Open logs" })).toBeFocused();
+
+  await page.evaluate(() => {
+    (window as unknown as { __mockListDelay: number }).__mockListDelay = 900;
+  });
+  await page.keyboard.press("Enter");
+  await expect(row(/Open logs/)).toHaveAttribute("data-loading", "true");
+  await expect(pane.getByRole("navigation", { name: "Folder path" })).toHaveAttribute("aria-busy", "true");
+  await expect(pane.getByRole("navigation", { name: "Folder path" })).toContainText("logs");
+  await expect(pane.getByRole("progressbar", { name: "Opening folder" })).toBeVisible();
+  await expect(remote).toHaveAccessibleName("Contents of /home/deploy/logs on api-gateway");
+  await expect(pane.getByRole("progressbar")).toHaveCount(0);
 });

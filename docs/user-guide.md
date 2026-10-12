@@ -144,6 +144,11 @@ Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH ses
 - **Copy to another server** between two connected sessions, without saving anything on this
   computer.
 
+Click an item to select it (it stays highlighted); Shift+click selects a range and Ctrl+click
+(⌘+click on macOS) adds or removes one. The arrow keys, Home and End move the selection, Space
+toggles the current item, and Enter or a double-click opens a folder. The line under the list
+shows how many items are selected and their size.
+
 The panel remembers each session's place: switch to another tab and back and you find the same
 folder, selection, scroll position, toggles and transfers, without the folder being listed
 again. **Refresh** lists it again. The panel forgets a session when the session ends.
@@ -166,6 +171,9 @@ list, or later from the pane's name at the top.
   choosing another location for the pane, disconnects it.
 - On this computer, a pane shows a folder you choose and what is inside it, never anything
   outside it.
+- Selecting works as in the Files panel (click, Shift, Ctrl/⌘, arrow keys, Space, Enter or
+  double-click to open); a folder being opened shows that it is loading. Copy to, dragging and
+  Delete act on everything selected.
 - Each pane has back and forward, **Up one folder**, clickable folder names (breadcrumbs), a
   filter and columns **Name**, **Date Modified**, **Size** and **Kind** that sort when clicked;
   the permissions appear under each name.

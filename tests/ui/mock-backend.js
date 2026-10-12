@@ -556,7 +556,10 @@ export function installMockBackend(options) {
         .map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), ...fs.get(p) }))
         .sort((x, y) => (x.kind === "dir") === (y.kind === "dir") ? x.name.localeCompare(y.name) : x.kind === "dir" ? -1 : 1);
       const parent = dir === "/" ? null : dir.slice(0, dir.lastIndexOf("/")) || "/";
-      return { path: dir, parent, entries, truncated: false };
+      const listing = { path: dir, parent, entries, truncated: false };
+      // Tests set a delay to see the loading state of a folder being opened.
+      const delay = window.__mockListDelay ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(listing), delay)) : listing;
     },
     files_mkdir: (a) => {
       const p = childPath(a.dir, a.name);

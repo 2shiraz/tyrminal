@@ -9,7 +9,7 @@ import type {
   TransferEvent,
   TransferStarted,
 } from "@tyrminal/contracts";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, Notice, Shortcut, Switch, TextField } from "../../components/ui/controls";
@@ -37,6 +37,20 @@ import { useAction } from "../../lib/useAsync";
 import { beginUpload, sendUpload } from "./dropUpload";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
 import { KeyedMemory, useMemory } from "./memory";
+import {
+  NO_SELECTION,
+  type Selection,
+  clickSelect,
+  keySelect,
+  pressFeedback,
+  pruneSelection,
+  selectionSummary,
+  single,
+  toggleKey,
+} from "./selection";
+
+/** After this long, opening a folder shows a progress bar (the row shows it at once). */
+const SLOW_MS = 300;
 
 /** Transfer ids of dropped-file uploads (cancelled in the page, not by the core's transfer id). */
 const DROP_PREFIX = "drop-";
@@ -67,7 +81,8 @@ type Edit = EditStatus & { saved?: boolean | undefined };
 export interface PanelMemory {
   listing: RemoteListing | null;
   pathText: string;
-  selected: string | null;
+  /** Selected names (several with Shift or Ctrl/Cmd), anchor and keyboard row. */
+  selection: Selection;
   showHidden: boolean;
   twoPane: boolean;
   scrollTop: number;
@@ -80,7 +95,7 @@ export interface PanelMemory {
 const emptyMemory = (): PanelMemory => ({
   listing: null,
   pathText: "",
-  selected: null,
+  selection: NO_SELECTION,
   showHidden: false,
   twoPane: false,
   scrollTop: 0,
@@ -156,7 +171,7 @@ export function FilesPanel({
   const bodyRef = useRef<HTMLDivElement>(null);
   const sessionId = target?.sessionId ?? null;
   const [memory, change] = useMemory(panelMemory, sessionId, NO_SESSION);
-  const { listing, pathText, selected, showHidden, twoPane, transfers, edits, local, localSelection } = memory;
+  const { listing, pathText, selection: picked, showHidden, twoPane, transfers, edits, local, localSelection } = memory;
   const set = useCallback(
     <K extends keyof PanelMemory>(key: K, value: PanelMemory[K] | ((previous: PanelMemory[K]) => PanelMemory[K])) =>
       change((m) => ({ ...m, [key]: typeof value === "function" ? (value as (p: PanelMemory[K]) => PanelMemory[K])(m[key]) : value })),
@@ -164,7 +179,11 @@ export function FilesPanel({
   );
   const setTransfers = (value: (list: Transfer[]) => Transfer[]) => set("transfers", value);
   const setEdits = (value: (list: Edit[]) => Edit[]) => set("edits", value);
-  const setSelected = (name: string | null) => set("selected", name);
+  const setPicked = (next: Selection) => set("selection", next);
+  /** The folder being opened (its row and the path show that the click registered). */
+  const [opening, setOpening] = useState<string | null>(null);
+  /** Opening has taken long enough to show a progress bar. */
+  const [slow, setSlow] = useState(false);
   const setPathText = (text: string) => set("pathText", text);
   const setShowHidden = (on: boolean) => set("showHidden", on);
   const setTwoPane = (on: boolean) => set("twoPane", on);
@@ -185,8 +204,8 @@ export function FilesPanel({
           // Refreshing the same folder keeps the selection (while the entry is still there) and
           // the scroll position; another folder starts at the top.
           const same = m.listing?.path === result.path;
-          const selected = same && result.entries.some((e) => e.name === m.selected) ? m.selected : null;
-          return { ...m, listing: result, pathText: result.path, selected, scrollTop: same ? m.scrollTop : 0 };
+          const selection = same ? pruneSelection(m.selection, result.entries.map((e) => e.name)) : NO_SELECTION;
+          return { ...m, listing: result, pathText: result.path, selection, scrollTop: same ? m.scrollTop : 0 };
         });
       }
     },
@@ -251,7 +270,28 @@ export function FilesPanel({
 
   const entries = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith("."));
   const current = listing?.path ?? null;
-  const selection = entries.find((e) => e.name === selected) ?? null;
+  /** The one selected entry, for actions that take a single item. */
+  const selection = picked.names.length === 1 ? (entries.find((e) => e.name === picked.names[0]) ?? null) : null;
+  const order = entries.map((e) => e.name);
+
+  useEffect(() => {
+    if (opening === null) {
+      setSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlow(true), SLOW_MS);
+    return () => window.clearTimeout(timer);
+  }, [opening]);
+
+  /** Arrow keys, Home/End and Space move or change the selection; focus follows the cursor. */
+  function onListKey(event: KeyboardEvent<HTMLElement>) {
+    const next = keySelect(picked, order, event.key, event.shiftKey);
+    if (!next) return;
+    event.preventDefault();
+    setPicked(next);
+    const list = event.currentTarget;
+    window.requestAnimationFrame(() => list.querySelector<HTMLButtonElement>(`[data-name="${CSS.escape(next.cursor ?? "")}"] button`)?.focus());
+  }
 
   function track(started: TransferStarted, dir: string) {
     setTransfers((list) => [
@@ -474,13 +514,18 @@ export function FilesPanel({
     if (folder) await startDownload(selection, current, folder.token, "ask");
   }
 
-  function activate(entry: RemoteEntry) {
+  async function activate(entry: RemoteEntry) {
     if (!current) return;
     if (entry.kind === "dir" || entry.kind === "symlink") {
       const next = `${current.replace(/\/+$/, "")}/${entry.name}`;
-      void load(next);
+      setOpening(entry.name);
+      try {
+        await load(next);
+      } finally {
+        setOpening(null);
+      }
     } else {
-      setSelected(entry.name);
+      setPicked(single(entry.name));
     }
   }
 
@@ -516,6 +561,7 @@ export function FilesPanel({
             </span>
             <form
               className="files-path"
+              aria-busy={opening !== null || undefined}
               onSubmit={(event) => {
                 event.preventDefault();
                 const path = pathText.trim();
@@ -556,43 +602,6 @@ export function FilesPanel({
               <Switch label={msg.files.twoPane} checked={twoPane} onChange={setTwoPane} />
               <Switch label={msg.files.showHidden} checked={showHidden} onChange={setShowHidden} />
             </div>
-            {selection && (
-              <div className="files-actions" aria-label={selection.name}>
-                {twoPane && localLocation && (selection.kind === "file" || selection.kind === "dir") && (
-                  <button type="button" className="btn btn-sm btn-primary" onClick={() => void downloadToLocal(selection)} disabled={pending}>
-                    <IconDownload size={14} /> {msg.files.toLocal}
-                  </button>
-                )}
-                {selection.kind === "file" && (
-                  <button type="button" className="btn btn-sm btn-primary" onClick={() => void download()} disabled={pending}>
-                    <IconDownload size={14} /> {msg.files.download}
-                  </button>
-                )}
-                {selection.kind === "file" && (
-                  <button type="button" className="btn btn-sm" onClick={() => void editSelected()} disabled={pending}>
-                    <IconPencil size={14} /> {msg.files.edit}
-                  </button>
-                )}
-                {(selection.kind === "file" || selection.kind === "dir") && others.length > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setPrompt({ kind: "copy", entry: selection, others, start: (dst, dir) => void startCopy(selection, dst, dir, "ask") })}
-                  >
-                    {msg.files.copyTo}
-                  </button>
-                )}
-                <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "rename", entry: selection })}>
-                  <IconPencil size={14} /> {msg.files.rename}
-                </button>
-                <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "chmod", entry: selection })}>
-                  <IconSlidersHorizontal size={14} /> {msg.files.permissions}
-                </button>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => setPrompt({ kind: "delete", entry: selection })}>
-                  <IconTrash2 size={14} /> {msg.files.delete}
-                </button>
-              </div>
-            )}
           </div>
 
           <div className="files-panes">
@@ -648,45 +657,110 @@ export function FilesPanel({
               if (data.side === "local") void uploadFromLocal(data.name, local?.kind ?? "file");
             }}
           >
+            {slow && <div className="list-progress" role="progressbar" aria-label={msg.files.loadingFolder} />}
             <ErrorNotice error={error} />
             {listing?.truncated && <Notice tone="warning">{msg.files.truncated(listing.entries.length)}</Notice>}
             {listing && entries.length === 0 && <p className="muted">{msg.files.empty}</p>}
             {listing && entries.length > 0 && (
-              <ul className="files-list" aria-label={msg.files.listLabel(listing.path)}>
-                {entries.map((entry) => (
-                  <li key={entry.name} data-selected={entry.name === selected || undefined}>
-                    <button
-                      type="button"
-                      className="files-row"
-                      aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
-                      aria-pressed={entry.kind === "dir" ? undefined : entry.name === selected}
-                      onClick={() => (entry.kind === "dir" ? activate(entry) : setSelected(entry.name === selected ? null : entry.name))}
-                      onDoubleClick={() => activate(entry)}
-                      draggable={twoPane && (entry.kind === "file" || entry.kind === "dir")}
-                      onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ side: "remote", name: entry.name }))}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && entry.kind === "symlink") {
-                          event.preventDefault();
-                          activate(entry);
-                        }
-                      }}
+              <ul
+                className="files-list"
+                role="grid"
+                aria-multiselectable="true"
+                aria-label={msg.files.listLabel(listing.path)}
+                aria-busy={opening !== null || undefined}
+                onKeyDown={onListKey}
+              >
+                {entries.map((entry) => {
+                  const isSelected = picked.names.includes(entry.name);
+                  const isOpening = opening === entry.name;
+                  return (
+                    <li
+                      key={entry.name}
+                      role="row"
+                      aria-selected={isSelected}
+                      className={isSelected ? "is-selected" : undefined}
+                      data-name={entry.name}
+                      data-loading={isOpening || undefined}
+                      onPointerDown={(event) => pressFeedback(event.currentTarget)}
                     >
-                      <span className={`files-icon files-icon-${entry.kind}`}>
-                        <EntryIcon entry={entry} />
-                      </span>
-                      <span className="files-name">{visibleName(entry.name)}</span>
-                      <span className="files-meta mono">{entry.kind === "dir" ? "" : formatSize(entry.size)}</span>
-                      <span className="files-meta mono" title={msg.files.permissions}>
-                        {modeText(entry.permissions)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                      <div role="gridcell" className="files-cell">
+                        <button
+                          type="button"
+                          className="files-row"
+                          aria-label={entry.kind === "dir" ? msg.files.open(entry.name) : msg.files.select(entry.name)}
+                          tabIndex={(picked.cursor ?? order[0]) === entry.name ? 0 : -1}
+                          onClick={(event) => setPicked(clickSelect(picked, order, entry.name, { toggle: toggleKey(event), extend: event.shiftKey }))}
+                          onDoubleClick={() => void activate(entry)}
+                          draggable={twoPane && (entry.kind === "file" || entry.kind === "dir")}
+                          onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ side: "remote", name: entry.name }))}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void activate(entry);
+                            }
+                          }}
+                        >
+                          <span className={`files-icon files-icon-${entry.kind}`}>
+                            {isOpening ? <span className="spinner spinner-xs" aria-hidden="true" /> : <EntryIcon entry={entry} />}
+                          </span>
+                          <span className="files-name">{visibleName(entry.name)}</span>
+                          <span className="files-meta mono">{entry.kind === "dir" ? "" : formatSize(entry.size)}</span>
+                          <span className="files-meta mono" title={msg.files.permissions}>
+                            {modeText(entry.permissions)}
+                          </span>
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
 
           </div>
+
+          {selection && (
+            <div className="files-actions files-selection-actions" aria-label={selection.name}>
+              {twoPane && localLocation && (selection.kind === "file" || selection.kind === "dir") && (
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => void downloadToLocal(selection)} disabled={pending}>
+                  <IconDownload size={14} /> {msg.files.toLocal}
+                </button>
+              )}
+              {selection.kind === "file" && (
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => void download()} disabled={pending}>
+                  <IconDownload size={14} /> {msg.files.download}
+                </button>
+              )}
+              {selection.kind === "file" && (
+                <button type="button" className="btn btn-sm" onClick={() => void editSelected()} disabled={pending}>
+                  <IconPencil size={14} /> {msg.files.edit}
+                </button>
+              )}
+              {(selection.kind === "file" || selection.kind === "dir") && others.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setPrompt({ kind: "copy", entry: selection, others, start: (dst, dir) => void startCopy(selection, dst, dir, "ask") })}
+                >
+                  {msg.files.copyTo}
+                </button>
+              )}
+              <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "rename", entry: selection })}>
+                <IconPencil size={14} /> {msg.files.rename}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setPrompt({ kind: "chmod", entry: selection })}>
+                <IconSlidersHorizontal size={14} /> {msg.files.permissions}
+              </button>
+              <button type="button" className="btn btn-sm btn-danger" onClick={() => setPrompt({ kind: "delete", entry: selection })}>
+                <IconTrash2 size={14} /> {msg.files.delete}
+              </button>
+            </div>
+          )}
+          {listing && (
+            <div className="files-footer" role="status" aria-label={msg.files.selectionStatus}>
+              {selectionSummary(entries, picked.names, (n) => formatSize(n))}
+            </div>
+          )}
 
           {edits.length > 0 && (
             <section className="files-transfers" aria-label={msg.files.editing}>

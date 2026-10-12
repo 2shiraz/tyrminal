@@ -48,7 +48,7 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
       await audit(page);
       await page.keyboard.press("Control+Shift+O");
-      await expect(page.getByRole("complementary", { name: "Files" }).getByRole("list", { name: /^Contents of \// })).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Files" }).getByRole("grid", { name: /^Contents of \// })).toBeVisible();
       await audit(page);
       await page.keyboard.press("Control+Shift+S");
       await expect(page.getByRole("complementary", { name: "Snippets" })).toBeVisible();
@@ -65,8 +65,8 @@ for (const theme of ["dark", "light"] as const) {
       await audit(page);
       await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
       await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
-      await expect(view.getByRole("table", { name: /on api-gateway/ })).toBeVisible();
-      await view.getByRole("table", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
+      await expect(view.getByRole("grid", { name: /on api-gateway/ })).toBeVisible();
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
       await audit(page);
       await view.getByRole("button", { name: "Actions for the right pane" }).click();
       await expect(page.getByRole("menu", { name: "Actions" })).toBeVisible();

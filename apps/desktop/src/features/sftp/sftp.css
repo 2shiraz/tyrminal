@@ -314,8 +314,56 @@ th.sftp-col-size .sftp-sort {
   background: var(--bg-hover);
 }
 
-.sftp-table tbody tr[aria-selected="true"] td {
+.sftp-table tbody tr.is-selected td {
   background: var(--bg-selected);
+  color: var(--accent-text);
+}
+
+.sftp-table tbody tr.is-selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sftp-table tbody tr.is-selected .sftp-name,
+.sftp-table tbody tr.is-selected .files-icon,
+.sftp-table tbody tr.is-selected .sftp-perm {
+  color: var(--accent-text);
+}
+
+/* Pressed: on pointer down at once, no transition (pressFeedback() holds it briefly). */
+.sftp-table tbody tr[data-pressed] td {
+  background: var(--bg-active);
+  transition: none;
+}
+
+.sftp-table tbody tr[data-loading] td {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+.sftp-crumbs[data-loading] .sftp-crumb {
+  opacity: 0.65;
+}
+
+.sftp-crumb-pending .sftp-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  cursor: progress;
+}
+
+.sftp-progress {
+  margin-bottom: -2px;
+}
+
+.sftp-footer {
+  flex: none;
+  padding: 4px var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .sftp-table tbody td.sftp-col-name {

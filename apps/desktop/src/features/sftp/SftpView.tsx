@@ -64,7 +64,10 @@ export function SftpView({
   const [refresh, setRefresh] = useState<Record<Side, number>>({ left: 0, right: 0 });
   const [health, setHealth] = useState<Record<Side, PaneHealth>>({ left: "idle", right: "idle" });
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [conflict, setConflict] = useState<Conflict | null>(null);
+  /** Name conflicts waiting for a decision, asked one at a time. */
+  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const conflict = conflicts[0] ?? null;
+  const settle = () => setConflicts((list) => list.slice(1));
   const [notice, setNotice] = useState<string | null>(null);
 
   const onLeftEndpoint = useCallback((e: Endpoint | null) => setEndpoints((c) => ({ ...c, left: e })), []);
@@ -100,6 +103,10 @@ export function SftpView({
       ...list,
       { id: `refused-${Date.now()}-${list.length}`, name, direction, total: null, done: 0, state: "failed", error: e.message },
     ]);
+  }
+
+  function transferAll(from: Side, entries: RemoteEntry[]) {
+    for (const entry of entries) transfer(from, entry);
   }
 
   /** Copies `entry` from the `from` pane's folder into the other pane's folder. */
@@ -152,7 +159,8 @@ export function SftpView({
       .catch((caught) => {
         const e = toAppError(caught);
         if (e.code === "CONFLICT" && choice === "ask") {
-          setConflict({ name: entry.name, remote: dst.kind === "remote", folder: entry.kind === "dir", start: (c) => transfer(from, entry, c) });
+          const next = { name: entry.name, remote: dst.kind === "remote", folder: entry.kind === "dir", start: (c: ConflictChoice) => transfer(from, entry, c) };
+          setConflicts((list) => [...list, next]);
         } else {
           failNow(entry.name, direction, e);
         }
@@ -171,8 +179,8 @@ export function SftpView({
           otherWhere={whereOf(endpoints.right)}
           onEndpoint={onLeftEndpoint}
           onHealth={onLeftHealth}
-          onTransfer={(entry) => transfer("left", entry)}
-          onDropFrom={(entry) => transfer("right", entry)}
+          onTransfer={(entries) => transferAll("left", entries)}
+          onDropFrom={(entries) => transferAll("right", entries)}
           onOpenKnownHosts={onOpenKnownHosts}
         />
         <div className="sftp-divider" aria-hidden="true" />
@@ -185,8 +193,8 @@ export function SftpView({
           otherWhere={whereOf(endpoints.left)}
           onEndpoint={onRightEndpoint}
           onHealth={onRightHealth}
-          onTransfer={(entry) => transfer("right", entry)}
-          onDropFrom={(entry) => transfer("left", entry)}
+          onTransfer={(entries) => transferAll("right", entries)}
+          onDropFrom={(entries) => transferAll("left", entries)}
           onOpenKnownHosts={onOpenKnownHosts}
         />
       </div>
@@ -244,11 +252,11 @@ export function SftpView({
       )}
 
       {conflict && visible && (
-        <Dialog title={msg.files.replaceTitle(conflict.name)} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => setConflict(null)}>
+        <Dialog key={`${conflict.name}-${conflicts.length}`} title={msg.files.replaceTitle(conflict.name)} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => settle()}>
           <div className="stack">
             <p>{conflict.folder ? msg.files.folderExists : conflict.remote ? msg.files.replaceRemote : msg.files.replaceLocal}</p>
             <div className="dialog-actions">
-              <button type="button" className="btn" onClick={() => setConflict(null)} data-autofocus>
+              <button type="button" className="btn" onClick={() => settle()} data-autofocus>
                 {msg.common.cancel}
               </button>
               <button
@@ -256,7 +264,7 @@ export function SftpView({
                 className={conflict.folder ? "btn btn-primary" : "btn"}
                 onClick={() => {
                   conflict.start("keep_both");
-                  setConflict(null);
+                  settle();
                 }}
               >
                 {msg.files.keepBoth}
@@ -267,7 +275,7 @@ export function SftpView({
                   className="btn btn-danger-solid"
                   onClick={() => {
                     conflict.start("replace");
-                    setConflict(null);
+                    settle();
                   }}
                 >
                   {msg.files.replace}
