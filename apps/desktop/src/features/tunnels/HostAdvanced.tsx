@@ -1,4 +1,4 @@
-import type { HostConnectionInput, HostSummary, ProxySummary, ProxyType } from "@tyrminal/contracts";
+import type { HostConnectionInput, HostSummary, KeyExchangeMode, ProxySummary, ProxyType } from "@tyrminal/contracts";
 import { useCallback, useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
@@ -12,6 +12,7 @@ type ProxyChoice = "none" | ProxyType;
 interface Loaded {
   jumpHostId: string | null;
   proxy: ProxySummary | null;
+  keyExchange: KeyExchangeMode;
 }
 
 /**
@@ -21,7 +22,8 @@ interface Loaded {
  * write-only: an empty field keeps the stored one.
  */
 export function useHostAdvanced(hostId: string | null) {
-  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null });
+  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, keyExchange: "prefer_post_quantum" });
+  const [keyExchange, setKeyExchange] = useState<KeyExchangeMode>("prefer_post_quantum");
   const [ready, setReady] = useState(hostId === null);
   const [jumpHostId, setJumpHostId] = useState<string | null>(null);
   const [proxyKind, setProxyKind] = useState<ProxyChoice>("none");
@@ -36,8 +38,9 @@ export function useHostAdvanced(hostId: string | null) {
     void tunnelsApi.connection(hostId).then(
       (connection) => {
         if (!alive) return;
-        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy });
+        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, keyExchange: connection.keyExchange });
         setJumpHostId(connection.jumpHostId);
+        setKeyExchange(connection.keyExchange);
         if (connection.proxy) {
           setProxyKind(connection.proxy.kind);
           setProxyHost(connection.proxy.host);
@@ -60,6 +63,7 @@ export function useHostAdvanced(hostId: string | null) {
   const input = useCallback(
     (): HostConnectionInput => ({
       jumpHostId,
+      keyExchange,
       proxy:
         proxyKind === "none"
           ? null
@@ -71,11 +75,12 @@ export function useHostAdvanced(hostId: string | null) {
               password: proxyPassword.length > 0 ? proxyPassword : null,
             },
     }),
-    [jumpHostId, proxyKind, proxyHost, port, proxyUser, proxyPassword],
+    [jumpHostId, keyExchange, proxyKind, proxyHost, port, proxyUser, proxyPassword],
   );
 
   const changed =
     jumpHostId !== loaded.jumpHostId ||
+    keyExchange !== loaded.keyExchange ||
     proxyPassword.length > 0 ||
     (proxyKind === "none") !== (loaded.proxy === null) ||
     (loaded.proxy !== null &&
@@ -103,6 +108,8 @@ export function useHostAdvanced(hostId: string | null) {
     valid: proxyValid,
     jumpHostId,
     setJumpHostId,
+    keyExchange,
+    setKeyExchange,
     proxy: { kind: proxyKind, host: proxyHost, port: proxyPort, user: proxyUser, password: proxyPassword, passwordStored },
     setProxyKind,
     setProxyHost,
@@ -115,13 +122,14 @@ export function useHostAdvanced(hostId: string | null) {
 }
 
 const PROXY_CHOICES: ProxyChoice[] = ["none", "http", "socks5"];
+const KEX_CHOICES: KeyExchangeMode[] = ["prefer_post_quantum", "require_post_quantum", "classic"];
 
 export function HostAdvancedSection({ host, state }: { host: HostSummary | null; state: ReturnType<typeof useHostAdvanced> }) {
   const { hosts } = useVaultData();
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
   const jump = options.find((h) => h.id === state.jumpHostId);
   const p = state.proxy;
-  const configured = state.jumpHostId !== null || p.kind !== "none";
+  const configured = state.jumpHostId !== null || p.kind !== "none" || state.keyExchange !== "prefer_post_quantum";
   return (
     <details className="advanced" open={configured ? true : undefined}>
       <summary>{msgB.advanced.title}</summary>
@@ -193,6 +201,24 @@ export function HostAdvancedSection({ host, state }: { host: HostSummary | null;
             {p.kind === "http" && p.user.trim() !== "" && <Notice tone="warning">{msgB.advanced.httpCleartext}</Notice>}
           </>
         )}
+
+        <label className="field">
+          <span className="label">{msgB.advanced.keyExchange}</span>
+          <select
+            className="select"
+            aria-label={msgB.advanced.keyExchange}
+            value={state.keyExchange}
+            disabled={!state.ready}
+            onChange={(event) => state.setKeyExchange(event.target.value as KeyExchangeMode)}
+          >
+            {KEX_CHOICES.map((choice) => (
+              <option key={choice} value={choice}>
+                {msgB.advanced.keyExchangeModes[choice]}
+              </option>
+            ))}
+          </select>
+          <span className="hint">{msgB.advanced.keyExchangeHints[state.keyExchange]}</span>
+        </label>
       </div>
     </details>
   );

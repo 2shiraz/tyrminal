@@ -127,6 +127,13 @@ pub(crate) struct StoredConnection {
     pub jump_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<StoredProxy>,
+    /// Post-quantum key exchange; the default (prefer) is not stored.
+    #[serde(default, skip_serializing_if = "is_default_key_exchange")]
+    pub key_exchange: tyrminal_contracts::KeyExchangeMode,
+}
+
+fn is_default_key_exchange(mode: &tyrminal_contracts::KeyExchangeMode) -> bool {
+    *mode == tyrminal_contracts::KeyExchangeMode::default()
 }
 
 /// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.

@@ -190,3 +190,35 @@ test("a direct connection's trust prompt shows no hop", async ({ page }) => {
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await expect(page.getByTestId("hop-notice")).toHaveCount(0);
 });
+
+test("hosts: post-quantum key exchange can be required or turned off per host", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-nav="hosts"]').click();
+  const edit = async (label: string) => {
+    await page.getByRole("button", { name: `More actions for ${label}` }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    return page.getByRole("dialog", { name: /Edit host/ });
+  };
+  const saved = () =>
+    page.evaluate(() => Object.fromEntries((window as unknown as { __mockKeyExchanges: Map<string, string> }).__mockKeyExchanges));
+
+  let dialog = await edit("db-primary");
+  await dialog.getByText("Advanced").click();
+  const kex = dialog.getByRole("combobox", { name: "Post-quantum key exchange" });
+  await expect(kex).toHaveValue("prefer_post_quantum");
+  await expect(dialog).toContainText("Servers without it use X25519");
+  await kex.selectOption("classic");
+  await expect(dialog).toContainText("For servers that fail with post-quantum key exchange");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(Object.values(await saved())).toEqual(["classic"]);
+
+  // A non-default setting keeps the Advanced section open when the editor is reopened.
+  dialog = await edit("db-primary");
+  await expect(dialog.getByRole("combobox", { name: "Post-quantum key exchange" })).toBeVisible();
+  await dialog.getByRole("combobox", { name: "Post-quantum key exchange" }).selectOption("require_post_quantum");
+  await expect(dialog).toContainText("Otherwise the connection stops before you sign in");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(Object.values(await saved())).toEqual(["require_post_quantum"]);
+});

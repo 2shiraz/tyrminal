@@ -30,6 +30,8 @@ pub struct ConnectOptions {
     /// Limit for each authentication round trip and channel request.
     pub request_timeout: Duration,
     pub keepalive_interval: Option<Duration>,
+    /// Post-quantum key exchange: preferred unless the host says otherwise.
+    pub key_exchange: crate::algorithms::KeyExchangePolicy,
 }
 
 impl ConnectOptions {
@@ -40,6 +42,7 @@ impl ConnectOptions {
             handshake_timeout: Duration::from_secs(15),
             request_timeout: Duration::from_secs(20),
             keepalive_interval: Some(Duration::from_secs(30)),
+            key_exchange: crate::algorithms::KeyExchangePolicy::default(),
         }
     }
 }
@@ -151,7 +154,7 @@ impl<V: HostKeyVerifier> Handler<V> {
 
 fn config(options: &ConnectOptions) -> Arc<client::Config> {
     Arc::new(client::Config {
-        preferred: algorithms::preferred(),
+        preferred: algorithms::preferred(options.key_exchange),
         keepalive_interval: options.keepalive_interval,
         keepalive_max: 3,
         nodelay: true,

@@ -6,6 +6,8 @@ use std::borrow::Cow;
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg};
 use russh::{Preferred, cipher, compression, kex, mac};
 
+/// Hybrid post-quantum first (ML-KEM-768 with X25519), then classical exchanges for servers that
+/// do not offer it.
 const KEX: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
     kex::CURVE25519,
@@ -16,6 +18,45 @@ const KEX: &[kex::Name] = &[
     kex::EXTENSION_SUPPORT_AS_CLIENT,
     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
 ];
+
+/// Only the hybrid post-quantum exchange: a server without it fails key exchange, before any
+/// credential could be sent.
+const KEX_POST_QUANTUM_ONLY: &[kex::Name] =
+    &[kex::MLKEM768X25519_SHA256, kex::EXTENSION_SUPPORT_AS_CLIENT, kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT];
+
+/// Without the post-quantum exchange, for servers that mishandle it.
+const KEX_CLASSIC: &[kex::Name] = &[
+    kex::CURVE25519,
+    kex::CURVE25519_PRE_RFC_8731,
+    kex::DH_GEX_SHA256,
+    kex::DH_G16_SHA512,
+    kex::DH_G14_SHA256,
+    kex::EXTENSION_SUPPORT_AS_CLIENT,
+    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+];
+
+/// The name of the hybrid post-quantum key exchange this build offers.
+pub const POST_QUANTUM_KEX: &str = "mlkem768x25519-sha256";
+
+/// How a connection treats post-quantum key exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyExchangePolicy {
+    /// Offer the hybrid post-quantum exchange first and fall back to classical ones.
+    #[default]
+    PreferPostQuantum,
+    /// Offer only the hybrid post-quantum exchange.
+    RequirePostQuantum,
+    /// Offer only classical exchanges (compatibility with servers that mishandle it).
+    Classic,
+}
+
+fn kex_for(policy: KeyExchangePolicy) -> &'static [kex::Name] {
+    match policy {
+        KeyExchangePolicy::PreferPostQuantum => KEX,
+        KeyExchangePolicy::RequirePostQuantum => KEX_POST_QUANTUM_ONLY,
+        KeyExchangePolicy::Classic => KEX_CLASSIC,
+    }
+}
 
 /// Host key algorithms. `ssh-rsa` with SHA-1 (`Rsa { hash: None }`) is deliberately absent.
 const HOST_KEYS: &[Algorithm] = &[
@@ -35,9 +76,9 @@ const MACS: &[mac::Name] = &[mac::HMAC_SHA512_ETM, mac::HMAC_SHA256_ETM, mac::HM
 /// Compression is off: it is unnecessary for interactive use and is a known side channel.
 const COMPRESSION: &[compression::Name] = &[compression::NONE];
 
-pub(crate) fn preferred() -> Preferred {
+pub(crate) fn preferred(policy: KeyExchangePolicy) -> Preferred {
     Preferred {
-        kex: Cow::Borrowed(KEX),
+        kex: Cow::Borrowed(kex_for(policy)),
         host_key_certificates: Cow::Borrowed(&[]),
         key: Cow::Borrowed(HOST_KEYS),
         cipher: Cow::Borrowed(CIPHERS),
@@ -74,5 +115,25 @@ mod tests {
         }
         assert!(summary.contains("curve25519-sha256"));
         assert!(summary.contains("chacha20-poly1305@openssh.com"));
+    }
+
+    #[test]
+    fn the_key_exchange_policy_selects_the_offer() {
+        let names = |p| kex_for(p).iter().map(|n| n.as_ref().to_owned()).collect::<Vec<_>>();
+        assert_eq!(names(KeyExchangePolicy::PreferPostQuantum)[0], POST_QUANTUM_KEX, "post-quantum first by default");
+        assert!(names(KeyExchangePolicy::PreferPostQuantum).iter().any(|n| n == "curve25519-sha256"));
+        let required = names(KeyExchangePolicy::RequirePostQuantum);
+        assert_eq!(required[0], POST_QUANTUM_KEX);
+        assert!(required[1..].iter().all(|n| n.starts_with("ext-info") || n.starts_with("kex-strict")), "{required:?}");
+        let classic = names(KeyExchangePolicy::Classic);
+        assert!(!classic.iter().any(|n| n == POST_QUANTUM_KEX));
+        assert_eq!(classic[0], "curve25519-sha256");
+        // Strict key exchange (Terrapin countermeasure) is kept in every policy.
+        for policy in
+            [KeyExchangePolicy::PreferPostQuantum, KeyExchangePolicy::RequirePostQuantum, KeyExchangePolicy::Classic]
+        {
+            assert!(names(policy).iter().any(|n| n == "kex-strict-c-v00@openssh.com"));
+        }
+        assert_eq!(KeyExchangePolicy::default(), KeyExchangePolicy::PreferPostQuantum);
     }
 }

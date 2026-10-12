@@ -17,14 +17,15 @@ and the merge protocol are in `docs/work-split.md`. Branch `claude/agent-b-tunne
 | Recording format: `crates/session-log`, STREAM-BE32 over XChaCha20-Poly1305 (`aead-stream` 0.6.0), per-file key from `K_logs`, header bound as AAD, padded chunks, size limit, Complete/Incomplete/Damaged reading | `crates/session-log/tests/format.rs` 14/14: a cut at every byte and a flipped bit at every byte never read as complete and show only original events; reordered, dropped, repeated, spliced and foreign chunks; flag flips; trailing data; wrong key/identity; limit never exceeded; proptest round trip; mutation (no AAD) fails 8 tests | LOG-01 |
 | Recording in core: output-only tee on the session sink (typed input cannot reach it), per-vault switch (off by default; off stops running recordings and keeps them; delete one/all separate), per-host retention plus bookmarks, comments, lock ends and later completes the record, owner-only files | `crates/core/tests/history.rs` 7/7, 3 runs (hidden `stty -echo` answer never recorded, mutation that records input fails it; no plaintext output/title/answer anywhere on disk; 0700/0600; cut/damaged/missing files; size limit; lock); `tunnels_lab` 12/12 incl. SSH recording without the hidden answer | LOG-01/02/03/04/10, P-16 |
 | Recordings page: switch and limits, storage indicator, newest-first list, search, bookmark filter, comment dialog, delete/delete all with confirmation, read-only player (replay at 1–8×, find, OSC 8/52/title/input inert) | `tests/ui/history.spec.ts` 6/6 incl. axe WCAG 2.2 AA in both themes; mutation (default link handler) fails the read-only test; full UI suite 78/78 | LOG-05/06/07 |
+| Post-quantum key exchange per host: prefer (default, `mlkem768x25519-sha256` first, X25519 fallback), require (refused during key exchange, before trust or sign-in), off (compatibility) | `algorithms` unit test; `crates/ssh/tests/kex_lab.rs` 3/3 ×3 against OpenSSH 9.6 (fallback, off, require refused with no authentication in the server log); the ML-KEM end-to-end test is BLOCKED here (needs OpenSSH ≥ 9.9; container image pull rate-limited); `tunnels_lab` 13/13 ×3, a mutant that ignores the setting fails; UI (mock) | SEC-08, SEC-10 |
 
 Design decisions: `docs/decisions/0004-tunnels-and-connection-path.md`.
 
 ## Next tasks, in order
 
-1. Export of a recording (P-16): a decrypted text/asciicast file the user saves in a native dialog.
-2. Connection diagnostics (CON-15), then agent forwarding (CON-11), then hybrid post-quantum key
-   exchange preference and per-host compatibility toggle (SEC-08/10), then command history (AUT-01).
+1. Tunnel runs follow their session when it moves to another window (after the handoff change lands).
+2. Sign-in with a user certificate (KEY-07, lab CA), OpenSSH `ProxyJump` import as jump hosts
+   (IMP-02), jump host and proxy inherited from groups (HST-05).
 
 ## Known limits
 

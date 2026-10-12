@@ -44,6 +44,18 @@ export const msgB = {
     proxyPassword: "Proxy password",
     proxyPasswordKeep: "Leave empty to keep the stored password.",
     httpCleartext: "An HTTP proxy receives the user name and password unencrypted (base64). Use it only on a network you trust.",
+    keyExchange: "Post-quantum key exchange",
+    keyExchangeModes: {
+      prefer_post_quantum: "Use when offered (recommended)",
+      require_post_quantum: "Require",
+      classic: "Off (compatibility)",
+    },
+    keyExchangeHints: {
+      prefer_post_quantum:
+        "ML-KEM-768 with X25519 protects against later decryption by a quantum computer. Servers without it use X25519.",
+      require_post_quantum: "Connects only to servers that offer it. Otherwise the connection stops before you sign in.",
+      classic: "For servers that fail with post-quantum key exchange. The connection uses X25519 only.",
+    },
   },
   tunnels: {
     title: "Tunnels",

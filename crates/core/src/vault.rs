@@ -111,6 +111,7 @@ pub(crate) struct ConnectionPlan {
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
     /// The host's saved label.
     pub label: String,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     pub generation: u32,
@@ -126,6 +127,7 @@ pub(crate) struct HopPlan {
     pub auth: PlanAuth,
     /// How to leave this computer when this host is the first hop.
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
 }
 
 pub(crate) enum PlanAuth {
@@ -1665,6 +1667,7 @@ impl VaultService {
             auth: target.auth,
             proxy: target.proxy,
             label: target.label,
+            key_exchange: target.key_exchange,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -1703,6 +1706,15 @@ impl VaultService {
             auth,
             // agent B: tunnels and history
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_spec),
+            key_exchange: match host.connection.key_exchange {
+                tyrminal_contracts::KeyExchangeMode::PreferPostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::PreferPostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::RequirePostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::Classic => tyrminal_ssh::KeyExchangePolicy::Classic,
+            },
         })
     }
 
@@ -1727,6 +1739,7 @@ impl VaultService {
         Ok(HostConnection {
             jump_host_id: host.connection.jump_host.clone(),
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_summary),
+            key_exchange: host.connection.key_exchange,
         })
     }
 
@@ -1754,6 +1767,7 @@ impl VaultService {
         let mut record = copy_host(&current.record);
         record.connection.jump_host = jump.map(|j| validate::id_text(&j));
         record.connection.proxy = proxy;
+        record.connection.key_exchange = input.key_exchange;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = jump;

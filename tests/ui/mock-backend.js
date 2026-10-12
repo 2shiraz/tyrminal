@@ -290,6 +290,8 @@ export function installMockBackend(options) {
       const runs = new Map();
       const jumps = new Map();
       const proxies = new Map();
+      const keyExchanges = new Map();
+      window.__mockKeyExchanges = keyExchanges;
       window.__mockJumps = jumps;
       window.__mockProxies = proxies;
       let nextRule = 1;
@@ -382,8 +384,16 @@ export function installMockBackend(options) {
         tunnel_clear_ended: () => {
           for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
         },
-        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null }),
+        host_connection_get: (a) => ({
+          jumpHostId: jumps.get(a.hostId) ?? null,
+          proxy: proxies.get(a.hostId) ?? null,
+          keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+        }),
         host_connection_set: (a) => {
+          if (!["prefer_post_quantum", "require_post_quantum", "classic"].includes(a.connection.keyExchange ?? "prefer_post_quantum")) {
+            throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
+          }
+          keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
           // Loops are refused as natively; the chain is returned first hop first.
           const next = a.connection.jumpHostId;
           for (let at = next, n = 0; at; at = jumps.get(at), n += 1) {
@@ -478,8 +488,14 @@ export function installMockBackend(options) {
           const next = a.settings;
           if (!(next.keepPerHost >= 1 && next.keepPerHost <= 100)) fail("INVALID_INPUT", "Keep between 1 and 100 recordings per host.");
           if (!(next.maxLogMib >= 1 && next.maxLogMib <= 512)) fail("INVALID_INPUT", "A recording's size limit must be between 1 and 512 MiB.");
-          settings = { ...next };
-          return { ...settings };
+          // Saving takes a moment natively (an encrypted vault write); quick successive changes
+          // must not overwrite one another.
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              settings = { ...next };
+              resolve({ ...settings });
+            }, 150),
+          );
         },
         session_log_list: () => [...logs].sort((x, y) => y.startedAt - x.startedAt).map(summary),
         session_log_storage: () => ({ count: logs.length, totalBytes: logs.reduce((n, l) => n + l.sizeBytes, 0) }),

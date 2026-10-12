@@ -69,6 +69,13 @@ forwarding uses `russh` 0.64.1 (ADR 0002) and `tokio`, both already in the works
    file has its own key from `K_logs` and its id. The recorder taps the session's output sink only, so
    typed input can never be recorded (BUILD_SPEC §8 "never log raw keystrokes").
 
+10. **Post-quantum key exchange per host.** The offer keeps `mlkem768x25519-sha256` (ML-KEM-768
+    with X25519, as OpenSSH 10 defaults to) first. Each host chooses: *prefer* (default; servers
+    without it negotiate X25519), *require* (only the hybrid is offered, so a server without it fails
+    key exchange before its host key is checked or any credential is sent), or *off* for servers
+    that mishandle it. Strict key exchange stays on in every mode. russh 0.64 does not implement
+    `sntrup761x25519-sha512`, so it is not offered. No new dependency.
+
 ## Limits, stated plainly
 
 - A loopback listener is reachable by other accounts on the same computer, as with OpenSSH's

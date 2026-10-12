@@ -502,7 +502,11 @@ async fn next_decision(events: &mut mpsc::UnboundedReceiver<SessionEvent>) -> Se
 }
 
 async fn jump_to(f: &Fixture, host: &str, via: &str) {
-    let connection = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(via.into()) };
+    let connection = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(via.into()),
+        key_exchange: Default::default(),
+    };
     f.core.vault.set_host_connection(host, connection).await.unwrap();
 }
 
@@ -624,13 +628,22 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
     let a = f.host_at(&user, "a", f.lab.port_of("a")).await;
     let b = f.host_at(&user, "b", f.lab.port_of("b")).await;
     jump_to(&f, &b, &a).await;
-    let looped = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(b.clone()) };
+    let looped = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(b.clone()),
+        key_exchange: Default::default(),
+    };
     assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
-    let itself = tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(a.clone()) };
+    let itself = tyrminal_core::contracts::HostConnectionInput {
+        proxy: None,
+        jump_host_id: Some(a.clone()),
+        key_exchange: Default::default(),
+    };
     assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
     let missing = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some("00000000000000000000000000000000".into()),
+        key_exchange: Default::default(),
     };
     assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
 
@@ -708,6 +721,7 @@ fn proxy_input(port: u16, password: Option<&str>) -> tyrminal_core::contracts::H
             username: PROXY_USER.into(),
             password: password.map(Into::into),
         }),
+        key_exchange: Default::default(),
     }
 }
 
@@ -827,4 +841,89 @@ async fn an_ssh_session_is_recorded_under_its_host_without_the_answer_to_a_hidde
     let done = f.core.sessions.list_session_logs().await.unwrap().remove(0);
     assert_eq!(done.state, tyrminal_core::contracts::SessionLogState::Complete);
     assert!(!recorded_text(&f, &done.id).await.contains("lab-hidden-answer-canary"));
+}
+
+// ---------- key exchange per host (SEC-08, SEC-10) ----------
+
+fn key_exchange(mode: tyrminal_core::contracts::KeyExchangeMode) -> tyrminal_core::contracts::HostConnectionInput {
+    tyrminal_core::contracts::HostConnectionInput { jump_host_id: None, proxy: None, key_exchange: mode }
+}
+
+/// Opens a session and returns every event up to the shell or the close.
+async fn events_until_settled(f: &Fixture, host_id: &str) -> Vec<SessionEvent> {
+    let (tx, mut events) = mpsc::unbounded_channel();
+    let opened = f.core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
+    let mut seen = Vec::new();
+    loop {
+        let event = tokio::time::timeout(WAIT, events.recv()).await.expect("settles in time").unwrap();
+        if let SessionEvent::TrustPrompt { prompt_id, .. } = &event {
+            f.core.sessions.answer_trust(WINDOW, &opened.session_id, prompt_id, TrustDecision::Once).unwrap();
+        }
+        let done =
+            matches!(event, SessionEvent::State { state: SessionState::Connected } | SessionEvent::Closed { .. });
+        seen.push(event);
+        if done {
+            if matches!(seen.last(), Some(SessionEvent::State { .. })) {
+                f.core.sessions.close(WINDOW, &opened.session_id).unwrap();
+            }
+            return seen;
+        }
+    }
+}
+
+fn negotiated_kex(events: &[SessionEvent]) -> Option<String> {
+    events.iter().find_map(|e| match e {
+        SessionEvent::Negotiated { kex, .. } => Some(kex.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_can_turn_post_quantum_off_for_compatibility_or_require_it() {
+    use tyrminal_core::contracts::KeyExchangeMode;
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::PreferPostQuantum);
+    let offers_post_quantum = {
+        let version = f.lab.str("/serverVersion");
+        let digits: Vec<u32> = version
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|p| !p.is_empty())
+            .take(2)
+            .map(|p| p.parse().unwrap())
+            .collect();
+        (digits[0], digits[1]) >= (9, 9)
+    };
+
+    // Default: post-quantum where offered, a classical exchange otherwise.
+    let preferred = negotiated_kex(&events_until_settled(&f, &host).await).expect("negotiated");
+    assert_eq!(preferred, if offers_post_quantum { tyrminal_ssh::POST_QUANTUM_KEX } else { "curve25519-sha256" });
+
+    // Compatibility: never post-quantum.
+    f.core.vault.set_host_connection(&host, key_exchange(KeyExchangeMode::Classic)).await.unwrap();
+    assert_eq!(negotiated_kex(&events_until_settled(&f, &host).await).as_deref(), Some("curve25519-sha256"));
+
+    // Required: a server without it is refused during key exchange, before trust or sign-in.
+    f.core.vault.set_host_connection(&host, key_exchange(KeyExchangeMode::RequirePostQuantum)).await.unwrap();
+    let events = events_until_settled(&f, &host).await;
+    if offers_post_quantum {
+        assert_eq!(negotiated_kex(&events).as_deref(), Some(tyrminal_ssh::POST_QUANTUM_KEX));
+    } else {
+        assert!(
+            !events.iter().any(|e| matches!(e, SessionEvent::TrustPrompt { .. } | SessionEvent::AuthPrompt { .. }))
+        );
+        let Some(SessionEvent::Closed { error: Some(error), .. }) = events.last() else {
+            panic!("expected a failed session, got {events:?}")
+        };
+        assert_eq!(error.code, ErrorCode::ProtocolError);
+        assert!(error.message.contains("post-quantum"), "{}", error.message);
+        // Key exchange failed, so the host key was never checked and no credential could be
+        // sent; kex_lab proves the same against the server's log, with no other client running.
+    }
+
+    // The setting is saved with the host and survives a lock.
+    f.core.vault.lock().await;
+    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::RequirePostQuantum);
 }

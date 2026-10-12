@@ -1209,11 +1209,16 @@ async fn connect_ssh(
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
-    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy, plan.key_exchange);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
-    let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
+    let hops = plan
+        .jumps
+        .into_iter()
+        .map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy, hop.key_exchange));
     let mut chain: Vec<VerifiedConnection> = Vec::new();
-    for (index, (label, endpoint, username, auth, proxy)) in hops.chain(std::iter::once(first)).enumerate() {
+    for (index, (label, endpoint, username, auth, proxy, key_exchange)) in
+        hops.chain(std::iter::once(first)).enumerate()
+    {
         // Prompts name the hop when there is more than one, so a jump host's trust or password
         // prompt cannot be mistaken for the destination's.
         let hop = (total > 1).then(|| tyrminal_contracts::ChainPosition {
@@ -1233,18 +1238,26 @@ async fn connect_ssh(
             entry: Arc::clone(&ctx.entry),
             sink: Arc::clone(&ctx.sink),
         };
-        let options = ConnectOptions::new(endpoint.clone());
+        let options = ConnectOptions { key_exchange, ..ConnectOptions::new(endpoint.clone()) };
+        let required = key_exchange == tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum;
+        let kex_error = |e: &SshError| match e {
+            SshError::NoCommonAlgorithm if required => err(
+                ErrorCode::ProtocolError,
+                "This server does not offer post-quantum key exchange, which this host requires. Nothing was sent to it.",
+            ),
+            other => from_ssh(other),
+        };
         let mut conn = match (chain.last(), proxy) {
-            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
+            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| kex_error(&e))?,
             (None, Some(proxy)) => {
                 let stream = tyrminal_ssh::connect_via_proxy(&proxy, &endpoint.host, endpoint.port)
                     .await
                     .map_err(crate::tunnels::proxy_error)?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
             (Some(via), _) => {
                 let stream = via.open_hop(&endpoint.host, endpoint.port).await.map_err(|e| hop_error(&e))?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
         };
         if let Some(text) = conn.banner() {

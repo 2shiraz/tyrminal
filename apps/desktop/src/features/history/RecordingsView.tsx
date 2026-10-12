@@ -1,5 +1,5 @@
 import type { RecordingSettings, SessionLogPlayback, SessionLogSummary } from "@tyrminal/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
@@ -95,17 +95,41 @@ export function RecordingsView() {
 
   const fail = useCallback((error: unknown) => notify("danger", (error as Error).message), [notify]);
 
-  async function save(next: RecordingSettings) {
-    try {
-      const saved = await recordingsApi.setSettings(next);
-      if (saved.enabled !== settings.value?.enabled) {
-        notify("info", saved.enabled ? msgB.recordings.turnedOn : msgB.recordings.turnedOff);
-      }
-      void settings.reload();
-      refresh();
-    } catch (error) {
-      fail(error);
+  // The page's own copy of the settings. Each change applies to the latest copy and saves are
+  // sent one after another, so two quick changes never overwrite each other.
+  const [local, setLocal] = useState<RecordingSettings | null>(null);
+  const latest = useRef<RecordingSettings | null>(null);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (settings.value && latest.current === null) {
+      latest.current = settings.value;
+      setLocal(settings.value);
     }
+  }, [settings.value]);
+
+  function change(patch: Partial<RecordingSettings>) {
+    const before = latest.current;
+    if (!before) return;
+    const next = { ...before, ...patch };
+    latest.current = next;
+    setLocal(next);
+    queue.current = queue.current.then(async () => {
+      try {
+        await recordingsApi.setSettings(next);
+        if (patch.enabled !== undefined && patch.enabled !== before.enabled) {
+          notify("info", next.enabled ? msgB.recordings.turnedOn : msgB.recordings.turnedOff);
+        }
+        refresh();
+      } catch (error) {
+        fail(error);
+        // Show what is actually stored.
+        const stored = await recordingsApi.settings().catch(() => null);
+        if (stored) {
+          latest.current = stored;
+          setLocal(stored);
+        }
+      }
+    });
   }
 
   async function toggleBookmark(log: SessionLogSummary) {
@@ -159,7 +183,7 @@ export function RecordingsView() {
     );
   }
 
-  const current = settings.value;
+  const current = local;
   return (
     <div className="page">
       <section className="page-inner stack" aria-labelledby="recordings-title" style={{ maxWidth: 960 }}>
@@ -178,14 +202,14 @@ export function RecordingsView() {
                 label={msgB.recordings.record}
                 hint={msgB.recordings.recordHint}
                 checked={current.enabled}
-                onChange={(enabled) => void save({ ...current, enabled })}
+                onChange={(enabled) => change({ enabled })}
               />
               <SettingRow label={msgB.recordings.keep} hint={msgB.recordings.keepHint}>
                 <select
                   className="select"
                   aria-label={msgB.recordings.keep}
                   value={current.keepPerHost}
-                  onChange={(event) => void save({ ...current, keepPerHost: Number(event.target.value) })}
+                  onChange={(event) => change({ keepPerHost: Number(event.target.value) })}
                 >
                   {[...new Set([...KEEP_CHOICES, current.keepPerHost])].sort((a, b) => a - b).map((n) => (
                     <option key={n} value={n}>
@@ -199,7 +223,7 @@ export function RecordingsView() {
                   className="select"
                   aria-label={msgB.recordings.limit}
                   value={current.maxLogMib}
-                  onChange={(event) => void save({ ...current, maxLogMib: Number(event.target.value) })}
+                  onChange={(event) => change({ maxLogMib: Number(event.target.value) })}
                 >
                   {[...new Set([...LIMIT_CHOICES, current.maxLogMib])].sort((a, b) => a - b).map((n) => (
                     <option key={n} value={n}>
