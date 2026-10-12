@@ -254,3 +254,6 @@ Never merge these by hand; regenerate them after resolving the sources:
   capability too and lets the test-only `e2e-automation` capability reach `detached-*` windows;
   `tests/native/webdriver.mjs` gains `windowHandles`/`windowHandle`/`switchToWindow` in a marked
   block; `tests/ui/mock-backend.js` takes `options.windowLabel` for a page playing a detached window.
+- **C → B (done by C, keep it when merging):** `tests/ui/tunnels.spec.ts` line ~103 closes the tab
+  through `.tab-close` inside the tab instead of a "Close …" button: after the axe fix the close
+  control is no longer a focusable button nested in the tab (keyboard: Delete or the tab menu).

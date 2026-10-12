@@ -100,7 +100,8 @@ test("tunnels: a closed session ends its forwards; start errors are shown", asyn
   await expect(run).toHaveAttribute("data-state", "running");
 
   // Close the terminal tab; the forward is reported as ended with its session.
-  await page.getByRole("button", { name: /Close api-gateway/ }).first().click();
+  // (The tab's close control is a pointer target, not a nested button; agent C, a11y.)
+  await page.getByRole("tab", { name: /api-gateway/ }).first().locator(".tab-close").click();
   await tunnelsPage(page);
   await expect(run).toHaveAttribute("data-state", "session_ended");
   await expect(run).toContainText("Session ended");
