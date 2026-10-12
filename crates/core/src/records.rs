@@ -140,6 +140,11 @@ pub(crate) struct StoredConnection {
     pub jump_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<StoredProxy>,
+    /// The host's own route, even when it sets neither a jump host nor a proxy (connect
+    /// directly). Without it, a host that sets neither uses its nearest group's route (HST-05).
+    /// Absent in older records, where a host that set neither was direct and no group had a route.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own: bool,
 }
 
 /// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.
@@ -258,6 +263,18 @@ pub(crate) struct WorkflowRecord {
     /// Environment variables sent with sessions, in order. Values are sensitive.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<StoredEnv>,
+    /// Snippet ids typed into the shell once it is open (SNP-08). `None` inherits the nearest
+    /// group's list; `Some([])` runs nothing. Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup: Option<Vec<String>>,
+    /// Group defaults for its hosts' route and appearance (HST-05); never set on a host's record,
+    /// whose own values live in its host and appearance records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<StoredProxy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<tyrminal_contracts::HostOs>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -268,7 +285,12 @@ pub(crate) struct StoredEnv {
 
 impl WorkflowRecord {
     pub fn is_empty(&self) -> bool {
-        self.identity_id.is_none() && self.env.is_empty()
+        self.identity_id.is_none()
+            && self.env.is_empty()
+            && self.startup.is_none()
+            && self.jump_host.is_none()
+            && self.proxy.is_none()
+            && self.os.is_none()
     }
 
     pub fn content_len(&self) -> usize {
@@ -276,6 +298,10 @@ impl WorkflowRecord {
             + self.group_id.as_ref().map_or(0, String::len)
             + self.identity_id.as_ref().map_or(0, String::len)
             + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
+            + self.startup.as_ref().map_or(0, |ids| ids.iter().map(|id| id.len() + 4).sum())
+            + StoredConnection { jump_host: self.jump_host.clone(), proxy: self.proxy.clone(), own: false }
+                .content_len()
+            + 16
     }
 }
 

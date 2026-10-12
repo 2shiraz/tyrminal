@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-effective"
+description = "Enables the startup_effective command without any pre-configured scope."
+commands.allow = ["startup_effective"]
+
+[[permission]]
+identifier = "deny-startup-effective"
+description = "Denies the startup_effective command without any pre-configured scope."
+commands.deny = ["startup_effective"]

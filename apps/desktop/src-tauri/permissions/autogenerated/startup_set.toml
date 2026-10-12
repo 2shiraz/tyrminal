@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-set"
+description = "Enables the startup_set command without any pre-configured scope."
+commands.allow = ["startup_set"]
+
+[[permission]]
+identifier = "deny-startup-set"
+description = "Denies the startup_set command without any pre-configured scope."
+commands.deny = ["startup_set"]

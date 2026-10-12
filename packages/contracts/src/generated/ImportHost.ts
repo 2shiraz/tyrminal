@@ -11,4 +11,9 @@ group: string, tags: Array<string>,
 /**
  * Notes for this entry, such as an identity file that was not imported.
  */
-notes: Array<string>, };
+notes: Array<string>, 
+/**
+ * The label of another host in the same import that this one is reached through (its jump
+ * host, from an OpenSSH `ProxyJump`). Absent in older previews.
+ */
+jumpVia: string | null, };

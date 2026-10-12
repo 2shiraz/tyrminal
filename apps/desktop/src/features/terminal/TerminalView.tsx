@@ -68,11 +68,20 @@ export interface PaneHandle {
   setEncoding(id: string): void;
   /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
   release(on: boolean): void;
+  /** SSH only: environment variables requested on this connection, and those the server refused. */
+  environment(): SessionEnvironment | null;
+}
+
+export interface SessionEnvironment {
+  sent: string[];
+  rejected: string[];
 }
 
 interface TerminalViewProps {
   paneId: number;
   target: TerminalTarget;
+  /** Folder to start the first attempt in (a duplicated tab's); reconnects start as usual. */
+  startIn?: string | undefined;
   /** Where this session goes, as configured by the user (not supplied by the server). */
   identity: string;
   label: string;
@@ -140,6 +149,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
+  const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findCount, setFindCount] = useState({ index: 0, total: 0 });
   const clipboardAllowed = useRef(false);
@@ -181,6 +191,7 @@ export function TerminalView(props: TerminalViewProps) {
     setChanged(null);
     setBanner(null);
     setClosed(null);
+    environment.current = null;
     clipboardAllowed.current = false;
     publish({ state: "connecting", clipboardAllowed: false });
 
@@ -243,6 +254,7 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           // Environment variables the server refused are always reported (SNP-13).
           case "environment":
+            environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
           case "negotiated":
@@ -268,7 +280,7 @@ export function TerminalView(props: TerminalViewProps) {
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
     // A handed-over session is taken over once; a later attempt (reconnect) never reuses the token.
     const token = attempt === 0 ? handlers.current.attachToken : undefined;
-    const timer = window.setTimeout(() => void controller.start(target, token), 0);
+    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null, token), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();
@@ -324,6 +336,7 @@ export function TerminalView(props: TerminalViewProps) {
         setEncodingId(encodingRef.current);
         controllerRef.current?.setEncoding(encodingRef.current);
       },
+      environment: () => environment.current,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

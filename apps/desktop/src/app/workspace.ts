@@ -34,6 +34,8 @@ export interface Pane {
   directory?: string;
   /** Restored from a template: the directory to offer returning to once connected. */
   restoreDirectory?: string;
+  /** Folder to start in (a duplicated tab's), as the source shell reported it. Used once. */
+  startIn?: string;
 }
 
 /**
@@ -85,7 +87,7 @@ export function activePane(ws: Workspace): Pane | null {
   return tab ? (ws.panes[tab.focused] ?? null) : null;
 }
 
-export type PaneSeed = Pick<Pane, "target" | "label" | "identity">;
+export type PaneSeed = Pick<Pane, "target" | "label" | "identity" | "startIn">;
 
 function newPane(ws: Workspace, seed: PaneSeed, pending = false): [Workspace, number] {
   const id = ws.nextId;
@@ -263,7 +265,8 @@ function remapLayout(layout: Layout, map: Map<number, number>): Layout {
  * new session of its own (nothing typed in the original is repeated). Refused (unchanged) when the
  * copy would exceed MAX_PANES.
  */
-export function duplicateTab(ws: Workspace, tabId: number): Workspace {
+/** `startIn`: the folder each copied pane starts in, when its shell reports one. */
+export function duplicateTab(ws: Workspace, tabId: number, startIn: (paneId: number) => string | undefined = () => undefined): Workspace {
   const index = ws.tabs.findIndex((t) => t.id === tabId);
   const tab = ws.tabs[index];
   if (!tab) return ws;
@@ -273,7 +276,9 @@ export function duplicateTab(ws: Workspace, tabId: number): Workspace {
   const map = new Map<number, number>();
   for (const id of ids) {
     const source = ws.panes[id] as Pane;
-    const [after, created] = newPane(next, { target: source.target, label: source.label, identity: source.identity }, source.pending);
+    const folder = source.pending ? undefined : startIn(id);
+    const seed: PaneSeed = { target: source.target, label: source.label, identity: source.identity, ...(folder ? { startIn: folder } : {}) };
+    const [after, created] = newPane(next, seed, source.pending);
     next = after;
     map.set(id, created);
   }

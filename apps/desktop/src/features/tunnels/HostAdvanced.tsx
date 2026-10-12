@@ -1,10 +1,11 @@
-import type { HostConnectionInput, HostSummary, ProxySummary, ProxyType } from "@tyrminal/contracts";
+import type { HostConnectionInput, HostSummary, InheritedRoute, ProxySummary, ProxyType } from "@tyrminal/contracts";
 import { useCallback, useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Notice, SecretField, TextField } from "../../components/ui/controls";
-import { tunnels as tunnelsApi } from "../../lib/ipc";
+import { groupDefaults as groupDefaultsApi, tunnels as tunnelsApi } from "../../lib/ipc";
 import { msgB } from "../../lib/messages-b";
+import { msgDefaults } from "../../lib/messages-defaults";
 import { parsePort } from "./rules";
 
 type ProxyChoice = "none" | ProxyType;
@@ -12,16 +13,23 @@ type ProxyChoice = "none" | ProxyType;
 interface Loaded {
   jumpHostId: string | null;
   proxy: ProxySummary | null;
+  /** HST-05: the host uses its group's route instead of its own. */
+  inherit: boolean;
 }
 
 /**
  * A host's advanced connection settings in the host editor (jump host, proxy). They are saved
  * with their own command: for an existing host before its basics (so a jump-host loop is refused
  * before anything changes), for a new host right after it is created. The proxy password is
- * write-only: an empty field keeps the stored one.
+ * write-only: an empty field keeps the stored one. When the host's group (`groupId`, as chosen in
+ * the editor) has a route, the host can use it instead of its own (HST-05).
  */
-export function useHostAdvanced(hostId: string | null) {
-  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null });
+export function useHostAdvanced(hostId: string | null, groupId: string | null = null) {
+  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, inherit: true });
+  const [inherit, setInherit] = useState(true);
+  const [groupRoute, setGroupRoute] = useState<InheritedRoute | null>(null);
+  const { groups } = useVaultData();
+  const groupName = (groups.value ?? []).find((g) => g.id === groupId)?.name ?? "";
   const [ready, setReady] = useState(hostId === null);
   const [jumpHostId, setJumpHostId] = useState<string | null>(null);
   const [proxyKind, setProxyKind] = useState<ProxyChoice>("none");
@@ -36,7 +44,8 @@ export function useHostAdvanced(hostId: string | null) {
     void tunnelsApi.connection(hostId).then(
       (connection) => {
         if (!alive) return;
-        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy });
+        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, inherit: !connection.own });
+        setInherit(!connection.own);
         setJumpHostId(connection.jumpHostId);
         if (connection.proxy) {
           setProxyKind(connection.proxy.kind);
@@ -53,8 +62,29 @@ export function useHostAdvanced(hostId: string | null) {
     };
   }, [hostId]);
 
+  // The route the chosen group would give this host: the group's own, else its parents'.
+  useEffect(() => {
+    if (groupId === null) {
+      setGroupRoute(null);
+      return;
+    }
+    let alive = true;
+    void groupDefaultsApi.get(groupId).then(
+      (d) => {
+        if (!alive) return;
+        const own = d.jumpHostId !== null || d.proxy !== null;
+        setGroupRoute(own ? { jumpHostId: d.jumpHostId, proxy: d.proxy, origin: { kind: "group", groupId, name: groupName } } : d.inheritedRoute);
+      },
+      () => alive && setGroupRoute(null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [groupId, groupName]);
+
   const port = parsePort(proxyPort, false);
-  const proxyValid = proxyKind === "none" || (proxyHost.trim() !== "" && port !== null);
+  const usesGroup = inherit && groupRoute !== null;
+  const proxyValid = usesGroup || proxyKind === "none" || (proxyHost.trim() !== "" && port !== null);
   const passwordStored = loaded.proxy?.passwordStored === true && loaded.proxy.username === proxyUser.trim();
 
   const input = useCallback(
@@ -70,19 +100,22 @@ export function useHostAdvanced(hostId: string | null) {
               username: proxyUser,
               password: proxyPassword.length > 0 ? proxyPassword : null,
             },
+      inherit: usesGroup,
     }),
-    [jumpHostId, proxyKind, proxyHost, port, proxyUser, proxyPassword],
+    [jumpHostId, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
   );
 
   const changed =
-    jumpHostId !== loaded.jumpHostId ||
+    usesGroup !== (loaded.inherit && groupRoute !== null) ||
+    (!usesGroup &&
+      (jumpHostId !== loaded.jumpHostId ||
     proxyPassword.length > 0 ||
     (proxyKind === "none") !== (loaded.proxy === null) ||
     (loaded.proxy !== null &&
       (proxyKind !== loaded.proxy.kind ||
         proxyHost !== loaded.proxy.host ||
         port !== loaded.proxy.port ||
-        proxyUser.trim() !== loaded.proxy.username));
+        proxyUser.trim() !== loaded.proxy.username))));
 
   /** Saves the settings for an existing host (before its basics). */
   const saveBefore = useCallback(async () => {
@@ -101,6 +134,9 @@ export function useHostAdvanced(hostId: string | null) {
   return {
     ready,
     valid: proxyValid,
+    inherit: usesGroup,
+    setInherit,
+    groupRoute,
     jumpHostId,
     setJumpHostId,
     proxy: { kind: proxyKind, host: proxyHost, port: proxyPort, user: proxyUser, password: proxyPassword, passwordStored },
@@ -116,16 +152,48 @@ export function useHostAdvanced(hostId: string | null) {
 
 const PROXY_CHOICES: ProxyChoice[] = ["none", "http", "socks5"];
 
+/** A route in words: "through bastion", "SOCKS5 proxy p.example", "directly". */
+export function routeSummary(route: { jumpHostId: string | null; proxy: ProxySummary | null }, labelOf: (id: string) => string): string {
+  const parts: string[] = [];
+  if (route.jumpHostId) parts.push(msgDefaults.routeVia(labelOf(route.jumpHostId)));
+  if (route.proxy) parts.push(msgDefaults.routeProxy(msgB.advanced.proxyKinds[route.proxy.kind], route.proxy.host));
+  return parts.length > 0 ? parts.join(", ") : msgDefaults.routeDirect;
+}
+
 export function HostAdvancedSection({ host, state }: { host: HostSummary | null; state: ReturnType<typeof useHostAdvanced> }) {
   const { hosts } = useVaultData();
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
   const jump = options.find((h) => h.id === state.jumpHostId);
   const p = state.proxy;
-  const configured = state.jumpHostId !== null || p.kind !== "none";
+  const configured = state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null;
+  const labelOf = (id: string) => (hosts.value ?? []).find((h) => h.id === id)?.label ?? msgB.advanced.missingJump;
+  const route = state.groupRoute;
   return (
     <details className="advanced" open={configured ? true : undefined}>
       <summary>{msgB.advanced.title}</summary>
       <div className="stack-sm" style={{ paddingTop: "var(--space-3)" }}>
+        {/* HST-05: the group's route, or one of this host's own. */}
+        {route && (
+          <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }} disabled={!state.ready}>
+            <label className="choice">
+              <input type="radio" name="route" checked={state.inherit} onChange={() => state.setInherit(true)} />
+              <span className="choice-body">
+                <span className="choice-title">{msgDefaults.routeInherit}</span>
+                <span className="hint" data-testid="route-inherited">
+                  {msgDefaults.routeInheritFrom(route.origin.kind === "group" ? route.origin.name : "", routeSummary(route, labelOf))}
+                </span>
+              </span>
+            </label>
+            <label className="choice">
+              <input type="radio" name="route" checked={!state.inherit} onChange={() => state.setInherit(false)} />
+              <span className="choice-body">
+                <span className="choice-title">{msgDefaults.routeOwn}</span>
+              </span>
+            </label>
+          </fieldset>
+        )}
+        {!state.inherit && (
+          <>
         <label className="field">
           <span className="label">{msgB.advanced.jumpHost}</span>
           <select
@@ -191,6 +259,8 @@ export function HostAdvancedSection({ host, state }: { host: HostSummary | null;
               )}
             </div>
             {p.kind === "http" && p.user.trim() !== "" && <Notice tone="warning">{msgB.advanced.httpCleartext}</Notice>}
+          </>
+        )}
           </>
         )}
       </div>

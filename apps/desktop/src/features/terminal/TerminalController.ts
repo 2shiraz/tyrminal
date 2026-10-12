@@ -27,7 +27,7 @@ import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
-import { attachShellContext } from "../autocomplete/shellContext";
+import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
 
@@ -59,6 +59,8 @@ const INPUT_CHUNK = 32 * 1024;
 const ACK_BATCH = 32 * 1024;
 const ACK_DELAY_MS = 25;
 const RESIZE_DEBOUNCE_MS = 60;
+/** How long a duplicated SSH tab waits for its first integrated prompt before dropping the `cd`. */
+const FOLDER_WAIT_MS = 60_000;
 const MIN_ZOOM = -6;
 const MAX_ZOOM = 12;
 
@@ -190,6 +192,8 @@ export class TerminalController {
    */
   private readonly counters = { rx: 0, parsed: 0, tx: 0, txFailed: 0, renders: 0 };
   private fromUser = false;
+  /** SSH: folder to change to at the new shell's first integrated prompt (duplicated tab). */
+  private pendingFolder: { command: string; until: number } | null = null;
   /** Whether user input can be told apart from terminal replies (see the data handler). */
   broadcastable = false;
   private readonly highlighter: OutputHighlighter;
@@ -245,6 +249,8 @@ export class TerminalController {
     this.term.onData((text) => {
       const fromUser = this.fromUser;
       this.fromUser = false;
+      // Once the user types, the shell is theirs: no folder change is typed in after that.
+      if (fromUser) this.pendingFolder = null;
       this.sendText(text);
       // Broadcast relays the typed text (as UTF-8); each pane encodes it for its own session.
       if (fromUser) this.callbacks.onUserInput?.(this.encoder.encode(text));
@@ -266,6 +272,14 @@ export class TerminalController {
     });
     // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
     this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+    this.cleanups.push(
+      shellContexts.onMark((mark) => {
+        const pending = this.pendingFolder;
+        if (!pending || mark.kind !== "prompt" || mark.sessionId !== this.sessionId) return;
+        this.pendingFolder = null;
+        if (Date.now() <= pending.until) this.send(this.encoder.encode(pending.command));
+      }),
+    );
 
     // OSC 7: the shell's working directory, remembered for layout templates only.
     this.term.parser.registerOscHandler(7, (data) => {
@@ -304,15 +318,19 @@ export class TerminalController {
 
   /**
    * Opens the session, or with `attachToken` takes over one handed to this window (a detached
-   * tab). Events (state, prompts, close) arrive through the callbacks.
+   * tab). Events (state, prompts, close) arrive through the callbacks. `startIn` (a duplicated
+   * tab's folder): a local shell starts there; an SSH shell is sent `cd` to it at its first
+   * prompt, and only when that prompt carries the shell integration's mark.
    */
-  async start(target: TerminalTarget, attachToken?: string): Promise<void> {
+  async start(target: TerminalTarget, startIn: string | null = null, attachToken?: string): Promise<void> {
     await fontsReady(this.prefs);
     if (this.disposed) return;
     this.fitNow();
     const { cols, rows } = this.term;
     this.lastSize = { cols, rows };
     this.callbacks.onResize(cols, rows);
+    const command = target.kind === "ssh" && startIn ? cdCommand(startIn) : null;
+    this.pendingFolder = command ? { command, until: Date.now() + FOLDER_WAIT_MS } : null;
     const onOutput = (bytes: Uint8Array) => this.receive(bytes);
     const onEvent = (event: SessionEvent) => {
       if (!this.disposed) this.callbacks.onEvent(event);
@@ -322,7 +340,7 @@ export class TerminalController {
         ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
         : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
-          : await sessions.openLocal(cols, rows, onOutput, onEvent);
+          : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
       if (this.disposed) {
         // Closed while opening: do not leave an orphan session behind.
         void sessions.close(opened.sessionId).catch(() => undefined);
