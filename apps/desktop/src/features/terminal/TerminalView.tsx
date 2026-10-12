@@ -1,31 +1,27 @@
 import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
-import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
-import { IconButton, Notice, SecretField, TextField } from "../../components/ui/controls";
+import { IconButton, Notice } from "../../components/ui/controls";
 import {
   IconChevronDown,
   IconChevronLeft,
   IconClipboardPaste,
   IconCopy,
   IconExternalLink,
-  IconKeyRound,
-  IconRefreshCw,
   IconSearch,
   IconShieldAlert,
-  IconShieldCheck,
-  IconTriangleAlert,
   IconX,
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
-import { HopNotice } from "../tunnels/HopNotice";
+import { ConnectionSheet, type TimelineEntry, timelineEntry } from "./ConnectionSheet";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
-import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, checkLink, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -89,23 +85,6 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
 }
 
-function Fingerprint({ value }: { value: string }) {
-  const { algorithm, groups } = groupFingerprint(value);
-  return (
-    <div className="fingerprint" aria-label={value}>
-      {algorithm && <span className="fingerprint-alg">{algorithm}</span>}
-      {groups.map((group, index) => (
-        // Position is the identity here: the groups are a fixed split of one string.
-        <span key={`${index}-${group}`} aria-hidden="true">
-          {group}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-const STEPS: SessionState[] = ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"];
-
 export function TerminalView(props: TerminalViewProps) {
   const { target, identity, label, visible, focused, prefs } = props;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -113,6 +92,9 @@ export function TerminalView(props: TerminalViewProps) {
   const notify = useToast();
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<SessionState>("connecting");
+  // What the session reported while connecting, with arrival times, for the connection sheet.
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [startedAt, setStartedAt] = useState(() => Date.now());
   const [trust, setTrust] = useState<TrustPrompt | null>(null);
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
@@ -129,7 +111,6 @@ export function TerminalView(props: TerminalViewProps) {
   const everConnected = useRef(false);
   const autoAttempts = useRef(0);
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const status = useRef<PaneStatus>({ state: "connecting", renderer: "dom", cols: 0, rows: 0, clipboardAllowed: false });
 
   // Callbacks change identity every render; the controller needs stable ones.
@@ -145,6 +126,8 @@ export function TerminalView(props: TerminalViewProps) {
     const container = hostRef.current;
     if (!container) return;
     setState("connecting");
+    setTimeline([]);
+    setStartedAt(Date.now());
     setTrust(null);
     setAuth(null);
     setChanged(null);
@@ -178,6 +161,8 @@ export function TerminalView(props: TerminalViewProps) {
       onSearchResults: (index, total) => setFindCount({ index, total }),
       onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
       onEvent: (event) => {
+        const entry = timelineEntry(event, Date.now());
+        if (entry) setTimeline((current) => [...current, entry]);
         switch (event.type) {
           case "state":
             setState(event.state);
@@ -236,17 +221,25 @@ export function TerminalView(props: TerminalViewProps) {
   // Counts down to the next automatic attempt; cancelled by unmount, Cancel or Reconnect now.
   useEffect(() => {
     if (!autoRetry) return;
-    setNow(Date.now());
-    const tick = window.setInterval(() => setNow(Date.now()), 250);
     const fire = window.setTimeout(() => {
       setAutoRetry(null);
       setAttempt((n) => n + 1);
     }, Math.max(0, autoRetry.dueAt - Date.now()));
-    return () => {
-      window.clearInterval(tick);
-      window.clearTimeout(fire);
-    };
+    return () => window.clearTimeout(fire);
   }, [autoRetry]);
+
+  /** Stops a connection in progress: answers an open prompt with no, then closes the session. */
+  function cancelConnect() {
+    const id = sessionId();
+    if (id && trust) void sessions.answerTrust(id, trust.promptId, "cancel").catch(() => undefined);
+    if (id && auth) void sessions.answerAuth(id, auth.promptId, null).catch(() => undefined);
+    setTrust(null);
+    setAuth(null);
+    setAutoRetry(null);
+    if (id) void sessions.close(id).catch(() => undefined);
+    setClosed((current) => current ?? { error: null, exitStatus: null });
+    publish({ state: "closed" });
+  }
 
   function reconnectNow() {
     setAutoRetry(null);
@@ -314,8 +307,6 @@ export function TerminalView(props: TerminalViewProps) {
     "--pane-fg": scheme.foreground,
     "--term-padding": `${prefs.padding}px`,
   } as CSSProperties;
-  const connecting = !closed && state !== "connected" && !needsAttention;
-  const stepIndex = Math.max(0, STEPS.indexOf(state));
   const showPrompts = visible;
 
   return (
@@ -342,23 +333,34 @@ export function TerminalView(props: TerminalViewProps) {
         />
       )}
 
-      {connecting && (
-        <div className="connecting" role="status" aria-live="polite">
-          <div className="connecting-card">
-            <span className="spinner" aria-hidden="true" />
-            <span>
-              {target.kind === "ssh" ? msg.terminal.connectingTo(identity) : msg.terminal.state.connecting}
-              <span className="faint"> · {msg.terminal.state[state]}</span>
-            </span>
-            {target.kind === "ssh" && (
-              <span className="connect-steps" aria-hidden="true">
-                {STEPS.slice(0, 4).map((step, index) => (
-                  <span key={step} data-done={index <= stepIndex} />
-                ))}
-              </span>
-            )}
-          </div>
-        </div>
+      {(closed !== null || state !== "connected" || needsAttention) && (
+        <ConnectionSheet
+          ssh={target.kind === "ssh"}
+          label={label}
+          identity={identity}
+          timeline={timeline}
+          startedAt={startedAt}
+          trust={showPrompts ? trust : null}
+          auth={showPrompts && !trust ? auth : null}
+          changed={changed}
+          closed={closed}
+          everConnected={everConnected.current}
+          autoRetry={autoRetry}
+          banner={banner}
+          interactive={visible && focused}
+          sessionId={sessionId}
+          onTrust={answerTrust}
+          onAuth={(secret) => {
+            const id = sessionId();
+            if (id && auth) void sessions.answerAuth(id, auth.promptId, secret).catch(() => undefined);
+            setAuth(null);
+          }}
+          onCancel={cancelConnect}
+          onReconnect={reconnectNow}
+          onStopRetry={() => setAutoRetry(null)}
+          onCloseTab={() => handlers.current.onClose()}
+          onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
+        />
       )}
 
       {clipboardAsk !== null && visible && (
@@ -390,127 +392,6 @@ export function TerminalView(props: TerminalViewProps) {
             {msg.terminal.clipboardDeny}
           </button>
         </div>
-      )}
-
-      {closed && (
-        <div className="terminal-overlay">
-          <div className="overlay-card" role={closed.error ? "alert" : "status"}>
-            <div className="dialog-head">
-              <span className="dialog-icon" data-tone={changed ? "danger" : closed.error ? "warning" : "accent"} aria-hidden="true">
-                {changed ? <IconShieldAlert size={18} /> : closed.error ? <IconTriangleAlert size={18} /> : <IconRefreshCw size={18} />}
-              </span>
-              <h2>{changed ? msg.terminal.changedTitle : closed.error ? msg.terminal.failedTitle : msg.terminal.endedTitle}</h2>
-            </div>
-            {changed ? (
-              <>
-                {/* agent B: tunnels and history */}
-                <HopNotice hop={changed.hop} />
-                <p>{msg.terminal.changedIntro}</p>
-                <div className="stack-xs">
-                  <span className="label">{msg.terminal.changedPresented}</span>
-                  <Fingerprint value={changed.presentedFingerprint} />
-                </div>
-                <div className="stack-xs">
-                  <span className="label">{msg.terminal.changedTrusted}</span>
-                  {changed.trustedFingerprints.map((fingerprint) => (
-                    <Fingerprint key={fingerprint} value={fingerprint} />
-                  ))}
-                </div>
-                <Notice tone="warning">{msg.terminal.changedNext}</Notice>
-              </>
-            ) : closed.error ? (
-              <>
-                <p>{closed.error.message}</p>
-                {autoRetry && (
-                  <p role="status" data-testid="auto-reconnect">
-                    {msg.terminal.autoReconnect(Math.max(0, Math.ceil((autoRetry.dueAt - now) / 1000)), autoRetry.attempt, RECONNECT_MAX_ATTEMPTS)}
-                  </p>
-                )}
-                <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-                  {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
-                </p>
-              </>
-            ) : (
-              <p className="muted">{closed.exitStatus !== null ? msg.terminal.endedExit(closed.exitStatus) : msg.terminal.endedClean}</p>
-            )}
-            <div className="dialog-actions">
-              <button type="button" className="btn" onClick={() => handlers.current.onClose()}>
-                {msg.terminal.closeTab}
-              </button>
-              {changed ? (
-                <button type="button" className="btn btn-primary" onClick={() => handlers.current.onOpenKnownHosts()}>
-                  {msg.terminal.openKnownHosts}
-                </button>
-              ) : (
-                <>
-                  {autoRetry && (
-                    <button type="button" className="btn" onClick={() => setAutoRetry(null)}>
-                      {msg.terminal.cancelAutoReconnect}
-                    </button>
-                  )}
-                  <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
-                    <IconRefreshCw size={15} />
-                    {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}
-      {showPrompts && trust && (
-        <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => answerTrust("cancel")}>
-          {/* agent B: tunnels and history */}
-          <HopNotice hop={trust.hop} />
-          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msg.terminal.trustIntro}
-          </p>
-          <dl className="kv">
-            <dt>{msg.terminal.host}</dt>
-            <dd>
-              {trust.host} : {trust.port}
-            </dd>
-            {trust.resolvedAddress && trust.resolvedAddress !== trust.host && (
-              <>
-                <dt>{msg.terminal.resolved}</dt>
-                <dd>{trust.resolvedAddress}</dd>
-              </>
-            )}
-            <dt>{msg.terminal.algorithm}</dt>
-            <dd>{trust.algorithm}</dd>
-          </dl>
-          <div className="stack-xs">
-            <span className="label">{msg.terminal.fingerprint}</span>
-            <Fingerprint value={trust.fingerprint} />
-          </div>
-          <div className="dialog-actions">
-            {/* The safe choice has initial focus, so Enter never grants trust by accident. */}
-            <button type="button" className="btn" onClick={() => answerTrust("cancel")} autoFocus data-autofocus>
-              {msg.terminal.trustCancel}
-            </button>
-            <button type="button" className="btn" onClick={() => answerTrust("once")}>
-              {msg.terminal.trustOnce}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => answerTrust("always")}>
-              {msg.terminal.trustAlways}
-            </button>
-          </div>
-        </Dialog>
-      )}
-
-      {showPrompts && auth && !trust && (
-        <AuthDialog
-          key={auth.promptId}
-          prompt={auth}
-          banner={banner}
-          onAnswer={(secret) => {
-            const id = sessionId();
-            if (id) void sessions.answerAuth(id, auth.promptId, secret).catch(() => undefined);
-            setAuth(null);
-          }}
-        />
       )}
 
       {link !== null && (
@@ -695,70 +576,6 @@ function LinkDialog({ url, onClose, onOpened }: { url: string; onClose: () => vo
           </>
         )}
       </div>
-    </Dialog>
-  );
-}
-
-function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
-  const [secret, setSecret] = useState("");
-  const isPassword = prompt.kind === "password";
-  const isKbd = prompt.kind === "keyboard_interactive";
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (secret === "") return;
-    const value = secret;
-    setSecret("");
-    onAnswer(value);
-  }
-
-  const title = isKbd ? msg.terminal.kbdTitle(prompt.username) : isPassword ? msg.terminal.passwordTitle(prompt.username) : msg.terminal.passphraseTitle;
-  const body = isKbd ? msg.terminal.kbdBody : isPassword ? msg.terminal.passwordBody : msg.terminal.passphraseBody;
-  const label = isKbd ? msg.terminal.kbdAnswer : isPassword ? msg.hosts.password : msg.keys.passphrase;
-
-  return (
-    <Dialog title={title} icon={<IconKeyRound size={18} />} onDismiss={() => onAnswer(null)}>
-      <form className="stack" onSubmit={submit}>
-        {/* agent B: tunnels and history */}
-        <HopNotice hop={prompt.hop} />
-        <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-          {body}
-        </p>
-        {banner && (isPassword || isKbd) && (
-          <div className="stack-xs">
-            <span className="label">{msg.terminal.banner}</span>
-            {/* Server-supplied text: rendered as plain text, never as markup. */}
-            <pre className="banner-text">{banner}</pre>
-          </div>
-        )}
-        {isKbd && prompt.message && (
-          <div className="stack-xs">
-            <span className="label">{msg.terminal.kbdQuestion}</span>
-            {/* Server-supplied, sanitized by the core, still untrusted: plain text only. */}
-            <pre className="banner-text" data-testid="kbd-question">
-              {prompt.message}
-            </pre>
-          </div>
-        )}
-        {prompt.attempt > 1 && (
-          <Notice tone="warning">
-            {msg.terminal.retryHint} {msg.terminal.attempt(prompt.attempt, prompt.maxAttempts)}
-          </Notice>
-        )}
-        {isKbd && prompt.echo ? (
-          <TextField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} autoComplete="off" spellCheck={false} />
-        ) : (
-          <SecretField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
-        )}
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={() => onAnswer(null)}>
-            {msg.common.cancel}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={secret === ""}>
-            {msg.terminal.submit}
-          </button>
-        </div>
-      </form>
     </Dialog>
   );
 }
