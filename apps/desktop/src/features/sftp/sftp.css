@@ -153,15 +153,19 @@
   min-height: 100%;
 }
 
+/* The host filter sits at the right of the hosts box's strip, as a quiet field. */
 .sftp-picker-search {
   display: flex;
-  flex: none;
   align-items: center;
-  gap: var(--space-2);
-  height: var(--strip-height-pane);
-  padding: 0 var(--space-4);
-  border-bottom: var(--box-rule);
-  color: var(--text-muted);
+  gap: var(--space-1);
+  width: min(200px, 45%);
+  height: var(--control-height-sm);
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  color: var(--text-faint);
 }
 
 .sftp-picker-search input {
@@ -172,7 +176,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 
 .sftp-picker-search input::placeholder {
@@ -184,7 +188,8 @@
 }
 
 .sftp-picker-search:focus-within {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  border-color: var(--focus);
+  box-shadow: var(--glow-accent);
 }
 
 .sftp-picker-body {
