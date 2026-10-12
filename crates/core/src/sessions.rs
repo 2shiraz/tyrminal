@@ -2929,51 +2929,49 @@ mod snippet_tests {
         assert_eq!(*log.lock().unwrap(), ["ready", "echo one\r", "ready", "cd /tmp\r", "ready", "ls\r"]);
     }
 
-    #[tokio::test]
+    // Paused time: the clock moves only when every task waits, so the times below are exact and
+    // do not depend on how busy the machine is.
+    #[tokio::test(start_paused = true)]
     async fn the_next_startup_line_waits_for_the_shell_to_print_and_pause() {
-        // Real time: lower bounds are exact, upper bounds leave room for a slow machine.
-        let slack = Duration::from_millis(400);
-        let within = |elapsed: Duration, low: Duration| {
-            assert!(elapsed >= low && elapsed < low + slack, "{elapsed:?} not within {low:?} + {slack:?}");
-        };
+        let ms = Duration::from_millis;
 
         // Nothing printed yet: wait for the prompt, then for it to pause.
         let (tx, mut rx) = watch::channel(0u64);
         let at = tokio::time::Instant::now();
         let shell = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(ms(200)).await;
             tx.send_modify(|n| *n += 1);
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(ms(20)).await;
             tx.send_modify(|n| *n += 1);
             tx
         });
         settle(&mut rx, true).await;
-        within(at.elapsed(), Duration::from_millis(220) + STARTUP_QUIET);
+        assert_eq!(at.elapsed(), ms(220) + STARTUP_QUIET);
         let tx = shell.await.unwrap();
 
         // The prompt was already printed before typing began: only the pause is awaited.
         let (_prompted, mut seen) = watch::channel(1u64);
         let at = tokio::time::Instant::now();
         settle(&mut seen, true).await;
-        within(at.elapsed(), Duration::ZERO);
+        assert_eq!(at.elapsed(), STARTUP_QUIET);
 
         // A later line waits for the echo of the one before it, then for the pause.
         let at = tokio::time::Instant::now();
         let echo = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(ms(100)).await;
             tx.send_modify(|n| *n += 1);
             tx
         });
         settle(&mut rx, false).await;
-        within(at.elapsed(), Duration::from_millis(100) + STARTUP_QUIET);
+        assert_eq!(at.elapsed(), ms(100) + STARTUP_QUIET);
         let tx = echo.await.unwrap();
 
         // A shell that never echoes is waited for at most STARTUP_SETTLE_MAX.
         let at = tokio::time::Instant::now();
         settle(&mut rx, false).await;
-        within(at.elapsed(), STARTUP_SETTLE_MAX);
+        assert_eq!(at.elapsed(), STARTUP_SETTLE_MAX);
 
-        // Nor is one that never pauses.
+        // Nor is one that never pauses (output every quarter of the quiet time).
         let busy = tokio::spawn(async move {
             while tx.send(0).is_ok() {
                 tokio::time::sleep(STARTUP_QUIET / 4).await;
@@ -2981,7 +2979,8 @@ mod snippet_tests {
         });
         let at = tokio::time::Instant::now();
         settle(&mut rx, false).await;
-        within(at.elapsed(), STARTUP_SETTLE_MAX);
+        let elapsed = at.elapsed();
+        assert!(elapsed >= STARTUP_SETTLE_MAX && elapsed < STARTUP_SETTLE_MAX + STARTUP_QUIET, "{elapsed:?}");
         drop(rx);
         busy.await.unwrap();
     }
