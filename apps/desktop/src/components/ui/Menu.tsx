@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { openedBy } from "../../lib/inputModality";
 import { IconCheck } from "./icons";
 
 export interface MenuItem {
@@ -34,7 +35,10 @@ export function Menu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
+  // The corner it grows from (the trigger's), set with the position: motion.md §3, Menus.
+  const [position, setPosition] = useState<{ left: number; top: number; "--origin"?: string }>({ left: -9999, top: -9999 });
+  // Opened from the keyboard, a menu is simply there.
+  const [opened] = useState(openedBy);
   // What had focus before the menu took it (read while rendering, before the menu focuses itself).
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
 
@@ -44,15 +48,24 @@ export function Menu({
     const { width, height } = menu.getBoundingClientRect();
     let left = point?.x ?? 0;
     let top = point?.y ?? 0;
+    let side = "left";
     if (anchor) {
       const r = anchor.getBoundingClientRect();
       left = r.right - width;
       top = r.bottom + 4;
-      if (left < 8) left = r.left;
+      side = "right";
+      if (left < 8) {
+        left = r.left;
+        side = "left";
+      }
     }
     left = Math.min(Math.max(8, left), window.innerWidth - width - 8);
-    if (top + height > window.innerHeight - 8) top = Math.max(8, (anchor ? anchor.getBoundingClientRect().top : top) - height - 4);
-    setPosition({ left, top });
+    let edge = "top";
+    if (top + height > window.innerHeight - 8) {
+      top = Math.max(8, (anchor ? anchor.getBoundingClientRect().top : top) - height - 4);
+      edge = "bottom";
+    }
+    setPosition({ left, top, "--origin": `${edge} ${side}` });
     menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, [anchor, point]);
 
@@ -86,7 +99,7 @@ export function Menu({
   }
 
   return createPortal(
-    <div ref={ref} className="menu" role="menu" aria-label={label} style={position} onKeyDown={onKeyDown}>
+    <div ref={ref} className="menu m-pop" role="menu" aria-label={label} style={position as React.CSSProperties} data-opened-by={opened} onKeyDown={onKeyDown}>
       {items.map((item, index) =>
         item === "separator" ? (
           // Separators are positional.
