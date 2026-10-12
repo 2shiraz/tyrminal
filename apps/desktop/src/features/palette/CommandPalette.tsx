@@ -363,7 +363,7 @@ export function CommandPalette({
         });
       }
     }
-    if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions));
+    if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions, "searchSessions"));
     if (onRunAllOpen) list.push(action("run-all-open", msgRuns.paletteRunAllOpen, <IconPlay size={16} />, onRunAllOpen));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
