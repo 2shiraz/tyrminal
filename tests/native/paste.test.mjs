@@ -89,4 +89,47 @@ describe("paste safety in the real application", { concurrency: false }, () => {
     await t.waitForText(/^p25-43-safeecho p25-44-evil\s*$/m, "the stripped paste ran as one line");
     assert.doesNotMatch(await t.terminalText(), /^p25-44-evil\s*$/m);
   });
+
+  test("a reviewed paste runs exactly once when confirmed", async () => {
+    // A single line ending in a newline is reviewed (it would run at once).
+    await paste("echo p25-once-$((6*7))\n");
+    await review();
+    await s.clickButton("Paste", { within: "dialog[open]" });
+    await s.waitGone("dialog[open]");
+    await enter();
+    await t.waitForText(/^p25-once-42\s*$/m, "the confirmed paste ran");
+    // Give a duplicate time to arrive, then check the shell ran it once: a marker typed after it
+    // must follow exactly one result.
+    await t.type("echo p25-once-$((6*7+1))-after\n");
+    await t.waitForText(/^p25-once-43-after\s*$/m, "the shell is back at its prompt");
+    const runs = (await t.terminalText()).match(/^p25-once-42\s*$/gm) ?? [];
+    assert.equal(runs.length, 1, `ran ${runs.length} times`);
+  });
+
+  test("the 8-bit end marker (CSI 201~) never lets the text after it run, whether cancelled or stripped", async () => {
+    const text = "echo p25-$((50+1))-safe\u009b201~echo p25-$((50+2))-evil\n";
+    await paste(text);
+    let r = await review();
+    assert.match(r.title, /end bracketed paste early/);
+    const labels = await s.execute(`return [...document.querySelectorAll("dialog[open] button")].map((b) => b.textContent.trim())`);
+    assert.ok(!labels.includes("Paste"), `no plain Paste button: ${labels}`);
+    // Cancelled: nothing at all reaches the shell.
+    await s.clickButton("Cancel", { within: "dialog[open]" });
+    await s.waitGone("dialog[open]");
+    await t.type("echo p25-$((50+3))-after-cancel\n");
+    await t.waitForText(/^p25-53-after-cancel\s*$/m, "the shell is still at its prompt");
+    let screen = await t.terminalText();
+    assert.doesNotMatch(screen, /^p25-51-safe/m);
+    assert.doesNotMatch(screen, /^p25-52-evil/m);
+
+    // Stripped: one command line, so the text after the marker never runs as its own command.
+    await paste(text);
+    r = await review();
+    await s.clickButton("Remove the marker and paste", { within: "dialog[open]" });
+    await s.waitGone("dialog[open]");
+    await enter();
+    await t.waitForText(/^p25-51-safeecho p25-52-evil\s*$/m, "the stripped paste ran as one line");
+    screen = await t.terminalText();
+    assert.doesNotMatch(screen, /^p25-52-evil\s*$/m);
+  });
 });
