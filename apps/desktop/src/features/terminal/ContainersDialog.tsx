@@ -7,8 +7,9 @@ import { IconSquareTerminal } from "../../components/ui/icons";
 import { sessions } from "../../lib/ipc";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
+import { engineName } from "./containerEngine";
 
-export const engineName = (engine: ContainerEngine) => (engine === "docker" ? "Docker" : "Podman");
+export { engineName } from "./containerEngine";
 
 /**
  * P-33: the running containers on the host of a connected SSH session. Names, images and statuses

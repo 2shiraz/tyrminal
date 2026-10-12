@@ -9,6 +9,7 @@ import { type ReactNode, createContext, useContext, useEffect, useMemo } from "r
 
 import { identityEvents } from "../features/credentials/identityEvents";
 import { groups as groupsApi, hosts as hostsApi, identities as identitiesApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
+import { useAfterFirstPaint } from "../lib/afterPaint";
 import { useLoaded } from "../lib/useAsync";
 
 type Loaded<T> = ReturnType<typeof useLoaded<T>>;
@@ -20,22 +21,27 @@ interface VaultData {
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
   identities: Loaded<IdentitySummary[]>;
+  /** The host list has loaded and painted: loads the first screen does not show may start. */
+  settled: boolean;
 }
 
 const Context = createContext<VaultData | null>(null);
 
 export function VaultDataProvider({ children }: { children: ReactNode }) {
+  // The window opens on Hosts: its hosts and groups load first; the rest waits until they painted
+  // (the vault serves one call at a time, so each earlier call would delay the list).
   const hosts = useLoaded(hostsApi.list);
-  const recent = useLoaded(hostsApi.recent);
-  const keys = useLoaded(keysApi.list);
-  const snippets = useLoaded(snippetsApi.list);
   const groups = useLoaded(groupsApi.list);
-  const identities = useLoaded(identitiesApi.list);
+  const settled = useAfterFirstPaint(hosts.value !== null || hosts.error !== null);
+  const recent = useLoaded(hostsApi.recent, settled);
+  const keys = useLoaded(keysApi.list, settled);
+  const snippets = useLoaded(snippetsApi.list, settled);
+  const identities = useLoaded(identitiesApi.list, settled);
   const reloadIdentities = identities.reload;
   useEffect(() => identityEvents.subscribe(() => void reloadIdentities()), [reloadIdentities]);
   const value = useMemo(
-    () => ({ hosts, recent, keys, snippets, groups, identities }),
-    [hosts, recent, keys, snippets, groups, identities],
+    () => ({ hosts, recent, keys, snippets, groups, identities, settled }),
+    [hosts, recent, keys, snippets, groups, identities, settled],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

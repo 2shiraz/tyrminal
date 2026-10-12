@@ -8,7 +8,7 @@ import { sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { TrustDialog } from "../sftp/SftpPane";
-import { AuthDialog } from "../terminal/TerminalView";
+import { AuthDialog } from "../terminal/AuthDialog";
 import { DeployKeyDialog } from "./DeployKeyDialog";
 
 type Trust = Extract<SessionEvent, { type: "trust_prompt" }>;

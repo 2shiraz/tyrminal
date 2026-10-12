@@ -156,6 +156,7 @@ export const msgB = {
   recordings: {
     title: "Recordings",
     subtitle: "What your sessions printed, encrypted in this vault. Typed input is never recorded.",
+    settingsTitle: "Recording",
     record: "Record sessions",
     recordHint: "Records the output of new SSH and local terminal sessions. Off by default.",
     keep: "Keep per host",

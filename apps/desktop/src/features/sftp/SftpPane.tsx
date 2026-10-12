@@ -13,7 +13,9 @@ export { TrustDialog } from "./SftpLocation";
 export type { PaneHealth, PaneTransfers, Side, Source } from "./SftpLocation";
 
 /** Locations one pane keeps open at most. */
-export const MAX_LOCATIONS = 8;
+import { MAX_LOCATIONS } from "./limits";
+
+export { MAX_LOCATIONS };
 
 /** Asks a pane to show a location: an open one with that host, else a new one. */
 export interface LocationRequest {

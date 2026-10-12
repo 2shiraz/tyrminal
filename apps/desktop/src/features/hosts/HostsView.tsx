@@ -62,29 +62,24 @@ import { msg } from "../../lib/messages";
 import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgProduction } from "../../lib/messages-production";
-import { useWindowedList } from "../../components/ui/useWindowedList";
+import { WINDOW_THRESHOLD, useWindowedList } from "../../components/ui/useWindowedList";
 import { flashSaved, useFlip } from "../../lib/motion";
 import { msgBulk, msgHv } from "../../lib/messages-hostsview";
 import { msgSelect } from "../../lib/messages-select";
 import { isMac } from "../../lib/platform";
 import { type OpenLayout } from "../../app/multiOpen";
 import { useAction } from "../../lib/useAsync";
-import { DiscoveryDialog } from "./DiscoveryDialog";
-import { GroupEditor, descendantsOf } from "./GroupEditor";
-import { HostPanel, type PanelTarget } from "./HostPanel";
-import { groupPath } from "./hostForm";
-import { ImportDialog } from "./ImportDialog";
-import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
-import { MultiRunDialog } from "../snippets/MultiRunDialog";
+import { descendantsOf, groupPath } from "./groupTree";
+import type { PanelTarget } from "./HostPanel";
 import { OsIcon } from "./OsIcon";
-import { MAX_LOCATIONS } from "../sftp/SftpPane";
+import { MAX_LOCATIONS } from "../sftp/limits";
 import { useIsProduction } from "./production";
-import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
-import { AssignIdentityDialog } from "./AssignIdentityDialog";
-import { EnvironmentDialog } from "./EnvironmentDialog";
+import { identityEvents } from "../credentials/identityEvents";
+import { useIdentities } from "../credentials/useIdentities";
 // quick connect
 import { msgQuick } from "../../lib/messages-quick";
 import { type QuickTarget, formatTarget, parseAddress } from "../../lib/quickConnect";
+import { lazyComponent } from "../../lib/lazyComponent";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -113,6 +108,17 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 }
 
 /** How Hosts is shown until the user changes it; the choice is kept in preferences. */
+// The details panel, editors and dialogs load on first use: the list paints without them.
+const HostPanel = lazyComponent(() => import("./HostPanel").then((m) => m.HostPanel));
+const GroupEditor = lazyComponent(() => import("./GroupEditor").then((m) => m.GroupEditor));
+const DiscoveryDialog = lazyComponent(() => import("./DiscoveryDialog").then((m) => m.DiscoveryDialog));
+const ImportDialog = lazyComponent(() => import("./ImportDialog").then((m) => m.ImportDialog));
+const ConnectAllDialog = lazyComponent(() => import("./InventoryDialogs").then((m) => m.ConnectAllDialog));
+const SetOsDialog = lazyComponent(() => import("./InventoryDialogs").then((m) => m.SetOsDialog));
+const MultiRunDialog = lazyComponent(() => import("../snippets/MultiRunDialog").then((m) => m.MultiRunDialog));
+const AssignIdentityDialog = lazyComponent(() => import("./AssignIdentityDialog").then((m) => m.AssignIdentityDialog));
+const EnvironmentDialog = lazyComponent(() => import("./EnvironmentDialog").then((m) => m.EnvironmentDialog));
+
 const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "none" }, connectHintUses: 0 };
 
 /** What an optimistic bulk change looks like before the vault answers (the reload brings the exact result). */
@@ -123,6 +129,9 @@ function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { ki
 }
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
+/** Search results are windowed above this many (browsing keeps WINDOW_THRESHOLD). */
+const SEARCH_WINDOW_THRESHOLD = 60;
+
 /** The address as the list shows it: the port only when it is not 22, the device for serial. */
 function shortAddress(host: HostSummary): string {
   if (host.protocol.type === "serial") return host.address;
@@ -173,7 +182,7 @@ function HostsViewImpl({
   /** The new-tab page's Serial tile: open a new serial host, once per change of this number. */
   newSerial?: number;
 }) {
-  const { hosts, keys, recent, groups } = useVaultData();
+  const { hosts, keys, recent, groups, settled } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
   useFlip(listRef);
   const notify = useToast();
@@ -257,9 +266,9 @@ function HostsViewImpl({
     return ids;
   }, [ws]);
 
-  // OS icons live in their own records; reload them with the host list.
+  // OS icons live in their own records; reload them with the host list (after its first paint).
   useEffect(() => {
-    if (!hosts.value) return;
+    if (!hosts.value || !settled) return;
     let live = true;
     appearanceApi
       .list()
@@ -274,10 +283,10 @@ function HostsViewImpl({
     return () => {
       live = false;
     };
-  }, [hosts.value]);
+  }, [hosts.value, settled]);
 
   useEffect(() => {
-    if (!hosts.value) return;
+    if (!hosts.value || !settled) return;
     let live = true;
     const load = () =>
       identitiesApi
@@ -295,7 +304,7 @@ function HostsViewImpl({
       live = false;
       unsubscribe();
     };
-  }, [hosts.value, groups.value]);
+  }, [hosts.value, groups.value, settled]);
   const identityOf = (hostId: string) => {
     const id = assignments.get(`host:${hostId}`)?.effectiveIdentityId;
     const label = id ? identityList?.find((i) => i.id === id)?.label : undefined;
@@ -441,8 +450,11 @@ function HostsViewImpl({
   const shownIds = filtered.map((h) => h.id);
   // Long lists are windowed: only the hosts near the visible part are in the DOM. Their rows come
   // and go as the list scrolls, so they carry no FLIP key while windowed (nothing animates in).
-  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef);
-  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef);
+  // Search results arrive all at once: windowed from a lower count, so ~100 results do not lay
+  // out in one long task.
+  const windowFrom = searching ? SEARCH_WINDOW_THRESHOLD : WINDOW_THRESHOLD;
+  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef, windowFrom);
+  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef, windowFrom);
   const listWindow = layout === "grid" ? gridWindow : rowWindow;
   const windowItem = (host: HostSummary, i: number) =>
     listWindow.windowed
@@ -1110,14 +1122,8 @@ function HostsViewImpl({
                         <div className="host-card-meta">
                           <div className="host-card-badges">
                           {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
-                          {identityOf(host.id) ? (
-                            <span className="badge">
-                              <IconUser size={12} />
-                              {identityOf(host.id)}
-                            </span>
-                          ) : (
-                            <AuthBadge host={host} keys={keyList} />
-                          )}
+                          {/* An identity already shows in the "ssh, …" line above, as in list rows. */}
+                          {!identityOf(host.id) && <AuthBadge host={host} keys={keyList} />}
                           {isConnected ? (
                             <span className="badge badge-success">
                               <span className="status-dot" data-tone="ok" aria-hidden="true" />
