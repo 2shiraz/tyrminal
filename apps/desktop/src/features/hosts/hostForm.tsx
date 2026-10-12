@@ -15,6 +15,7 @@ import { identityEvents } from "../credentials/IdentitiesSection";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 import { OsIcon } from "./OsIcon";
+import { AgentForwarding, DEFAULT_SERIAL, DEFAULT_TERMINAL, type ProtocolKind, SerialFields, TelnetWarning, TerminalFields } from "./ProtocolFields";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -78,6 +79,10 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
           : (sourceAuth?.kind ?? (defaultGroupId ? "inherit" : keys.length > 0 ? "key" : "ask_password"))) as AuthKind,
       keyId: sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : (keys[0]?.id ?? ""),
       identityId: identity?.current ?? "",
+      protocol: (host?.protocol.type ?? "ssh") as ProtocolKind,
+      serial: host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL,
+      terminal: host?.terminal ?? DEFAULT_TERMINAL,
+      forwardAgent: host?.forwardAgent ?? false,
     };
   });
   const [groupId, setGroupId] = useState<string | null>(start.groupId);
@@ -90,6 +95,10 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
   const [password, setPassword] = useState("");
   const [keyId, setKeyId] = useState(start.keyId);
   const [identityId, setIdentityId] = useState(start.identityId);
+  const [protocol, setProtocolState] = useState<ProtocolKind>(start.protocol);
+  const [serial, setSerial] = useState(start.serial);
+  const [terminal, setTerminal] = useState(start.terminal);
+  const [forwardAgent, setForwardAgent] = useState(start.forwardAgent);
   const [certified, setCertified] = useState<Set<string>>(new Set());
   const { pending, error, run } = useAction();
 
@@ -117,16 +126,34 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     (authKind === "inherit" && groupId !== null) ||
     (authKind === "stored_password" && (password.length > 0 || hadStoredPassword)) ||
     (authKind === "key" && keyId !== "");
-  const ready = label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid && advanced.valid;
+  // Telnet and serial hosts sign in at the device's own prompt: no user name or stored credentials.
+  const ready =
+    protocol === "serial"
+      ? label.trim() !== "" && serial.path.trim() !== ""
+      : protocol === "telnet"
+        ? label.trim() !== "" && address.trim() !== "" && (port === "" || portValid)
+        : label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid && advanced.valid;
   /** What still stops a save, in the order of the cards, for the footer's explanation. */
-  const missing = [
-    address.trim() === "" && msg.hosts.address,
-    label.trim() === "" && msg.hosts.label,
-    !portValid && msg.hosts.port,
-    effectiveUser === "" && msg.hosts.username,
-    !authValid && (authKind === "stored_password" ? msg.hosts.password : msg.hosts.auth),
-    !advanced.valid && msgD.hostPanel.more,
-  ].filter((x): x is string => typeof x === "string");
+  const missing = (
+    protocol === "serial"
+      ? [label.trim() === "" && msg.hosts.label, serial.path.trim() === "" && msg.hosts.serialPort]
+      : protocol === "telnet"
+        ? [address.trim() === "" && msg.hosts.address, label.trim() === "" && msg.hosts.label, port !== "" && !portValid && msg.hosts.port]
+        : [
+            address.trim() === "" && msg.hosts.address,
+            label.trim() === "" && msg.hosts.label,
+            !portValid && msg.hosts.port,
+            effectiveUser === "" && msg.hosts.username,
+            !authValid && (authKind === "stored_password" ? msg.hosts.password : msg.hosts.auth),
+            !advanced.valid && msgD.hostPanel.more,
+          ]
+  ).filter((x): x is string => typeof x === "string");
+  /** Follows the protocol's usual port unless the user chose another. */
+  const setProtocol = (next: ProtocolKind) => {
+    if (next === "telnet" && port === "22") setPort("23");
+    if (next === "ssh" && port === "23") setPort("22");
+    setProtocolState(next);
+  };
   const dirty =
     groupId !== start.groupId ||
     label !== start.label ||
@@ -138,6 +165,11 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     (authKind === "key" && keyId !== start.keyId) ||
     password.length > 0 ||
     identityId !== start.identityId ||
+    protocol !== start.protocol ||
+    (protocol === "serial" && JSON.stringify(serial) !== JSON.stringify(start.serial)) ||
+    terminal.encoding !== start.terminal.encoding ||
+    terminal.term !== start.terminal.term ||
+    forwardAgent !== start.forwardAgent ||
     advanced.changed;
 
   /** Saves the host; resolves to the saved host, or `undefined` when the core refused it. */
@@ -156,9 +188,37 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
       .map((t) => t.trim())
       .filter((t) => t !== "");
     const saved = await run(async () => {
+      // The advanced connection settings (jump host, proxy) and identities apply to SSH only.
+      if (protocol !== "ssh") {
+        return hostsApi.save({
+          id: host?.id ?? null,
+          label,
+          address: protocol === "serial" ? serial.path : address,
+          port: protocol === "serial" ? null : portNumber,
+          username: "",
+          auth: { kind: "ask_password" },
+          groupId,
+          tags: tagList,
+          protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
+          terminal,
+          forwardAgent: false,
+        });
+      }
       // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
       await advanced.saveBefore();
-      const result = await hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList });
+      const result = await hostsApi.save({
+        id: host?.id ?? null,
+        label,
+        address,
+        port: portNumber,
+        username,
+        auth,
+        groupId,
+        tags: tagList,
+        protocol: { type: "ssh" },
+        terminal,
+        forwardAgent: forwardAgent && authKind === "key",
+      });
       await advanced.saveAfter(result.id);
       if (identity && identityId !== start.identityId) {
         await identitiesApi.assign({ kind: "host", hostId: result.id }, identityId || null);
@@ -176,8 +236,23 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     groups,
     identity,
     advanced,
-    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId },
-    set: { setGroupId, setLabel, setAddress, setPort, setUsername, setTags, setAuthKind, setPassword, setKeyId, setIdentityId },
+    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId, protocol, serial, terminal, forwardAgent },
+    set: {
+      setGroupId,
+      setLabel,
+      setAddress,
+      setPort,
+      setUsername,
+      setTags,
+      setAuthKind,
+      setPassword,
+      setKeyId,
+      setIdentityId,
+      setProtocol,
+      setSerial,
+      setTerminal,
+      setForwardAgent,
+    },
     certified,
     inherited,
     inheritedKey,
@@ -264,35 +339,56 @@ function GeneralCard({ form }: { form: HostForm }) {
   );
 }
 
-/** 3. "SSH on [22] port". */
+const PROTOCOL_NAMES: Record<ProtocolKind, string> = { ssh: "SSH", telnet: msg.hosts.telnet, serial: msg.hosts.serial };
+
+/** 3. "[SSH] on [22] port": the protocol (SSH, or Telnet or a serial device instead) and its port or line settings. */
 function ProtocolCard({ form }: { form: HostForm }) {
   const { fields, set, inherited, portValid } = form;
   const id = useId();
+  const protocolId = useId();
   const inheritedPort = String(inherited.port ?? 22);
   const error = fields.port !== "" && !portValid ? "1–65535" : undefined;
-  const hint = fields.groupId && fields.port === "" ? msg.hosts.inherit(inheritedPort) : undefined;
+  const hint = fields.protocol === "ssh" && fields.groupId && fields.port === "" ? msg.hosts.inherit(inheritedPort) : undefined;
   return (
     <Card title={msgD.hostPanel.protocol}>
       <div className="protocol-line">
-        <span className="protocol-name">SSH</span>
-        <span aria-hidden="true">{msgD.hostPanel.on}</span>
-        <label htmlFor={id} className="visually-hidden">
-          {msg.hosts.port}
+        <label htmlFor={protocolId} className="visually-hidden">
+          {msg.hosts.protocol}
         </label>
-        <input
-          id={id}
-          className="input protocol-port"
-          value={fields.port}
-          onChange={(event) => set.setPort(event.target.value)}
-          inputMode="numeric"
-          maxLength={5}
-          placeholder={fields.groupId ? inheritedPort : undefined}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <span aria-hidden="true">{msgD.hostPanel.portWord}</span>
+        <select
+          id={protocolId}
+          className="select protocol-select"
+          value={fields.protocol}
+          onChange={(event) => set.setProtocol(event.target.value as ProtocolKind)}
+        >
+          {(Object.keys(PROTOCOL_NAMES) as ProtocolKind[]).map((kind) => (
+            <option key={kind} value={kind}>
+              {PROTOCOL_NAMES[kind]}
+            </option>
+          ))}
+        </select>
+        {fields.protocol !== "serial" && (
+          <>
+            <span aria-hidden="true">{msgD.hostPanel.on}</span>
+            <label htmlFor={id} className="visually-hidden">
+              {msg.hosts.port}
+            </label>
+            <input
+              id={id}
+              className="input protocol-port"
+              value={fields.port}
+              onChange={(event) => set.setPort(event.target.value)}
+              inputMode="numeric"
+              maxLength={5}
+              placeholder={fields.protocol === "ssh" && fields.groupId ? inheritedPort : undefined}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <span aria-hidden="true">{msgD.hostPanel.portWord}</span>
+          </>
+        )}
       </div>
       {error ? (
         <span id={`${id}-error`} className="field-error" role="alert">
@@ -303,6 +399,8 @@ function ProtocolCard({ form }: { form: HostForm }) {
           {hint}
         </span>
       ) : null}
+      {fields.protocol === "telnet" && <TelnetWarning />}
+      {fields.protocol === "serial" && <SerialFields value={fields.serial} onChange={set.setSerial} />}
     </Card>
   );
 }
@@ -452,9 +550,13 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
     <details className="host-section host-more" open={configured ? true : undefined}>
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
       <div className="stack-sm host-more-body">
+        <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />
+        {form.fields.protocol === "ssh" && form.fields.authKind === "key" && (
+          <AgentForwarding checked={form.fields.forwardAgent} onChange={form.set.setForwardAgent} />
+        )}
         {/* agent B: tunnels and history */}
-        <HostAdvancedSection host={form.host} state={advanced} embedded />
-        {extra}
+        {form.fields.protocol === "ssh" && <HostAdvancedSection host={form.host} state={advanced} embedded />}
+        {form.fields.protocol === "ssh" && extra}
       </div>
     </details>
   );
@@ -474,12 +576,12 @@ export function HostFormCards({
 }) {
   return (
     <>
-      <AddressCard form={form} os={os} autoFocus={autoFocus} />
+      {form.fields.protocol !== "serial" && <AddressCard form={form} os={os} autoFocus={autoFocus} />}
       <GeneralCard form={form} />
       <ProtocolCard form={form} />
-      <CredentialsCard form={form} />
+      {form.fields.protocol === "ssh" && <CredentialsCard form={form} />}
       <MoreCard form={form} extra={extra} />
-      {form.ready && <p className="muted host-effective">{msg.hosts.effective(form.effectiveUser, form.fields.address.trim(), form.effectivePort)}</p>}
+      {form.ready && form.fields.protocol === "ssh" && <p className="muted host-effective">{msg.hosts.effective(form.effectiveUser, form.fields.address.trim(), form.effectivePort)}</p>}
     </>
   );
 }

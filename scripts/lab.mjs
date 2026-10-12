@@ -347,7 +347,7 @@ function sshdConfig({ port, inDir, authFile, version, kbdOnly = false }) {
     "AllowTcpForwarding yes",
     "GatewayPorts no",
     "X11Forwarding no",
-    "AllowAgentForwarding no",
+    "AllowAgentForwarding yes",
     "PermitUserEnvironment no",
     "AcceptEnv TYR_*",
     "PrintMotd no",

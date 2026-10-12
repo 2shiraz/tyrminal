@@ -52,7 +52,8 @@ jobs:
 
   build:
     name: Package ${{ matrix.platform }}
-    needs: [ci, native, security]
+    # Packaging runs alongside the test workflows; publishing waits for all of them.
+    needs: validate
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -113,7 +114,7 @@ jobs:
 
   publish:
     name: Create GitHub pre-release
-    needs: build
+    needs: [build, ci, native, security]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

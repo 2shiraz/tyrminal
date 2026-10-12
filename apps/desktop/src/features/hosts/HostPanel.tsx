@@ -60,10 +60,13 @@ export function HostPanel({
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   dirtyRef.current = form.dirty;
 
-  // After a save the panel is rebuilt from the saved host; keep focus inside it.
+  // After a save the panel is rebuilt from the saved host, and a serial host has no address field
+  // to start in: focus goes to the panel's heading so it stays inside the panel.
+  const focusHeading = justSaved || host?.protocol.type === "serial";
   useEffect(() => {
-    if (justSaved) heading.current?.focus();
-  }, [justSaved]);
+    if (focusHeading) heading.current?.focus();
+    // On mount only: the panel is remounted for every host and after every save.
+  }, []);
 
   const groupId = form.fields.groupId;
   const location = msgD.hostPanel.location(groupId ? groupPath(groups, groupId) : null);
@@ -130,7 +133,7 @@ export function HostPanel({
           <HostFormCards
             form={form}
             os={os}
-            autoFocus={!justSaved}
+            autoFocus={!focusHeading}
             extra={
               host && (
                 <button type="button" className="btn btn-sm" onClick={() => onEnvironment(host)}>

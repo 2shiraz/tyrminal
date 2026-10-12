@@ -8,8 +8,8 @@ use std::time::Instant;
 use tempfile::TempDir;
 use tyrminal_core::Core;
 use tyrminal_core::contracts::{
-    BulkHostChange, ErrorCode, GroupInput, HostAuth, HostAuthInput, HostInput, IdentityInput, InheritedFields,
-    IpcError, SecretChange, SettingOrigin, SettingsTarget,
+    BulkHostChange, ErrorCode, GroupInput, HostAuth, HostAuthInput, HostInput, HostProtocol, IdentityInput,
+    InheritedFields, IpcError, SecretChange, SettingOrigin, SettingsTarget,
 };
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -45,6 +45,9 @@ fn host(label: &str, group: Option<&str>) -> HostInput {
         auth: HostAuthInput::Inherit,
         group_id: group.map(Into::into),
         tags: Vec::new(),
+        protocol: HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent: false,
     }
 }
 

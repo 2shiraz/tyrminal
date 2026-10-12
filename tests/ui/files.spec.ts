@@ -277,3 +277,77 @@ test("files: copy to another server is offered with two SSH sessions and runs as
   await finishLatest(page);
   await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
 });
+
+test("files: files dropped from the desktop upload in pieces and ask before replacing", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page).getByRole("button", { name: "Select README.md" })).toBeVisible();
+  const drop = (files: { name: string; size: number }[]) =>
+    page.locator(".files-body").evaluate((el, specs) => {
+      const transfer = new DataTransfer();
+      for (const s of specs) transfer.items.add(new File([new Uint8Array(s.size)], s.name));
+      el.dispatchEvent(new DragEvent("dragover", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    }, files);
+
+  // 2.5 MiB arrives as three ordered pieces and then appears in the folder.
+  await drop([{ name: "dump.sql", size: 2.5 * 1024 * 1024 }]);
+  await expect(panel(page).getByRole("listitem").filter({ hasText: "dump.sql" }).last()).toContainText(/Done|2\.5 MB/);
+  await expect(list(page).getByRole("button", { name: "Select dump.sql" })).toBeVisible();
+  const pieces = await page.evaluate(() => (window as unknown as { __mockDropped: { name: string; bytes: number }[] }).__mockDropped);
+  expect(pieces.map((p) => p.bytes)).toEqual([1048576, 1048576, 524288]);
+
+  // An existing name asks first; Keep both uploads under the next free name.
+  await drop([{ name: "README.md", size: 10 }]);
+  const dialog = page.getByRole("alertdialog", { name: "Replace “README.md”?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /Keep both/ }).click();
+  await expect(list(page).getByRole("button", { name: "Select README (1).md" })).toBeVisible();
+});
+
+test("files: switching tabs keeps each session's folder, selection, toggles and scroll without listing again", async ({ page }) => {
+  await openApp(page);
+  // Enough entries for the list to scroll.
+  await page.evaluate(() => {
+    const fs = (window as unknown as { __mockFs: Map<string, unknown> }).__mockFs;
+    for (let i = 0; i < 80; i++) fs.set(`/home/deploy/app/log-${String(i).padStart(2, "0")}.txt`, { kind: "file", size: 10, permissions: 0o644, modified: 0 });
+  });
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await list(page).getByRole("button", { name: "Open app" }).click();
+  await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/app");
+  await panel(page).getByRole("switch", { name: "Show hidden files" }).check();
+  await list(page).getByRole("button", { name: "Select log-40.txt" }).click();
+  await page.locator(".files-body").evaluate((el) => {
+    el.scrollTop = 600;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  const scrolled = await page.locator(".files-body").evaluate((el) => el.scrollTop);
+  expect(scrolled).toBeGreaterThan(0);
+
+  // Tab B: another session starts at its own login folder with its own toggles.
+  await connect(page, "db-primary");
+  await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy");
+  await expect(panel(page).getByRole("switch", { name: "Show hidden files" })).not.toBeChecked();
+
+  const listCalls = () =>
+    page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((c) => c.cmd === "files_list").length);
+  const before = await listCalls();
+
+  // Back to tab A: same folder, selection, toggles and scroll, and nothing is listed again.
+  await page.getByRole("tab", { name: /api-gateway/ }).click();
+  await expect(panel(page).getByRole("status", { name: "Target" })).toHaveText(/Files on api-gateway/);
+  await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy/app");
+  await expect(panel(page).getByRole("switch", { name: "Show hidden files" })).toBeChecked();
+  await expect(list(page).getByRole("button", { name: "Select log-40.txt" })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.locator(".files-body").evaluate((el) => el.scrollTop)).toBe(scrolled);
+  // And back to B, which also kept its place.
+  await page.getByRole("tab", { name: /db-primary/ }).click();
+  await expect(panel(page).getByRole("textbox", { name: "Folder on the server" })).toHaveValue("/home/deploy");
+  expect(await listCalls()).toBe(before);
+
+  // Refresh is the way to list again.
+  await panel(page).getByRole("button", { name: "Refresh" }).click();
+  await expect.poll(listCalls).toBe(before + 1);
+});

@@ -1,13 +1,14 @@
 import type { Preferences } from "@tyrminal/contracts";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { preferences as prefsApi } from "../lib/ipc";
+import { diagnostics, preferences as prefsApi } from "../lib/ipc";
 
 const DEFAULTS: Preferences = {
   theme: "system",
   reduceMotion: false,
   localShell: null,
   editorApps: [],
+  diagnostics: false,
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",
@@ -67,6 +68,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resolvedTheme = prefs.theme === "system" ? system : prefs.theme;
+
+  useEffect(() => diagnostics.setEnabled(prefs.diagnostics), [prefs.diagnostics]);
 
   useEffect(() => {
     const root = document.documentElement;

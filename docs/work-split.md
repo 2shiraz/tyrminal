@@ -160,8 +160,9 @@ Home's quick connect uses). Edits outside `features/hosts`:
 - Tests: `tests/ui/{inventory,tunnels,accessibility,visual}.spec.ts` drive the panel; new
   `tests/ui/host-panel.spec.ts`; the two `08-host-editor` baselines re-recorded;
   `tests/native/{app,backup}.test.mjs` and `flows.mjs` save through the panel.
-- With PR #8 (Telnet/serial, terminal type and encoding, agent forwarding in the host editor):
-  those fields move into the panel's Protocol card and "Show more" when it merges.
+- PR #8's fields live in the panel: the protocol select (SSH, Telnet, serial device) and the
+  serial line settings in the Protocol card; encoding, terminal type and agent forwarding under
+  "Show more". `tests/ui/protocols.spec.ts` drives the panel.
 
 ## Status (each agent edits only its own column)
 

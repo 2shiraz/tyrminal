@@ -203,3 +203,21 @@ test("at a narrow width the panel takes the whole view and the list behind it is
   const wide = await panel(page).boundingBox();
   expect(wide?.width).toBe(400);
 });
+
+test("Show more holds the terminal settings and, for a key sign-in, agent forwarding (off by default)", async ({ page }) => {
+  await openHosts(page);
+  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click();
+  await details(page).getByText("Show more").click();
+  const forward = details(page).getByRole("switch", { name: /agent forwarding/ });
+  await expect(forward).not.toBeChecked();
+  await forward.click();
+  await details(page).getByRole("combobox", { name: "Character encoding" }).selectOption("iso8859-1");
+  await details(page).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(status(page)).toHaveText("Saved");
+  const [save] = await calls(page, "host_save");
+  expect(save?.args).toMatchObject({ host: { protocol: { type: "ssh" }, forwardAgent: true, terminal: { encoding: "iso8859-1" } } });
+
+  // A password sign-in has nothing to forward: the switch is not offered.
+  await details(page).getByRole("radio", { name: /Ask for the password each time/ }).check();
+  await expect(details(page).getByRole("switch", { name: /agent forwarding/ })).toHaveCount(0);
+});
