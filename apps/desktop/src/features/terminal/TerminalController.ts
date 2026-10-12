@@ -24,6 +24,7 @@ import { sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import { schemeById } from "./schemes";
+import { BRACKET_END } from "../paste/pasteSafety";
 import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
@@ -38,8 +39,8 @@ export interface TerminalCallbacks {
   onLink(url: string): void;
   /** The server asked to write `text` to the clipboard (OSC 52). */
   onClipboardWrite(text: string): void;
-  /** A paste needs review before it is sent; call `confirm` to send it. */
-  onPasteReview(text: string, bracketed: boolean, confirm: () => void): void;
+  /** A paste needs review before it is sent; call `confirm` with the text to send (the review may remove an end marker). */
+  onPasteReview(text: string, bracketed: boolean, confirm: (text: string) => void): void;
   onRenderer(kind: RendererKind, fellBack: boolean): void;
   onResize(cols: number, rows: number): void;
   onSearchResults(index: number, total: number): void;
@@ -425,11 +426,17 @@ export class TerminalController {
   /** Sends text as a paste (bracketed when the remote enabled it), after review if needed. */
   pasteText(text: string): void {
     if (!text || this.disposed) return;
-    const send = () => this.term.paste(text);
-    if (this.prefs.confirmMultilinePaste && needsPasteReview(text)) {
+    const send = (final: string) => {
+      // A bracketed-paste end marker inside a paste would end it early and run the rest as typed
+      // input: it is never sent, whatever path led here (P-25).
+      if (!final || this.disposed || final.includes(BRACKET_END)) return;
+      this.term.paste(final);
+    };
+    // Hidden characters and end markers are always reviewed; plain multi-line pastes follow the setting.
+    if (needsPasteReview(text, this.prefs.confirmMultilinePaste)) {
       this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, send);
     } else {
-      send();
+      send(text);
     }
   }
 
