@@ -123,6 +123,12 @@ function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { ki
 }
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
+/** The address as the list shows it: the port only when it is not 22, the device for serial. */
+function shortAddress(host: HostSummary): string {
+  if (host.protocol.type === "serial") return host.address;
+  return host.port === 22 ? host.address : `${host.address}:${host.port}`;
+}
+
 function rangeBetween(order: string[], from: string, to: string): string[] {
   const a = order.indexOf(from);
   const b = order.indexOf(to);
@@ -1070,7 +1076,10 @@ function HostsViewImpl({
                               </span>
                             )}
                           </span>
-                          <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                          <span className="row-sub">{msgHv.protocolUser(host.protocol.type, host.protocol.type === "serial" ? "" : (identityOf(host.id) ?? host.username))}</span>
+                          <span className="host-card-dest truncate" title={msg.hosts.destination(host.username, host.address, host.port)}>
+                            {shortAddress(host)}
+                          </span>
                           {(host.groupId || host.tags.length > 0) && (
                             <span className="host-card-tags">
                               {host.groupId && (
@@ -1169,7 +1178,7 @@ function HostsViewImpl({
                       </span>
                     </div>
                     <span className="host-col-address mono truncate" title={msg.hosts.destination(host.username, host.address, host.port)}>
-                      {host.protocol.type === "serial" ? host.address : `${host.address}${host.port === 22 ? "" : `:${host.port}`}`}
+                      {shortAddress(host)}
                     </span>
                     <span className="host-col-badges">
                       {host.favourite && (
