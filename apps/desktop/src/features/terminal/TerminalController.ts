@@ -35,7 +35,7 @@ import { schemeById } from "./schemes";
 import { type PasteCheck, type PasteChecks, checkPaste, hasBracketEnd } from "./pasteSafety";
 import { decodeOsc52, ligatureRanges, parseOsc7, sanitizeTitle } from "./terminalPolicy";
 import { CommandOutputs } from "./commandOutput";
-import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
+import { type ScrollbackResult, type SearchSlice, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
 export type TerminalTarget =
@@ -411,9 +411,9 @@ export class TerminalController {
   }
 
   /** P-28: matches for `query` in this terminal's scrollback (in memory only). */
-  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult {
+  searchScrollback(query: string, caseSensitive: boolean, slice?: SearchSlice): ScrollbackResult {
     const buffer = this.term.buffer.normal;
-    return searchLines((y) => buffer.getLine(y), buffer.length, query, caseSensitive);
+    return searchLines((y) => buffer.getLine(y), buffer.length, query, caseSensitive, slice);
   }
 
   /** P-28: scrolls a match into view and selects it. */

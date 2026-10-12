@@ -559,6 +559,9 @@ function Shell() {
         case "lock":
           void vault.lock().catch(() => undefined);
           break;
+        case "searchSessions":
+          if (wsRef.current.tabs.some((t) => panesOf(t.layout).some((id) => wsRef.current.panes[id]?.target.kind !== "sftp"))) setSearchingSessions(true);
+          break;
         // agent D: inventory and snippets
         case "suggest": {
           const p = activePane(wsRef.current);
@@ -1112,7 +1115,8 @@ function Shell() {
             panes: panesOf(t.layout).flatMap((paneId) => {
               const handle = handles.current.get(paneId);
               const p = ws.panes[paneId];
-              return handle && p ? [{ paneId, label: p.label, handle }] : [];
+              // Terminals only: an SFTP tab has no scrollback to search.
+              return handle && p && p.target.kind !== "sftp" ? [{ paneId, label: p.label, handle }] : [];
             }),
           }))}
           onReveal={(paneId, match) => {

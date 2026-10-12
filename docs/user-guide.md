@@ -269,9 +269,11 @@ like any paste. On Linux the system's middle-click paste of the selected text is
 middle click with the setting off sends nothing. Programs that use the mouse (vim, htop, mc) get
 the click; hold Shift to paste anyway.
 
-**Search all sessions** (command palette) finds text in the scrollback of every open terminal
-and lists the matches by tab; choosing one brings its tab to the front and selects the match.
-The search runs in memory only: nothing is saved or logged.
+**Search all sessions** (command palette, or Alt+Shift+F / ⌘⇧F) finds text in the scrollback of
+every open terminal and lists the matches by tab; choosing one brings its tab to the front and
+selects the match. It lists the first 500 matches, and **More…** continues. SFTP tabs are not
+searched. The search runs in memory only, a little at a time so typing never waits: nothing is
+saved, sent or logged.
 
 **Copy or save a command's output** (command palette) lists the commands the shell integration
 marked in the focused terminal, newest first. Copy or save the output of one of them, without
@@ -505,6 +507,7 @@ open in your browser only when you click them.
 | Close pane | Ctrl+Shift+W | ⌘W |
 | Split right / down | Alt+Shift+= / Alt+Shift+- | ⌘D / ⌘⇧D |
 | Find in terminal | Ctrl+Shift+F | ⌘F |
+| Search all sessions | Alt+Shift+F | ⌘⇧F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | ⌘⇧] / ⌘⇧[ |
 | Move focus between panes | Alt+arrow keys | ⌘⌥ + arrow keys |
