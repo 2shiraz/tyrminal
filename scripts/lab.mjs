@@ -26,13 +26,23 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { randomBytes } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const labDir = join(root, "tests", "ssh-lab");
-const runDir = join(labDir, ".run");
+// TYRMINAL_LAB_RUN_DIR runs a second lab beside the first (CI's post-quantum container lab on
+// Linux). It must be a ".run-<name>" folder in tests/ssh-lab, since `down` deletes it.
+const runDir = (() => {
+  const dir = process.env.TYRMINAL_LAB_RUN_DIR;
+  if (!dir) return join(labDir, ".run");
+  const name = basename(dir);
+  if (resolve(root, dir) !== join(labDir, name) || !/^\.run-[a-z0-9-]+$/.test(name)) {
+    throw new Error(`TYRMINAL_LAB_RUN_DIR must be tests/ssh-lab/.run-<name>, not ${dir}`);
+  }
+  return join(labDir, name);
+})();
 const LABEL = "tyrminal.lab=1";
 const IMAGE = "tyrminal-lab-sshd:alpine3.22-openssh10.0p1";
 const SERVERS = ["a", "b"];

@@ -154,6 +154,16 @@ jobs:
           sudo usermod -aG docker tyrlab
           docker pull -q alpine:3.22
           echo "TYRMINAL_LAB_CONTAINERS=1" >> "$GITHUB_ENV"
+      # SEC-08's end-to-end ML-KEM test needs OpenSSH 9.9 or later; the runner's sshd is 9.6. The
+      # repository's container lab (Alpine 3.22, OpenSSH 10.0p1) runs beside the local lab for it.
+      - name: Post-quantum lab (container, Linux)
+        if: steps.changed.outputs.code == 'true' && runner.os == 'Linux'
+        env:
+          TYRMINAL_LAB_MODE: docker
+          TYRMINAL_LAB_RUN_DIR: tests/ssh-lab/.run-pq
+        run: |
+          node scripts/lab.mjs up
+          echo "TYRMINAL_PQ_LAB=$PWD/tests/ssh-lab/.run-pq/lab.json" >> "$GITHUB_ENV"
 
       - name: Integration suite
         if: steps.changed.outputs.code == 'true'
