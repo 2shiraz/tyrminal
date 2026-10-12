@@ -48,7 +48,14 @@ export function TransferDrawer<T extends Transfer & { job?: unknown }>({
   const sum = totals(transfers);
   const overall = percent(sum.done, sum.total);
   return (
-    <section ref={exitRef} className="xfer" aria-label={msg.files.transfers} data-open={open || undefined}>
+    <section
+      ref={exitRef}
+      className="xfer"
+      aria-label={msg.files.transfers}
+      data-open={open || undefined}
+      // The status edge, as a toast: failed wins, then running, else all done.
+      data-tone={sum.failed > 0 ? "danger" : sum.running > 0 ? "accent" : "success"}
+    >
       <div className="xfer-head">
         <button type="button" className="xfer-toggle" aria-expanded={open} aria-label={open ? msgFiles.hideTransfers : msgFiles.showTransfers} onClick={() => setOpen((v) => !v)}>
           <IconChevronDown size={14} className="xfer-chevron" />

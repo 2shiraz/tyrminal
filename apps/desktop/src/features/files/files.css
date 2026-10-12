@@ -495,12 +495,29 @@ button.pathbar-crumb:hover {
 
 /* ---------- transfer drawer ---------- */
 
+/* The transfer drawer floats over the bottom of the pane as a toast does: a box on the overlay
+   colour with a 2 px status edge (accent while running, danger when one failed, success when all
+   are done), a strip head and list-height rows. */
 .xfer {
+  --xfer-edge: var(--accent);
   flex: none;
   max-height: 40%;
+  margin: 0 var(--space-2) var(--space-2);
   overflow: auto;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--ft-bg, var(--bg-surface));
+  border: var(--box-border);
+  border-radius: var(--radius-dialog);
+  background: var(--bg-overlay);
+  box-shadow:
+    inset 2px 0 0 var(--xfer-edge),
+    var(--shadow-3);
+}
+
+.xfer[data-tone="danger"] {
+  --xfer-edge: var(--danger);
+}
+
+.xfer[data-tone="success"] {
+  --xfer-edge: var(--success);
 }
 
 .xfer-head {
@@ -510,8 +527,13 @@ button.pathbar-crumb:hover {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 4px var(--space-2) 4px var(--space-1);
+  min-height: var(--strip-height);
+  padding: 0 var(--space-2) 0 var(--space-1);
   background: inherit;
+}
+
+.xfer[data-open] .xfer-head {
+  border-bottom: var(--box-rule);
 }
 
 .xfer-toggle {
@@ -576,7 +598,7 @@ button.pathbar-crumb:hover {
 
 .xfer-list {
   margin: 0;
-  padding: 0 var(--space-3) var(--space-2);
+  padding: 0 var(--space-3);
   list-style: none;
 }
 
@@ -586,12 +608,13 @@ button.pathbar-crumb:hover {
   align-items: center;
   column-gap: var(--space-2);
   row-gap: 3px;
-  padding: 5px 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) 0;
   font-size: var(--text-sm);
 }
 
 .xfer-row + .xfer-row {
-  border-top: 1px solid var(--border-subtle);
+  border-top: var(--box-rule);
 }
 
 .xfer-icon {
