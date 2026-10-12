@@ -1288,6 +1288,8 @@ kbd,
   display: grid;
   gap: var(--space-2);
   width: min(380px, calc(100vw - 32px));
+  /* Click-through: a toast never covers a control (Toasts.tsx finds hover by hit-testing). */
+  pointer-events: none;
 }
 
 .toast {

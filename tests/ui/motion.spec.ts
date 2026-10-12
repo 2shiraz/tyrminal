@@ -244,7 +244,9 @@ test.describe("exits", () => {
     await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
     const toast = page.locator(".toast").filter({ hasText: "Sent “Disk usage”" });
     await expect(toast).toBeVisible();
-    await toast.hover();
+    // The stack is click-through (a toast never covers a control), so the pointer is placed on it
+    // without the "receives pointer events" check; the hover is found by hit-testing.
+    await toast.hover({ force: true });
     await page.waitForTimeout(5000);
     await expect(toast).toBeVisible();
     await page.mouse.move(5, 400);
