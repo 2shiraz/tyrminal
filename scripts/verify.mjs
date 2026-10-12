@@ -126,6 +126,7 @@ const SUITES = {
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
     { name: "paste safety (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/paste.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "a refused key installed by password, then used (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/key-install.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "notes: inert Markdown, kept in the vault, code blocks only through the paste review (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/notes.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
