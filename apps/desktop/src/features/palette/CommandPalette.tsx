@@ -5,11 +5,14 @@ import type { Destination } from "../../app/AppShell";
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
 import {
+  // agent B: tunnels and history
+  IconRoute,
+  IconArrowLeftRight,
   IconColumns2,
   IconCornerDownLeft,
   IconFingerprint,
-  IconHouse,
   IconHardDrive,
+  IconHouse,
   IconKeyRound,
   IconLock,
   IconPlay,
@@ -25,15 +28,14 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
-  // agent B: tunnels and history
   IconHistory,
-  IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
+import { msgSftp } from "../sftp/messages";
 
 interface Item {
   id: string;
@@ -89,6 +91,7 @@ export function CommandPalette({
   onAction,
   onToggleTheme,
   onLocal,
+  onSftp,
   onSnippet,
   onDeployKey,
   broadcast,
@@ -105,6 +108,8 @@ export function CommandPalette({
   onAction: (a: ActionId) => void;
   onToggleTheme: () => void;
   onLocal: () => void;
+  /** Opens a new SFTP tab. */
+  onSftp?: (() => void) | undefined;
   onSnippet: (s: SnippetSummary) => void;
   /** Present only when the focused pane is a connected SSH session. */
   onDeployKey?: (() => void) | undefined;
@@ -167,6 +172,7 @@ export function CommandPalette({
       shortcut,
     });
     list.push(action("local", msg.nav.localTerminal, <IconSquareTerminal size={16} />, onLocal, "newLocal"));
+    if (onSftp) list.push({ ...action("sftp", msgSftp.open, <IconArrowLeftRight size={16} />, onSftp), keywords: `files transfer ${msgSftp.openHint}` });
     if (hasTerminal) {
       list.push(action("split-right", msg.palette.splitRight, <IconColumns2 size={16} />, () => onAction("splitRight"), "splitRight"));
       list.push(action("split-down", msg.palette.splitDown, <IconRows2 size={16} />, () => onAction("splitDown"), "splitDown"));
@@ -207,7 +213,7 @@ export function CommandPalette({
     list.push(nav("tunnels", <IconRoute size={16} />));
     list.push(nav("recordings", <IconHistory size={16} />));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate]);
 
   const results = useMemo(() => {
     const scored = items

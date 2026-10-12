@@ -5,6 +5,9 @@ import { type Workspace, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
 import { Shortcut } from "../ui/controls";
 import {
+  // agent B: tunnels and history
+  IconRoute,
+  IconArrowLeftRight,
   IconFingerprint,
   IconHouse,
   IconKeyRound,
@@ -15,10 +18,9 @@ import {
   IconSettings,
   IconSidebar,
   IconSquareTerminal,
-  // agent B: tunnels and history
   IconHistory,
-  IconRoute,
 } from "../ui/icons";
+import { msgSftp } from "../../features/sftp/messages";
 
 /** The Tyrminal mark: a prompt chevron and cursor in a rounded tile. Original artwork. */
 export function BrandMark({ size = 26 }: { size?: number }) {
@@ -60,6 +62,7 @@ export function Sidebar({
   onSelectTab,
   onOpenPalette,
   onLocalTerminal,
+  onSftp,
   onToggleCollapsed,
   onLock,
   hostCount,
@@ -72,6 +75,8 @@ export function Sidebar({
   onSelectTab: (id: number) => void;
   onOpenPalette: () => void;
   onLocalTerminal: () => void;
+  /** Opens a new SFTP tab. */
+  onSftp?: () => void;
   onToggleCollapsed: () => void;
   onLock: () => void;
   hostCount: number;
@@ -145,6 +150,12 @@ export function Sidebar({
           <IconSquareTerminal size={17} />
           <span className="nav-label">{msg.nav.localTerminal}</span>
         </button>
+        {onSftp && (
+          <button type="button" className="nav-item" data-nav="sftp" onClick={onSftp} data-tooltip={collapsed ? msgSftp.open : undefined} data-tooltip-side="right">
+            <IconArrowLeftRight size={17} />
+            <span className="nav-label">{msgSftp.open}</span>
+          </button>
+        )}
         {item({ id: "settings", icon: <IconSettings size={17} /> })}
         <button type="button" className="nav-item" data-nav="lock" onClick={onLock} data-tooltip={collapsed ? msg.nav.lock : undefined} data-tooltip-side="right">
           <IconLock size={17} />

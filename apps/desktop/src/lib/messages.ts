@@ -441,6 +441,8 @@ export const msg = {
     empty: "This folder is empty.",
     truncated: (n: number) => `Showing the first ${n.toLocaleString()} entries.`,
     listLabel: (path: string) => `Contents of ${path}`,
+    loadingFolder: "Opening folder",
+    selectionStatus: "Selection",
     open: (name: string) => `Open ${name}`,
     select: (name: string) => `Select ${name}`,
     kind: { file: "File", dir: "Folder", symlink: "Link", other: "Other" },

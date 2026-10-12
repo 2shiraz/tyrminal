@@ -38,7 +38,7 @@ mod command_history;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
-pub use files::{TransferSink, list_local, local_within};
+pub use files::{TransferSink, list_local, local_make_dir, local_remove, local_rename, local_set_mode, local_within};
 pub use preferences::PreferencesStore;
 pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
