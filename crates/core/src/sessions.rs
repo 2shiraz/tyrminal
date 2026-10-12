@@ -1891,7 +1891,19 @@ impl Sessions {
             None => Vec::new(),
         };
         let cancel = self.snippet_runs.start(owner, run_id)?;
-        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
+        // The run holds its own handle to the connection, so it would outlive its session: it
+        // stops (and the channel is dropped) when the session closes or the vault locks.
+        let mut closed = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        let result = tokio::select! {
+            result = crate::snippet_runs::run(&conn, &text, &env, cancel) => result,
+            _ = closed.wait_for(|closed| *closed) => {
+                Err(err(ErrorCode::Cancelled, "The session was closed, so the run stopped."))
+            }
+            () = locked_since(&mut vault, entry.generation) => {
+                Err(err(ErrorCode::VaultLocked, "The vault was locked, so the run stopped."))
+            }
+        };
         self.snippet_runs.finish(run_id);
         result
     }
