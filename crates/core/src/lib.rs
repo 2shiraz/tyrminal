@@ -21,6 +21,7 @@ mod serial;
 mod sessions;
 mod streams;
 mod telnet;
+mod transcode;
 mod validate;
 mod vault;
 

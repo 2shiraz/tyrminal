@@ -163,6 +163,8 @@ export const msg = {
   },
   hosts: {
     protocol: "Protocol",
+    encoding: "Character encoding",
+    terminalType: "Terminal type",
     telnet: "Telnet (not encrypted)",
     serial: "Serial device",
     telnetWarning:

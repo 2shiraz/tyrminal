@@ -339,6 +339,7 @@ impl Fixture {
             group_id: None,
             tags: Vec::new(),
             protocol: HostProtocol::Ssh,
+            terminal: Default::default(),
         };
         self.core.vault.save_host(input).await.unwrap().id
     }

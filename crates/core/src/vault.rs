@@ -145,6 +145,7 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
         tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
         protocol: record.protocol.clone(),
+        terminal: record.terminal,
     }
 }
 
@@ -175,6 +176,7 @@ fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
 /// Where a host is reached (see `VaultService::host_endpoint`).
 pub(crate) struct HostEndpoint {
     pub protocol: tyrminal_contracts::HostProtocol,
+    pub terminal: tyrminal_contracts::HostTerminal,
     pub address: String,
     pub port: u16,
     pub generation: u32,
@@ -200,6 +202,7 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
         protocol: record.protocol.clone(),
+        terminal: record.terminal,
     }
 }
 
@@ -960,6 +963,7 @@ impl VaultService {
             tags,
             last_connected_at,
             protocol,
+            terminal: input.terminal,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
         let summary = host_summary(&group_index(open), &id, &record);
@@ -1206,6 +1210,7 @@ impl VaultService {
                 tags: host.tags,
                 last_connected_at: None,
                 protocol: tyrminal_contracts::HostProtocol::Ssh,
+                terminal: tyrminal_contracts::HostTerminal::default(),
             };
             new_hosts.push((random_id().map_err(from_vault)?, record));
         }
@@ -1655,6 +1660,7 @@ impl VaultService {
         };
         Ok(HostEndpoint {
             protocol: host.protocol.clone(),
+            terminal: host.terminal,
             address: host.address.clone(),
             port,
             generation: self.generation(),

@@ -222,10 +222,13 @@ impl Sessions {
     ) -> Result<SessionOpened, IpcError> {
         // Hosts reached over Telnet or a serial line open through their own transport.
         let endpoint = self.vault.host_endpoint(host_id).await?;
+        let terminal = endpoint.terminal;
         match endpoint.protocol {
             HostProtocol::Ssh => {}
             HostProtocol::Telnet => return self.open_telnet(owner, endpoint, cols, rows, sink),
-            HostProtocol::Serial { settings } => return self.open_serial(owner, endpoint.generation, settings, sink),
+            HostProtocol::Serial { settings } => {
+                return self.open_serial(owner, endpoint.generation, settings, terminal.encoding, sink);
+            }
         }
         let plan = self.vault.connection_plan(host_id).await?;
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink)?;
@@ -233,7 +236,7 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let ctx = TaskContext::new(&this, &entry, &sink);
+            let ctx = TaskContext { terminal, ..TaskContext::new(&this, &entry, &sink) };
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -268,6 +271,7 @@ impl Sessions {
         owner: &str,
         generation: u32,
         settings: tyrminal_contracts::SerialSettings,
+        encoding: tyrminal_contracts::TerminalEncoding,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
         let (id, entry, input_rx) = self.register(owner, generation, sink)?;
@@ -276,12 +280,13 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
+            let transcoder = crate::transcode::Transcoder::new(encoding);
             let body = async {
                 sink.event(SessionEvent::State { state: SessionState::Connecting });
                 match crate::serial::open(&settings) {
                     Ok(link) => {
                         sink.event(SessionEvent::State { state: SessionState::Connected });
-                        pump(Transport::Serial(link), &relay, input_rx).await
+                        pump(Transport::Serial(link), &relay, input_rx, transcoder).await
                     }
                     Err(error) => Outcome::failed(error),
                 }
@@ -1071,6 +1076,8 @@ struct TaskContext {
     connect_slots: Arc<Semaphore>,
     entry: Arc<Entry>,
     sink: Arc<dyn SessionSink>,
+    /// Encoding and terminal type of the host (UTF-8 and xterm-256color by default).
+    terminal: tyrminal_contracts::HostTerminal,
 }
 
 impl TaskContext {
@@ -1080,6 +1087,7 @@ impl TaskContext {
             connect_slots: Arc::clone(&sessions.connect_slots),
             entry: Arc::clone(entry),
             sink: Arc::clone(sink),
+            terminal: tyrminal_contracts::HostTerminal::default(),
         }
     }
 
@@ -1323,7 +1331,8 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
-            let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input).await;
+            let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
+            let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
             ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
             if let Ok(conn) = Arc::try_unwrap(conn) {
@@ -1362,7 +1371,7 @@ async fn connect_ssh(
     authenticate(ctx, &mut conn, &plan.username, plan.auth).await?;
 
     ctx.state(SessionState::OpeningChannel);
-    let pty = PtyRequest { term: "xterm-256color".into(), cols: u32::from(cols), rows: u32::from(rows) };
+    let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
     Ok((conn, reader, writer))
 }
@@ -1389,7 +1398,7 @@ async fn run_local(
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
             sink.event(SessionEvent::State { state: SessionState::Connected });
-            pump(Transport::Local { reader, handle, recheck_size: None }, relay, input).await
+            pump(Transport::Local { reader, handle, recheck_size: None }, relay, input, None).await
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
@@ -1424,8 +1433,10 @@ async fn run_telnet(
     let _ = stream.set_nodelay(true);
     let (reader, writer) = stream.into_split();
     sink.event(SessionEvent::State { state: SessionState::Connected });
-    let link = TelnetLink { reader, writer, codec: crate::telnet::Codec::new(cols, rows), replies: Vec::new() };
-    pump(Transport::Telnet(Box::new(link)), relay, input).await
+    let terminal = endpoint.terminal;
+    let codec = crate::telnet::Codec::new(cols, rows, terminal.term.term());
+    let link = TelnetLink { reader, writer, codec, replies: Vec::new() };
+    pump(Transport::Telnet(Box::new(link)), relay, input, crate::transcode::Transcoder::new(terminal.encoding)).await
 }
 
 enum Transport {
@@ -1570,7 +1581,12 @@ fn lost() -> Outcome {
 }
 
 /// Moves bytes between the transport and the renderer until either side ends.
-async fn pump(mut transport: Transport, sink: &Relay, mut input: mpsc::Receiver<Input>) -> Outcome {
+async fn pump(
+    mut transport: Transport,
+    sink: &Relay,
+    mut input: mpsc::Receiver<Input>,
+    mut transcoder: Option<crate::transcode::Transcoder>,
+) -> Outcome {
     let mut exit_status = None;
     loop {
         let recheck = transport.recheck_deadline();
@@ -1580,6 +1596,10 @@ async fn pump(mut transport: Transport, sink: &Relay, mut input: mpsc::Receiver<
                 // The registry entry (and with it the sender) is gone.
                 None => return Outcome::ended(exit_status),
                 Some(Input::Data(data)) => {
+                    let data = match transcoder.as_mut() {
+                        Some(t) => t.encode(&data),
+                        None => data,
+                    };
                     if !transport.write(&data).await {
                         return lost();
                     }
@@ -1608,6 +1628,13 @@ async fn pump(mut transport: Transport, sink: &Relay, mut input: mpsc::Receiver<
                             Ok(Some(TransportEvent::Lost)) => { dropped = true; break; }
                             Ok(None) => { ended = true; break; }
                             Err(_) => break,
+                        }
+                    }
+                    if let Some(t) = transcoder.as_mut() {
+                        batch = t.decode(&batch);
+                        if batch.is_empty() {
+                            // Only part of a character so far; the rest comes with the next read.
+                            continue;
                         }
                     }
                     // The output that arrived before a drop is still shown.

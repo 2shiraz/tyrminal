@@ -61,6 +61,7 @@ export function DeployKeyDialog({
         groupId: host.groupId,
         tags: host.tags,
         protocol: host.protocol,
+        terminal: host.terminal,
       }),
     );
     if (saved) {

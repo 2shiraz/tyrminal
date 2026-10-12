@@ -124,6 +124,7 @@ pub struct HostSummary {
     #[ts(type = "number | null")]
     pub last_connected_at: Option<u64>,
     pub protocol: HostProtocol,
+    pub terminal: HostTerminal,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -269,6 +270,9 @@ pub struct HostInput {
     /// How the host is reached (SSH unless chosen otherwise).
     #[serde(default)]
     pub protocol: HostProtocol,
+    /// Encoding and terminal type (UTF-8 and xterm-256color unless chosen otherwise).
+    #[serde(default)]
+    pub terminal: HostTerminal,
 }
 
 /// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a
@@ -870,5 +874,66 @@ impl Default for SerialSettings {
             stop_bits: 1,
             flow_control: SerialFlowControl::None,
         }
+    }
+}
+
+// ---------- terminal settings per host (TRM-05, TRM-06) ----------
+
+/// Character encoding a host's programs use. Output is converted to UTF-8 natively and typed
+/// text back; characters the encoding cannot represent are sent as `?`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TerminalEncoding {
+    #[default]
+    Utf8,
+    Iso8859_1,
+    Iso8859_15,
+    Windows1252,
+    Koi8R,
+    ShiftJis,
+    EucJp,
+    EucKr,
+    Gbk,
+    Gb18030,
+    Big5,
+}
+
+/// The terminal type reported to the server (`TERM`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TerminalType {
+    #[default]
+    Xterm256color,
+    Xterm,
+    Linux,
+    Vt220,
+    Vt100,
+}
+
+impl TerminalType {
+    pub fn term(self) -> &'static str {
+        match self {
+            Self::Xterm256color => "xterm-256color",
+            Self::Xterm => "xterm",
+            Self::Linux => "linux",
+            Self::Vt220 => "vt220",
+            Self::Vt100 => "vt100",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct HostTerminal {
+    pub encoding: TerminalEncoding,
+    pub term: TerminalType,
+}
+
+impl HostTerminal {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }

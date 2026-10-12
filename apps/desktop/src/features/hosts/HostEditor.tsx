@@ -7,7 +7,15 @@ import { IconServer } from "../../components/ui/icons";
 import { hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
-import { DEFAULT_SERIAL, type ProtocolKind, ProtocolSelect, SerialFields, TelnetWarning } from "./ProtocolFields";
+import {
+  DEFAULT_SERIAL,
+  DEFAULT_TERMINAL,
+  type ProtocolKind,
+  ProtocolSelect,
+  SerialFields,
+  TelnetWarning,
+  TerminalFields,
+} from "./ProtocolFields";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -78,6 +86,7 @@ export function HostEditor({
   // agent A: protocols
   const [protocol, setProtocol] = useState<ProtocolKind>(host?.protocol.type ?? "ssh");
   const [serial, setSerial] = useState(host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL);
+  const [terminal, setTerminal] = useState(host?.terminal ?? DEFAULT_TERMINAL);
 
   const inherited = useMemo(() => groupDefaults(groups, groupId), [groups, groupId]);
   const inheritedKey = inherited.keyId ? keys.find((k) => k.id === inherited.keyId) : undefined;
@@ -116,7 +125,7 @@ export function HostEditor({
     // Telnet and serial hosts sign in at the device's own prompt: no stored credentials.
     const saved = await run(() =>
       protocol === "ssh"
-        ? hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList, protocol: { type: "ssh" } })
+        ? hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList, protocol: { type: "ssh" }, terminal })
         : hostsApi.save({
             id: host?.id ?? null,
             label,
@@ -127,6 +136,7 @@ export function HostEditor({
             groupId,
             tags: tagList,
             protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
+            terminal,
           }),
     );
     setPassword("");
@@ -148,6 +158,7 @@ export function HostEditor({
         />
         {protocol === "telnet" && <TelnetWarning />}
         {protocol === "serial" && <SerialFields value={serial} onChange={setSerial} />}
+        <TerminalFields value={terminal} onChange={setTerminal} showTerm={protocol !== "serial"} />
         {groups.length > 0 && (
           <label className="field">
             <span className="label">{msg.hosts.group}</span>

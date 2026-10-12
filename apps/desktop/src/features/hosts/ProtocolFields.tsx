@@ -1,5 +1,13 @@
 // Protocol choice for a host (HST-01): SSH, Telnet or a serial device on this computer.
-import type { HostProtocol, SerialFlowControl, SerialParity, SerialSettings } from "@tyrminal/contracts";
+import type {
+  HostProtocol,
+  HostTerminal,
+  SerialFlowControl,
+  SerialParity,
+  SerialSettings,
+  TerminalEncoding,
+  TerminalType,
+} from "@tyrminal/contracts";
 import { useEffect, useState } from "react";
 
 import { Notice, TextField } from "../../components/ui/controls";
@@ -102,6 +110,60 @@ export function SerialFields({ value, onChange }: { value: SerialSettings; onCha
           </select>
         </label>
       </div>
+    </div>
+  );
+}
+
+const ENCODINGS: [TerminalEncoding, string][] = [
+  ["utf8", "UTF-8"],
+  ["iso8859-1", "ISO-8859-1 (Western)"],
+  ["iso8859-15", "ISO-8859-15 (Western, €)"],
+  ["windows1252", "Windows-1252"],
+  ["koi8-r", "KOI8-R (Cyrillic)"],
+  ["shift-jis", "Shift_JIS (Japanese)"],
+  ["euc-jp", "EUC-JP (Japanese)"],
+  ["euc-kr", "EUC-KR (Korean)"],
+  ["gbk", "GBK (Simplified Chinese)"],
+  ["gb18030", "GB18030 (Chinese)"],
+  ["big5", "Big5 (Traditional Chinese)"],
+];
+
+const TERMS: [TerminalType, string][] = [
+  ["xterm256color", "xterm-256color"],
+  ["xterm", "xterm"],
+  ["linux", "linux"],
+  ["vt220", "vt220"],
+  ["vt100", "vt100"],
+];
+
+export const DEFAULT_TERMINAL: HostTerminal = { encoding: "utf8", term: "xterm256color" };
+
+/** Character encoding and terminal type (TRM-05, TRM-06); serial lines report no type. */
+export function TerminalFields({ value, onChange, showTerm }: { value: HostTerminal; onChange: (next: HostTerminal) => void; showTerm: boolean }) {
+  return (
+    <div className="split">
+      <label className="field">
+        <span className="label">{msg.hosts.encoding}</span>
+        <select className="select" value={value.encoding} onChange={(e) => onChange({ ...value, encoding: e.target.value as TerminalEncoding })}>
+          {ENCODINGS.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {showTerm && (
+        <label className="field">
+          <span className="label">{msg.hosts.terminalType}</span>
+          <select className="select" value={value.term} onChange={(e) => onChange({ ...value, term: e.target.value as TerminalType })}>
+            {TERMS.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

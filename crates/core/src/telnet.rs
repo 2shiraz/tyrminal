@@ -27,8 +27,6 @@ const TTYPE_IS: u8 = 0;
 /// the client buffer without bound).
 const MAX_SUBNEGOTIATION: usize = 64;
 
-const TERMINAL_TYPE: &[u8] = b"XTERM-256COLOR";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Data,
@@ -41,6 +39,8 @@ enum State {
 #[derive(Debug)]
 pub(crate) struct Codec {
     state: State,
+    /// Terminal type sent when the server asks (upper case, as RFC 1091 recommends).
+    term: Vec<u8>,
     sub: Vec<u8>,
     naws: bool,
     size: (u16, u16),
@@ -49,8 +49,15 @@ pub(crate) struct Codec {
 }
 
 impl Codec {
-    pub(crate) fn new(cols: u16, rows: u16) -> Self {
-        Self { state: State::Data, sub: Vec::new(), naws: false, size: (cols, rows), answered: [false; 256] }
+    pub(crate) fn new(cols: u16, rows: u16, term: &str) -> Self {
+        Self {
+            state: State::Data,
+            term: term.to_ascii_uppercase().into_bytes(),
+            sub: Vec::new(),
+            naws: false,
+            size: (cols, rows),
+            answered: [false; 256],
+        }
     }
 
     /// Splits bytes from the server into terminal output and replies to send back.
@@ -137,7 +144,7 @@ impl Codec {
     fn subnegotiation(&mut self, reply: &mut Vec<u8>) {
         if self.sub.as_slice() == [OPT_TTYPE, TTYPE_SEND] {
             reply.extend_from_slice(&[IAC, SB, OPT_TTYPE, TTYPE_IS]);
-            reply.extend_from_slice(TERMINAL_TYPE);
+            reply.extend_from_slice(&self.term);
             reply.extend_from_slice(&[IAC, SE]);
         }
     }
@@ -191,7 +198,7 @@ mod tests {
 
     #[test]
     fn negotiation_is_removed_from_output_and_answered() {
-        let mut c = Codec::new(100, 30);
+        let mut c = Codec::new(100, 30, "xterm-256color");
         let (out, reply) = feed(&mut c, &[b'h', IAC, WILL, OPT_ECHO, b'i', IAC, DO, OPT_NAWS, IAC, DO, OPT_TTYPE]);
         assert_eq!(out, b"hi");
         assert_eq!(
@@ -206,7 +213,7 @@ mod tests {
 
     #[test]
     fn anything_else_is_refused_once_and_split_sequences_work() {
-        let mut c = Codec::new(80, 24);
+        let mut c = Codec::new(80, 24, "vt100");
         // Linemode (34), environment (39), X display (35), binary (0): all refused.
         let (out, reply) = feed(&mut c, &[IAC, DO, 34, IAC, WILL, 0, IAC, DO, 39, IAC, DO, 35]);
         assert!(out.is_empty());
@@ -223,7 +230,7 @@ mod tests {
 
     #[test]
     fn subnegotiations_are_bounded_and_window_sizes_escape_255() {
-        let mut c = Codec::new(80, 24);
+        let mut c = Codec::new(80, 24, "vt100");
         let mut flood = vec![IAC, SB, OPT_TTYPE];
         flood.extend(std::iter::repeat_n(b'x', 10_000));
         flood.extend_from_slice(&[IAC, SE, b'k']);

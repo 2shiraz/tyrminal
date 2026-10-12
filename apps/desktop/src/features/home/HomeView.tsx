@@ -81,6 +81,7 @@ export function HomeView({
         groupId: null,
         tags: [],
         protocol: { type: "ssh" },
+        terminal: { encoding: "utf8", term: "xterm256color" },
         auth: { kind: "ask_password" },
       });
       setQuery("");

@@ -51,6 +51,7 @@ async fn host(core: &Core, address: &str, port: Option<u16>, protocol: HostProto
         group_id: None,
         tags: Vec::new(),
         protocol,
+        terminal: Default::default(),
     };
     core.vault.save_host(input).await.unwrap().id
 }
@@ -166,6 +167,7 @@ async fn serial_settings_are_checked_when_saved_and_when_opened() {
         group_id: None,
         tags: Vec::new(),
         protocol: serial("/dev/ttyUSB0", 0),
+        terminal: Default::default(),
     };
     assert!(core.vault.save_host(bad).await.is_err(), "a zero baud rate is refused at save");
     // A file that is not a device is never opened as a port.
@@ -227,4 +229,44 @@ async fn a_serial_host_carries_bytes_both_ways() {
     core.sessions.close(WINDOW, &session).unwrap();
     let _ = socat.kill();
     let _ = socat.wait();
+}
+
+#[tokio::test]
+async fn a_host_encoding_and_terminal_type_apply_both_ways() {
+    use tyrminal_core::contracts::{HostTerminal, TerminalEncoding, TerminalType};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (mut s, _) = listener.accept().await.unwrap();
+        // Ask for the terminal type, then send KOI8-R text.
+        s.write_all(&[IAC, 253, 24]).await.unwrap();
+        read_exactly(&mut s, &[IAC, 251, 24]).await;
+        s.write_all(&[IAC, 250, 24, 1, IAC, 240]).await.unwrap();
+        read_exactly(&mut s, b"\xff\xfa\x18\x00VT100\xff\xf0").await;
+        s.write_all(&[0xF0, 0xD2, 0xC9, 0xD7, 0xC5, 0xD4, b'\r', b'\n']).await.unwrap(); // "Привет"
+        // What the user types reaches the server in KOI8-R.
+        read_exactly(&mut s, &[0xE4, 0xC1, b'\r', 0]).await; // "Да"
+        s.write_all(b"ok\r\n").await.unwrap();
+    });
+    let (_dir, core) = core().await;
+    let input = HostInput {
+        id: None,
+        label: "old box".into(),
+        address: "127.0.0.1".into(),
+        port: Some(port),
+        username: String::new(),
+        auth: HostAuthInput::AskPassword,
+        group_id: None,
+        tags: Vec::new(),
+        protocol: HostProtocol::Telnet,
+        terminal: HostTerminal { encoding: TerminalEncoding::Koi8R, term: TerminalType::Vt100 },
+    };
+    let saved = core.vault.save_host(input).await.unwrap();
+    assert_eq!(saved.terminal.encoding, TerminalEncoding::Koi8R);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let session = core.sessions.open_ssh(WINDOW, &saved.id, 80, 24, Arc::new(Sink(tx))).await.unwrap().session_id;
+    output_until(&core, &session, &mut rx, "Привет".as_bytes()).await;
+    core.sessions.write(WINDOW, &session, "Да\r".as_bytes().to_vec()).await.unwrap();
+    output_until(&core, &session, &mut rx, b"ok").await;
+    server.await.unwrap();
 }

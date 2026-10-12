@@ -24,10 +24,19 @@ test("protocols: a Telnet host warns that nothing is encrypted and stores no cre
   await expect(dialog.getByRole("radio")).toHaveCount(0);
   await expect(dialog.getByLabel("Port")).toHaveValue("23");
   await dialog.getByLabel("Address").fill("192.0.2.40");
+  await dialog.getByRole("combobox", { name: "Character encoding" }).selectOption("koi8-r");
+  await dialog.getByRole("combobox", { name: "Terminal type" }).selectOption("vt100");
   await dialog.getByRole("button", { name: "Save" }).click();
   const saves = await calls(page, "host_save");
   expect(saves.at(-1)?.args).toMatchObject({
-    host: { address: "192.0.2.40", port: 23, username: "", auth: { kind: "ask_password" }, protocol: { type: "telnet" } },
+    host: {
+      address: "192.0.2.40",
+      port: 23,
+      username: "",
+      auth: { kind: "ask_password" },
+      protocol: { type: "telnet" },
+      terminal: { encoding: "koi8-r", term: "vt100" },
+    },
   });
 });
 
@@ -41,6 +50,8 @@ test("protocols: a serial host picks a device and line settings", async ({ page 
   await dialog.getByRole("combobox", { name: "Speed (baud)" }).selectOption("9600");
   await dialog.getByRole("combobox", { name: "Parity" }).selectOption("even");
   await dialog.getByRole("combobox", { name: "Flow control" }).selectOption("hardware");
+  // A serial line has no terminal type to report.
+  await expect(dialog.getByRole("combobox", { name: "Terminal type" })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Save" }).click();
   const saves = await calls(page, "host_save");
   expect(saves.at(-1)?.args).toMatchObject({

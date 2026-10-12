@@ -64,6 +64,9 @@ pub(crate) struct HostRecord {
     /// SSH, Telnet or a serial device. Absent (SSH) in older records.
     #[serde(default, skip_serializing_if = "tyrminal_contracts::HostProtocol::is_ssh")]
     pub protocol: tyrminal_contracts::HostProtocol,
+    /// Encoding and terminal type. Absent (UTF-8, xterm-256color) in older records.
+    #[serde(default, skip_serializing_if = "tyrminal_contracts::HostTerminal::is_default")]
+    pub terminal: tyrminal_contracts::HostTerminal,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -188,6 +191,7 @@ mod tests {
             tags: Vec::new(),
             last_connected_at: None,
             protocol: tyrminal_contracts::HostProtocol::Ssh,
+            terminal: tyrminal_contracts::HostTerminal::default(),
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);

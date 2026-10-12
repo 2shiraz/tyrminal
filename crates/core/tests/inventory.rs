@@ -45,6 +45,7 @@ fn host(label: &str, group: Option<&str>) -> HostInput {
         group_id: group.map(Into::into),
         tags: Vec::new(),
         protocol: HostProtocol::Ssh,
+        terminal: Default::default(),
     }
 }
 
