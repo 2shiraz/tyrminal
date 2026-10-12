@@ -157,7 +157,8 @@ pub(crate) struct StartupItem {
 }
 
 pub(crate) struct ConnectionPlan {
-    pub host_id: String,
+    /// The saved host; `None` for a quick connection to an address that is not saved.
+    pub host_id: Option<String>,
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
@@ -176,6 +177,13 @@ pub(crate) struct ConnectionPlan {
     /// Offer quick forwards for ports the session's output names (P-24).
     pub port_suggestions: bool,
     pub generation: u32,
+}
+
+// quick connect
+/// How a quick connection is made: SSH with a plan, or Telnet to an endpoint.
+pub(crate) enum QuickPlan {
+    Ssh(Box<ConnectionPlan>),
+    Telnet(HostEndpoint),
 }
 
 // agent B: tunnels and history
@@ -1993,23 +2001,12 @@ impl VaultService {
             .iter()
             .map(|hop| Self::hop_plan(open, hop))
             .collect::<Result<Vec<_>, _>>()?;
-        let known_hosts = open
-            .known_hosts
-            .values()
-            .map(|k| {
-                let known = KnownHost {
-                    host: k.record.host.clone(),
-                    port: k.record.port,
-                    public_key: k.record.public_key.clone(),
-                };
-                (known, k.record.fingerprint.clone())
-            })
-            .collect();
+        let known_hosts = Self::known_host_list(open);
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         let env = Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect();
         Ok(ConnectionPlan {
             env,
-            host_id: validate::id_text(&id),
+            host_id: Some(validate::id_text(&id)),
             endpoint: target.endpoint,
             username: target.username,
             auth: target.auth,
@@ -2021,6 +2018,97 @@ impl VaultService {
             known_hosts,
             generation: self.generation(),
         })
+    }
+
+    /// Trusted keys with their display fingerprints, for host-key verification.
+    fn known_host_list(open: &Open) -> Vec<(KnownHost, String)> {
+        open.known_hosts
+            .values()
+            .map(|k| {
+                let known = KnownHost {
+                    host: k.record.host.clone(),
+                    port: k.record.port,
+                    public_key: k.record.public_key.clone(),
+                };
+                (known, k.record.fingerprint.clone())
+            })
+            .collect()
+    }
+
+    // quick connect
+    /// A connection to an address that is not saved: everything is validated as for a saved host,
+    /// a key or identity is read from the vault, and nothing is written. Host-key trust is the
+    /// normal one (the same trusted keys, the same prompt).
+    pub(crate) async fn quick_plan(&self, input: tyrminal_contracts::QuickConnectInput) -> Result<QuickPlan, IpcError> {
+        use tyrminal_contracts::{QuickAuth, QuickProtocol};
+        let address = validate::address(&input.address)?;
+        let port = validate::port(input.port)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if input.protocol == QuickProtocol::Telnet {
+            return Ok(QuickPlan::Telnet(HostEndpoint {
+                protocol: tyrminal_contracts::HostProtocol::Telnet,
+                terminal: tyrminal_contracts::HostTerminal::default(),
+                forward_agent: false,
+                address,
+                port,
+                generation: self.generation(),
+            }));
+        }
+        let key_plan = |key_id: &str| -> Result<PlanAuth, IpcError> {
+            let key = open
+                .ssh_keys
+                .get(&validate::id(key_id)?)
+                .ok_or_else(|| not_found("That key is no longer in the keychain."))?;
+            Ok(PlanAuth::Key {
+                private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
+                passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                key_id: key_id.to_owned(),
+                label: key.record.label.clone(),
+            })
+        };
+        let mut username = input.username.trim().to_owned();
+        let auth = match input.auth {
+            QuickAuth::Ask => PlanAuth::Ask,
+            QuickAuth::Password { password } => {
+                if password.is_empty() {
+                    PlanAuth::Ask
+                } else {
+                    PlanAuth::Password(Zeroizing::new(password))
+                }
+            }
+            QuickAuth::Key { key_id } => key_plan(&key_id)?,
+            QuickAuth::Identity { identity_id } => {
+                let identity = &open
+                    .identities
+                    .get(&validate::id(&identity_id)?)
+                    .ok_or_else(|| not_found("That identity no longer exists."))?
+                    .record;
+                if username.is_empty() {
+                    username.clone_from(&identity.username);
+                }
+                match (&identity.key_id, &identity.password) {
+                    (Some(key_id), _) => key_plan(key_id)?,
+                    (None, Some(password)) => PlanAuth::Password(Zeroizing::new(password.as_str().to_owned())),
+                    (None, None) => PlanAuth::Ask,
+                }
+            }
+        };
+        let username = validate::username(&username)?;
+        Ok(QuickPlan::Ssh(Box::new(ConnectionPlan {
+            host_id: None,
+            label: address.clone(),
+            endpoint: Endpoint::new(address, port),
+            username,
+            auth,
+            jumps: Vec::new(),
+            proxy: None,
+            key_exchange: tyrminal_ssh::KeyExchangePolicy::PreferPostQuantum,
+            known_hosts: Self::known_host_list(open),
+            env: Vec::new(),
+            port_suggestions: false,
+            generation: self.generation(),
+        })))
     }
 
     /// Where and as whom one host of a chain is reached, with its credentials.

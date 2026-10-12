@@ -33,6 +33,8 @@ mod server_glance;
 mod security_review;
 // tmux and screen session awareness (P-31)
 mod multiplexers;
+// quick connect
+mod quick_connect;
 
 pub use discovery::*;
 pub use dto::*;
@@ -61,3 +63,5 @@ pub use server_glance::*;
 pub use security_review::*;
 // tmux and screen session awareness (P-31)
 pub use multiplexers::*;
+// quick connect
+pub use quick_connect::*;
