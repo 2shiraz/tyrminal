@@ -11,29 +11,31 @@
 //! through SSH flow control (or the local PTY buffer); nothing is dropped and memory is bounded.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tyrminal_contracts::limits::{
-    AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_SECRET_LEN, MAX_SESSIONS,
-    MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_UNACKED_OUTPUT, TERMINAL_OUTPUT_BATCH,
-    TRUST_PROMPT_TIMEOUT_SECS,
+    AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_DIR_ENTRIES, MAX_SECRET_LEN,
+    MAX_SESSIONS, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS, MAX_UNACKED_OUTPUT,
+    TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, KeyDeployPreview, SessionEvent, SessionOpened, SessionState, SnippetSendMode,
-    TrustDecision, VaultStatus,
+    AuthPromptKind, ErrorCode, IpcError, KeyDeployPreview, RemoteEntryKind, RemoteListing, SessionEvent, SessionOpened,
+    SessionState, SnippetSendMode, TransferDirection, TransferStarted, TrustDecision, VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
     AuthOutcome, ClientKey, ConnectOptions, HostKeyRequest, HostKeyVerifier, KeyError, KnownHost, PtyRequest,
-    RejectReason, ShellEvent, ShellReader, ShellWriter, SshError, TrustStatus, TrustVerdict, VerifiedConnection,
+    RejectReason, Sftp, ShellEvent, ShellReader, ShellWriter, SshError, TrustStatus, TrustVerdict, VerifiedConnection,
     evaluate,
 };
 use zeroize::Zeroizing;
 
 use crate::deploy;
 use crate::error::{err, from_ssh, internal, invalid, not_found};
+use crate::files::{self, Download, TransferSink, Upload, from_file};
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
 
@@ -65,6 +67,8 @@ struct Entry {
     /// The authenticated SSH connection while the session is connected (SSH sessions only),
     /// for side operations on their own channels such as installing a public key.
     connection: Mutex<Option<Arc<VerifiedConnection>>>,
+    /// The session's SFTP channel, opened on first use.
+    sftp: Mutex<Option<Arc<Sftp>>>,
 }
 
 impl Entry {
@@ -73,10 +77,15 @@ impl Entry {
     }
 }
 
+/// A running transfer: the window that started it and its cancel switch.
+type Transfer = (String, watch::Sender<bool>);
+
 pub struct Sessions {
     vault: Arc<VaultService>,
     entries: Mutex<HashMap<String, Arc<Entry>>>,
     connect_slots: Arc<Semaphore>,
+    /// Running file transfers: owner window and cancel switch.
+    transfers: Arc<Mutex<HashMap<String, Transfer>>>,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -85,7 +94,7 @@ impl core::fmt::Debug for Sessions {
     }
 }
 
-fn random_token() -> Result<String, IpcError> {
+pub(crate) fn random_token() -> Result<String, IpcError> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| internal())?;
     Ok(validate::id_text(&bytes))
@@ -107,6 +116,7 @@ impl Sessions {
             vault,
             entries: Mutex::new(HashMap::new()),
             connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
+            transfers: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -134,6 +144,7 @@ impl Sessions {
             close,
             prompts: Mutex::new(Prompts::default()),
             connection: Mutex::new(None),
+            sftp: Mutex::new(None),
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -248,6 +259,192 @@ impl Sessions {
         let (entry, conn) = self.connection(owner, session_id)?;
         let line = self.vault.public_key_line(entry.generation, key_id).await?;
         deploy::install(&conn, &line).await
+    }
+
+    // ---------- files (SFTP) ----------
+
+    /// The session's SFTP channel, opened on first use over its verified connection.
+    async fn sftp(&self, owner: &str, session_id: &str) -> Result<(Arc<Entry>, Arc<Sftp>), IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let cached = entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(sftp) = cached {
+            return Ok((entry, sftp));
+        }
+        let sftp = Arc::new(conn.open_sftp().await.map_err(|e| match e {
+            SshError::ChannelDenied | SshError::RequestDenied => {
+                err(ErrorCode::ChannelDenied, "This server does not offer file access (SFTP).")
+            }
+            other => from_ssh(&other),
+        })?);
+        *entry.sftp.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sftp));
+        Ok((entry, sftp))
+    }
+
+    /// Runs one file operation; a lost SFTP channel is dropped so the next call opens a new one.
+    async fn file_op<T, F, Fut>(&self, owner: &str, session_id: &str, op: F) -> Result<T, IpcError>
+    where
+        F: FnOnce(Arc<Sftp>) -> Fut,
+        Fut: std::future::Future<Output = Result<T, tyrminal_ssh::FileError>>,
+    {
+        let (entry, sftp) = self.sftp(owner, session_id).await?;
+        let result = op(sftp).await;
+        if matches!(result, Err(tyrminal_ssh::FileError::Lost | tyrminal_ssh::FileError::Protocol)) {
+            entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
+        result.map_err(from_file)
+    }
+
+    /// Lists a remote folder (`None`: the login folder). Folders first, then by name.
+    pub async fn list_files(
+        &self,
+        owner: &str,
+        session_id: &str,
+        path: Option<&str>,
+    ) -> Result<RemoteListing, IpcError> {
+        let path = match path {
+            Some(p) => files::remote_dir(p)?.to_owned(),
+            None => ".".to_owned(),
+        };
+        let (path, (list, truncated)) = self
+            .file_op(owner, session_id, |sftp| async move {
+                let path = sftp.canonicalize(&path).await?;
+                let list = sftp.read_dir(&path, MAX_DIR_ENTRIES).await?;
+                Ok((path, list))
+            })
+            .await?;
+        let mut entries: Vec<_> = list.into_iter().map(|e| files::entry(e.name, &e.attrs)).collect();
+        entries.sort_by(|a, b| {
+            (a.kind != RemoteEntryKind::Dir).cmp(&(b.kind != RemoteEntryKind::Dir)).then_with(|| a.name.cmp(&b.name))
+        });
+        Ok(RemoteListing { parent: files::parent(&path), path, entries, truncated })
+    }
+
+    pub async fn make_dir(&self, owner: &str, session_id: &str, dir: &str, name: &str) -> Result<(), IpcError> {
+        let path = files::join(files::remote_dir(dir)?, name)?;
+        self.file_op(owner, session_id, |sftp| async move { sftp.create_dir(&path).await }).await
+    }
+
+    /// Renames within one folder. Refuses to replace an existing name.
+    pub async fn rename_file(
+        &self,
+        owner: &str,
+        session_id: &str,
+        dir: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), IpcError> {
+        let dir = files::remote_dir(dir)?;
+        let (from, to) = (files::join(dir, from)?, files::join(dir, to)?);
+        let exists = self.file_op(owner, session_id, |sftp| async move { sftp.exists(&to).await.map(|e| (e, to)) });
+        let (exists, to) = exists.await?;
+        if exists {
+            return Err(err(ErrorCode::Conflict, "Something with that name is already there."));
+        }
+        self.file_op(owner, session_id, |sftp| async move { sftp.rename(&from, &to).await }).await
+    }
+
+    /// Removes a file, a link (not its target) or an empty folder.
+    pub async fn remove_file(&self, owner: &str, session_id: &str, dir: &str, name: &str) -> Result<(), IpcError> {
+        let path = files::join(files::remote_dir(dir)?, name)?;
+        self.file_op(owner, session_id, |sftp| async move {
+            if sftp.lstat(&path).await?.kind == tyrminal_ssh::RemoteKind::Dir {
+                sftp.remove_dir(&path).await
+            } else {
+                sftp.remove_file(&path).await
+            }
+        })
+        .await
+    }
+
+    pub async fn set_file_mode(
+        &self,
+        owner: &str,
+        session_id: &str,
+        dir: &str,
+        name: &str,
+        mode: u32,
+    ) -> Result<(), IpcError> {
+        if mode > 0o7777 {
+            return Err(invalid("Permissions must be between 0000 and 7777."));
+        }
+        let path = files::join(files::remote_dir(dir)?, name)?;
+        self.file_op(owner, session_id, |sftp| async move { sftp.set_permissions(&path, mode).await }).await
+    }
+
+    fn start_transfer(&self, owner: &str) -> Result<(String, watch::Receiver<bool>), IpcError> {
+        let id = random_token()?;
+        let (cancel, cancelled) = watch::channel(false);
+        let mut transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
+        if transfers.len() >= MAX_TRANSFERS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many transfers are running. Wait for one to finish."));
+        }
+        transfers.insert(id.clone(), (owner.to_owned(), cancel));
+        Ok((id, cancelled))
+    }
+
+    /// Downloads `dir/name` into `local_dir` (a folder the user chose natively) under the same
+    /// name. Checks run before the transfer starts; progress and the result arrive on `sink`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn download(
+        &self,
+        owner: &str,
+        session_id: &str,
+        dir: &str,
+        name: &str,
+        local_dir: PathBuf,
+        overwrite: bool,
+        sink: Arc<dyn TransferSink>,
+    ) -> Result<TransferStarted, IpcError> {
+        let remote = files::join(files::remote_dir(dir)?, name)?;
+        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let total = files::prepare_download(&job).await?;
+        let (id, cancel) = self.start_transfer(owner)?;
+        let transfers = Arc::clone(&self.transfers);
+        let done_id = id.clone();
+        tokio::spawn(async move {
+            files::run_download(job, sink.as_ref(), cancel).await;
+            transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+        });
+        Ok(files::started(id, name.to_owned(), TransferDirection::Download, total))
+    }
+
+    /// Uploads a local file (chosen natively) into the remote folder `dir` under `name`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upload(
+        &self,
+        owner: &str,
+        session_id: &str,
+        local: PathBuf,
+        dir: &str,
+        name: &str,
+        overwrite: bool,
+        sink: Arc<dyn TransferSink>,
+    ) -> Result<TransferStarted, IpcError> {
+        let dir = files::remote_dir(dir)?.to_owned();
+        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token: random_token()? };
+        let (total, mode) = files::prepare_upload(&job).await?;
+        let (id, cancel) = self.start_transfer(owner)?;
+        let transfers = Arc::clone(&self.transfers);
+        let done_id = id.clone();
+        tokio::spawn(async move {
+            files::run_upload(job, mode, sink.as_ref(), cancel).await;
+            transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+        });
+        Ok(files::started(id, name.to_owned(), TransferDirection::Upload, Some(total)))
+    }
+
+    /// Stops a running transfer; its temporary data is removed and nothing replaces the target.
+    pub fn cancel_transfer(&self, owner: &str, transfer_id: &str) -> Result<(), IpcError> {
+        let transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
+        match transfers.get(transfer_id) {
+            Some((who, cancel)) if who == owner => {
+                let _ = cancel.send(true);
+                Ok(())
+            }
+            _ => Err(denied()),
+        }
     }
 
     pub async fn write(&self, owner: &str, session_id: &str, data: Vec<u8>) -> Result<(), IpcError> {
@@ -661,6 +858,7 @@ async fn run_ssh(
             *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
+            ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
             if let Ok(conn) = Arc::try_unwrap(conn) {
                 conn.disconnect().await;
             }

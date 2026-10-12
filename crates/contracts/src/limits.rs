@@ -63,3 +63,11 @@ pub const MAX_IMPORT_LINE_LEN: usize = 4096;
 pub const MAX_IMPORT_HOSTS: usize = 10_000;
 /// Search query, in bytes.
 pub const MAX_SEARCH_LEN: usize = 256;
+
+/// A remote path, and one name in it, in bytes.
+pub const MAX_REMOTE_PATH_LEN: usize = 4096;
+pub const MAX_FILE_NAME_LEN: usize = 255;
+/// Entries returned for one remote folder; the listing says when there were more.
+pub const MAX_DIR_ENTRIES: usize = 20_000;
+/// File transfers running at once.
+pub const MAX_TRANSFERS: usize = 8;

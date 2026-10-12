@@ -49,6 +49,8 @@ runners do not provide Linux containers, so the Docker SSH lab cannot run there.
 | GitHub actions: checkout 7.0.1, setup-node 7.1.0, pnpm/action-setup 6.1.0, upload-artifact 7.0.2, download-artifact 8.0.2, Swatinem/rust-cache 2.9.2 | SHA-pinned | MIT | CI |
 | `tauri-plugin-dialog` (pulls `rfd` 0.16.0, `tauri-plugin-fs` 2.7.0) | 2.8.2 | Apache-2.0 OR MIT | Native open/save dialogs for backup files, called from Rust only; no dialog or fs permission is granted to the renderer (`check:release` enforces this) |
 | `open` | 5.4.4 | MIT | Hands a validated http(s) link to the OS browser |
+| `russh-sftp` (default features off; pulls `dashmap` 6.2.1, `serde_bytes` 0.11.19, `chrono`, `tokio-util`) | =3.0.1 | Apache-2.0 | SFTP client protocol for Phase 06. Only the raw client is used, so `tyrminal-ssh` bounds listings, keeps a fixed number of requests in flight and times every request out itself |
+| `getrandom` in the desktop adapter (already used by `tyrminal-core`) | 0.4.3 | MIT/Apache-2.0 | Opaque tokens for local file grants |
 | `lucide-static` (build-time icon source, not shipped as a package) | 1.47.0 | ISC | Inline SVG icons generated into `icons.tsx` |
 | Playwright container image (CI/dev only) | `mcr.microsoft.com/playwright:v1.56.1-noble` by digest | Apache-2.0 | Identical fonts and Chromium for visual baselines in CI and locally |
 | `Vampire/setup-wsl` (Windows CI only) | v7.0.0, commit d1da7f2c | Apache-2.0 | Debian 12 under WSL 1 as the Windows lab server (same OpenSSH, PAM and TUI apps as the Linux lab; shares Windows loopback) |

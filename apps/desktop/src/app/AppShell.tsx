@@ -12,6 +12,7 @@ import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
@@ -69,7 +70,10 @@ function Shell() {
   const [destination, setDestination] = useState<Destination>("home");
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // The side panel beside the terminals: snippets or files, one at a time.
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | null>(null);
+  const panelOpen = sidePanel === "snippets";
+  const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
@@ -249,7 +253,10 @@ function Shell() {
           moveFocus("down");
           break;
         case "toggleSnippets":
-          setPanelOpen((v) => !v);
+          togglePanel("snippets");
+          break;
+        case "toggleFiles":
+          togglePanel("files");
           break;
         case "toggleSidebar":
           setCollapsed((v) => !v);
@@ -299,7 +306,9 @@ function Shell() {
   }, [runAction]);
 
   const terminalVisible = tab !== null;
-  const showPanel = panelOpen && terminalVisible;
+  const showPanel = sidePanel !== null && terminalVisible;
+  const filesSession =
+    pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
   return (
     <div className="shell" data-sidebar={collapsed ? "collapsed" : "expanded"}>
@@ -358,12 +367,20 @@ function Shell() {
                 ws={ws}
                 prefs={prefs.terminal}
                 panel={
-                  showPanel ? (
+                  showPanel && sidePanel === "files" ? (
+                    <FilesPanel
+                      target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : showPanel ? (
                     <SnippetsPanel
                       target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
                       onSend={requestSnippet}
                       onClose={() => {
-                        setPanelOpen(false);
+                        setSidePanel(null);
                         focusedHandle()?.focus();
                       }}
                     />
@@ -398,7 +415,9 @@ function Shell() {
           pane={terminalVisible ? pane : null}
           status={terminalVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible ? () => setPanelOpen((v) => !v) : undefined}
+          onTogglePanel={terminalVisible ? () => togglePanel("snippets") : undefined}
+          filesOpen={sidePanel === "files"}
+          onToggleFiles={terminalVisible ? () => togglePanel("files") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}

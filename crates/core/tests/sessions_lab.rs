@@ -17,10 +17,10 @@ use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    AuthPromptKind, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, TrustDecision,
-    VaultState,
+    AuthPromptKind, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, TransferEvent,
+    TrustDecision, VaultState,
 };
-use tyrminal_core::{Core, SessionSink};
+use tyrminal_core::{Core, SessionSink, TransferSink};
 
 const PASSPHRASE: &str = "correct horse battery staple";
 const WINDOW: &str = "main";
@@ -1103,4 +1103,188 @@ async fn deploying_a_public_key_appends_one_line_and_keeps_the_others() {
     // A local terminal has no SSH connection to install over.
     let local = Client::open_local(&f.core).await;
     assert_eq!(s.deploy_key(WINDOW, &local.session, &key.id).await.unwrap_err().code, ErrorCode::InvalidInput);
+}
+
+// ---------- files (SFTP) ----------
+
+struct TransferInbox(mpsc::UnboundedSender<TransferEvent>);
+
+impl TransferSink for TransferInbox {
+    fn event(&self, event: TransferEvent) -> bool {
+        self.0.send(event).is_ok()
+    }
+}
+
+fn transfer_sink() -> (Arc<dyn TransferSink>, mpsc::UnboundedReceiver<TransferEvent>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Arc::new(TransferInbox(tx)), rx)
+}
+
+/// The final event of a transfer (progress events skipped).
+async fn transfer_end(rx: &mut mpsc::UnboundedReceiver<TransferEvent>) -> TransferEvent {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(120), rx.recv()).await.expect("transfer timed out") {
+            Some(TransferEvent::Progress { .. }) => {}
+            Some(other) => return other,
+            None => panic!("transfer channel closed"),
+        }
+    }
+}
+
+/// Deterministic, incompressible-looking test data.
+fn pattern(len: usize, seed: u64) -> Vec<u8> {
+    let mut x = seed | 1;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let s = &f.core.sessions;
+    let id = &client.session;
+
+    // The login folder, absolute, without . and ..
+    let home = s.list_files(WINDOW, id, None).await.unwrap();
+    assert!(home.path.starts_with('/'), "{}", home.path);
+    assert!(home.entries.iter().all(|e| e.name != "." && e.name != ".."));
+    // Another window cannot browse this session.
+    assert_eq!(s.list_files("other-window", id, None).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let folder_name = format!("tyr-files-{}", std::process::id());
+    let _ = s.remove_file(WINDOW, id, &home.path, &folder_name).await;
+    s.make_dir(WINDOW, id, &home.path, &folder_name).await.unwrap();
+    let dir = format!("{}/{folder_name}", home.path.trim_end_matches('/'));
+    let listing = s.list_files(WINDOW, id, Some(&dir)).await.unwrap();
+    assert!(listing.entries.is_empty());
+    assert_eq!(listing.parent.as_deref(), Some(home.path.as_str()));
+    // Names are single components: no traversal out of the folder.
+    for bad in ["../escape", "a/b", "..", ""] {
+        assert_eq!(s.make_dir(WINDOW, id, &dir, bad).await.unwrap_err().code, ErrorCode::InvalidInput, "{bad:?}");
+    }
+    assert_eq!(s.list_files(WINDOW, id, Some("relative/path")).await.unwrap_err().code, ErrorCode::InvalidInput);
+
+    // Upload: a multi-chunk file and a file with a strange (but legal) name.
+    let local = TempDir::new().unwrap();
+    let big = pattern(9 * 1024 * 1024 + 123, 7);
+    std::fs::write(local.path().join("big.bin"), &big).unwrap();
+    let strange = "we ird;$(touch pwned) ü.txt";
+    std::fs::write(local.path().join(strange), b"strange\n").unwrap();
+    for name in ["big.bin", strange] {
+        let (sink, mut rx) = transfer_sink();
+        let started = s.upload(WINDOW, id, local.path().join(name), &dir, name, false, sink).await.unwrap();
+        assert_eq!(started.name, name);
+        let end = transfer_end(&mut rx).await;
+        let expected = std::fs::metadata(local.path().join(name)).unwrap().len();
+        assert_eq!(end, TransferEvent::Done { bytes: expected }, "{name}");
+    }
+    let listing = s.list_files(WINDOW, id, Some(&dir)).await.unwrap();
+    let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["big.bin", strange], "no temporary files are left behind");
+    assert_eq!(listing.entries[0].size, Some(big.len() as u64));
+    // The name was never handed to a shell.
+    assert!(!s.list_files(WINDOW, id, Some(&home.path)).await.unwrap().entries.iter().any(|e| e.name == "pwned"));
+
+    // Same name again: a conflict unless replacing was chosen.
+    let (sink, _rx) = transfer_sink();
+    let conflict = s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", false, sink).await.unwrap_err();
+    assert_eq!(conflict.code, ErrorCode::Conflict);
+    std::fs::write(local.path().join("big.bin"), pattern(1000, 9)).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: 1000 });
+    std::fs::write(local.path().join("big.bin"), &big).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+
+    // Download into another folder: byte for byte.
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), false, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+    assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big, "downloaded bytes differ");
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, id, &dir, strange, down.path().to_path_buf(), false, sink).await.unwrap();
+    assert!(matches!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: 8 }));
+    assert_eq!(std::fs::read(down.path().join(strange)).unwrap(), b"strange\n");
+    // An existing local file is a conflict; replacing it is explicit.
+    std::fs::write(down.path().join("big.bin"), b"local edit").unwrap();
+    let (sink, _rx) = transfer_sink();
+    let err = s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), false, sink).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+    assert_eq!(std::fs::read(down.path().join("big.bin")).unwrap(), b"local edit");
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), true, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: big.len() as u64 });
+    assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big);
+    let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(leftovers.len(), 2, "no temporary files: {leftovers:?}");
+    // Folders are not downloaded as files.
+    let (sink, _rx) = transfer_sink();
+    let err = s.download(WINDOW, id, &home.path, &folder_name, down.path().to_path_buf(), false, sink).await;
+    assert_eq!(err.unwrap_err().code, ErrorCode::InvalidInput);
+
+    // A remote name that is legal on the server but unusable locally is refused, not altered.
+    s.make_dir(WINDOW, id, &dir, "back\\slash").await.unwrap();
+    let (sink, _rx) = transfer_sink();
+    let err = s.download(WINDOW, id, &dir, "back\\slash", down.path().to_path_buf(), false, sink).await;
+    assert_eq!(err.unwrap_err().code, ErrorCode::InvalidInput);
+    s.remove_file(WINDOW, id, &dir, "back\\slash").await.unwrap();
+
+    // Cancel: nothing remains under the final name, and no temporary file either.
+    let huge = pattern(96 * 1024 * 1024, 3);
+    std::fs::write(local.path().join("huge.bin"), &huge).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    let started = s.upload(WINDOW, id, local.path().join("huge.bin"), &dir, "huge.bin", false, sink).await.unwrap();
+    assert_eq!(s.cancel_transfer("other-window", &started.transfer_id).unwrap_err().code, ErrorCode::AccessDenied);
+    s.cancel_transfer(WINDOW, &started.transfer_id).unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Cancelled);
+    let names: Vec<_> =
+        s.list_files(WINDOW, id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["big.bin", strange]);
+
+    // Rename (never over an existing name), permissions, removal.
+    let err = s.rename_file(WINDOW, id, &dir, strange, "big.bin").await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+    s.rename_file(WINDOW, id, &dir, strange, "plain.txt").await.unwrap();
+    s.set_file_mode(WINDOW, id, &dir, "plain.txt", 0o640).await.unwrap();
+    let plain = s.list_files(WINDOW, id, Some(&dir)).await.unwrap();
+    let plain = plain.entries.iter().find(|e| e.name == "plain.txt").unwrap();
+    assert_eq!(plain.permissions, Some(0o640));
+    assert_eq!(
+        s.set_file_mode(WINDOW, id, &dir, "plain.txt", 0o10000).await.unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+
+    // Permission denied is reported as such.
+    s.make_dir(WINDOW, id, &dir, "locked").await.unwrap();
+    s.set_file_mode(WINDOW, id, &dir, "locked", 0o500).await.unwrap();
+    let err = s.make_dir(WINDOW, id, &format!("{dir}/locked"), "inner").await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::AccessDenied);
+    s.remove_file(WINDOW, id, &dir, "locked").await.unwrap();
+
+    // A folder that is not empty is not removed.
+    assert_eq!(s.remove_file(WINDOW, id, &home.path, &folder_name).await.unwrap_err().code, ErrorCode::IoError);
+    for name in ["big.bin", "plain.txt"] {
+        s.remove_file(WINDOW, id, &dir, name).await.unwrap();
+    }
+    s.remove_file(WINDOW, id, &home.path, &folder_name).await.unwrap();
+
+    // A local terminal has no SFTP.
+    let local_session = Client::open_local(&f.core).await;
+    let err = s.list_files(WINDOW, &local_session.session, None).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
 }

@@ -45,6 +45,17 @@ const COMMANDS: &[&str] = &[
     "session_close",
     "session_trust_answer",
     "session_auth_answer",
+    // files (SFTP)
+    "files_pick_upload",
+    "files_pick_folder",
+    "files_list",
+    "files_mkdir",
+    "files_rename",
+    "files_remove",
+    "files_chmod",
+    "files_upload",
+    "files_download",
+    "files_cancel",
     // snippets
     "snippet_list",
     "snippet_save",

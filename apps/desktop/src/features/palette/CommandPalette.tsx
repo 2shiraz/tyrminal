@@ -9,6 +9,7 @@ import {
   IconCornerDownLeft,
   IconFingerprint,
   IconHouse,
+  IconHardDrive,
   IconKeyRound,
   IconLock,
   IconPlay,
@@ -157,6 +158,7 @@ export function CommandPalette({
       list.push(action("split-down", msg.palette.splitDown, <IconRows2 size={16} />, () => onAction("splitDown"), "splitDown"));
       list.push(action("find", msg.palette.find, <IconSearch size={16} />, () => onAction("find"), "find"));
       list.push(action("snippets", msg.palette.toggleSnippets, <IconScrollText size={16} />, () => onAction("toggleSnippets"), "toggleSnippets"));
+      list.push(action("files", msg.palette.toggleFiles, <IconHardDrive size={16} />, () => onAction("toggleFiles"), "toggleFiles"));
       list.push(action("zoom-in", msg.palette.zoomIn, <IconZoomIn size={16} />, () => onAction("zoomIn"), "zoomIn"));
       list.push(action("zoom-out", msg.palette.zoomOut, <IconZoomOut size={16} />, () => onAction("zoomOut"), "zoomOut"));
       list.push(action("zoom-reset", msg.palette.zoomReset, <IconZoomIn size={16} />, () => onAction("zoomReset"), "zoomReset"));

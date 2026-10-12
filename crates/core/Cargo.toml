@@ -15,7 +15,7 @@ getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
-tokio = { version = "1.53", features = ["rt", "sync", "time", "macros"] }
+tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "fs", "io-util"] }
 tyrminal-contracts = { path = "../contracts" }
 tyrminal-platform = { path = "../platform" }
 tyrminal-pty = { path = "../pty" }

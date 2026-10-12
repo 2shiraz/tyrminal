@@ -13,6 +13,7 @@ mod channels;
 mod client;
 mod error;
 mod host_trust;
+mod sftp;
 
 pub use algorithms::negotiation_summary;
 pub use auth::{
@@ -26,3 +27,4 @@ pub use host_trust::{
     Endpoint, HostKeyRequest, HostKeyVerifier, KnownHost, PresentedHostKey, RejectReason, TrustStatus, TrustVerdict,
     canonical_host, evaluate,
 };
+pub use sftp::{FileError, RemoteAttrs, RemoteDirEntry, RemoteKind, RemoteReader, RemoteWriter, SFTP_CHUNK, Sftp};

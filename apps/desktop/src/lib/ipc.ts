@@ -24,13 +24,17 @@ import type {
   KeyImportInput,
   KeySummary,
   KnownHostSummary,
+  LocalPick,
   Preferences,
   RecoveryKeyIssued,
+  RemoteListing,
   SessionEvent,
   SessionOpened,
   SnippetInput,
   SnippetSendMode,
   SnippetSummary,
+  TransferEvent,
+  TransferStarted,
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
@@ -178,6 +182,33 @@ export const sessions = {
   /** `secret: null` dismisses the prompt. */
   answerAuth: (sessionId: string, promptId: string, secret: string | null) =>
     call<void>("session_auth_answer", { sessionId, promptId, secret }),
+};
+
+function transferChannel(onEvent: (event: TransferEvent) => void) {
+  const events = new Channel<TransferEvent>();
+  events.onmessage = onEvent;
+  return events;
+}
+
+/**
+ * Remote files over SFTP on a connected session. Local files and folders are chosen in native
+ * dialogs and referred to by token; the page never sees or supplies a local path.
+ */
+export const files = {
+  list: (sessionId: string, path: string | null) => call<RemoteListing>("files_list", { sessionId, path }),
+  mkdir: (sessionId: string, dir: string, name: string) => call<void>("files_mkdir", { sessionId, dir, name }),
+  rename: (sessionId: string, dir: string, from: string, to: string) => call<void>("files_rename", { sessionId, dir, from, to }),
+  remove: (sessionId: string, dir: string, name: string) => call<void>("files_remove", { sessionId, dir, name }),
+  chmod: (sessionId: string, dir: string, name: string, mode: number) => call<void>("files_chmod", { sessionId, dir, name, mode }),
+  /** Native file picker; empty if cancelled. */
+  pickUpload: () => call<LocalPick[]>("files_pick_upload"),
+  /** Native folder picker; null if cancelled. */
+  pickFolder: () => call<LocalPick | null>("files_pick_folder"),
+  upload: (sessionId: string, token: string, dir: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
+    call<TransferStarted>("files_upload", { sessionId, token, dir, overwrite, events: transferChannel(onEvent) }),
+  download: (sessionId: string, dir: string, name: string, token: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
+    call<TransferStarted>("files_download", { sessionId, dir, name, token, overwrite, events: transferChannel(onEvent) }),
+  cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
 };
 
 export const snippets = {

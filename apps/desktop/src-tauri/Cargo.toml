@@ -28,12 +28,14 @@ e2e = ["dep:tauri-plugin-wdio-webdriver"]
 tauri-build = { version = "=2.7.1", features = [] }
 
 [dependencies]
+# Opaque tokens for local file grants (already used by tyrminal-core).
+getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "=2.12.1", features = [] }
 tauri-plugin-wdio-webdriver = { version = "=1.5.0", optional = true }
 # Hands a validated http(s) URL to the OS default browser (link opener, TRM link policy).
 open = "=5.4.4"
-# Native open/save dialogs for backup files, driven from Rust only: the renderer gets no dialog
+# Native open/save dialogs for backup files and SFTP transfers, driven from Rust only: the renderer gets no dialog
 # permission and never supplies a path (ADR 0003).
 tauri-plugin-dialog = "=2.8.2"
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }

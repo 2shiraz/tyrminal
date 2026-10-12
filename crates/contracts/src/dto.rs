@@ -623,3 +623,95 @@ mod tests {
         serde_json::to_string(value).unwrap_or_default()
     }
 }
+
+// ---------- files (SFTP) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RemoteEntryKind {
+    File,
+    Dir,
+    Symlink,
+    Other,
+}
+
+/// One entry of a remote folder. `name` is server-supplied text: display it, never interpret it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub kind: RemoteEntryKind,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    /// Permission bits (`0o7777`).
+    pub permissions: Option<u32>,
+    /// Seconds since the Unix epoch.
+    #[ts(type = "number | null")]
+    pub modified: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RemoteListing {
+    /// The folder's absolute path on the server.
+    pub path: String,
+    /// The parent folder, unless this is the root.
+    pub parent: Option<String>,
+    pub entries: Vec<RemoteEntry>,
+    /// The folder has more entries than are listed.
+    pub truncated: bool,
+}
+
+/// A local file or folder the user chose in a native dialog. The path stays on the native side;
+/// the renderer refers to it by `token`, valid for the window that chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LocalPick {
+    pub token: String,
+    pub name: String,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TransferDirection {
+    Upload,
+    Download,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TransferStarted {
+    pub transfer_id: String,
+    pub name: String,
+    pub direction: TransferDirection,
+    #[ts(type = "number | null")]
+    pub total: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum TransferEvent {
+    Progress {
+        #[ts(type = "number")]
+        done: u64,
+    },
+    /// The file is complete under its final name.
+    Done {
+        #[ts(type = "number")]
+        bytes: u64,
+    },
+    /// Nothing was left under the final name; temporary data was removed where possible.
+    Failed {
+        error: IpcError,
+    },
+    Cancelled,
+}

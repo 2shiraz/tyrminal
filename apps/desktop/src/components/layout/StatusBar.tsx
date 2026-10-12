@@ -2,7 +2,7 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconRadio, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 export function StatusBar({
@@ -14,6 +14,8 @@ export function StatusBar({
   onToggleTheme,
   broadcast,
   onStopBroadcast,
+  filesOpen,
+  onToggleFiles,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -24,6 +26,8 @@ export function StatusBar({
   /** Panes receiving this tab's typed input, when broadcasting. */
   broadcast?: number | undefined;
   onStopBroadcast?: (() => void) | undefined;
+  filesOpen?: boolean | undefined;
+  onToggleFiles?: (() => void) | undefined;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -93,6 +97,19 @@ export function StatusBar({
         </span>
       )}
       <span className="spacer" />
+      {onToggleFiles && (
+        <button
+          type="button"
+          className="status-button"
+          aria-pressed={filesOpen ?? false}
+          onClick={onToggleFiles}
+          data-tooltip={`${msg.palette.toggleFiles} (${shortcutText("toggleFiles")})`}
+          data-tooltip-side="top"
+        >
+          <IconHardDrive size={13} />
+          {msg.status.files}
+        </button>
+      )}
       {onTogglePanel && (
         <button
           type="button"

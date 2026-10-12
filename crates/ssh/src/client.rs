@@ -534,6 +534,22 @@ impl VerifiedConnection {
         Ok((ShellReader { read, ended: false }, ShellWriter { write }))
     }
 
+    /// Opens the SFTP subsystem on a new channel of this connection.
+    pub async fn open_sftp(&self) -> Result<crate::Sftp, SshError> {
+        if !self.authenticated {
+            return Err(SshError::NotAuthenticated);
+        }
+        let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        self.bounded(Stage::OpeningChannel, channel.request_subsystem(true, "sftp")).await?;
+        self.await_reply(&mut channel).await?;
+        let start = crate::Sftp::start(channel.into_stream());
+        match tokio::time::timeout(self.request_timeout, start).await {
+            Err(_) => Err(SshError::Timeout(Stage::OpeningChannel)),
+            Ok(Err(_)) => Err(SshError::RequestDenied),
+            Ok(Ok(sftp)) => Ok(sftp),
+        }
+    }
+
     async fn await_reply(&self, channel: &mut russh::Channel<client::Msg>) -> Result<(), SshError> {
         let wait = async {
             loop {

@@ -7,6 +7,7 @@
 
 mod deploy;
 mod error;
+mod files;
 mod import;
 mod inventory;
 mod preferences;
@@ -15,6 +16,7 @@ mod sessions;
 mod validate;
 mod vault;
 
+pub use files::TransferSink;
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
