@@ -61,6 +61,7 @@ export type { RemoteListing } from "./RemoteListing";
 export type { RendererPreference } from "./RendererPreference";
 export type { SecretChange } from "./SecretChange";
 export type { SessionEvent } from "./SessionEvent";
+export type { SessionIdentity } from "./SessionIdentity";
 export type { SessionOpened } from "./SessionOpened";
 export type { SessionState } from "./SessionState";
 export type { SettingOrigin } from "./SettingOrigin";

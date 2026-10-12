@@ -66,6 +66,8 @@ const SUITES = {
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    // privilege prompts (KEY-18)
+    { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -86,6 +88,8 @@ const SUITES = {
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    // privilege prompts (KEY-18)
+    { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 

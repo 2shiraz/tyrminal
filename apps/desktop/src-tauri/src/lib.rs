@@ -240,6 +240,9 @@ pub fn run() {
             commands::inventory::env_get,
             commands::inventory::env_set,
             commands::inventory::env_effective,
+            // privilege prompts (KEY-18)
+            commands::privilege::session_identity,
+            commands::privilege::session_insert_identity_password,
         ])
         .build(tauri::generate_context!());
 

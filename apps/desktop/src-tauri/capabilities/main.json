@@ -117,6 +117,8 @@
     "allow-identity-assign",
     "allow-env-get",
     "allow-env-set",
-    "allow-env-effective"
+    "allow-env-effective",
+    "allow-session-identity",
+    "allow-session-insert-identity-password"
   ]
 }

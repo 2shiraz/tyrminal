@@ -8,6 +8,9 @@ import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
 import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
+// privilege prompts (KEY-18)
+import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
+import { msgP } from "../lib/messages-privilege";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
@@ -92,6 +95,8 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
+  // privilege prompts (KEY-18)
+  const [inserting, setInserting] = useState<{ sessionId: string; hostId: string } | null>(null);
   // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
   // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
@@ -292,6 +297,15 @@ function Shell() {
           const sessionId = handle?.connected() ? handle.sessionId() : null;
           if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId, hostId: p.target.hostId });
           else notify("info", msgD.suggest.needsTerminal);
+          break;
+        }
+        // privilege prompts (KEY-18): opens the confirmation; nothing is typed until the user confirms.
+        case "insertPassword": {
+          const p = activePane(wsRef.current);
+          const handle = p ? handles.current.get(p.id) : undefined;
+          const sessionId = handle?.connected() ? handle.sessionId() : null;
+          if (p && sessionId && p.target.kind === "ssh") setInserting({ sessionId, hostId: p.target.hostId });
+          else notify("info", msgP.insert.needsSsh);
           break;
         }
         case "renameTab": {
@@ -527,6 +541,8 @@ function Shell() {
                 }
               : undefined
           }
+          // privilege prompts (KEY-18)
+          onInsertPassword={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? () => runAction("insertPassword") : undefined}
           onShellIntegration={
             pane && paneStatus?.state === "connected"
               ? () => {
@@ -536,6 +552,23 @@ function Shell() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {/* privilege prompts (KEY-18) */}
+      {inserting && (
+        <InsertPasswordDialog
+          sessionId={inserting.sessionId}
+          hostLabel={data.hosts.value?.find((h) => h.id === inserting.hostId)?.label ?? ""}
+          onClose={() => {
+            setInserting(null);
+            focusedHandle()?.focus();
+          }}
+          onInserted={(identity) => {
+            setInserting(null);
+            notify("success", msgP.insert.done(identity.label));
+            focusedHandle()?.focus();
+          }}
         />
       )}
 

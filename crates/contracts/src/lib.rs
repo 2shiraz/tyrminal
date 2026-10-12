@@ -16,6 +16,8 @@ mod error;
 mod tunnels;
 // agent D: inventory and snippets
 mod inventory;
+// privilege prompts (KEY-18)
+mod privilege;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
@@ -23,3 +25,5 @@ pub use error::{ErrorCode, IpcError};
 pub use tunnels::*;
 // agent D: inventory and snippets
 pub use inventory::*;
+// privilege prompts (KEY-18)
+pub use privilege::*;

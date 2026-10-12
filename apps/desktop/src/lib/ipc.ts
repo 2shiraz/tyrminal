@@ -388,3 +388,12 @@ export const environment = {
     call<import("@tyrminal/contracts").EnvVar[]>("env_set", { target, vars }),
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
 };
+
+// privilege prompts (KEY-18)
+export const privilege = {
+  /** The identity whose password the session could type in, or null. */
+  forSession: (sessionId: string) => call<import("@tyrminal/contracts").SessionIdentity | null>("session_identity", { sessionId }),
+  /** Types that identity's password into the session (an explicit user action; no Enter). */
+  insertPassword: (sessionId: string, identityId: string) =>
+    call<void>("session_insert_identity_password", { sessionId, identityId }),
+};

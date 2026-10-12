@@ -2939,6 +2939,71 @@ impl VaultService {
     }
 }
 
+// privilege prompts (KEY-18)
+/// Typing an identity's password into a session on an explicit request. Nothing here watches
+/// terminal output: a server can print text that looks like a password prompt (BUILD_SPEC §4.5).
+impl VaultService {
+    /// The identity a host uses now (its own, else its nearest group's when it inherits).
+    fn session_identity_of<'a>(
+        open: &'a Open,
+        host_id: &str,
+    ) -> Result<Option<(String, &'a IdentityRecord)>, IpcError> {
+        let id = validate::id(host_id)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::identity_for_host(open, &id, host).map(|(identity_id, record, _)| (identity_id, record)))
+    }
+
+    /// Which identity's password a session to `host_id` may insert, read under `generation`.
+    pub(crate) async fn session_identity(
+        &self,
+        generation: u32,
+        host_id: &str,
+    ) -> Result<Option<tyrminal_contracts::SessionIdentity>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(Self::session_identity_of(open, host_id)?.map(|(identity_id, record)| tyrminal_contracts::SessionIdentity {
+            identity_id,
+            label: record.label.clone(),
+            has_password: record.password.is_some(),
+        }))
+    }
+
+    /// The password of the identity a session's host uses, for an explicit insert. Refused
+    /// unless that is still `expected_identity` (the one the user was shown when they chose to
+    /// insert it), so a change in between can never send a different identity's password.
+    pub(crate) async fn identity_password(
+        &self,
+        generation: u32,
+        host_id: &str,
+        expected_identity: &str,
+    ) -> Result<Zeroizing<String>, IpcError> {
+        let expected = validate::id_text(&validate::id(expected_identity)?);
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        match Self::session_identity_of(open, host_id)? {
+            Some((identity_id, record)) if identity_id == expected => match &record.password {
+                // Typed into a terminal, a control character is a keystroke (Enter, Ctrl-C, an
+                // escape sequence), not part of the password. Refused rather than stripped.
+                Some(password) if password.chars().any(char::is_control) => {
+                    Err(invalid("This password contains control characters, so it cannot be typed into a terminal."))
+                }
+                Some(password) => Ok(Zeroizing::new(password.as_str().to_owned())),
+                None => Err(invalid("This identity has no stored password.")),
+            },
+            _ => Err(err(
+                ErrorCode::Conflict,
+                "The identity of this host changed. Check which identity it uses and try again.",
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod suspend_tests {
     use super::*;
@@ -2951,5 +3016,107 @@ mod suspend_tests {
         assert!(slept_between(s(35), s(5)));
         assert!(slept_between(s(7200), s(5)));
         assert!(!slept_between(Duration::ZERO, s(5)), "a clock set backwards is not sleep");
+    }
+}
+
+// privilege prompts (KEY-18)
+#[cfg(test)]
+mod privilege_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use tyrminal_contracts::{HostAuthInput, SecretChange, SettingsTarget};
+
+    fn host(label: &str, auth: HostAuthInput, group_id: Option<String>) -> HostInput {
+        HostInput {
+            id: None,
+            label: label.into(),
+            address: format!("{label}.example"),
+            port: None,
+            username: "ops".into(),
+            auth,
+            group_id,
+            tags: Vec::new(),
+        }
+    }
+
+    fn identity(id: Option<String>, label: &str, password: SecretChange) -> IdentityInput {
+        IdentityInput { id, label: label.into(), username: "ops".into(), password, key_id: None }
+    }
+
+    fn set(value: &str) -> SecretChange {
+        SecretChange::Set { value: value.into() }
+    }
+
+    #[tokio::test]
+    async fn inserted_passwords_belong_to_the_identity_the_user_was_shown() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let core = crate::Core::open(&dir.path().join("vault.db")).unwrap();
+        let v = &core.vault;
+        v.create("correct horse battery staple".into()).await.unwrap();
+        let generation = v.generation();
+        let ops = v.save_identity(identity(None, "Ops", set("sudo-pass"))).await.unwrap();
+        let other = v.save_identity(identity(None, "Other", set("other-pass"))).await.unwrap();
+        let group = v
+            .save_group(GroupInput {
+                id: None,
+                name: "G".into(),
+                parent_id: None,
+                username: None,
+                port: None,
+                key_id: None,
+            })
+            .await
+            .unwrap();
+        v.set_identity(SettingsTarget::Group { group_id: group.id.clone() }, Some(ops.id.clone())).await.unwrap();
+        let inheriting = v.save_host(host("a", HostAuthInput::Inherit, Some(group.id.clone()))).await.unwrap();
+        let plain = v.save_host(host("b", HostAuthInput::AskPassword, None)).await.unwrap();
+
+        // The group's identity reaches the inheriting host.
+        let shown = v.session_identity(generation, &inheriting.id).await.unwrap().unwrap();
+        assert_eq!(
+            (shown.identity_id.as_str(), shown.label.as_str(), shown.has_password),
+            (ops.id.as_str(), "Ops", true)
+        );
+        let password = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap();
+        assert_eq!(password.as_str(), "sudo-pass");
+
+        // A different identity than the host uses now is refused, never substituted.
+        let wrong = v.identity_password(generation, &inheriting.id, &other.id).await.unwrap_err();
+        assert_eq!(wrong.code, ErrorCode::Conflict);
+        assert!(v.session_identity(generation, &plain.id).await.unwrap().is_none());
+        assert_eq!(v.identity_password(generation, &plain.id, &ops.id).await.unwrap_err().code, ErrorCode::Conflict);
+
+        // The host's own identity wins once set; the group's is then refused for it.
+        v.set_identity(SettingsTarget::Host { host_id: inheriting.id.clone() }, Some(other.id.clone())).await.unwrap();
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(v.identity_password(generation, &inheriting.id, &other.id).await.unwrap().as_str(), "other-pass");
+        v.set_identity(SettingsTarget::Host { host_id: inheriting.id.clone() }, None).await.unwrap();
+
+        // A password with control characters would be keystrokes in a terminal: refused.
+        v.save_identity(identity(Some(ops.id.clone()), "Ops", set("pw\rrm -rf ~\r"))).await.unwrap();
+        let refused = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput);
+        assert!(!refused.message.contains("rm -rf"), "the password never appears in an error");
+
+        // No password stored: nothing to insert.
+        v.save_identity(identity(Some(ops.id.clone()), "Ops", SecretChange::Clear)).await.unwrap();
+        assert!(!v.session_identity(generation, &inheriting.id).await.unwrap().unwrap().has_password);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+
+        // After a lock, the old generation reads nothing, even once unlocked again.
+        v.lock().await;
+        v.unlock_with_passphrase("correct horse battery staple".into()).await.unwrap();
+        assert_eq!(v.session_identity(generation, &inheriting.id).await.unwrap_err().code, ErrorCode::VaultLocked);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::VaultLocked
+        );
     }
 }

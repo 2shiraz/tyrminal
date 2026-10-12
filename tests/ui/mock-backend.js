@@ -122,7 +122,7 @@ export function installMockBackend(options) {
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
     state.sessions.set(sessionId, s);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
@@ -787,6 +787,24 @@ export function installMockBackend(options) {
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
       }
+    },
+    // privilege prompts (KEY-18)
+    session_identity: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      if (!s.hostId) return null;
+      const effective = identityAssignment({ kind: "host", hostId: s.hostId }).effectiveIdentityId;
+      const identity = identityState.list.find((i) => i.id === effective);
+      return identity ? { identityId: identity.id, label: identity.label, hasPassword: identity.password !== null } : null;
+    },
+    session_insert_identity_password: (a) => {
+      const current = handlers.session_identity({ sessionId: a.sessionId });
+      if (!current || current.identityId !== a.identityId)
+        throw { code: "CONFLICT", message: "The identity of this host changed. Check which identity it uses and try again." };
+      const password = identityState.list.find((i) => i.id === a.identityId)?.password;
+      if (!password) throw { code: "INVALID_INPUT", message: "This identity has no stored password." };
+      // Typed by the "core": the renderer never receives the password, and no Enter is added.
+      write(a.sessionId, new TextEncoder().encode(password));
     },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };

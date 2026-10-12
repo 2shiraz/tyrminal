@@ -122,6 +122,9 @@ const COMMANDS: &[&str] = &[
     "env_get",
     "env_set",
     "env_effective",
+    // privilege prompts (KEY-18)
+    "session_identity",
+    "session_insert_identity_password",
 ];
 
 fn main() {
