@@ -18,9 +18,11 @@ import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "..
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
@@ -103,7 +105,8 @@ export type Destination =
   | "knownHosts"
   | "settings"
   // agent B: tunnels and history
-  | "tunnels";
+  | "tunnels"
+  | "recordings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -132,10 +135,10 @@ function Shell() {
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
-  // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
+  // The side panel beside the terminals: snippets, files, server facts or host notes, one at a time.
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | "notes" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server" | "notes") => setSidePanel((v) => (v === which ? null : which)), []);
   // terminal input: the side panel's section (snippets, history, appearance; TRM-14)
   const [panelSection, setPanelSection] = useState<PanelSection>("snippets");
   const panelSectionRef = useRef(panelSection);
@@ -736,7 +739,7 @@ function Shell() {
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
-          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} />}
+          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} onOpenKeychain={() => navigate("keychain")} />}
           {/* agent B: tunnels and history */}
           {!terminalVisible && destination === "tunnels" && (
             <TunnelsView
@@ -749,6 +752,7 @@ function Shell() {
               onConnect={connect}
             />
           )}
+          {!terminalVisible && destination === "recordings" && <RecordingsView />}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>
@@ -773,6 +777,15 @@ function Shell() {
                         const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
                         return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
                       })}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : showPanel && sidePanel === "notes" ? (
+                    <NotesPanel
+                      host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
+                      onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (text) => focusedHandle()?.reviewPaste(text) : undefined}
                       onClose={() => {
                         setSidePanel(null);
                         focusedHandle()?.focus();
@@ -835,6 +848,8 @@ function Shell() {
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           serverOpen={sidePanel === "server"}
           onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
+          notesOpen={sidePanel === "notes"}
+          onToggleNotes={terminalVisible && !sftpVisible ? () => togglePanel("notes") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
@@ -959,6 +974,11 @@ function Shell() {
               : undefined
           }
           // privilege prompts (KEY-18)
+          // security review (P-27)
+          onSecurityReview={() => {
+            navigate("settings");
+            setSettingsAt((current) => ({ section: "review", n: (current?.n ?? 0) + 1 }));
+          }}
           onInsertPassword={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? () => runAction("insertPassword") : undefined}
           onConnectionLog={
             pane?.target.kind === "ssh" && focusedHandle()?.sessionId()

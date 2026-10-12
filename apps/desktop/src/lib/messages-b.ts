@@ -4,7 +4,7 @@
 
 import type { TunnelKind, TunnelState } from "@tyrminal/contracts";
 
-function bytes(n: number): string {
+export function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = n / 1024;
@@ -44,6 +44,18 @@ export const msgB = {
     proxyPassword: "Proxy password",
     proxyPasswordKeep: "Leave empty to keep the stored password.",
     httpCleartext: "An HTTP proxy receives the user name and password unencrypted (base64). Use it only on a network you trust.",
+    keyExchange: "Post-quantum key exchange",
+    keyExchangeModes: {
+      prefer_post_quantum: "Use when offered (recommended)",
+      require_post_quantum: "Require",
+      classic: "Off (compatibility)",
+    },
+    keyExchangeHints: {
+      prefer_post_quantum:
+        "ML-KEM-768 with X25519 protects against later decryption by a quantum computer. Servers without it use X25519.",
+      require_post_quantum: "Connects only to servers that offer it. Otherwise the connection stops before you sign in.",
+      classic: "For servers that fail with post-quantum key exchange. The connection uses X25519 only.",
+    },
   },
   tunnels: {
     title: "Tunnels",
@@ -124,5 +136,87 @@ export const msgB = {
     exposeApproved: "You approved a listener that other computers can reach.",
     sessionsFor: (n: number) => (n === 1 ? "1 connected session" : `${n} connected sessions`),
     socksNote: "Applications use it as a SOCKS5 proxy with no user name or password.",
+  },
+  recordings: {
+    title: "Recordings",
+    subtitle: "What your sessions printed, encrypted in this vault. Typed input is never recorded.",
+    record: "Record sessions",
+    recordHint: "Records the output of new SSH and local terminal sessions. Off by default.",
+    keep: "Keep per host",
+    keepHint: "Older recordings that are not bookmarked are deleted when a new one ends.",
+    keepValue: (n: number) => (n === 1 ? "1 recording" : `${n} recordings`),
+    limit: "Size limit per recording",
+    limitHint: "A recording that reaches it ends; the session goes on unrecorded.",
+    limitValue: (mib: number) => `${mib} MiB`,
+    turnedOn: "New sessions will be recorded.",
+    turnedOff: "Recording is off. Existing recordings are kept.",
+    storage: (count: number, total: number) =>
+      count === 0 ? "No recordings stored" : `${count === 1 ? "1 recording" : `${count} recordings`} · ${bytes(total)} on this computer`,
+    deleteAll: "Delete all recordings",
+    deleteAllTitle: "Delete every recording?",
+    deleteAllBody:
+      "This permanently deletes every recording in this vault, including bookmarked ones. Sessions being recorded now are kept. Recording stays on or off as it is.",
+    deleteAllConfirm: "Delete all",
+    deletedAll: (n: number) => (n === 1 ? "Deleted 1 recording." : `Deleted ${n} recordings.`),
+    search: "Search recordings",
+    searchPlaceholder: "Search by host or comment",
+    filterAll: "All",
+    filterBookmarked: "Bookmarked",
+    filter: "Show",
+    emptyTitle: "No recordings yet",
+    emptyOffBody: "Turn on recording above, then connect to a host or open a local terminal.",
+    emptyOnBody: "Sessions you open from now on will appear here.",
+    noMatches: "No recordings match.",
+    open: "Open",
+    openNamed: (title: string) => `Open recording of ${title}`,
+    bookmark: "Bookmark",
+    unbookmark: "Remove bookmark",
+    bookmarkNamed: (title: string) => `Bookmark recording of ${title}`,
+    unbookmarkNamed: (title: string) => `Remove bookmark from recording of ${title}`,
+    comment: "Comment",
+    editComment: "Edit comment",
+    commentTitle: "Bookmark and comment",
+    commentLabel: "Comment",
+    commentHint: "Shown in the list and searched. Up to 2,000 characters.",
+    saveComment: "Save",
+    delete: "Delete",
+    deleteNamed: (title: string) => `Delete recording of ${title}`,
+    deleteTitle: "Delete this recording?",
+    deleteBody: (title: string) => `The recording of ${title} is deleted permanently.`,
+    more: (title: string) => `More actions for recording of ${title}`,
+    states: {
+      recording: "Recording",
+      complete: "Complete",
+      size_limit: "Size limit reached",
+      incomplete: "Incomplete",
+      damaged: "Damaged",
+      unreadable: "File missing",
+    } as Record<string, string>,
+    local: "Local terminal",
+    duration: (ms: number) => {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (s < 60) return `${s} s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m} min ${s % 60} s`;
+      return `${Math.floor(m / 60)} h ${m % 60} min`;
+    },
+    // playback
+    back: "Back to recordings",
+    playerLabel: (title: string) => `Recording of ${title}`,
+    replay: "Replay",
+    replaying: "Replaying…",
+    stopReplay: "Stop",
+    speed: "Speed",
+    showAll: "Show all",
+    find: "Find in recording",
+    findNext: "Next match",
+    findPrevious: "Previous match",
+    noMatch: "No match",
+    readOnly: "Read-only playback. Links, clipboard requests and other terminal actions are turned off.",
+    truncated: "This recording is longer than one playback shows. The first 16 MiB of output are shown.",
+    incompleteNote: "This recording stops early: the application closed while it was being recorded. Everything shown was verified.",
+    damagedNote: "Part of this recording failed verification. Only what came before that point is shown.",
+    sizeLimitNote: "This recording reached its size limit; later output was not recorded.",
+    recordingNote: "This session is still being recorded. Showing what has been recorded so far.",
   },
 };

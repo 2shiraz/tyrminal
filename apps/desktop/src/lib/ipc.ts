@@ -419,6 +419,27 @@ export const detach = {
     call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
 };
 
+// Session recordings
+type RecordingSettingsDto = import("@tyrminal/contracts").RecordingSettings;
+type SessionLogSummaryDto = import("@tyrminal/contracts").SessionLogSummary;
+type SessionLogStorageDto = import("@tyrminal/contracts").SessionLogStorage;
+type SessionLogPlaybackDto = import("@tyrminal/contracts").SessionLogPlayback;
+
+/** Session recordings: output only, encrypted in the vault, opened read-only. */
+export const recordings = {
+  settings: () => call<RecordingSettingsDto>("recording_settings_get"),
+  /** Turning recording off stops running recordings and keeps existing ones. */
+  setSettings: (settings: RecordingSettingsDto) => call<RecordingSettingsDto>("recording_settings_set", { settings }),
+  list: () => call<SessionLogSummaryDto[]>("session_log_list"),
+  storage: () => call<SessionLogStorageDto>("session_log_storage"),
+  bookmark: (id: string, bookmarked: boolean, comment: string) =>
+    call<SessionLogSummaryDto>("session_log_bookmark", { id, bookmarked, comment }),
+  remove: (id: string) => call<void>("session_log_delete", { id }),
+  /** Deletes every recording that is not running now; separate from turning recording off. */
+  removeAll: () => call<number>("session_log_delete_all"),
+  open: (id: string) => call<SessionLogPlaybackDto>("session_log_open", { id }),
+};
+
 // agent D: inventory and snippets
 
 /** Presentation settings of hosts (the OS icon), apart from their connection settings. */
@@ -521,6 +542,12 @@ export const passwordCheck = {
   run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
 };
 
+// security review (P-27)
+export const securityReview = {
+  /** Findings over the unlocked vault. Read-only, on the device; never a secret. */
+  run: () => call<import("@tyrminal/contracts").SecurityReview>("security_review"),
+};
+
 /** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
 export const startup = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
@@ -560,4 +587,13 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+/** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
+export const notes = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").Note | null>("note_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, note: import("@tyrminal/contracts").NoteInput | null) =>
+    call<import("@tyrminal/contracts").Note | null>("note_set", { target, note }),
+  /** A host's own note first, then its groups' (nearest first). */
+  forHost: (hostId: string) => call<import("@tyrminal/contracts").HostNote[]>("note_for_host", { hostId }),
 };

@@ -134,6 +134,23 @@ pub struct HostConnection {
     /// The route of the nearest group that sets one (HST-05), whether or not the host uses it.
     #[serde(default)]
     pub inherited: Option<crate::InheritedRoute>,
+    /// Post-quantum key exchange for this host (each hop of a chain uses its own setting).
+    #[serde(default)]
+    pub key_exchange: KeyExchangeMode,
+}
+
+/// How a host's connection treats hybrid post-quantum key exchange (ML-KEM-768 with X25519).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum KeyExchangeMode {
+    /// Use it when the server offers it, otherwise a classical exchange.
+    #[default]
+    PreferPostQuantum,
+    /// Connect only when the server offers it; otherwise stop before signing in.
+    RequirePostQuantum,
+    /// Never offer it, for servers that mishandle it.
+    Classic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -170,6 +187,8 @@ pub struct HostConnectionInput {
     /// host's own proxy, including its password, is dropped).
     #[serde(default)]
     pub inherit: bool,
+    #[serde(default)]
+    pub key_exchange: KeyExchangeMode,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]
@@ -191,6 +210,7 @@ impl core::fmt::Debug for HostConnectionInput {
             .field("jump_host_id", &self.jump_host_id)
             .field("proxy", &self.proxy)
             .field("inherit", &self.inherit)
+            .field("key_exchange", &self.key_exchange)
             .finish()
     }
 }
@@ -238,6 +258,7 @@ mod tests {
     fn proxy_input_debug_never_prints_the_password() {
         let input = HostConnectionInput {
             jump_host_id: None,
+            key_exchange: KeyExchangeMode::default(),
             proxy: Some(ProxyInput {
                 kind: ProxyType::Http,
                 host: "proxy.lab".into(),

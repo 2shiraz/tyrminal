@@ -9,6 +9,7 @@ import { ErrorNotice, IconButton } from "../../components/ui/controls";
 import { IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { NoteCard } from "../notes/NoteCard";
 import { HostFormCards, type HostFormOptions, groupPath, useHostForm } from "./hostForm";
 
 export type PanelTarget = { kind: "new"; initial?: HostFormOptions["initial"] } | { kind: "edit"; host: HostSummary };
@@ -58,7 +59,9 @@ export function HostPanel({
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
-  dirtyRef.current = form.dirty;
+  // An unsaved note counts as an unsaved change for the close guard too.
+  const [noteDirty, setNoteDirty] = useState(false);
+  dirtyRef.current = form.dirty || noteDirty;
 
   // After a save the panel is rebuilt from the saved host, and a serial host has no address field
   // to start in: focus goes to the panel's heading so it stays inside the panel.
@@ -144,6 +147,7 @@ export function HostPanel({
             }
           />
           <ErrorNotice error={form.error} />
+          {host && <NoteCard target={{ kind: "host", hostId: host.id }} onDirty={setNoteDirty} />}
         </div>
 
         <footer className="host-panel-foot">
