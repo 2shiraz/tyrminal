@@ -218,7 +218,8 @@ impl Client {
 
     async fn output_until(&mut self, needle: &str) {
         let deadline = tokio::time::Instant::now() + WAIT;
-        while !self.text.contains(needle) {
+        // Matched without escape sequences: line editors such as PowerShell's colour each token.
+        while !strip_escapes(&self.text).contains(needle) {
             match tokio::time::timeout_at(deadline, self.inbox.recv()).await {
                 Ok(Some(Message::Output(bytes))) => self.absorb(bytes).await,
                 Ok(Some(Message::Event(event))) => panic!("unexpected event while waiting for {needle:?}: {event:?}"),
@@ -228,8 +229,11 @@ impl Client {
         }
     }
 
+    /// Types `text`; a newline is the Enter key, which a terminal sends as CR (PowerShell under
+    /// ConPTY submits only on CR; Unix terminal drivers turn CR into NL).
     async fn send(&self, text: &str) {
-        self.core.sessions.write(WINDOW, &self.session, text.as_bytes().to_vec()).await.expect("write");
+        let keys = text.replace('\n', "\r");
+        self.core.sessions.write(WINDOW, &self.session, keys.into_bytes()).await.expect("write");
     }
 
     fn trust(&self, prompt_id: &str, decision: TrustDecision) {
@@ -270,6 +274,42 @@ struct Fixture {
     _dir: TempDir,
     core: Core,
     lab: Lab,
+}
+
+/// Removes terminal escape sequences (CSI, OSC and two-byte ESC sequences) from `text`.
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters and intermediates, then one final byte in @..~.
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 async fn fixture() -> Fixture {
