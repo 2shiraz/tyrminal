@@ -273,3 +273,27 @@ test("status dots in tabs are plain 8 px dots, with no halo or ring", async ({ p
     expect(d.outline).toBe("none");
   }
 });
+
+test("a host's tab shows its OS logo; a local tab keeps the status dot", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    const s = (window as unknown as { __mockState: { hosts: { id: string; label: string }[]; os?: Record<string, string> } }).__mockState;
+    const host = s.hosts.find((h) => h.label === "api-gateway")!;
+    s.os = { ...(s.os ?? {}), [host.id]: "ubuntu" };
+  });
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("api-gateway");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  await openLocalTabs(page, 1);
+  const host = page.getByRole("tab", { name: /api-gateway/ });
+  await expect(host.locator('.tab-os .os-icon[data-os="ubuntu"]')).toBeAttached();
+  // Not the active tab, so the logo shows (the close button takes the slot on the active tab).
+  await page.mouse.move(5, 500);
+  await expect(host.locator(".tab-os")).toHaveCSS("opacity", "1");
+  const local = page.getByRole("tab", { name: /Local terminal/ });
+  await expect(local.locator(".tab-lead .status-dot")).toBeAttached();
+  await expect(local.locator(".tab-os")).toHaveCount(0);
+  // The tab's accessible name is unchanged by the logo (the slot is hidden from assistive tech).
+  await expect(host).toHaveAccessibleName(/^api-gateway/);
+});

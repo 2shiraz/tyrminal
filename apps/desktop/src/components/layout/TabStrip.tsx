@@ -30,6 +30,9 @@ import {
   IconX,
 } from "../ui/icons";
 import { msgSftp } from "../../features/sftp/messages";
+import { OsIcon } from "../../features/hosts/OsIcon";
+import { appearance } from "../../lib/ipc";
+import type { HostOs } from "@tyrminal/contracts";
 
 const PAGE_ICONS: Record<Destination, typeof IconServer> = {
   hosts: IconServer,
@@ -111,6 +114,28 @@ function TabStripImpl({
   // them follow; opening grows a tab in and closing with the pointer shrinks it out. Pointer only:
   // keyboard changes and reduced motion are instant. No transform (FLIP) runs on tabs.
   const tabsRef = useRef<HTMLDivElement>(null);
+
+  // The OS of each host open in a tab, for its icon (Termius-style). Read again when the hosts or
+  // their connection states change: OS detection fills it in when a connection opens.
+  const [osOf, setOsOf] = useState<ReadonlyMap<string, HostOs>>(new Map());
+  const osKey = ws.tabs
+    .map((t) => {
+      const p = ws.panes[t.focused];
+      return p?.target.kind === "ssh" ? `${p.target.hostId}:${tabStatus(ws, t).indicator}` : "";
+    })
+    .filter(Boolean)
+    .join(",");
+  useEffect(() => {
+    if (!osKey) return;
+    let live = true;
+    appearance.list().then(
+      (list) => live && setOsOf(new Map(list.map((a) => [a.hostId, a.os]))),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [osKey]);
 
   // Overflow scrolls sideways only: the wheel scrolls the strip horizontally, the active tab is
   // kept in view, and faded edges show that more tabs are hidden on that side.
@@ -258,6 +283,7 @@ function TabStripImpl({
           const selected = ws.active === tab.id;
           const paneCount = panesOf(tab.layout).length;
           const status = tabStatus(ws, tab);
+          const os = pane?.target.kind === "ssh" ? (osOf.get(pane.target.hostId) ?? null) : null;
           const isProduction = production ? panesOf(tab.layout).some((id) => production.has(id)) : false;
           return (
             <div
@@ -314,8 +340,15 @@ function TabStripImpl({
                   hovered tab (as Termius), so nothing in the tab changes size while widths move.
                   The close button is a pointer target only: a focusable control may not sit inside
                   a tab. From the keyboard a tab closes with Delete or from its menu (Shift+F10). */}
-              <span className="tab-lead">
-                <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+              <span className="tab-lead" aria-hidden="true">
+                {os ? (
+                  // The host's OS; a small dot on it only while the session is not simply open.
+                  <span className="tab-os" data-tone={status.indicator}>
+                    <OsIcon os={os} size="sm" />
+                  </span>
+                ) : (
+                  <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+                )}
                 <span
                   className="tab-close"
                   aria-hidden="true"
