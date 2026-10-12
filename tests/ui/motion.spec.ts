@@ -227,6 +227,8 @@ test.describe("exits", () => {
     await expect(toast).toBeVisible();
     await page.mouse.move(5, 400);
     await expect(toast).toHaveCount(0, { timeout: 6000 });
+  });
+});
 
 // Moments (motion.md PR 4).
 test.describe("moments", () => {
