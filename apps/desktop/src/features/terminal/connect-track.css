@@ -69,7 +69,7 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--text-on-accent);
-  animation: track-settle 260ms var(--ease-out);
+  animation: track-settle var(--duration-fast) var(--ease-out);
 }
 
 .track-rail {
@@ -218,11 +218,11 @@
   color: var(--danger);
 }
 
-/* On success the sheet fades while the shell, already live underneath, takes input. */
+/* On success the sheet fades (an exit: --duration-fast, docs/design/motion.md) while the shell, already live underneath, takes input. */
 .connect-layer[data-leaving="true"] {
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration-slow) var(--ease-out);
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 @keyframes track-spin {

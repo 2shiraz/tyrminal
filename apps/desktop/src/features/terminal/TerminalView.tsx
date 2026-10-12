@@ -496,7 +496,7 @@ export function TerminalView(props: TerminalViewProps) {
     };
   }, [hostId]);
 
-  // When the session opens, the sheet stays for one slow beat to settle, faded, inert and
+  // When the session opens, the sheet stays for one short exit to settle, faded, inert and
   // click-through, while the shell already takes input. Under reduced motion it goes at once.
   const showSheet = !pending && (closed !== null || state !== "connected" || needsAttention);
   const [settling, setSettling] = useState(false);
@@ -990,8 +990,8 @@ function userIsElsewhere(pane: HTMLElement | null): boolean {
   return active.matches("input, textarea, select, [contenteditable='true']") || active.closest("dialog, [role='menu']") !== null;
 }
 
-/** The sheet's settle time on connect: the slow motion token (0 under reduced motion). */
+/** The sheet's exit on connect: the fast motion token, as for exits (0 under reduced motion). */
 function settleMs(): number {
-  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--duration-slow"));
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--duration-fast"));
   return Number.isFinite(value) ? value : 0;
 }
