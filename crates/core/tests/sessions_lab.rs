@@ -1406,12 +1406,9 @@ async fn a_link_lost_mid_transfer_fails_promptly_and_leaves_no_partial_file() {
     let (sink, mut rx) = transfer_sink();
     s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), false, sink).await.unwrap();
     // Wait until bytes are flowing, then kill this connection's server process.
-    loop {
-        match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
-            Some(TransferEvent::Progress { .. }) => break,
-            Some(other) => panic!("transfer ended before the link was cut: {other:?}"),
-            None => panic!("closed"),
-        }
+    match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
+        Some(TransferEvent::Progress { .. }) => {}
+        other => panic!("transfer ended before the link was cut: {other:?}"),
     }
     client.send("kill -9 $PPID\n").await;
     let started = std::time::Instant::now();
