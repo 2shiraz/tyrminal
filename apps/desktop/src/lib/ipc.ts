@@ -209,6 +209,8 @@ export const sessions = {
   resize: (sessionId: string, cols: number, rows: number) => call<void>("session_resize", { sessionId, cols, rows }),
   ack: (sessionId: string, bytes: number) => call<void>("session_ack", { sessionId, bytes }),
   close: (sessionId: string) => call<void>("session_close", { sessionId }),
+  /** What happened while the session connected (no secrets), also shortly after it ended. */
+  diagnostics: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
   answerTrust: (sessionId: string, promptId: string, decision: TrustDecision) =>
     call<void>("session_trust_answer", { sessionId, promptId, decision }),
   /** `secret: null` dismisses the prompt. */

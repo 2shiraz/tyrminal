@@ -2074,3 +2074,61 @@ async fn full_disk_download_fails_cleanly_and_leaves_nothing_behind() {
     assert_eq!(std::fs::read(target.path().join("keep.txt")).unwrap(), b"keep\n");
     s.remove_file(WINDOW, &id, &home, &name).await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn the_connection_log_shows_each_step_and_never_a_secret() {
+    let f = fixture().await;
+    let password = f.lab.str("/password");
+    let host = f
+        .host(
+            "diag",
+            f.lab.port("a"),
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some(password.clone()) },
+        )
+        .await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let lines = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap();
+    let text = lines.join("\n");
+    for step in [
+        "connecting to 127.0.0.1:",
+        "directly",
+        "key exchange ",
+        "host key SHA256:",
+        "signing in as ",
+        "the stored password",
+        "signed in",
+        "shell opened (xterm-256color, 100x30)",
+    ] {
+        assert!(text.contains(step), "missing {step:?} in:\n{text}");
+    }
+    assert!(!text.contains(&password), "the password must never be logged");
+    // Only the window that owns the session can read its log.
+    assert_eq!(f.core.sessions.diagnostics("other", &client.session).unwrap_err().code, ErrorCode::AccessDenied);
+    // A failed sign-in says why, still without the secret.
+    let wrong = f
+        .host(
+            "diag-wrong",
+            f.lab.port("a"),
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some("not-the-password-9".into()) },
+        )
+        .await;
+    let mut client = Client::open_ssh(&f.core, &wrong).await;
+    // A refused stored password falls back to asking; the user cancels.
+    let (_, prompt) = client.until_not_state().await;
+    let (prompt_id, _, _) = auth_prompt(&prompt);
+    client.answer(&prompt_id, None);
+    let (error, _) = client.until_closed().await;
+    assert!(error.is_some());
+    let text = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(text.contains("refused the stored password"), "{text}");
+    assert!(text.contains("sign-in failed: "), "{text}");
+    assert!(text.contains("ended: "), "{text}");
+    assert!(!text.contains("not-the-password-9"));
+    assert!(f.core.sessions.diagnostics("other", &client.session).is_err());
+}

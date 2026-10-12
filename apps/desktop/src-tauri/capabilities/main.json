@@ -49,6 +49,7 @@
     "allow-session-auth-answer",
     "allow-session-handoff-offer",
     "allow-session-attach",
+    "allow-session-diagnostics",
     "allow-files-pick-upload",
     "allow-files-pick-folder",
     "allow-files-pick-upload-folder",

@@ -812,6 +812,7 @@ export function installMockBackend(options) {
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
     session_write: (a, o) => write(o.headers["x-session"], a),
+    session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
     session_resize: () => null,
     session_ack: () => null,
     session_close: (a) => {

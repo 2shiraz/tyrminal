@@ -72,6 +72,8 @@ pub(crate) struct Entry {
     pub(crate) generation: u32,
     /// Where output and events go, with the flow-control count (see `handoff`).
     relay: Arc<Relay>,
+    /// What happened while connecting (CON-15; no secrets, see `connlog`).
+    log: crate::connlog::ConnLog,
     input: mpsc::Sender<Input>,
     close: watch::Sender<bool>,
     prompts: Mutex<Prompts>,
@@ -117,6 +119,9 @@ pub struct Sessions {
     offers: Mutex<HashMap<String, Offer>>,
     /// Uploads whose content the window sends (dropped files).
     streams: Arc<Streams>,
+    /// Connection logs of recently ended sessions (session id, owner, lines), so a failed
+    /// connection can still be explained.
+    ended_logs: Mutex<std::collections::VecDeque<(String, String, Vec<String>)>>,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
 }
@@ -153,6 +158,7 @@ impl Sessions {
             edits: edits::Edits::default(),
             offers: Mutex::new(HashMap::new()),
             streams: Arc::new(Streams::default()),
+            ended_logs: Mutex::new(std::collections::VecDeque::new()),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
         })
@@ -204,6 +210,7 @@ impl Sessions {
             owner: Mutex::new(owner.to_owned()),
             generation,
             relay: Relay::new(sink),
+            log: crate::connlog::ConnLog::new(),
             input,
             close,
             prompts: Mutex::new(Prompts::default()),
@@ -273,6 +280,9 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
+            entry
+                .log
+                .note(&format!("connecting to {}:{} with Telnet (not encrypted)", endpoint.address, endpoint.port));
             let body = run_telnet(&sink, &relay, endpoint, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -297,6 +307,15 @@ impl Sessions {
             let transcoder = crate::transcode::Transcoder::new(encoding);
             let body = async {
                 sink.event(SessionEvent::State { state: SessionState::Connecting });
+                entry.log.note(&format!(
+                    "opening serial port {} at {} baud, {} data bits, parity {:?}, {} stop bits, flow control {:?}",
+                    settings.path,
+                    settings.baud,
+                    settings.data_bits,
+                    settings.parity,
+                    settings.stop_bits,
+                    settings.flow_control
+                ));
                 match crate::serial::open(&settings) {
                     Ok(link) => {
                         sink.event(SessionEvent::State { state: SessionState::Connected });
@@ -368,6 +387,16 @@ impl Sessions {
             )),
         };
         self.entries().remove(session_id);
+        if let Some(error) = &outcome.error {
+            entry.log.note(&format!("ended: {}", error.message));
+        }
+        {
+            let mut ended = self.ended_logs.lock().unwrap_or_else(|p| p.into_inner());
+            if ended.len() >= MAX_ENDED_LOGS {
+                ended.pop_front();
+            }
+            ended.push_back((session_id.to_owned(), entry.owner().clone(), entry.log.lines()));
+        }
         // agent B: tunnels and history
         self.tunnel_runs.session_ended(session_id).await;
         *entry.prompts() = Prompts::default();
@@ -894,6 +923,19 @@ impl Sessions {
     }
 
     /// The renderer reports that its terminal has processed `bytes` of output.
+    /// The connection log of a session the caller owns (CON-15), also for a while after it ended.
+    pub fn diagnostics(&self, owner: &str, session_id: &str) -> Result<Vec<String>, IpcError> {
+        if let Ok(entry) = self.authorize(owner, session_id) {
+            return Ok(entry.log.lines());
+        }
+        let ended = self.ended_logs.lock().unwrap_or_else(|p| p.into_inner());
+        ended
+            .iter()
+            .find(|(id, o, _)| id == session_id && o == owner)
+            .map(|(_, _, lines)| lines.clone())
+            .ok_or_else(denied)
+    }
+
     pub async fn ack(&self, owner: &str, session_id: &str, bytes: u32) -> Result<(), IpcError> {
         let (entry, epoch) = self.authorize_epoch(owner, session_id)?;
         entry.input.send(Input::Ack(bytes as usize, epoch)).await.map_err(|_| denied())
@@ -1271,6 +1313,7 @@ async fn authenticate(
                 return Ok(());
             }
             // The stored password was refused: fall through to asking, never silently loop.
+            ctx.entry.log.note("the server refused the stored password; asking instead");
             ask_password(ctx, conn, username).await
         }
         PlanAuth::Ask => ask_password(ctx, conn, username).await,
@@ -1281,7 +1324,10 @@ async fn ask_password(ctx: &TaskContext, conn: &mut VerifiedConnection, username
     // Servers that take only keyboard-interactive (PAM, one-time codes) get its prompts instead.
     let methods = match conn.auth_methods(username).await.map_err(|e| from_ssh(&e))? {
         AuthOutcome::Success => return Ok(()),
-        AuthOutcome::Failure { remaining_methods, .. } => remaining_methods,
+        AuthOutcome::Failure { remaining_methods, .. } => {
+            ctx.entry.log.note(&format!("server offers: {}", remaining_methods.join(", ")));
+            remaining_methods
+        }
     };
     let offers = |m: &str| methods.iter().any(|x| x == m);
     if !offers("password") && offers("keyboard-interactive") {
@@ -1436,6 +1482,14 @@ async fn connect_ssh(
         if !chain.is_empty() {
             ctx.state(SessionState::Connecting);
         }
+        let log = &ctx.entry.log;
+        let step = hop.as_ref().map(|h| format!("hop {}/{} ({}): ", h.index, h.total, h.label)).unwrap_or_default();
+        let route = match (chain.last(), &proxy) {
+            (None, None) => "directly".to_owned(),
+            (None, Some(p)) => format!("through a {:?} proxy at {}:{}", p.kind, p.host, p.port),
+            (Some(_), _) => "through the previous hop".to_owned(),
+        };
+        log.note(&format!("{step}connecting to {}:{} {route}", endpoint.host, endpoint.port));
         let verifier = PromptingVerifier {
             hop,
             known: plan.known_hosts.clone(),
@@ -1458,11 +1512,34 @@ async fn connect_ssh(
                 tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
             }
         };
+        if let Some(n) = conn.negotiated() {
+            log.note(&format!(
+                "{step}key exchange {}, host key {}, cipher {}{}, strict kex {}",
+                n.kex,
+                n.host_key,
+                n.cipher,
+                if n.mac.is_empty() { String::new() } else { format!(", mac {}", n.mac) },
+                if n.strict_kex { "on" } else { "off" }
+            ));
+        }
+        log.note(&format!("{step}host key {} trusted", conn.host_key().fingerprint));
         if let Some(text) = conn.banner() {
             ctx.sink.event(SessionEvent::Banner { text });
         }
         ctx.state(SessionState::Authenticating);
-        authenticate(ctx, &mut conn, &username, auth).await?;
+        let method = match &auth {
+            PlanAuth::Key { .. } => "a key",
+            PlanAuth::Password(_) => "the stored password",
+            PlanAuth::Ask => "a password or one-time code you enter",
+        };
+        log.note(&format!("{step}signing in as {} with {method}", username));
+        match authenticate(ctx, &mut conn, &username, auth).await {
+            Ok(()) => log.note(&format!("{step}signed in")),
+            Err(e) => {
+                log.note(&format!("{step}sign-in failed: {}", e.message));
+                return Err(e);
+            }
+        }
         chain.push(conn);
     }
     let conn = chain.pop().ok_or_else(internal)?;
@@ -1470,6 +1547,7 @@ async fn connect_ssh(
     ctx.state(SessionState::OpeningChannel);
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
     Ok((Linked { conn, hops: chain }, reader, writer))
 }
 
@@ -1500,6 +1578,9 @@ async fn run_local(
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
 }
+
+/// Ended sessions whose connection logs are kept.
+const MAX_ENDED_LOGS: usize = 16;
 
 /// Telnet connections that take longer than this to answer are given up.
 const TELNET_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);

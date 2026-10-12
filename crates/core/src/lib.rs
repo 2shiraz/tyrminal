@@ -5,6 +5,7 @@
 //! ownership, trust and authentication prompts). It has no dependency on Tauri or the UI; the
 //! adapter crate supplies a [`SessionSink`] and calls these services.
 
+mod connlog;
 mod deploy;
 mod diagnostics;
 mod edits;
