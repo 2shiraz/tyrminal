@@ -430,6 +430,19 @@ export function SkeletonBlock({ className = "" }: { className?: string }) {
 }
 
 /** Relative time for "last connected" labels. */
+/**
+ * Like relativeTime, but stays relative past a month ("3 months ago", "2 years ago"), so a list of
+ * ages reads in one format. Pair it with the exact date in a title.
+ */
+export function relativeAge(unixSeconds: number, now = Date.now()): string {
+  const days = Math.max(0, now / 1000 - unixSeconds) / 86_400;
+  if (days < 29.5) return relativeTime(unixSeconds, now);
+  const months = Math.round(days / 30.44);
+  if (months < 12) return months === 1 ? "a month ago" : `${months} months ago`;
+  const years = Math.round(days / 365.25);
+  return years === 1 ? "a year ago" : `${years} years ago`;
+}
+
 export function relativeTime(unixSeconds: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round(now / 1000 - unixSeconds));
   if (seconds < 60) return "just now";

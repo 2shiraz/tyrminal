@@ -345,6 +345,8 @@ export const msg = {
     endpoint: (host: string, port: number) => (port === 22 ? host : `${host} port ${port}`),
     createHost: "Create host",
     createHostFor: (endpoint: string) => `Create a host for ${endpoint}`,
+    listTitle: "Trusted servers",
+    trusted: (when: string) => `Trusted ${when}`,
   },
   settings: {
     title: "Settings",

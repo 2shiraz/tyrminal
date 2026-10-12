@@ -4,7 +4,7 @@ import { type FormEvent, useRef, useState } from "react";
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { useWindowedList } from "../../components/ui/useWindowedList";
-import { EmptyState, ErrorNotice, Notice, SkeletonRows, TextArea, relativeTime } from "../../components/ui/controls";
+import { EmptyState, ErrorNotice, Notice, SkeletonRows, TextArea, relativeAge } from "../../components/ui/controls";
 import { IconFingerprint, IconPlus, IconShieldAlert, IconTrash2 } from "../../components/ui/icons";
 import { knownHosts as knownHostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -41,37 +41,47 @@ export function KnownHostsView() {
         {list.value === null && !list.error && <SkeletonRows count={2} />}
         {list.value?.length === 0 && <EmptyState icon={<IconFingerprint size={28} />} title={msg.knownHosts.emptyTitle} body={msg.knownHosts.emptyBody} />}
         {(list.value?.length ?? 0) > 0 && (
-          <ul className="list" ref={listRef} style={rows.style} data-windowed={rows.windowed || undefined}>
-            {entries.slice(rows.start, rows.end).map((entry, i) => (
-              // A windowed list's rows come and go as it scrolls: no FLIP keys, so none of them animates in.
-              <li key={entry.id} data-window-item {...(rows.windowed ? { "aria-setsize": entries.length, "aria-posinset": rows.start + i + 1 } : { "data-flip-key": entry.id })}>
-                <span className="tile-icon" aria-hidden="true">
-                  <IconFingerprint size={17} />
-                </span>
-                <div className="row-main">
-                  <span className="row-title">{msg.knownHosts.endpoint(entry.host, entry.port)}</span>
-                  <span className="row-sub mono selectable">
-                    {entry.algorithm} · {entry.fingerprint}
+          <section className="section" aria-labelledby="known-list-title">
+            <div className="section-head">
+              <h2 id="known-list-title">{msg.knownHosts.listTitle}</h2>
+              <span className="box-count">{entries.length}</span>
+            </div>
+            <ul className="list" ref={listRef} style={rows.style} data-windowed={rows.windowed || undefined}>
+              {entries.slice(rows.start, rows.end).map((entry, i) => (
+                // A windowed list's rows come and go as it scrolls: no FLIP keys, so none of them animates in.
+                <li key={entry.id} data-window-item {...(rows.windowed ? { "aria-setsize": entries.length, "aria-posinset": rows.start + i + 1 } : { "data-flip-key": entry.id })}>
+                  <span className="tile-icon" aria-hidden="true">
+                    <IconFingerprint size={17} />
                   </span>
-                  <span className="row-sub">{relativeTime(entry.addedAt)}</span>
-                </div>
-                {savedHosts.value && !hasHost(entry) && (
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setCreating(entry)}
-                    aria-label={msg.knownHosts.createHostFor(msg.knownHosts.endpoint(entry.host, entry.port))}
-                  >
-                    <IconPlus size={14} aria-hidden="true" />
-                    {msg.knownHosts.createHost}
+                  <div className="row-main">
+                    <span className="row-title">{msg.knownHosts.endpoint(entry.host, entry.port)}</span>
+                    <span className="row-sub mono selectable">
+                      {entry.algorithm} · {entry.fingerprint}
+                    </span>
+                    <span className="row-sub">
+                      <time dateTime={new Date(entry.addedAt * 1000).toISOString()} title={new Date(entry.addedAt * 1000).toLocaleString()}>
+                        {msg.knownHosts.trusted(relativeAge(entry.addedAt))}
+                      </time>
+                    </span>
+                  </div>
+                  {savedHosts.value && !hasHost(entry) && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => setCreating(entry)}
+                      aria-label={msg.knownHosts.createHostFor(msg.knownHosts.endpoint(entry.host, entry.port))}
+                    >
+                      <IconPlus size={14} aria-hidden="true" />
+                      {msg.knownHosts.createHost}
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => setRemoving(entry)}>
+                    {msg.knownHosts.remove}
                   </button>
-                )}
-                <button type="button" className="btn btn-danger btn-sm" onClick={() => setRemoving(entry)}>
-                  {msg.knownHosts.remove}
-                </button>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </section>
       {creating && (
