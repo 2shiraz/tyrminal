@@ -182,6 +182,19 @@ Never merge these by hand; regenerate them after resolving the sources:
   suggestions only; nothing runs). `CommandPalette.tsx` gets an optional `onShellIntegration` prop
   and one entry; `AppShell.tsx` opens `IntegrationDialog` from it. Please keep them when merging.
 
+- **D → tunnels owner (KEY-16, identities in the connection path):** `VaultService::hop_plan` now
+  asks `identity_for_host` first: a host's identity (or its nearest group's, when the host
+  inherits its sign-in method) supplies the user name and credentials. The rest of `hop_plan` is
+  unchanged; please keep the block when restructuring it. Lab test:
+  `inventory_lab::hosts_sign_in_with_their_groups_identity_and_follow_its_changes`.
+
+- **D → tunnels owner / A (SNP-13, environment variables):** `crates/ssh/src/client.rs` gains
+  `open_shell_with_env` and `open_command_with_env` (env requests before the shell/exec request;
+  `open_shell`/`open_command` call them with no variables, unchanged behaviour); `run_ssh` takes
+  `plan.env` and calls `open_shell_with_env`, then reports `SessionEvent::Environment` (new
+  variant in `dto.rs`, names only); `ConnectionPlan` gains `env`; `TerminalView.tsx` gets one
+  `case "environment"` that shows refusals. Please keep them when merging.
+
 **From agent B (notices of small additive edits in agent A's files, each in a block marked
 `agent B: tunnels and history`; please keep them when you touch these files):**
 

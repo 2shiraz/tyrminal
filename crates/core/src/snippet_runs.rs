@@ -96,9 +96,11 @@ fn keep(into: &mut Vec<u8>, data: &[u8], truncated: &mut bool) {
 pub(crate) async fn run(
     conn: &VerifiedConnection,
     text: &str,
+    env: &[(String, zeroize::Zeroizing<String>)],
     mut cancel: watch::Receiver<bool>,
 ) -> Result<SnippetExecResult, IpcError> {
-    let (mut reader, writer) = conn.open_command(text).await.map_err(|e| from_ssh(&e))?;
+    // The host's environment variables are requested first, so the snippet can use them (SNP-14).
+    let (mut reader, writer, env_rejected) = conn.open_command_with_env(text, env).await.map_err(|e| from_ssh(&e))?;
     // Nothing is sent on standard input.
     let _ = writer.eof().await;
     let mut out = SnippetExecResult {
@@ -107,6 +109,7 @@ pub(crate) async fn run(
         stdout: String::new(),
         stderr: String::new(),
         truncated: false,
+        env_rejected,
     };
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     let mut read = 0usize;

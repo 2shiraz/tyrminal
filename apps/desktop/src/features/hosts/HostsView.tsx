@@ -1,4 +1,4 @@
-import type { BulkHostChange, GroupSummary, HostOs, HostSummary, KeySummary } from "@tyrminal/contracts";
+import type { BulkHostChange, GroupSummary, HostOs, HostSummary, IdentityAssignment, KeySummary, SettingsTarget } from "@tyrminal/contracts";
 import { type FormEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
@@ -21,12 +21,14 @@ import {
   IconPlus,
   IconSearch,
   IconServer,
+  IconSlidersHorizontal,
   IconTextCursorInput,
   IconTrash2,
   IconUpload,
+  IconUser,
   IconX,
 } from "../../components/ui/icons";
-import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi } from "../../lib/ipc";
+import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
@@ -35,6 +37,9 @@ import { HostEditor, groupPath } from "./HostEditor";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
+import { AssignIdentityDialog } from "./AssignIdentityDialog";
+import { EnvironmentDialog } from "./EnvironmentDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -115,6 +120,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const [osOf, setOsOf] = useState<Map<string, HostOs>>(new Map());
   const [settingOs, setSettingOs] = useState<{ ids: string[]; initial: HostOs | null } | null>(null);
   const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null } | null>(null);
+  // Identities (KEY-17): which one every host and group uses.
+  const identityList = useIdentities();
+  const [assignments, setAssignments] = useState<Map<string, IdentityAssignment>>(new Map());
+  const [assigning, setAssigning] = useState<{ target: SettingsTarget; name: string } | null>(null);
+  const [environmentFor, setEnvironmentFor] = useState<{ target: SettingsTarget; name: string } | null>(null);
   const anchor = useRef<string | null>(null);
   const remove = useAction();
   const action = useAction();
@@ -150,6 +160,32 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
       live = false;
     };
   }, [hosts.value]);
+
+  useEffect(() => {
+    if (!hosts.value) return;
+    let live = true;
+    const load = () =>
+      identitiesApi
+        .assignments()
+        .then((list) => {
+          const key = (t: SettingsTarget) => (t.kind === "host" ? `host:${t.hostId}` : `group:${t.groupId}`);
+          if (live) setAssignments(new Map(list.map((a) => [key(a.target), a])));
+        })
+        .catch(() => {
+          if (live) setAssignments(new Map());
+        });
+    void load();
+    const unsubscribe = identityEvents.subscribe(() => void load());
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, [hosts.value, groups.value]);
+  const identityOf = (hostId: string) => {
+    const id = assignments.get(`host:${hostId}`)?.effectiveIdentityId;
+    const label = id ? identityList?.find((i) => i.id === id)?.label : undefined;
+    return label ? msgD.identities.badge(label) : null;
+  };
 
   // Search runs in the core (names, addresses, users, tags, group paths; tag:/group: terms).
   useEffect(() => {
@@ -456,7 +492,14 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                     </div>
                     <div className="host-card-meta">
                       <div className="host-card-badges">
-                      <AuthBadge host={host} keys={keyList} />
+                      {identityOf(host.id) ? (
+                        <span className="badge">
+                          <IconUser size={12} />
+                          {identityOf(host.id)}
+                        </span>
+                      ) : (
+                        <AuthBadge host={host} keys={keyList} />
+                      )}
                       {isConnected ? (
                         <span className="badge badge-success">
                           <span className="status-dot" data-tone="ok" aria-hidden="true" />
@@ -492,7 +535,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                 <div className="row-main">
                   <span className="row-title">{host.label}</span>
                   <span className="row-sub">
-                    {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keyList)}
+                    {msg.hosts.destination(host.username, host.address, host.port)} · {identityOf(host.id) ?? authSummary(host, keyList)}
                     {host.groupId ? ` · ${groupName(host.groupId)}` : ""}
                     {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                   </span>
@@ -537,6 +580,16 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               onSelect: () => setSettingOs({ ids: [menu.host.id], initial: osOf.get(menu.host.id) ?? null }),
             },
             "separator",
+            {
+              label: msgD.identities.assign,
+              icon: <IconUser size={15} />,
+              onSelect: () => setAssigning({ target: { kind: "host", hostId: menu.host.id }, name: menu.host.label }),
+            },
+            {
+              label: msgD.env.menu,
+              icon: <IconSlidersHorizontal size={15} />,
+              onSelect: () => setEnvironmentFor({ target: { kind: "host", hostId: menu.host.id }, name: menu.host.label }),
+            },
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
           ]}
         />
@@ -575,6 +628,16 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               onSelect: () => setEditingGroup({ group: null, parentId: groupMenu.group.id }),
             },
             "separator",
+            {
+              label: msgD.identities.assign,
+              icon: <IconUser size={15} />,
+              onSelect: () => setAssigning({ target: { kind: "group", groupId: groupMenu.group.id }, name: groupMenu.group.name }),
+            },
+            {
+              label: msgD.env.menu,
+              icon: <IconSlidersHorizontal size={15} />,
+              onSelect: () => setEnvironmentFor({ target: { kind: "group", groupId: groupMenu.group.id }, name: groupMenu.group.name }),
+            },
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeletingGroup(groupMenu.group) },
           ]}
         />
@@ -662,6 +725,33 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             setConnectAll(null);
             notify("success", msgD.inventory.connectAllDone(list.length));
             for (const host of list) onConnect(host);
+          }}
+        />
+      )}
+
+      {environmentFor && (
+        <EnvironmentDialog
+          target={environmentFor.target}
+          name={environmentFor.name}
+          onClose={() => setEnvironmentFor(null)}
+          onDone={() => {
+            setEnvironmentFor(null);
+            notify("success", msgD.env.saved);
+          }}
+        />
+      )}
+
+      {assigning && (
+        <AssignIdentityDialog
+          target={assigning.target}
+          name={assigning.name}
+          current={assignments.get(assigning.target.kind === "host" ? `host:${assigning.target.hostId}` : `group:${assigning.target.groupId}`) ?? null}
+          list={identityList ?? []}
+          onClose={() => setAssigning(null)}
+          onDone={() => {
+            setAssigning(null);
+            notify("success", msgD.identities.assigned);
+            identityEvents.changed();
           }}
         />
       )}

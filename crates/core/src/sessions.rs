@@ -1195,6 +1195,7 @@ async fn connect_ssh(
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
+    let env = plan.env;
     let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
     let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
@@ -1244,7 +1245,11 @@ async fn connect_ssh(
 
     ctx.state(SessionState::OpeningChannel);
     let pty = PtyRequest { term: "xterm-256color".into(), cols: u32::from(cols), rows: u32::from(rows) };
-    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
+    let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
+    if !env.is_empty() {
+        ctx.sink.event(SessionEvent::Environment { sent: env.iter().map(|(n, _)| n.clone()).collect(), rejected });
+    }
     Ok((Linked { conn, hops: chain }, reader, writer))
 }
 
@@ -1425,8 +1430,12 @@ impl Sessions {
         // Ownership first: a wrong window learns nothing about which snippets exist.
         let (entry, conn) = self.connection(owner, session_id)?;
         let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let env = match &entry.host_id {
+            Some(host_id) => self.vault.session_env(host_id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
         let cancel = self.snippet_runs.start(owner, run_id)?;
-        let result = crate::snippet_runs::run(&conn, &text, cancel).await;
+        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
         self.snippet_runs.finish(run_id);
         result
     }

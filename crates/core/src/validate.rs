@@ -202,6 +202,37 @@ pub(crate) fn id_text(id: &Id) -> String {
     })
 }
 
+/// Most environment variables one host or group sends.
+const MAX_ENV_VARS: usize = 64;
+const MAX_ENV_VALUE: usize = 4096;
+
+/// Environment variables for a host or group: portable names (`[A-Za-z_][A-Za-z0-9_]*`, 64
+/// bytes at most, each once), values without control characters other than tab.
+pub(crate) fn env_vars(vars: &[tyrminal_contracts::EnvVar]) -> Result<Vec<(String, String)>, IpcError> {
+    if vars.len() > MAX_ENV_VARS {
+        return Err(invalid("At most 64 environment variables per host or group."));
+    }
+    let mut out: Vec<(String, String)> = Vec::with_capacity(vars.len());
+    for var in vars {
+        let name = var.name.trim();
+        let mut bytes = name.bytes();
+        let valid = name.len() <= 64
+            && bytes.next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+            && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !valid {
+            return Err(invalid("Variable names use letters, digits and _, and do not start with a digit."));
+        }
+        if out.iter().any(|(n, _)| n == name) {
+            return Err(invalid("Each variable name can appear only once."));
+        }
+        if var.value.len() > MAX_ENV_VALUE || var.value.chars().any(|c| c.is_control() && c != '\t') {
+            return Err(invalid("Variable values are at most 4096 bytes, on one line."));
+        }
+        out.push((name.to_owned(), var.value.clone()));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

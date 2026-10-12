@@ -329,3 +329,69 @@ pub async fn known_hosts_import(
 ) -> Result<u32, IpcError> {
     state.core()?.vault.import_known_hosts(entries).await
 }
+
+// Identities (KEY-15..17). The password is write-only: no command returns it.
+
+#[tauri::command]
+pub async fn identity_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<tyrminal_core::contracts::IdentitySummary>, IpcError> {
+    state.core()?.vault.list_identities().await
+}
+
+#[tauri::command]
+pub async fn identity_save(
+    state: State<'_, AppState>,
+    identity: tyrminal_core::contracts::IdentityInput,
+) -> Result<tyrminal_core::contracts::IdentitySummary, IpcError> {
+    state.core()?.vault.save_identity(identity).await
+}
+
+/// Deletes an identity; resolves to how many hosts and groups were using it.
+#[tauri::command]
+pub async fn identity_delete(state: State<'_, AppState>, id: String) -> Result<u32, IpcError> {
+    state.core()?.vault.delete_identity(&id).await
+}
+
+#[tauri::command]
+pub async fn identity_assignments(
+    state: State<'_, AppState>,
+) -> Result<Vec<tyrminal_core::contracts::IdentityAssignment>, IpcError> {
+    state.core()?.vault.list_identity_assignments().await
+}
+
+#[tauri::command]
+pub async fn identity_assign(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+    identity_id: Option<String>,
+) -> Result<tyrminal_core::contracts::IdentityAssignment, IpcError> {
+    state.core()?.vault.set_identity(target, identity_id).await
+}
+
+// Environment variables (SNP-11..14). Values are the user's own settings, shown in the editor.
+
+#[tauri::command]
+pub async fn env_get(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+) -> Result<Vec<tyrminal_core::contracts::EnvVar>, IpcError> {
+    state.core()?.vault.env_vars(target).await
+}
+
+#[tauri::command]
+pub async fn env_set(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+    vars: Vec<tyrminal_core::contracts::EnvVar>,
+) -> Result<Vec<tyrminal_core::contracts::EnvVar>, IpcError> {
+    state.core()?.vault.set_env_vars(target, vars).await
+}
+
+#[tauri::command]
+pub async fn env_effective(
+    state: State<'_, AppState>,
+    host_id: String,
+) -> Result<Vec<tyrminal_core::contracts::EffectiveEnvVar>, IpcError> {
+    state.core()?.vault.effective_env_vars(&host_id).await
+}

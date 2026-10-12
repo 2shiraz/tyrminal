@@ -13,7 +13,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, SnippetInput, TrustDecision,
+    EnvVar, ErrorCode, GroupInput, HostAuthInput, HostInput, IdentityInput, KeyImportInput, SecretChange, SessionEvent,
+    SessionState, SettingsTarget, SnippetInput, TrustDecision,
 };
 use tyrminal_core::{Core, SessionSink};
 
@@ -468,4 +469,229 @@ async fn shell_integration_is_installed_on_request_and_a_real_bash_reports_its_c
     let restore = run("rm -f ~/.bashrc ~/.bashrc.tyrminal-backup; [ ! -e ~/.bashrc.tyrminal-test ] || mv ~/.bashrc.tyrminal-test ~/.bashrc").await;
     assert_eq!(restore.exit_status, Some(0));
     core.sessions.close(WINDOW, &session).unwrap();
+}
+
+/// How a connection attempt ended: connected, a sign-in prompt (credentials were not enough), or
+/// closed with an error code. Host keys are trusted once along the way.
+async fn attempt(core: &Core, host_id: &str) -> Result<(), String> {
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let outcome = loop {
+        let event = tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed");
+        match event {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::State { state: SessionState::Connected } => break Ok(()),
+            SessionEvent::AuthPrompt { .. } => break Err("asked for credentials".to_owned()),
+            SessionEvent::Closed { error, .. } => break Err(format!("closed: {error:?}")),
+            _ => {}
+        }
+    };
+    let _ = core.sessions.close(WINDOW, &opened.session_id);
+    outcome
+}
+
+/// KEY-15/16 against the real server: a host that inherits its sign-in method signs in with its
+/// group's identity (key), follows an edit of that identity (now a password) on the next
+/// connection, and a host's own identity overrides the group's.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn hosts_sign_in_with_their_groups_identity_and_follow_its_changes() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let group = v
+        .save_group(GroupInput {
+            id: None,
+            name: "lab".into(),
+            parent_id: None,
+            username: None,
+            port: None,
+            key_id: None,
+        })
+        .await
+        .unwrap();
+    let identity = v
+        .save_identity(IdentityInput {
+            id: None,
+            label: "lab account".into(),
+            username: lab.str("/user"),
+            password: SecretChange::Keep,
+            key_id: Some(key.id.clone()),
+        })
+        .await
+        .unwrap();
+    // The host itself names a wrong user and inherits its sign-in method.
+    let member = v
+        .save_host(HostInput {
+            auth: HostAuthInput::Inherit,
+            group_id: Some(group.id.clone()),
+            ..host("member", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Err("asked for credentials".to_owned()), "no identity yet");
+
+    v.set_identity(SettingsTarget::Group { group_id: group.id.clone() }, Some(identity.id.clone())).await.unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()), "signed in with the group's identity (key)");
+
+    // KEY-16: change the identity once; the host uses the new credentials.
+    v.save_identity(IdentityInput {
+        id: Some(identity.id.clone()),
+        label: "lab account".into(),
+        username: lab.str("/user"),
+        password: SecretChange::Set { value: lab.str("/password") },
+        key_id: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()), "signed in with the identity's password");
+    v.save_identity(IdentityInput {
+        id: Some(identity.id.clone()),
+        label: "lab account".into(),
+        username: lab.str("/user"),
+        password: SecretChange::Set { value: "not the password".into() },
+        key_id: None,
+    })
+    .await
+    .unwrap();
+    assert!(attempt(&core, &member.id).await.is_err(), "a wrong identity password does not sign in");
+
+    // A host's own identity wins over the group's.
+    let own = v
+        .save_identity(IdentityInput {
+            id: None,
+            label: "key".into(),
+            username: lab.str("/user"),
+            password: SecretChange::Keep,
+            key_id: Some(key.id.clone()),
+        })
+        .await
+        .unwrap();
+    v.set_identity(SettingsTarget::Host { host_id: member.id.clone() }, Some(own.id.clone())).await.unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()));
+}
+
+/// SNP-11..14 against the real server (its `AcceptEnv` allows `TYR_*` only): group variables are
+/// inherited and a host value overrides them; the variables are requested before the shell and
+/// for snippet runs, so snippets can use them; a variable the server refuses is reported by name.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn environment_variables_are_inherited_sent_and_refusals_reported() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let group = v
+        .save_group(GroupInput {
+            id: None,
+            name: "env".into(),
+            parent_id: None,
+            username: None,
+            port: None,
+            key_id: None,
+        })
+        .await
+        .unwrap();
+    let host = v
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: key.id.clone() },
+            group_id: Some(group.id.clone()),
+            ..host("env host", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let var = |name: &str, value: &str| EnvVar { name: name.into(), value: value.into() };
+    v.set_env_vars(
+        SettingsTarget::Group { group_id: group.id.clone() },
+        vec![var("TYR_GROUP", "from group"), var("TYR_SHARED", "group value")],
+    )
+    .await
+    .unwrap();
+    v.set_env_vars(
+        SettingsTarget::Host { host_id: host.id.clone() },
+        vec![var("TYR_SHARED", "host value"), var("NOT_ACCEPTED", "x")],
+    )
+    .await
+    .unwrap();
+    let effective = v.effective_env_vars(&host.id).await.unwrap();
+    let names: Vec<_> = effective.iter().map(|e| (e.name.as_str(), e.value.as_str())).collect();
+    assert_eq!(names, [("TYR_GROUP", "from group"), ("TYR_SHARED", "host value"), ("NOT_ACCEPTED", "x")]);
+
+    // An interactive session: the request and the refusal are reported, names only.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let session = opened.session_id.clone();
+    let reported = loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::Environment { sent, rejected } => break (sent, rejected),
+            SessionEvent::Closed { error, .. } => panic!("closed: {error:?}"),
+            _ => {}
+        }
+    };
+    assert_eq!(reported.0, ["TYR_GROUP", "TYR_SHARED", "NOT_ACCEPTED"]);
+    assert_eq!(reported.1, ["NOT_ACCEPTED"]);
+    let format = format!("{reported:?}");
+    assert!(!format.contains("host value") && !format.contains("from group"), "values never leave the vault in events");
+    loop {
+        if let SessionEvent::State { state: SessionState::Connected } =
+            tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed")
+        {
+            break;
+        }
+    }
+
+    // A snippet run on that session sees the accepted variables and reports the refused one.
+    let snippet = v
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "env".into(),
+            folder: String::new(),
+            text: "printf '%s|%s|%s' \"$TYR_GROUP\" \"$TYR_SHARED\" \"${NOT_ACCEPTED-unset}\"".into(),
+        })
+        .await
+        .unwrap();
+    let ran = core.sessions.exec_snippet(WINDOW, &session, &snippet.id, "env-run").await.unwrap();
+    assert_eq!(ran.stdout, "from group|host value|unset");
+    assert_eq!(ran.env_rejected, ["NOT_ACCEPTED"]);
+    core.sessions.close(WINDOW, &session).unwrap();
+
+    // Invalid names and values are refused before anything is stored.
+    for bad in [var("1BAD", "x"), var("BAD-NAME", "x"), var("TYR_X", "line\nbreak")] {
+        assert_eq!(
+            v.set_env_vars(SettingsTarget::Host { host_id: host.id.clone() }, vec![bad]).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+    }
+    assert_eq!(
+        v.set_env_vars(SettingsTarget::Host { host_id: host.id.clone() }, vec![var("TYR_A", "1"), var("TYR_A", "2")])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidInput
+    );
 }

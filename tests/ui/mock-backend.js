@@ -135,6 +135,11 @@ export function installMockBackend(options) {
     let delay = 10;
     for (const step of steps) {
       if (step === "connected" && kind === "ssh") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+      // Environment variables of the host: the mock server's AcceptEnv allows TYR_* only.
+      if (step === "opening_channel" && host) {
+        const sent = (window.__mockEnvOf?.(host.id) ?? []).map((v) => v.name);
+        if (sent.length) setTimeout(() => channelSend(s.events, { type: "environment", sent, rejected: sent.filter((n) => !n.startsWith("TYR_")) }), delay);
+      }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
     }
@@ -848,8 +853,8 @@ export function installMockBackend(options) {
         const finish = () => {
           state.runs.delete(a.runId);
           // A stand-in for real hosts: "staging-web" fails, "build-runner-03" hangs until cancelled.
-          if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false });
-          else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false });
+          if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false, envRejected: ["LEGACY_MODE"] });
+          else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false, envRejected: [] });
         };
         if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
         else setTimeout(finish, 50);
@@ -919,6 +924,52 @@ export function installMockBackend(options) {
         .map((k) => ({ label: k.port === 22 ? k.host : `${k.host}:${k.port}`, address: k.host, port: k.port, username: "", group: "", tags: [], notes: [`Trusted ${k.algorithm} key ${k.fingerprint}`] }));
       return { hosts, skipped: [], duplicates: [] };
     },
+    env_get: (a) => envState.get(envKey(a.target)) ?? [],
+    env_set: (a) => {
+      for (const v of a.vars) if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(v.name)) throw { code: "INVALID_INPUT", message: "Variable names use letters, digits and _, and do not start with a digit." };
+      if (a.vars.length) envState.set(envKey(a.target), a.vars);
+      else envState.delete(envKey(a.target));
+      return a.vars;
+    },
+    env_effective: (a) => window.__mockEnvOf(a.hostId, true),
+    identity_list: () =>
+      identityState.list.map((i) => ({
+        id: i.id,
+        label: i.label,
+        username: i.username,
+        hasPassword: i.password !== null,
+        keyId: i.keyId,
+        usedBy: [...identityState.uses.values()].filter((u) => u === i.id).length,
+      })),
+    identity_save: (a) => {
+      const input = a.identity;
+      if (!input.label.trim()) throw { code: "INVALID_INPUT", message: "Enter a name." };
+      const existing = identityState.list.find((i) => i.id === input.id);
+      const password = input.password.kind === "set" ? input.password.value : input.password.kind === "clear" ? null : (existing?.password ?? null);
+      const record = { id: existing?.id ?? id(1100 + identityState.list.length), label: input.label, username: input.username, password, keyId: input.keyId };
+      if (existing) Object.assign(existing, record);
+      else identityState.list.push(record);
+      return handlers.identity_list().find((i) => i.id === record.id);
+    },
+    identity_delete: (a) => {
+      identityState.list = identityState.list.filter((i) => i.id !== a.id);
+      let n = 0;
+      for (const [k, v] of identityState.uses) if (v === a.id) {
+        identityState.uses.delete(k);
+        n += 1;
+      }
+      return n;
+    },
+    identity_assignments: () => [
+      ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
+      ...state.groups.map((g) => identityAssignment({ kind: "group", groupId: g.id })),
+    ],
+    identity_assign: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (a.identityId) identityState.uses.set(key, a.identityId);
+      else identityState.uses.delete(key);
+      return identityAssignment(a.target);
+    },
     prompt_marks_status: (a) => integrationStatus(a.target),
     prompt_marks_install: (a) => {
       integration.set(integrationKey(a.target), 1);
@@ -945,6 +996,38 @@ export function installMockBackend(options) {
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);
+  /** Environment variables in the mock, per target; hosts get their group chain's, outermost first. */
+  const envState = new Map();
+  function envKey(target) {
+    return target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`;
+  }
+  window.__mockEnvOf = (hostId, withOrigin = false) => {
+    const host = state.hosts.find((h) => h.id === hostId);
+    const chain = [];
+    let group = state.groups.find((g) => g.id === host?.groupId);
+    while (group) {
+      chain.unshift(group);
+      group = state.groups.find((g) => g.id === group.parentId);
+    }
+    const out = new Map();
+    for (const g of chain) for (const v of envState.get(`group:${g.id}`) ?? []) out.set(v.name, { ...v, origin: { kind: "group", groupId: g.id, name: g.name } });
+    for (const v of envState.get(`host:${hostId}`) ?? []) out.set(v.name, { ...v, origin: { kind: "host" } });
+    return [...out.values()].map((v) => (withOrigin ? v : { name: v.name, value: v.value }));
+  };
+  /** Identities in the mock: the list (passwords kept here only) and which target uses which. */
+  const identityState = { list: [], uses: new Map() };
+  function identityAssignment(target) {
+    const own = identityState.uses.get(target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`) ?? null;
+    if (target.kind === "group") return { target, identityId: own, effectiveIdentityId: own, origin: own ? { kind: "host" } : null };
+    if (own) return { target, identityId: own, effectiveIdentityId: own, origin: { kind: "host" } };
+    let group = state.groups.find((g) => g.id === state.hosts.find((h) => h.id === target.hostId)?.groupId);
+    while (group) {
+      const fromGroup = identityState.uses.get(`group:${group.id}`);
+      if (fromGroup) return { target, identityId: null, effectiveIdentityId: fromGroup, origin: { kind: "group", groupId: group.id, name: group.name } };
+      group = state.groups.find((g) => g.id === group.parentId);
+    }
+    return { target, identityId: null, effectiveIdentityId: null, origin: null };
+  }
   /** Shell integration in the mock: per target, installed or not (the block text is fixed). */
   const integration = new Map();
   function integrationKey(target) {

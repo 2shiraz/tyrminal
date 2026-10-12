@@ -8,7 +8,8 @@ use std::time::Instant;
 use tempfile::TempDir;
 use tyrminal_core::Core;
 use tyrminal_core::contracts::{
-    BulkHostChange, ErrorCode, GroupInput, HostAuth, HostAuthInput, HostInput, InheritedFields, IpcError,
+    BulkHostChange, ErrorCode, GroupInput, HostAuth, HostAuthInput, HostInput, IdentityInput, InheritedFields,
+    IpcError, SecretChange, SettingOrigin, SettingsTarget,
 };
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -602,4 +603,143 @@ async fn execution_targets_keep_existing_hosts_and_snippets_move_copy_and_rename
     v.lock().await;
     v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
     assert_eq!(v.list_snippets().await.unwrap().iter().find(|s| s.id == s2.id).unwrap().folder, "");
+}
+
+fn identity(label: &str, username: &str, password: SecretChange, key_id: Option<&str>) -> IdentityInput {
+    IdentityInput { id: None, label: label.into(), username: username.into(), password, key_id: key_id.map(Into::into) }
+}
+
+fn host_target(id: &str) -> SettingsTarget {
+    SettingsTarget::Host { host_id: id.into() }
+}
+
+fn group_target(id: &str) -> SettingsTarget {
+    SettingsTarget::Group { group_id: id.into() }
+}
+
+/// KEY-15..17: identities are stored once and referenced; a host's own identity wins, a group's
+/// applies to hosts that inherit their sign-in method (nearest group first); the password never
+/// comes back out; references go with deleted hosts, groups and identities, all persisted.
+#[tokio::test]
+async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_users() {
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v.generate_key("deploy key").await.unwrap();
+
+    // Validation first: something to sign in with, an existing key, a valid secret.
+    assert_eq!(code(v.save_identity(identity("empty", "", SecretChange::Keep, None)).await), ErrorCode::InvalidInput);
+    assert_eq!(
+        code(v.save_identity(identity("x", "ops", SecretChange::Keep, Some("00000000000000000000000000000000"))).await),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        code(v.save_identity(identity("x", "ops", SecretChange::Set { value: String::new() }, None)).await),
+        ErrorCode::InvalidInput
+    );
+
+    let ops = v
+        .save_identity(identity("Ops", "ops", SecretChange::Set { value: "hunter2-identity".into() }, None))
+        .await
+        .unwrap();
+    assert!(ops.has_password && ops.key_id.is_none() && ops.used_by == 0);
+    let deploy = v.save_identity(identity("Deploy", "deploy", SecretChange::Keep, Some(&key.id))).await.unwrap();
+    assert!(!deploy.has_password);
+    // The password is write-only: no summary or assignment carries it.
+    let listed = format!("{:?}", v.list_identities().await.unwrap());
+    assert!(!listed.contains("hunter2-identity"), "{listed}");
+
+    let root = v.save_group(group("prod", None)).await.unwrap();
+    let web = v.save_group(group("web", Some(&root.id))).await.unwrap();
+    let inherits = v.save_host(host("web1", Some(&web.id))).await.unwrap();
+    let own_key = v
+        .save_host(HostInput { auth: HostAuthInput::Key { key_id: key.id.clone() }, ..host("web2", Some(&web.id)) })
+        .await
+        .unwrap();
+    let pinned = v.save_host(host("web3", Some(&web.id))).await.unwrap();
+
+    // Unknown targets and identities are refused.
+    assert_eq!(
+        code(v.set_identity(host_target("00000000000000000000000000000000"), Some(ops.id.clone())).await),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        code(v.set_identity(host_target(&inherits.id), Some("00000000000000000000000000000000".into())).await),
+        ErrorCode::NotFound
+    );
+
+    // A group's identity reaches hosts that inherit their sign-in method, through subgroups.
+    let on_root = v.set_identity(group_target(&root.id), Some(ops.id.clone())).await.unwrap();
+    assert_eq!(on_root.identity_id.as_deref(), Some(ops.id.as_str()));
+    let assignments = v.list_identity_assignments().await.unwrap();
+    let of = |id: &str| assignments.iter().find(|a| a.target == host_target(id)).unwrap().clone();
+    assert_eq!(of(&inherits.id).effective_identity_id.as_deref(), Some(ops.id.as_str()));
+    assert_eq!(of(&inherits.id).origin, Some(SettingOrigin::Group { group_id: root.id.clone(), name: "prod".into() }));
+    // A host with its own sign-in method keeps it.
+    assert_eq!(of(&own_key.id).effective_identity_id, None);
+
+    // The nearest group wins; the host's own identity wins over every group.
+    v.set_identity(group_target(&web.id), Some(deploy.id.clone())).await.unwrap();
+    let pinned_now = v.set_identity(host_target(&pinned.id), Some(ops.id.clone())).await.unwrap();
+    assert_eq!(
+        (pinned_now.effective_identity_id.as_deref(), pinned_now.origin),
+        (Some(ops.id.as_str()), Some(SettingOrigin::Host))
+    );
+    let assignments = v.list_identity_assignments().await.unwrap();
+    let of = |id: &str| assignments.iter().find(|a| a.target == host_target(id)).unwrap().clone();
+    assert_eq!(of(&inherits.id).effective_identity_id.as_deref(), Some(deploy.id.as_str()));
+    assert_eq!(of(&inherits.id).origin, Some(SettingOrigin::Group { group_id: web.id.clone(), name: "web".into() }));
+
+    // A key an identity uses cannot be deleted from under it.
+    assert_eq!(code(v.delete_key(&key.id).await), ErrorCode::InUse);
+
+    // Duplicating a host keeps its identity; deleting hosts and groups takes their references.
+    let copy = v.duplicate_host(&pinned.id).await.unwrap();
+    let uses = |list: &[tyrminal_core::contracts::IdentitySummary], id: &str| {
+        list.iter().find(|i| i.id == id).unwrap().used_by
+    };
+    assert_eq!(uses(&v.list_identities().await.unwrap(), &ops.id), 3, "root group, pinned host and its copy");
+    v.delete_host(&copy.id).await.unwrap();
+    v.bulk_update_hosts(std::slice::from_ref(&pinned.id), BulkHostChange::Delete).await.unwrap();
+    assert_eq!(uses(&v.list_identities().await.unwrap(), &ops.id), 1);
+
+    // Editing an identity keeps its password unless asked; every user follows the change.
+    let edited = v
+        .save_identity(IdentityInput {
+            id: Some(deploy.id.clone()),
+            ..identity("Deploy", "release", SecretChange::Keep, Some(&key.id))
+        })
+        .await
+        .unwrap();
+    assert_eq!((edited.username.as_str(), edited.used_by), ("release", 1));
+    let kept = v
+        .save_identity(IdentityInput { id: Some(ops.id.clone()), ..identity("Ops", "ops", SecretChange::Keep, None) })
+        .await
+        .unwrap();
+    assert!(kept.has_password);
+
+    // Deleting an identity clears its references in the same transaction; hosts fall back.
+    assert_eq!(v.delete_identity(&deploy.id).await.unwrap(), 1);
+    let assignments = v.list_identity_assignments().await.unwrap();
+    let of = |id: &str| assignments.iter().find(|a| a.target == host_target(id)).unwrap().clone();
+    assert_eq!(
+        of(&inherits.id).effective_identity_id.as_deref(),
+        Some(ops.id.as_str()),
+        "falls back to the root group"
+    );
+
+    // Everything above survives a restart (no stale references, no lost ones).
+    v.delete_host(&inherits.id).await.unwrap();
+    v.delete_host(&own_key.id).await.unwrap();
+    v.delete_key(&key.id).await.unwrap();
+    v.delete_group(&web.id).await.unwrap();
+    drop(core);
+    let core = Core::open(&dir.path().join("vault.db")).unwrap();
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let list = core.vault.list_identities().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!((list[0].used_by, list[0].has_password), (1, true));
+    core.vault.delete_group(&root.id).await.unwrap();
+    assert_eq!(core.vault.list_identities().await.unwrap()[0].used_by, 0);
+    assert!(core.vault.list_identity_assignments().await.unwrap().is_empty());
 }
