@@ -840,10 +840,6 @@ function HostsViewImpl({
             </EmptyState>
           )}
 
-          {total > 0 && filtered.length === 0 && searching && (
-            // Short: Connect in the search box (or Enter) starts quick connect for an address.
-            <p className="muted hosts-empty">{msgHv.noSavedMatch}</p>
-          )}
           {quick && onQuickConnect && (
             <QuickConnectDialog
               address={quick.address}
@@ -996,8 +992,9 @@ function HostsViewImpl({
                 )}
               </div>
             )}
-            {total > 0 && filtered.length === 0 && !searching && (
-              <p className="muted hosts-empty">{filter.kind === "group" ? msgHv.emptyGroup : msgHv.noUngrouped}</p>
+            {total > 0 && filtered.length === 0 && (
+              // Short: with a search, Connect in the search box (or Enter) starts quick connect.
+              <p className="muted hosts-empty">{searching ? msgHv.noSavedMatch : filter.kind === "group" ? msgHv.emptyGroup : msgHv.noUngrouped}</p>
             )}
 
             <span id={selectedNoteId} className="visually-hidden">

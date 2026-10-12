@@ -52,7 +52,7 @@ test("search goes through the core and understands tag: and group:", async ({ pa
   await expect(hostCards(page)).toHaveCount(1);
   await expect(hostCards(page).first()).toHaveAccessibleName("Home lab");
   await search.fill("nothing-matches-this");
-  await expect(page.getByText("No hosts match your search.")).toBeVisible();
+  await expect(page.getByText("No saved host matches.")).toBeVisible();
   expect((await calls(page, "host_search")).length).toBeGreaterThan(0);
 });
 
