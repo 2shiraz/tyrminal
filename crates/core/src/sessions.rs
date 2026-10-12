@@ -1490,10 +1490,18 @@ async fn authenticate(
                     Err(_) => return Err(err(ErrorCode::KeyInvalid, "The stored key could not be read.")),
                 }
             };
+            // Public facts only, so a refusal can be traced to the key that was offered.
+            let signs_with = conn.key_signature_algorithm(&key).await.map_err(|e| from_ssh(&e))?;
+            ctx.entry.log.note(&format!(
+                "offering the key \"{label}\" ({}, {}), signing with {signs_with}",
+                key.algorithm(),
+                key.fingerprint()
+            ));
             match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
                 // The key is kept only for agent forwarding, if the host has it on.
                 AuthOutcome::Success => Ok(Some(key)),
-                AuthOutcome::Failure { .. } => {
+                AuthOutcome::Failure { remaining_methods, .. } => {
+                    ctx.entry.log.note(&crate::connlog::remaining_methods_line(&remaining_methods));
                     // Say which key was refused, so the user can install it (or choose another).
                     let hop = ctx.hop.lock().unwrap_or_else(|p| p.into_inner()).clone();
                     let message = match hop.as_ref().filter(|h| h.index < h.total) {

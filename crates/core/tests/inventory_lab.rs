@@ -898,7 +898,18 @@ async fn a_refused_key_is_named_and_installing_it_with_a_password_lets_it_sign_i
     let dir = TempDir::new().unwrap();
     let core = unlocked(&dir).await;
     let label = format!("fresh key {}", std::process::id());
-    let key = core.vault.generate_key(&label).await.unwrap();
+    // Made here, so the test knows the private key and can show it never reaches the log.
+    let private = tyrminal_ssh::ClientKey::generate_ed25519().unwrap().to_openssh().unwrap();
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: label.clone(),
+            private_key: private.as_str().to_owned(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
     let host = core
         .vault
         .save_host(HostInput {
@@ -933,7 +944,52 @@ async fn a_refused_key_is_named_and_installing_it_with_a_password_lets_it_sign_i
     );
     let log = s.diagnostics(WINDOW, &opened.session_id).unwrap().join("\n");
     assert!(log.contains(&format!("did not accept the key \"{label}\"")), "{log}");
+    // Which key was offered (public facts only) and what the server would still take.
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{label}\" (ssh-ed25519, {}), signing with ssh-ed25519",
+            key.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("server still allows: ") && log.contains("password"), "{log}");
     assert!(!log.contains("PRIVATE KEY") && !closed.message.contains("PRIVATE KEY"));
+    for line in private.lines().filter(|l| !l.starts_with("-----") && l.len() > 16) {
+        assert!(!log.contains(line) && !closed.message.contains(line), "no private key material in the log");
+    }
+
+    // An RSA key is offered with a SHA-2 signature, never SHA-1.
+    let rsa_label = format!("fresh rsa {}", std::process::id());
+    let rsa = core.vault.generate_key_of(&rsa_label, tyrminal_core::contracts::KeyKind::Rsa3072).await.unwrap();
+    let rsa_host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: rsa.id.clone() },
+            ..crate::host("lab a rsa", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let rsa_session = s.open_ssh(WINDOW, &rsa_host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                s.answer_trust(WINDOW, &rsa_session.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::Closed { .. } => break,
+            _ => {}
+        }
+    }
+    let log = s.diagnostics(WINDOW, &rsa_session.session_id).unwrap().join("\n");
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{rsa_label}\" (ssh-rsa, {}), signing with rsa-sha2-",
+            rsa.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("signing with rsa-sha2-512") || log.contains("signing with rsa-sha2-256"), "{log}");
 
     // Install it: sign in once with the password (the normal prompt), preview, install.
     let (tx, mut inbox) = mpsc::unbounded_channel();
