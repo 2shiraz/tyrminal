@@ -422,7 +422,9 @@ kbd,
   pointer-events: none;
 }
 
-.input-with-icon > .input {
+/* Room for a leading icon only when there is one: plain fields (TextField, SecretField) share this
+   wrapper for their trailing button and keep the normal padding. */
+.input-with-icon > svg + .input {
   padding-left: 34px;
 }
 
@@ -4157,11 +4159,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 /* Empty: stays in the tree as a live region but takes no room. */
 .host-panel-status:empty {
   margin-bottom: calc(-1 * var(--space-2));
-}
-
-/* TextField wraps every input for an optional icon; without one, keep the normal inset. */
-.host-section .input-with-icon > .input:first-child {
-  padding-left: var(--space-3);
 }
 
 .host-panel-actions {
