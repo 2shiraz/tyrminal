@@ -2152,6 +2152,8 @@ async fn output_with_events(client: &mut Client, needle: &str) -> Vec<SessionEve
 #[tokio::test]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on() {
+    // The hop signs in to server B, whose authentication log another test asserts on.
+    let _b = SERVER_B.lock().await;
     let f = fixture().await;
     let key_id = f.import("ed25519", None, false).await;
     let user = f.lab.str("/user");
