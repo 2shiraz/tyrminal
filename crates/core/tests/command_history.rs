@@ -37,7 +37,7 @@ async fn local_session(core: &Core) -> String {
         .session_id;
     let wait = tokio::time::timeout(Duration::from_secs(20), async {
         while let Some(event) = events.recv().await {
-            if event == (SessionEvent::State { state: SessionState::Connected }) {
+            if event == (SessionEvent::State { state: SessionState::Connected, hop: None }) {
                 return;
             }
         }

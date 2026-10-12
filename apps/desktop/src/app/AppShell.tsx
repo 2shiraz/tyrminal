@@ -1,4 +1,4 @@
-import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, useMemo } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
@@ -20,43 +20,68 @@ import { TunnelsView } from "../features/tunnels/TunnelsView";
 import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
+import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
 // command history
 import { installHistoryCapture } from "../features/history/historyCapture";
 import { insertionBytes } from "../features/autocomplete/suggest";
+import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { CommandOutputDialog } from "../features/terminal/CommandOutputDialog";
 import { SearchSessionsDialog } from "../features/terminal/SearchSessionsDialog";
 import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
 import { msgD } from "../lib/messages-d";
+import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
+import { useLoaded } from "../lib/useAsync";
+import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
+import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
-import { actionFor, tabIndexFor } from "../lib/shortcuts";
+import { msgC } from "../lib/messages-c";
+import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
+import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
+  type Arrangement,
   type Direction,
+  MAX_PANES,
   type PaneTarget,
   type Workspace,
   activePane,
   activeTab,
+  arrangeTab,
   closeOtherTabs,
   closePane,
   closeTab,
+  connectPanes,
+  detachInput,
   cycleTab,
+  duplicateTab,
   emptyWorkspace,
   focusPane,
   focusPaneInActiveTab,
+  markSaved,
+  markUnread,
+  movePane,
   moveTab,
   neighbour,
   openTab,
+  paneCount,
+  paneToNewTab,
   panesOf,
   patchPane,
   renameTab,
+  restoreTemplate,
   selectTab,
+  setFocusMode,
   setRatio,
   splitPane,
+  swapPanes,
   tabTitle,
+  templateDirty,
+  templateTabs,
 } from "./workspace";
 
 export type Destination =
@@ -86,6 +111,8 @@ function hostIdentity(host: HostSummary): string {
 
 function Shell() {
   const { prefs, resolvedTheme, update } = usePreferences();
+  // The user's shortcuts replace the defaults before anything below reads them.
+  applyBindingOverrides(workspacePrefs(prefs.workspace).bindings);
   const data = useVaultData();
   const notify = useToast();
   const [destination, setDestination] = useState<Destination>("home");
@@ -98,6 +125,14 @@ function Shell() {
   const panelOpen = sidePanel === "snippets";
   const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The palette can instead pick the destination of a new pane (a split with another host).
+  const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
+  // Named layout templates: listed from the vault, saved only on an explicit request.
+  const savedLayouts = useLoaded(layoutsApi.list);
+  const [savingAs, setSavingAs] = useState(false);
+  const [choosingEncoding, setChoosingEncoding] = useState<{ paneId: number; current: string; target: string } | null>(null);
+  // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
+  const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // P-28 and P-29: search across sessions, and the command-output dialog for one pane.
@@ -109,6 +144,7 @@ function Shell() {
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
+  const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -148,6 +184,17 @@ function Shell() {
       return next ?? current;
     });
   }, [ws, statuses]);
+
+  /** The panes (and their current sessions) that broadcast in `tabId` would send to. */
+  const broadcastTargets = useCallback(
+    (tabId: number): BroadcastTarget[] =>
+      broadcastPanes(tabId).flatMap((id) => {
+        const p = wsRef.current.panes[id];
+        const sessionId = handles.current.get(id)?.sessionId();
+        return p && sessionId ? [{ paneId: id, sessionId, label: p.label, identity: p.identity }] : [];
+      }),
+    [broadcastPanes],
+  );
 
   // The files panel remembers each session's folder while that session lives.
   useEffect(() => {
@@ -196,9 +243,135 @@ function Shell() {
     return p ? (handles.current.get(p.id) ?? null) : null;
   }, []);
 
-  const split = useCallback((dir: Direction) => {
+  /** Splits `paneId` (the focused pane by default); at the pane limit, says so instead. */
+  const split = useCallback(
+    (dir: Direction, seed?: { target: TerminalTarget; label: string; identity: string }, paneId?: number) => {
+      const id = paneId ?? activePane(wsRef.current)?.id;
+      // An SFTP tab has one pane and is never split.
+      if (id === undefined || wsRef.current.panes[id]?.target.kind === "sftp") return;
+      if (paneCount(wsRef.current) >= MAX_PANES) {
+        notify("danger", msgC.panes.full);
+        return;
+      }
+      setWs((current) => splitPane(current, id, dir, seed));
+    },
+    [notify],
+  );
+
+  const duplicate = useCallback(
+    (id: number) => {
+      const current = wsRef.current;
+      // Each copy starts in its pane's current folder when the shell integration reports it.
+      const next = duplicateTab(current, id, (paneId) => {
+        const sessionId = handles.current.get(paneId)?.sessionId();
+        return sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
+      });
+      const t = current.tabs.find((x) => x.id === id);
+      if (next === current && t) notify("danger", msgC.tabs.duplicateFull(panesOf(t.layout).length));
+      else setWs(next);
+    },
+    [notify],
+  );
+
+  /** What a template pane shows before it connects; a deleted host stays visibly missing. */
+  const seedFor = useCallback(
+    (target: LayoutTarget) => {
+      if (target.kind === "local") return { target: { kind: "local" } as const, label: msg.nav.localTerminal, identity: msg.terminal.local };
+      const host = data.hosts.value?.find((h) => h.id === target.hostId);
+      return {
+        target: { kind: "ssh", hostId: target.hostId } as const,
+        label: host?.label ?? msgC.restore.missingHost,
+        identity: host ? hostIdentity(host) : "",
+      };
+    },
+    [data.hosts.value],
+  );
+
+  const openLayout = useCallback(
+    (layout: LayoutTemplateSummary) => {
+      const current = wsRef.current;
+      const next = restoreTemplate(current, layout.tabs, seedFor);
+      if (next === current) {
+        notify("danger", msgC.layouts.full(layout.tabs.reduce((n, t) => n + t.panes.length, 0)));
+        return;
+      }
+      setWs(markSaved(next, layout));
+    },
+    [notify, seedFor],
+  );
+
+  /** Saves the open tabs: into the current template, or as a new one when `name` is given. */
+  const saveLayout = useCallback(
+    async (name?: string): Promise<string | null> => {
+      const current = wsRef.current;
+      const target = name === undefined ? current.template : null;
+      if (!target && name === undefined) {
+        setSavingAs(true);
+        return null;
+      }
+      try {
+        const saved = await layoutsApi.save({ id: target?.id ?? null, name: target?.name ?? (name as string), tabs: templateTabs(current) });
+        setWs((now) => markSaved(now, saved));
+        void savedLayouts.reload();
+        notify("success", msgC.layouts.saved(saved.name));
+        return null;
+      } catch (error) {
+        const message = (error as Error).message;
+        if (name === undefined) notify("danger", message);
+        return message;
+      }
+    },
+    [notify, savedLayouts],
+  );
+
+  const deleteLayout = useCallback(
+    async (layout: LayoutTemplateSummary) => {
+      try {
+        await layoutsApi.remove(layout.id);
+        setWs((now) => (now.template?.id === layout.id ? { ...now, template: null } : now));
+        void savedLayouts.reload();
+        notify("info", msgC.layouts.deleted(layout.name));
+      } catch (error) {
+        notify("danger", (error as Error).message);
+      }
+    },
+    [notify, savedLayouts],
+  );
+
+  /** Moves a tab, with its live sessions, into a new window. Its panes unmount here without closing. */
+  const detachTab = useCallback(
+    async (tabId: number) => {
+      const t = wsRef.current.tabs.find((x) => x.id === tabId);
+      if (!t) return;
+      const ids = panesOf(t.layout);
+      const live = ids.map((id) => handles.current.get(id)).filter((h) => h?.connected() && h.sessionId());
+      if (live.length !== ids.length) {
+        notify("danger", msgC.detach.notConnected);
+        return;
+      }
+      const input = detachInput(wsRef.current, t, (id) => handles.current.get(id)?.sessionId() ?? "");
+      for (const h of live) h?.release(true);
+      try {
+        await detachApi.open(input);
+        setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
+        setWs((current) => closeTab(current, tabId));
+        notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
+      } catch (error) {
+        for (const h of live) h?.release(false);
+        notify("danger", msgC.detach.failed((error as Error).message));
+      }
+    },
+    [notify],
+  );
+
+  const arrange = useCallback((arrangement: Arrangement) => {
+    const t = activeTab(wsRef.current);
+    if (t) setWs((current) => arrangeTab(current, t.id, arrangement));
+  }, []);
+
+  const moveFocused = useCallback((towards: "left" | "right" | "up" | "down") => {
     const p = activePane(wsRef.current);
-    if (p && p.target.kind !== "sftp") setWs((current) => splitPane(current, p.id, dir));
+    if (p) setWs((current) => movePane(current, p.id, towards));
   }, []);
 
   const closeFocused = useCallback(() => {
@@ -329,11 +502,29 @@ function Shell() {
           if (t) setRenaming(t.id);
           break;
         }
+        // agent C: workspaces
+        case "toggleFocusLayout": {
+          const t = activeTab(wsRef.current);
+          if (t && panesOf(t.layout).length > 1) setWs((current) => setFocusMode(current, t.id, !t.focusMode));
+          break;
+        }
+        case "movePaneLeft":
+          moveFocused("left");
+          break;
+        case "movePaneRight":
+          moveFocused("right");
+          break;
+        case "movePaneUp":
+          moveFocused("up");
+          break;
+        case "movePaneDown":
+          moveFocused("down");
+          break;
         default:
           break;
       }
     },
-    [openLocal, closeFocused, split, focusedHandle, moveFocus, navigate],
+    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate],
   );
 
   // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys
@@ -417,20 +608,21 @@ function Shell() {
           onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
           onSplit={(id, dir) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
-            if (t && wsRef.current.panes[t.focused]?.target.kind !== "sftp") setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
+            if (!t) return;
+            setWs((current) => selectTab(current, id));
+            split(dir, undefined, t.focused);
           }}
-          onDuplicate={(id) => {
-            const t = wsRef.current.tabs.find((x) => x.id === id);
-            const p = t ? wsRef.current.panes[t.focused] : undefined;
-            if (!p) return;
-            // The copy starts in the shell's current folder when the shell integration reports it.
-            const sessionId = handles.current.get(p.id)?.sessionId();
-            const cwd = sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
-            open(p.target, p.label, p.identity, cwd);
-          }}
+          onDuplicate={duplicate}
+          onDetach={(id) => void detachTab(id)}
           onNewLocal={openLocal}
           onNewSftp={openSftp}
           onOpenPalette={() => setPaletteOpen(true)}
+          recent={(data.recent.value ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) }))}
+          layout={
+            ws.template
+              ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
+              : null
+          }
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
@@ -461,6 +653,7 @@ function Shell() {
               <PaneGrid
                 ws={ws}
                 prefs={prefs.terminal}
+                workspace={workspacePrefs(prefs.workspace)}
                 panel={
                   showPanel && sidePanel === "files" ? (
                     <FilesPanel
@@ -488,6 +681,12 @@ function Shell() {
                 onPatch={(paneId, patch) => setWs((current) => patchPane(current, paneId, patch))}
                 onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
                 onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
+                onUnread={(paneId) => setWs((current) => markUnread(current, paneId))}
+                onSelectPane={(paneId) => setWs((current) => focusPane(current, paneId))}
+                onSwap={(a, b) => setWs((current) => swapPanes(current, a, b))}
+                onFocusMode={(tabId, on) => setWs((current) => setFocusMode(current, tabId, on))}
+                onToNewTab={(paneId) => setWs((current) => paneToNewTab(current, paneId))}
+                onConnect={(paneIds) => setWs((current) => connectPanes(current, paneIds))}
                 onClose={(paneId) => {
                   setWs((current) => closePane(current, paneId));
                   setStatuses((current) => {
@@ -496,9 +695,7 @@ function Shell() {
                     return next;
                   });
                 }}
-                onSplit={(paneId, dir) => {
-                  if (wsRef.current.panes[paneId]?.target.kind !== "sftp") setWs((current) => splitPane(current, paneId, dir));
-                }}
+                onSplit={(paneId, dir) => split(dir, undefined, paneId)}
                 onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
                 onOpenKnownHosts={() => navigate("knownHosts")}
                 register={(paneId, handle) => {
@@ -530,6 +727,31 @@ function Shell() {
         />
       </div>
 
+      {pickingSplit && (
+        <CommandPalette
+          hasTerminal={false}
+          terminalConnected={false}
+          pick={{
+            title: msgC.panes.pickTitle(pickingSplit === "row" ? msgC.panes.right : msgC.panes.below),
+            onPick: (choice) => {
+              const dir = pickingSplit;
+              if (choice === "local") split(dir, { target: { kind: "local" }, label: msg.nav.localTerminal, identity: msg.terminal.local });
+              else split(dir, { target: { kind: "ssh", hostId: choice.id }, label: choice.label, identity: hostIdentity(choice) });
+            },
+          }}
+          onClose={() => {
+            setPickingSplit(null);
+            focusedHandle()?.focus();
+          }}
+          onConnect={() => undefined}
+          onNavigate={() => undefined}
+          onAction={() => undefined}
+          onToggleTheme={() => undefined}
+          onLocal={() => undefined}
+          onSnippet={() => undefined}
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette
           hasTerminal={terminalVisible && pane !== null && !sftpVisible}
@@ -545,17 +767,50 @@ function Shell() {
           onLocal={openLocal}
           onSftp={openSftp}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          openTabs={ws.tabs.map((t) => {
+            const p = ws.panes[t.focused];
+            return { id: t.id, title: tabTitle(ws, t), detail: p?.identity ?? "", onSelect: () => setWs((current) => selectTab(current, t.id)) };
+          })}
+          layouts={{
+            list: savedLayouts.value ?? [],
+            current: ws.template?.name ?? null,
+            canSave: ws.tabs.length > 0,
+            onOpen: openLayout,
+            onSave: () => void saveLayout(),
+            onSaveAs: () => setSavingAs(true),
+            onDelete: (layout) => void deleteLayout(layout),
+          }}
+          workspace={
+            terminalVisible && tab
+              ? {
+                  split: panesOf(tab.layout).length > 1,
+                  focusLayout: tab.focusMode,
+                  onDuplicate: () => duplicate(tab.id),
+                  onArrange: arrange,
+                  onPaneToNewTab: () => {
+                    const p = activePane(wsRef.current);
+                    if (p) setWs((current) => paneToNewTab(current, p.id));
+                  },
+                  onSplitWith: (dir) => setPickingSplit(dir),
+                  onDetach: () => void detachTab(tab.id),
+                  onEncoding: () => {
+                    const p = activePane(wsRef.current);
+                    const h = p ? handles.current.get(p.id) : undefined;
+                    if (p && h) setChoosingEncoding({ paneId: p.id, current: h.encoding(), target: `${p.label} · ${p.identity}` });
+                  },
+                }
+              : undefined
+          }
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={
             terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)
               ? () => {
                   const id = tab.id;
-                  setBroadcasting((current) => {
-                    const next = new Set(current);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  });
+                  if (broadcasting.has(id)) {
+                    setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+                    return;
+                  }
+                  setReviewing({ tabId: id, targets: broadcastTargets(id) });
                 }
               : undefined
           }
@@ -564,6 +819,14 @@ function Shell() {
               ? () => {
                   const sessionId = focusedHandle()?.sessionId();
                   if (sessionId && pane.target.kind === "ssh") setDeploying({ sessionId, hostId: pane.target.hostId });
+                }
+              : undefined
+          }
+          onConnectionLog={
+            pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (sessionId) setConnectionLog({ sessionId, label: pane.label });
                 }
               : undefined
           }
@@ -578,6 +841,22 @@ function Shell() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {choosingEncoding && (
+        <EncodingDialog
+          current={choosingEncoding.current}
+          target={choosingEncoding.target}
+          onCancel={() => {
+            setChoosingEncoding(null);
+            focusedHandle()?.focus();
+          }}
+          onApply={(id) => {
+            handles.current.get(choosingEncoding.paneId)?.setEncoding(id);
+            setChoosingEncoding(null);
+            focusedHandle()?.focus();
+          }}
         />
       )}
 
@@ -611,6 +890,33 @@ function Shell() {
         />
       )}
 
+      {reviewing && (
+        <BroadcastReview
+          targets={reviewing.targets}
+          onCancel={() => {
+            setReviewing(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const { tabId, targets } = reviewing;
+            setReviewing(null);
+            const t = wsRef.current.tabs.find((x) => x.id === tabId);
+            const now = broadcastTargets(tabId);
+            const same =
+              t !== undefined &&
+              now.length === panesOf(t.layout).length &&
+              now.length === targets.length &&
+              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            if (!same) {
+              notify("danger", msgC.broadcast.changed);
+            } else {
+              setBroadcasting((current) => new Set([...current, tabId]));
+            }
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
       {outputFor !== null && handles.current.get(outputFor) && (
         <CommandOutputDialog
           handle={handles.current.get(outputFor) as PaneHandle}
@@ -618,6 +924,22 @@ function Shell() {
           onClose={() => {
             setOutputFor(null);
             focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {savingAs && (
+        <SaveLayoutDialog
+          initialName={ws.template?.name ?? ""}
+          summary={msgC.layouts.summary(ws.tabs.length, paneCount(ws))}
+          onCancel={() => {
+            setSavingAs(false);
+            if (terminalVisible) focusedHandle()?.focus();
+          }}
+          onSave={async (name) => {
+            const failure = await saveLayout(name);
+            if (failure === null) setSavingAs(false);
+            return failure;
           }}
         />
       )}
@@ -665,6 +987,17 @@ function Shell() {
               .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
               .then(() => handle.focus())
               .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {connectionLog && (
+        <ConnectionLogDialog
+          sessionId={connectionLog.sessionId}
+          title={connectionLog.label}
+          onClose={() => {
+            setConnectionLog(null);
+            focusedHandle()?.focus();
           }}
         />
       )}

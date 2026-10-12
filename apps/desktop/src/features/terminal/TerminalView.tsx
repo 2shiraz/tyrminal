@@ -1,6 +1,7 @@
-import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
+import type { IpcError, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
+import type { Indicator } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
 import { IconButton, Notice, SecretField, TextField } from "../../components/ui/controls";
@@ -9,7 +10,9 @@ import {
   IconChevronLeft,
   IconCopy,
   IconExternalLink,
+  IconFolder,
   IconKeyRound,
+  IconPlug,
   IconRefreshCw,
   IconSearch,
   IconShieldAlert,
@@ -19,22 +22,27 @@ import {
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import type { CommandRecord } from "./commandOutput";
+import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
 import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
-import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+
+const encodingLabel = (id: string) => encodingById(id).label;
+import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
 type KeyChanged = Extract<SessionEvent, { type: "host_key_changed" }>;
 
-export type TabIndicator = "busy" | "ok" | "bad" | "attention" | "idle";
+export type TabIndicator = Indicator;
 
 /** What the shell's status bar shows for the focused pane. */
 export interface PaneStatus {
@@ -59,6 +67,11 @@ export interface PaneHandle {
   broadcastable(): boolean;
   /** Input typed in another pane of a broadcasting tab. */
   receiveBroadcast(bytes: Uint8Array): void;
+  /** The session's character encoding (kept across reconnects of this pane). */
+  encoding(): string;
+  setEncoding(id: string): void;
+  /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
+  release(on: boolean): void;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
@@ -89,6 +102,8 @@ interface TerminalViewProps {
   /** This pane has keyboard focus within its tab. */
   focused: boolean;
   prefs: TerminalPreferences;
+  /** Highlighting, Option/Alt and mouse preferences. */
+  workspace?: WorkspacePreferences | undefined;
   onIndicator: (indicator: TabIndicator) => void;
   onTitle: (title: string) => void;
   onStatus: (status: PaneStatus) => void;
@@ -98,6 +113,20 @@ interface TerminalViewProps {
   register: (handle: PaneHandle | null) => void;
   /** User input typed in this pane (for broadcast). */
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
+  /** Output arrived while this pane's tab was hidden (reported once until it is shown again). */
+  onUnread?: (() => void) | undefined;
+  /** Restored from a template: offer (never perform by itself) a return to this directory. */
+  restoreDirectory?: string | undefined;
+  /** The shell reported its working directory (OSC 7). */
+  onDirectory?: ((path: string) => void) | undefined;
+  /** A session handed to this (detached) window: taken over instead of opened. */
+  attachToken?: string | undefined;
+  /** False where this window cannot open sessions (a detached window): no reconnect. */
+  canReconnect?: boolean | undefined;
+  /** Restored from a layout: no session is opened until the user chooses Connect. */
+  pending?: boolean | undefined;
+  onConnect?: (() => void) | undefined;
+  onConnectAll?: (() => void) | undefined;
   /** P-25: the paste checks this host keeps (all of them unless the host lowers some). */
   pasteChecks?: PasteChecks | undefined;
   /** P-25: extra labels for this session in the paste review (an environment label, for one). */
@@ -133,6 +162,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; check: PasteCheck; bracketed: boolean; send: (text: string) => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
@@ -145,6 +175,13 @@ export function TerminalView(props: TerminalViewProps) {
   const autoAttempts = useRef(0);
   const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const unreadReported = useRef(false);
+  // The return-to-directory offer is made at most once per restored pane.
+  const [directoryOffer, setDirectoryOffer] = useState<"waiting" | "shown" | "done">(props.restoreDirectory ? "waiting" : "done");
+  const [encodingId, setEncodingId] = useState("utf-8");
+  const encodingRef = useRef("utf-8");
+  const lastUnencodable = useRef(0);
+  if (visible) unreadReported.current = false;
   const status = useRef<PaneStatus>({ state: "connecting", renderer: "dom", cols: 0, rows: 0, clipboardAllowed: false });
 
   // Callbacks change identity every render; the controller needs stable ones.
@@ -156,9 +193,15 @@ export function TerminalView(props: TerminalViewProps) {
     handlers.current.onStatus(status.current);
   }
 
+  const pending = props.pending === true;
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return;
+    if (pending) {
+      // Nothing is opened, started or sent while a restored pane waits for the user.
+      publish({ state: "closed", clipboardAllowed: false });
+      return;
+    }
     setState("connecting");
     setTrust(null);
     setAuth(null);
@@ -192,6 +235,18 @@ export function TerminalView(props: TerminalViewProps) {
       onResize: (cols, rows) => publish({ cols, rows }),
       onSearchResults: (index, total) => setFindCount({ index, total }),
       onUserInput: (bytes) => handlers.current.onUserInput?.(bytes),
+      onDirectory: (path) => handlers.current.onDirectory?.(path),
+      onUnencodable: (chars) => {
+        // At most one notice every few seconds while typing.
+        if (Date.now() - lastUnencodable.current < 4000) return;
+        lastUnencodable.current = Date.now();
+        notify("danger", msgC.encoding.unencodable(chars.slice(0, 3).join(" "), encodingLabel(encodingRef.current)));
+      },
+      onOutput: () => {
+        if (handlers.current.visible || unreadReported.current) return;
+        unreadReported.current = true;
+        handlers.current.onUnread?.();
+      },
       onEvent: (event) => {
         switch (event.type) {
           case "state":
@@ -223,6 +278,8 @@ export function TerminalView(props: TerminalViewProps) {
             notify("danger", event.text);
             break;
           case "negotiated":
+            // Sent for every hop of a jump chain; the status bar shows the destination's.
+            if (event.hop && event.hop.index !== event.hop.total) break;
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;
           case "closed":
@@ -230,7 +287,7 @@ export function TerminalView(props: TerminalViewProps) {
             setAuth(null);
             setClipboardAsk(null);
             setClosed({ error: event.error, exitStatus: event.exitStatus });
-            if (shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
+            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
               autoAttempts.current += 1;
               setAutoRetry({ attempt: autoAttempts.current, dueAt: Date.now() + reconnectDelayMs(autoAttempts.current) });
             }
@@ -240,16 +297,20 @@ export function TerminalView(props: TerminalViewProps) {
       },
     });
     controllerRef.current = controller;
+    if (handlers.current.workspace) controller.setWorkspace(handlers.current.workspace);
+    controller.setEncoding(encodingRef.current);
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
-    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null), 0);
+    // A handed-over session is taken over once; a later attempt (reconnect) never reuses the token.
+    const token = attempt === 0 ? handlers.current.attachToken : undefined;
+    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null, token), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();
       controllerRef.current = null;
     };
-    // `target` is fixed for the life of a pane; `attempt` drives reconnects.
+    // `target` is fixed for the life of a pane; `attempt` drives reconnects; `pending` the first start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt]);
+  }, [attempt, pending]);
 
   // The host's paste checks can change while the session is open (the user edits the host).
   const skipMultiline = props.pasteChecks?.multiline === false;
@@ -283,7 +344,8 @@ export function TerminalView(props: TerminalViewProps) {
   // Live preference changes keep the session and screen.
   useEffect(() => {
     controllerRef.current?.updatePreferences(prefs);
-  }, [prefs]);
+    if (props.workspace) controllerRef.current?.setWorkspace(props.workspace);
+  }, [prefs, props.workspace]);
 
   useEffect(() => {
     const handle: PaneHandle = {
@@ -297,6 +359,13 @@ export function TerminalView(props: TerminalViewProps) {
       receiveBroadcast: (bytes) => {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
+      encoding: () => encodingRef.current,
+      release: (on) => controllerRef.current?.release(on),
+      setEncoding: (id) => {
+        encodingRef.current = encodingById(id).id;
+        setEncodingId(encodingRef.current);
+        controllerRef.current?.setEncoding(encodingRef.current);
+      },
       environment: () => environment.current,
       searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
@@ -307,8 +376,13 @@ export function TerminalView(props: TerminalViewProps) {
     return () => handlers.current.register(null);
   }, []);
 
+  // Offered once the restored session is connected; never sent without a click.
+  useEffect(() => {
+    if (directoryOffer === "waiting" && state === "connected") setDirectoryOffer("shown");
+  }, [directoryOffer, state]);
+
   const needsAttention = trust !== null || auth !== null;
-  const indicator: TabIndicator = closed ? (closed.error ? "bad" : "idle") : needsAttention ? "attention" : state === "connected" ? "ok" : "busy";
+  const indicator: TabIndicator = pending ? "idle" : closed ? (closed.error ? "bad" : "idle") : needsAttention ? "attention" : state === "connected" ? "ok" : "busy";
   useEffect(() => {
     handlers.current.onIndicator(indicator);
   }, [indicator]);
@@ -344,7 +418,7 @@ export function TerminalView(props: TerminalViewProps) {
     "--pane-fg": scheme.foreground,
     "--term-padding": `${prefs.padding}px`,
   } as CSSProperties;
-  const connecting = !closed && state !== "connected" && !needsAttention;
+  const connecting = !pending && !closed && state !== "connected" && !needsAttention;
   const stepIndex = Math.max(0, STEPS.indexOf(state));
   const showPrompts = visible;
 
@@ -358,7 +432,70 @@ export function TerminalView(props: TerminalViewProps) {
       onMouseDown={() => handlers.current.onFocus()}
       onFocusCapture={() => handlers.current.onFocus()}
     >
-      <div className="terminal-host" ref={hostRef} data-pane={props.paneId} />
+      <div className="terminal-host" ref={hostRef} data-pane={props.paneId} data-encoding={encodingId} />
+      {encodingId !== "utf-8" && (
+        <span className="term-encoding" title={msgC.encoding.badge(encodingLabel(encodingId))}>
+          {encodingLabel(encodingId)}
+        </span>
+      )}
+
+      {pending && (
+        <div className="terminal-overlay">
+          <div className="overlay-card" role="group" aria-label={msgC.restore.waiting(label)}>
+            <div className="dialog-head">
+              <span className="dialog-icon" data-tone="accent" aria-hidden="true">
+                <IconPlug size={18} />
+              </span>
+              <h2>{msgC.restore.title}</h2>
+            </div>
+            <p className="muted">{msgC.restore.body(identity || label)}</p>
+            <div className="dialog-actions">
+              {props.onConnectAll && (
+                <button type="button" className="btn" onClick={() => props.onConnectAll?.()}>
+                  {msgC.restore.connectAll}
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => props.onConnect?.()} data-autofocus>
+                <IconPlug size={15} />
+                {msgC.restore.connect}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {directoryOffer === "shown" && props.restoreDirectory && visible && (
+        <div className="term-banner" role="group" aria-label={msgC.restore.directoryTitle}>
+          <IconFolder size={16} />
+          <span className="stack-xs" style={{ minWidth: 0 }}>
+            <span>{msgC.restore.directoryBody}</span>
+            <code className="mono truncate" data-testid="restore-command">
+              {cdCommand(props.restoreDirectory)}
+            </code>
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              controllerRef.current?.sendConfirmedCommand(cdCommand(props.restoreDirectory as string));
+              setDirectoryOffer("done");
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgC.restore.directoryRun}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              setDirectoryOffer("done");
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgC.restore.directoryDismiss}
+          </button>
+        </div>
+      )}
 
       {findOpen && (
         <FindBar
@@ -467,7 +604,11 @@ export function TerminalView(props: TerminalViewProps) {
               <button type="button" className="btn" onClick={() => handlers.current.onClose()}>
                 {msg.terminal.closeTab}
               </button>
-              {changed ? (
+              {props.canReconnect === false ? (
+                <span className="faint" style={{ fontSize: "var(--text-sm)" }}>
+                  {msgC.detach.reconnectInMain}
+                </span>
+              ) : changed ? (
                 <button type="button" className="btn btn-primary" onClick={() => handlers.current.onOpenKnownHosts()}>
                   {msg.terminal.openKnownHosts}
                 </button>
@@ -476,6 +617,11 @@ export function TerminalView(props: TerminalViewProps) {
                   {autoRetry && (
                     <button type="button" className="btn" onClick={() => setAutoRetry(null)}>
                       {msg.terminal.cancelAutoReconnect}
+                    </button>
+                  )}
+                  {target.kind === "ssh" && controllerRef.current?.id && (
+                    <button type="button" className="btn" onClick={() => setLogOpen(true)}>
+                      {msgD.connectionLog.open}
                     </button>
                   )}
                   <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
@@ -487,6 +633,10 @@ export function TerminalView(props: TerminalViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {logOpen && controllerRef.current?.id && (
+        <ConnectionLogDialog sessionId={controllerRef.current.id} title={props.label} onClose={() => setLogOpen(false)} />
       )}
 
       {/* Prompts appear only while their tab is in front; a background tab shows an indicator. */}
@@ -790,5 +940,7 @@ function userIsElsewhere(pane: HTMLElement | null): boolean {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || active === document.body) return false;
   if (pane?.contains(active)) return false;
+  // Another terminal's input is not "elsewhere": the pane that became focused takes over.
+  if (active.classList.contains("xterm-helper-textarea")) return false;
   return active.matches("input, textarea, select, [contenteditable='true']") || active.closest("dialog, [role='menu']") !== null;
 }
