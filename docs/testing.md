@@ -86,6 +86,12 @@ all passing.
   manual runs and the release workflow still build and inspect the real binary.
 - Debug builds keep line tables only (`[profile.dev] debug = "line-tables-only"`): readable
   panics and backtraces with much faster compiling and linking.
+- A pull request that changes only documentation (`docs/`, `.claude/`, Markdown) skips the native
+  suites; the job still reports success. Any other file runs everything.
+- The integration, security, transfer and end-to-end steps have their own timeouts (15–25 min), so
+  a hang fails within minutes instead of holding the runner for the 2-hour job limit.
+- The release workflow packages installers alongside its test workflows; publishing waits for
+  packaging and every test workflow.
 
 ## Upgrades and installers (Phase 09)
 

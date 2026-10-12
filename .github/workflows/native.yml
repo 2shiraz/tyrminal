@@ -42,10 +42,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Pull requests that touch only documentation skip the native suites: nothing they change
+      # is built or run. Main, schedules and releases always run everything.
+      - name: What changed
+        id: changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          code=true
+          if [ "${{ github.event_name }}" = "pull_request" ] && git fetch -q --depth=1 origin "$BASE"; then
+            if ! git diff --name-only "$BASE" HEAD | grep -qvE '^(docs/|\.claude/)|\.md$|^LICENSE'; then code=false; fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "native suites needed: $code"
       - uses: ./.github/actions/setup
+        if: steps.changed.outputs.code == 'true'
         with:
           cache-key: native-${{ matrix.platform }}
       - name: Platform details
+        if: steps.changed.outputs.code == 'true'
         run: |
           uname -a || true
           node --version; pnpm --version; rustc --version
@@ -53,30 +68,30 @@ jobs:
 
       # On Linux the CI workflow already runs verify:fast for every change.
       - name: verify:fast
-        if: runner.os != 'Linux'
+        if: steps.changed.outputs.code == 'true' && (runner.os != 'Linux')
         run: pnpm run verify:fast
 
       - name: Full-screen applications for the macOS lab server
-        if: runner.os == 'macOS'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
         run: brew install tmux htop midnight-commander nano socat
       # The app under test is a background process on an unattended desktop; App Nap then pauses
       # its WebView's rendering, so the screen stops updating while bytes still arrive. Disposable
       # runner only: turn App Nap off for every app.
       - name: No App Nap on the test desktop
-        if: runner.os == 'macOS'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
         run: defaults write -g NSAppSleepDisabled -bool YES
       - name: Full-screen applications for the Linux lab server
-        if: runner.os == 'Linux'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Linux')
         run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc socat
       # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
       # the Windows loopback interface: the same server, PAM and full-screen applications as on
       # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.
       - name: Windows node before WSL is installed
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         run: echo "WIN_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
       # Debian 12: Ubuntu 24.04's binaries fail to execute under WSL 1 (ENOEXEC on node).
       - name: WSL lab server (Debian 12, WSL 1)
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
         with:
           distribution: Debian-12
@@ -89,13 +104,13 @@ jobs:
       # Installing a distribution makes System32\bash.exe the WSL launcher; keep pnpm's script
       # shell on Git Bash so `pnpm run …` keeps running Windows node.
       - name: Script shell stays Git Bash
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         shell: pwsh
         run: |
           "npm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
           "pnpm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
       - name: Which node runs after WSL is installed (diagnostic)
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         run: |
           echo "WIN_NODE=$WIN_NODE"
           type -a node || true
@@ -106,7 +121,7 @@ jobs:
       # shell then reads the binary as a script). The official build, pinned by SHA-256, runs the
       # lab script inside the distribution instead.
       - name: Node for the lab inside WSL (official build, pinned)
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         shell: wsl-bash {0}
         run: |
           set -eu
@@ -121,13 +136,16 @@ jobs:
           for b in vim nano htop mc; do command -v "$b" >/dev/null && "$b" --version 2>&1 | head -1 || echo "$b: not runnable"; done
           tmux -V
       - name: Keep the WSL instance running for the whole job
-        if: runner.os == 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Windows')
         shell: pwsh
         run: Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d','Debian-12','-u','root','--','sleep','infinity'
       - name: Start SSH lab
+        if: steps.changed.outputs.code == 'true'
         run: pnpm run lab:up
 
       - name: Integration suite
+        if: steps.changed.outputs.code == 'true'
+        timeout-minutes: 25
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             dbus-run-session -- scripts/ci/linux-test-keyring.sh pnpm run test:integration
@@ -135,50 +153,56 @@ jobs:
             pnpm run test:integration
           fi
       - name: Security suite
+        if: steps.changed.outputs.code == 'true'
+        timeout-minutes: 20
         run: pnpm run test:security
       # A tiny filesystem for the full-disk download test (disposable runner).
       - name: Tiny filesystem (Linux)
-        if: runner.os == 'Linux'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'Linux')
         run: |
           sudo mkdir -p /mnt/tyr-small
           sudo mount -t tmpfs -o size=2m,mode=1777 tmpfs /mnt/tyr-small
           echo "TYRMINAL_SMALL_FS=/mnt/tyr-small" >> "$GITHUB_ENV"
       - name: Tiny filesystem (macOS)
-        if: runner.os == 'macOS'
+        if: steps.changed.outputs.code == 'true' && (runner.os == 'macOS')
         run: |
           hdiutil create -size 4m -fs HFS+ -volname TyrSmall "$RUNNER_TEMP/tyr-small.dmg"
           hdiutil attach "$RUNNER_TEMP/tyr-small.dmg" -mountpoint "$RUNNER_TEMP/tyr-small"
           echo "TYRMINAL_SMALL_FS=$RUNNER_TEMP/tyr-small" >> "$GITHUB_ENV"
       - name: Large transfer (2 GiB each way over SFTP) and full local disk
+        timeout-minutes: 25
         # Windows runs the lab inside WSL 1, where 4 GiB of file I/O takes too long for every run.
-        if: runner.os != 'Windows'
+        if: steps.changed.outputs.code == 'true' && (runner.os != 'Windows')
         env:
           TYRMINAL_BIG_TRANSFER: "1"
         run: pnpm run test:transfer
 
       - name: Build test application (e2e feature)
+        if: steps.changed.outputs.code == 'true'
         run: pnpm run build:e2e
       - name: Native end-to-end suite
+        if: steps.changed.outputs.code == 'true'
+        timeout-minutes: 15
         run: pnpm run test:native
 
       # The optimized release build (thin LTO, one codegen unit) is the slowest step; pull
       # requests check the release policy statically and main, schedules and the release
       # workflow build and inspect the real binary.
       - name: Release build (unsigned)
-        if: github.event_name != 'pull_request'
+        if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
         run: pnpm run build:desktop
       - name: Release policy against the built binary
-        if: github.event_name != 'pull_request'
+        if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
         run: node scripts/check-release.mjs --require-binary
       # Install the packages as a user would, start the app, uninstall, and check user data stays
       # (the release workflow runs this workflow on the commit it releases).
       - name: Installer smoke test
-        if: github.event_name != 'pull_request'
+        if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
         run: |
           node scripts/ci/collect-artifacts.mjs "${{ matrix.platform }}" smoke dist-smoke
           node scripts/ci/installer-smoke.mjs "${{ matrix.platform }}" dist-smoke
       - name: Release policy (static)
-        if: github.event_name == 'pull_request'
+        if: steps.changed.outputs.code == 'true' && (github.event_name == 'pull_request')
         run: node scripts/check-release.mjs
 
       - name: Lab server logs (on failure)
