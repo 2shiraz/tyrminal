@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { useVaultData } from "../../app/vaultData";
-import { type Workspace, tabTitle } from "../../app/workspace";
+import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { useToast } from "../../components/ui/Toasts";
 import { Avatar, EmptyState, Keys, Shortcut, SkeletonRows, relativeTime } from "../../components/ui/controls";
 import {
@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/icons";
 import { hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgC } from "../../lib/messages-c";
 import { HostEditor } from "../hosts/HostEditor";
 import type { PaneStatus } from "../terminal/TerminalView";
 import { msgSftp } from "../sftp/messages";
@@ -217,11 +218,15 @@ export function HomeView({
                     {openTabs.map((tab) => {
                       const pane = ws.panes[tab.focused];
                       const status = pane ? statuses[pane.id] : undefined;
+                      const summary = tabStatus(ws, tab);
                       return (
                         <button key={tab.id} type="button" className="tile" onClick={() => onSelectTab(tab.id)}>
-                          <span className="status-dot" data-tone={pane?.indicator ?? "idle"} aria-hidden="true" />
+                          <span className="status-dot" data-tone={summary.indicator} data-unread={summary.unread || undefined} aria-hidden="true" />
                           <span className="row-main">
-                            <span className="row-title">{tabTitle(ws, tab)}</span>
+                            <span className="row-title">
+                              {tabTitle(ws, tab)}
+                              <span className="visually-hidden">{msgC.status.describe(summary)}</span>
+                            </span>
                             <span className="row-sub mono">
                               {pane?.identity}
                               {status?.cols ? ` · ${status.cols}×${status.rows}` : ""}

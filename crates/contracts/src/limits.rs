@@ -93,6 +93,11 @@ pub const MAX_ENDED_TUNNELS: usize = 32;
 /// Hosts in one connection chain, the destination included.
 pub const MAX_CHAIN_HOPS: usize = 8;
 
+// agent C: workspaces
+/// Panes in one layout template (the same limit as open panes).
+pub const MAX_LAYOUT_PANES: usize = 16;
+/// A custom tab name in a layout template, in characters.
+pub const MAX_TAB_TITLE_LEN: usize = 80;
 // command history
 /// Commands kept per host (and for local terminals), and the length of one command in bytes.
 pub const MAX_HISTORY_ENTRIES: usize = 1_000;
