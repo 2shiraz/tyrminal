@@ -1,10 +1,11 @@
-// User-visible strings for quick connect from Home, in their own module so parallel branches never
+// User-visible strings for quick connect (the Hosts search opens it in a new tab), in their own module so parallel branches never
 // edit the same object. Same rules as messages.ts: stable keys, interpolation through functions.
 
 export const msgQuick = {
   option: (address: string) => `Connect to ${address}…`,
   title: (address: string) => `Connect to ${address}`,
-  steps: { protocol: "Protocol", user: "User", signIn: "Sign in", connect: "Connect" },
+  steps: { protocol: "Protocol", user: "User", signIn: "Login", connect: "Connect" },
+  subtitle: "Not saved. Choose how to connect; nothing is stored unless you save the host.",
   protocolLegend: "Protocol",
   ssh: "SSH",
   telnet: "Telnet",
@@ -35,5 +36,5 @@ export const msgQuick = {
   saveHint: "Saves the host (and the password, encrypted in the vault), then connects.",
   close: "Close",
   noDetach: "A quick connection stays in this window. Save the host to move its tab.",
-  gone: "This quick connection's details are no longer available. Connect again from Home.",
+  gone: "This quick connection's details are no longer available. Connect again from the Hosts search.",
 };

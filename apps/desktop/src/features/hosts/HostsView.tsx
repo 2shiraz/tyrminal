@@ -1,5 +1,4 @@
 import type {
-  QuickConnectInput,
   BulkHostChange,
   GroupSummary,
   HostOs,
@@ -86,7 +85,6 @@ import { EnvironmentDialog } from "./EnvironmentDialog";
 // quick connect
 import { msgQuick } from "../../lib/messages-quick";
 import { type QuickTarget, formatTarget, parseAddress } from "../../lib/quickConnect";
-import { QuickConnectDialog } from "./QuickConnectDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -153,8 +151,8 @@ function HostsViewImpl({
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
-  /** Quick connect: an address typed in the search that matches no host (nothing is saved). */
-  onQuickConnect?: (input: QuickConnectInput) => void;
+  /** Quick connect: an address typed in the search that matches no host opens a new tab for it. */
+  onQuickConnect?: (target: QuickTarget) => void;
   /** Several hosts at once, one tab each or one split tab; each still asks for trust and sign-in. */
   onConnectMany?: (hosts: HostSummary[], layout: OpenLayout) => void;
   /** Connect in split: beside the focused pane of the terminal tab in front. */
@@ -172,8 +170,6 @@ function HostsViewImpl({
   const notify = useToast();
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
-  // quick connect: the address the sheet is open for.
-  const [quick, setQuick] = useState<QuickTarget | null>(null);
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   // Layout, sort and group filter live in preferences, so they survive other views and restarts.
   const { prefs, update } = usePreferences();
@@ -378,7 +374,7 @@ function HostsViewImpl({
   const [addMenu, setAddMenu] = useState<HTMLElement | null>(null);
   const [tagMenu, setTagMenu] = useState<HTMLElement | null>(null);
   const [sortMenu, setSortMenu] = useState<HTMLElement | null>(null);
-  // quick connect (#101): an address typed in the search that matches no host opens the sheet.
+  // quick connect: an address typed in the search that matches no host opens a new tab for it.
   const quickTarget = searching && filtered.length === 0 ? parseAddress(query) : null;
   const canSubmit = searching && (filtered.length > 0 || (quickTarget !== null && onQuickConnect !== undefined));
   /** Enter or Connect in the search bar: the first match connects; an unknown address opens quick connect. */
@@ -386,7 +382,11 @@ function HostsViewImpl({
     if (!searching) return;
     const first = filtered[0];
     if (first) connectFrom(first);
-    else if (quickTarget && onQuickConnect) setQuick(quickTarget);
+    else if (quickTarget && onQuickConnect) startQuick(quickTarget);
+  }
+  function startQuick(target: QuickTarget) {
+    setQuery("");
+    onQuickConnect?.(target);
   }
   /**
    * A local, reversible edit (move to a group, add or remove a tag) shows at once; the vault call
@@ -865,25 +865,6 @@ function HostsViewImpl({
                 {msgHv.newHost}
               </button>
             </EmptyState>
-          )}
-
-          {quick && onQuickConnect && (
-            <QuickConnectDialog
-              address={quick.address}
-              initialUser={quick.username}
-              initialPort={quick.port}
-              onConnect={(input) => {
-                setQuick(null);
-                setQuery("");
-                onQuickConnect(input);
-              }}
-              onConnectSaved={(host) => {
-                setQuick(null);
-                setQuery("");
-                onConnect(host);
-              }}
-              onClose={() => setQuick(null)}
-            />
           )}
 
           {bulkCount > 0 && (

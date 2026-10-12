@@ -396,6 +396,16 @@ export function paneVisible(ws: Workspace, pane: number): boolean {
   return !tab.focusMode || tab.focused === pane;
 }
 
+/**
+ * Quick connect saved its host: the pane becomes that host's, in place (same tab, same layout),
+ * and connects the normal way.
+ */
+export function retargetPane(ws: Workspace, pane: number, seed: PaneSeed): Workspace {
+  const current = ws.panes[pane];
+  if (!current) return ws;
+  return { ...ws, panes: { ...ws.panes, [pane]: { ...current, target: seed.target, label: seed.label, identity: seed.identity, remoteTitle: "" } } };
+}
+
 export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator" | "directory">>): Workspace {
   const current = ws.panes[pane];
   if (!current) return ws;

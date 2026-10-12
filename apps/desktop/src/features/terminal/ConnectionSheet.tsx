@@ -10,7 +10,7 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 import { OsIcon } from "../hosts/OsIcon";
 import { HopNotice } from "../tunnels/HopNotice";
-import { ConnectTrack, trackStates } from "./ConnectTrack";
+import { ConnectTrack, type TrackStop, trackStates } from "./ConnectTrack";
 import { RECONNECT_MAX_ATTEMPTS, groupFingerprint } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
@@ -253,6 +253,8 @@ export function ConnectionSheet(props: {
   os?: HostOs | null;
   /** The session just opened: the track settles while the sheet fades over the live shell. */
   settling?: boolean;
+  /** Stops the track passed before connecting (quick connect's setup), shown done before its own. */
+  leadStops?: TrackStop[] | undefined;
 }) {
   const { ssh, label, identity, timeline, startedAt, trust, auth, changed, closed, autoRetry, banner, interactive } = props;
   const [now, setNow] = useState(() => Date.now());
@@ -509,7 +511,7 @@ export function ConnectionSheet(props: {
           </div>
           {ssh && !settling && log}
         </div>
-        {showTrack && <ConnectTrack states={states} />}
+        {showTrack && <ConnectTrack states={states} lead={props.leadStops} />}
         {retrying && !closed ? (
           <>
             {body}

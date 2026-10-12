@@ -1,4 +1,4 @@
-import type { HostSummary, LayoutTarget, LayoutTemplateSummary, QuickConnectInput, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
@@ -59,7 +59,7 @@ import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 // quick connect
 import { msgQuick } from "../lib/messages-quick";
-import { stashQuick } from "../lib/quickConnect";
+import { type QuickTarget, forgetQuick, formatTarget, startQuick } from "../lib/quickConnect";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
@@ -100,6 +100,7 @@ import {
   patchPane,
   renameTab,
   restoreTemplate,
+  retargetPane,
   selectTab,
   setFocusMode,
   setRatio,
@@ -334,16 +335,30 @@ function Shell() {
     setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
-  // quick connect: an address that is not saved; its input goes to the new pane by a one-time token.
+  // quick connect: an address that is not saved opens a tab at once; its pane shows the setup and
+  // then connects. The details stay in memory under a token (lib/quickConnect).
   const quickConnect = useCallback(
-    (input: QuickConnectInput) => {
-      const token = stashQuick(input);
-      const label = input.address;
-      const identity = input.protocol === "ssh" && input.username ? msg.hosts.destination(input.username, input.address, input.port) : `${input.address}:${input.port}`;
-      open({ kind: "quick", token, protocol: input.protocol }, label, identity);
+    (target: QuickTarget) => {
+      open({ kind: "quick", token: startQuick(target) }, target.address, formatTarget(target));
     },
     [open],
   );
+  // The setup saved the host: the pane becomes that host's and connects the normal way.
+  const onQuickSaved = useCallback(
+    (paneId: number, host: HostSummary) => {
+      setWs((current) => retargetPane(current, paneId, { target: { kind: "ssh", hostId: host.id }, label: host.label, identity: hostIdentity(host) }));
+      window.setTimeout(() => void reloadRecent(), 3_000);
+    },
+    [reloadRecent],
+  );
+  // A quick pane that closed (or became a saved host's) leaves nothing behind.
+  const quickTokens = useRef(new Set<string>());
+  useEffect(() => {
+    const live = new Set<string>();
+    for (const pane of Object.values(ws.panes)) if (pane.target.kind === "quick") live.add(pane.target.token);
+    for (const token of quickTokens.current) if (!live.has(token)) forgetQuick(token);
+    quickTokens.current = live;
+  }, [ws.panes]);
 
   const connect = useCallback(
     (host: HostSummary) => {
@@ -1060,6 +1075,7 @@ function Shell() {
                 onToNewTab={onToNewTab}
                 onConnect={onConnectPanes}
                 onClose={onClosePane}
+                onQuickSaved={onQuickSaved}
                 onSplit={onSplitPane}
                 onRatio={onRatio}
                 onOpenKnownHosts={openKnownHosts}
