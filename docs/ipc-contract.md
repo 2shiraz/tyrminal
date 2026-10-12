@@ -69,6 +69,8 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `snippet_save` / `snippet_delete` | `SnippetInput` / id | `SnippetSummary` / — | Text ≤ 64 KiB, no control characters except tab/newline |
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
+| `note_get` / `note_set` | `SettingsTarget` / target + `NoteInput` or null | `Note` or null | P-30. Vault unlocked; text ≤ 64 KiB, no control or invisible characters except newline and tab; empty text deletes; stored encrypted in the target's settings record and deleted with its host or group |
+| `note_for_host` | host id | `HostNote[]` | The host's own note, then its groups' (nearest first) |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
 | `app_info` | — | `AppInfo` | Static build and platform facts (commit, build date, OS, architecture, Tauri and WebView versions); nothing about the user or the vault |
 | `layout_list` / `layout_save` / `layout_delete` | — / `LayoutTemplateInput` / id | `LayoutTemplateSummary[]` / `LayoutTemplateSummary` / — | Agent C. Saved only on request. Each split tree names each pane once, ratios are 0.15–0.85, at most 16 panes, SSH targets must be saved hosts. No commands, output or secrets are stored. A restored pane connects only on Connect |

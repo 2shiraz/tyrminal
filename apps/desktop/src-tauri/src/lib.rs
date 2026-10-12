@@ -173,6 +173,8 @@ pub fn run() {
             commands::sessions::session_attach,
             commands::sessions::session_diagnostics,
             commands::sessions::session_open_key_install,
+            commands::sessions::containers_list,
+            commands::sessions::container_session_open,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
             commands::files::files_pick_upload_folder,
@@ -291,6 +293,9 @@ pub fn run() {
             commands::inventory::startup_effective,
             commands::inventory::group_defaults_get,
             commands::inventory::group_defaults_set,
+            commands::inventory::note_get,
+            commands::inventory::note_set,
+            commands::inventory::note_for_host,
             // command history
             commands::command_history::history_settings_get,
             commands::command_history::history_settings_set,

@@ -126,6 +126,7 @@ export function CommandPalette({
   onInsertPassword,
   onSecurityReview,
   onConnectionLog,
+  onContainers,
   onSearchSessions,
   onCommandOutput,
 }: {
@@ -186,6 +187,8 @@ export function CommandPalette({
   onSecurityReview?: (() => void) | undefined;
   /** The focused SSH pane's connection log; present when it has a session. */
   onConnectionLog?: (() => void) | undefined;
+  /** P-33: containers on the focused connected SSH pane's host. */
+  onContainers?: (() => void) | undefined;
   /** P-28: search every open terminal's scrollback; present while any terminal is open. */
   onSearchSessions?: (() => void) | undefined;
   /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
@@ -296,6 +299,7 @@ export function CommandPalette({
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
       if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
+      if (onContainers) list.push(action("containers", msgD.containers.palette, <IconSquareTerminal size={16} />, onContainers));
       if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
     // agent C: workspaces

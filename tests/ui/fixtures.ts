@@ -24,6 +24,8 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */
+  notes?: Record<string, { text: string; format?: "plain" | "markdown" }>;
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;

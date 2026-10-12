@@ -13,6 +13,8 @@ import type {
   BackupPreview,
   BulkHostChange,
   ConflictChoice,
+  ContainerEngine,
+  ContainerList,
   DiagnosticEntry,
   EditStatus,
   ErrorCode,
@@ -229,6 +231,18 @@ export const sessions = {
   close: (sessionId: string) => call<void>("session_close", { sessionId }),
   /** What happened while the session connected (no secrets), also shortly after it ended. */
   diagnostics: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
+  /** P-33: running Docker or Podman containers on the host of a connected SSH session. */
+  containers: (sessionId: string) => call<ContainerList>("containers_list", { sessionId }),
+  /** P-33: a shell in a container, as a new session on the connection of `sessionId`. */
+  openContainer: (
+    sessionId: string,
+    engine: ContainerEngine,
+    containerId: string,
+    cols: number,
+    rows: number,
+    onOutput: OutputHandler,
+    onEvent: EventHandler,
+  ) => call<SessionOpened>("container_session_open", { sessionId, engine, containerId, cols, rows, ...channels(onOutput, onEvent) }),
   answerTrust: (sessionId: string, promptId: string, decision: TrustDecision) =>
     call<void>("session_trust_answer", { sessionId, promptId, decision }),
   /** `secret: null` dismisses the prompt. */
@@ -587,4 +601,13 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+/** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
+export const notes = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").Note | null>("note_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, note: import("@tyrminal/contracts").NoteInput | null) =>
+    call<import("@tyrminal/contracts").Note | null>("note_set", { target, note }),
+  /** A host's own note first, then its groups' (nearest first). */
+  forHost: (hostId: string) => call<import("@tyrminal/contracts").HostNote[]>("note_for_host", { hostId }),
 };

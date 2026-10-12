@@ -50,6 +50,8 @@ const COMMANDS: &[&str] = &[
     "session_attach",
     "session_diagnostics",
     "session_open_key_install",
+    "containers_list",
+    "container_session_open",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
@@ -168,6 +170,9 @@ const COMMANDS: &[&str] = &[
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    "note_get",
+    "note_set",
+    "note_for_host",
     // LAN discovery
     "discovery_networks",
     "discovery_start",

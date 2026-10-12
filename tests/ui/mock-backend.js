@@ -45,6 +45,7 @@ export function installMockBackend(options) {
     groups: [],
     snippets: [],
     knownHosts: [],
+    notes: {},
     sessions: new Map(),
     nextSession: 1,
   };
@@ -94,6 +95,12 @@ export function installMockBackend(options) {
       { id: id(300), host: "10.20.0.11", port: 22, algorithm: "ssh-ed25519", fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8", addedAt: now - 86400 * 30 },
       { id: id(301), host: "ci3.lab.example", port: 2222, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Z0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4", addedAt: now - 86400 * 4 },
     ];
+    // P-30: notes by host label or group name ("host:api-gateway", "group:Production").
+    for (const [key, note] of Object.entries(options.notes ?? {})) {
+      const [kind, name] = key.split(":");
+      const target = kind === "host" ? state.hosts.find((h) => h.label === name) : state.groups.find((g) => g.name === name);
+      if (target) state.notes[`${kind}:${target.id}`] = { format: "markdown", updatedAt: 1760184000, ...note };
+    }
     // security review (P-27): an old DSA key, a 2048-bit RSA key and an RSA-only trusted key for
     // a host that is no longer in the inventory.
     if (options.reviewFixtures) {
@@ -1262,6 +1269,27 @@ export function installMockBackend(options) {
       if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
     },
     session_write: (a, o) => write(o.headers["x-session"], a),
+    // P-33: containers on the host of an SSH session. Tests replace the list via __mockContainers.
+    containers_list: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return (
+        window.__mockContainers ?? {
+          engine: "docker",
+          containers: [
+            { id: "4f1c2b3a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a", name: "web", image: "nginx:1.27", status: "Up 3 hours" },
+            { id: "0a1b2c3d4e5f", name: "<img src=x onerror=window.__pwned=1>", image: "evil/<b>bold</b>", status: "Up 5 minutes" },
+          ],
+          problem: null,
+          skipped: 1,
+        }
+      );
+    },
+    container_session_open: (a) => {
+      if (!state.sessions.has(a.sessionId)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      // Like the core: anything that is not a container ID is refused before a session exists.
+      if (!/^[0-9a-f]{12,64}$/.test(a.containerId)) throw { code: "INVALID_INPUT", message: "That is not a container ID." };
+      return openSession(a, "local");
+    },
     session_diagnostics: () => {
       // terminal input: tests can replace the lines or make the request fail.
       if (window.__mockDiagnosticsError) throw { code: "NOT_FOUND", message: "No details are kept for that session any more." };
@@ -1353,6 +1381,29 @@ export function installMockBackend(options) {
     discovery_stop: () => {
       if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
       return { ...(state.discovery ?? { running: false, secondsLeft: 0, found: [], truncated: false }) };
+    },
+    // P-30: notes, keyed "host:<id>" / "group:<id>"; seeded only by a test (options.notes).
+    note_get: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      return state.notes[key] ? { ...state.notes[key] } : null;
+    },
+    note_set: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (!a.note || !a.note.text.trim()) {
+        delete state.notes[key];
+        return null;
+      }
+      state.notes[key] = { text: a.note.text.replace(/\r\n?/g, "\n"), format: a.note.format, updatedAt: 1760184000 };
+      return { ...state.notes[key] };
+    },
+    note_for_host: (a) => {
+      const h = state.hosts.find((x) => x.id === a.hostId);
+      if (!h) throw { code: "NOT_FOUND", message: "That host no longer exists." };
+      const out = state.notes[`host:${h.id}`] ? [{ note: { ...state.notes[`host:${h.id}`] }, origin: { kind: "host" } }] : [];
+      for (let g = state.groups.find((x) => x.id === h.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+        if (state.notes[`group:${g.id}`]) out.push({ note: { ...state.notes[`group:${g.id}`] }, origin: { kind: "group", groupId: g.id, name: g.name } });
+      }
+      return out;
     },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };

@@ -139,6 +139,25 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
 - The app never adds `sudo` and never retries with more privilege. A permission error is shown
   as it is.
 - Listing and shells stop when the session closes or the vault locks.
+- Implementation notes (2026-10-12):
+  - Listing is one fixed command (`crates/core/src/containers.rs`). It tries Docker, then
+    Podman, and prints one JSON object per line from the engine's own `--format` template.
+    Entries without a container ID are left out and counted. Text keeps 256 characters with
+    control and direction-override characters removed. A listing keeps at most 500 entries and
+    1 MiB of output.
+  - An engine does not end a process it started with `exec` when its client goes away. Closing
+    the channel ends the client normally, so the shell and anything it runs would stay in the
+    container. The fix has three parts:
+    - The shell carries `TYRMINAL_SHELL=<random token>` (passed with `-e`), and its children
+      inherit it.
+    - When the client ends for any reason, the server ends every process in the container that
+      carries the token: a hang-up first, then a kill after one second if any were found. The
+      server-side shell catches its own hang-up, so the clean-up still runs.
+    - The command is `sh -c '…'` with no single quote inside, so the user's login shell does not
+      matter.
+  - A container shell's channel is closed when its tab closes, because the connection stays open
+    for the SSH session. `ShellWriter` sends EOF and close on drop for PTY command channels.
+  - No new dependency.
 
 ## Consequences
 

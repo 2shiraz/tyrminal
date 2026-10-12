@@ -65,7 +65,7 @@ use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
 use crate::records::StoredProxy;
 use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
-    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
+    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, StoredNote, WorkflowRecord,
 };
 use tyrminal_contracts::{
     EffectiveEnvVar, EnvVar, ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment,
@@ -73,6 +73,7 @@ use tyrminal_contracts::{
     KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
 use tyrminal_contracts::{EffectiveStartup, GroupDefaults, GroupDefaultsInput, InheritedRoute, StartupSnippet};
+use tyrminal_contracts::{HostNote, Note, NoteInput};
 
 struct Stored<T> {
     revision: u64,
@@ -2940,6 +2941,61 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    // ---------- notes (P-30) ----------
+
+    fn note_view(stored: &StoredNote) -> Note {
+        Note { text: stored.text.clone(), format: stored.format, updated_at: stored.updated_at }
+    }
+
+    /// The note a host or group carries itself.
+    pub async fn note(&self, target: SettingsTarget) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::workflow_of(open, &target).and_then(|(_, w)| w.record.note.as_ref().map(Self::note_view)))
+    }
+
+    /// Replaces the note of a host or group; empty text (or `None`) deletes it.
+    pub async fn set_note(&self, target: SettingsTarget, input: Option<NoteInput>) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let note = match input {
+            Some(input) => validate::note_text(&input.text)?.map(|text| StoredNote {
+                text,
+                format: input.format,
+                updated_at: now_unix(),
+            }),
+            None => None,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        let view = note.as_ref().map(Self::note_view);
+        self.update_workflow(open, &target, |w| WorkflowRecord { note, ..w }).await?;
+        Ok(view)
+    }
+
+    /// The notes that apply to a host: its own first, then its groups' (nearest group first).
+    pub async fn host_notes(&self, host_id: &str) -> Result<Vec<HostNote>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let mut out = Vec::new();
+        if let Some(note) =
+            Self::workflow_of_host(open, &validate::id_text(&id)).and_then(|(_, w)| w.record.note.as_ref())
+        {
+            out.push(HostNote { note: Self::note_view(note), origin: SettingOrigin::Host });
+        }
+        for (group_id, group) in Self::group_chain(open, host) {
+            if let Some(note) = Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.note.as_ref()) {
+                let origin = SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() };
+                out.push(HostNote { note: Self::note_view(note), origin });
+            }
+        }
+        Ok(out)
     }
 
     // ---------- startup snippets (SNP-08) ----------
