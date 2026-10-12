@@ -285,6 +285,8 @@ function TabStripImpl({
           const status = tabStatus(ws, tab);
           const os = pane?.target.kind === "ssh" ? (osOf.get(pane.target.hostId) ?? null) : null;
           const isProduction = production ? panesOf(tab.layout).some((id) => production.has(id)) : false;
+          // A tab of SFTP panes only is not a terminal: it keeps the app's colours, not the scheme's.
+          const filesOnly = panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind === "sftp");
           return (
             <div
               key={tab.id}
@@ -302,6 +304,7 @@ function TabStripImpl({
               data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
               data-status={status.indicator}
               data-production={isProduction || undefined}
+              data-files-only={filesOnly || undefined}
               data-unread={status.unread || undefined}
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}

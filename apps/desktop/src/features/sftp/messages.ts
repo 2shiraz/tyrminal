@@ -27,6 +27,7 @@ export const msgSftp = {
   selectHost: "Select host",
   noHosts: "No SSH hosts yet. Add one in Hosts first.",
   searchHosts: "Filter hosts",
+  noHostMatch: (query: string) => `No host matches “${query}”.`,
   connecting: (label: string) => `Connecting to ${label}`,
   state: {
     resolving: "Looking up",
