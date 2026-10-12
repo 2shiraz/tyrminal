@@ -401,6 +401,18 @@ export const msg = {
     closeTab: "Close tab",
     safe: "Your vault data is unchanged.",
   },
+  quickUnlock: {
+    unlockButton: "Unlock with this device",
+    title: "Quick unlock on this device",
+    body: "Unlock without typing the passphrase. A key kept by your operating system's keychain opens the vault, so anyone who can use your account on this computer can open it too. Your passphrase and recovery key keep working.",
+    on: "Quick unlock is on for this device.",
+    off: "Quick unlock is off.",
+    enable: "Turn on quick unlock…",
+    disable: "Turn off quick unlock",
+    confirmTitle: "Turn on quick unlock",
+    confirmBody: "Enter your passphrase to confirm. It is checked, not stored.",
+    confirm: "Turn on",
+  },
   backup: {
     title: "Backup and restore",
     body: "A backup is one encrypted file with everything in your vault. It opens with your current passphrase or recovery key, on this or another device. Nothing in it is readable without them.",

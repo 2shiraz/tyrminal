@@ -1,8 +1,8 @@
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { BrandMark } from "../../components/layout/Sidebar";
 import { ErrorNotice, Notice, SecretField, TextField } from "../../components/ui/controls";
-import { IconCopy, IconLock, IconShieldCheck } from "../../components/ui/icons";
+import { IconCopy, IconFingerprint, IconLock, IconShieldCheck } from "../../components/ui/icons";
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
@@ -195,6 +195,17 @@ export function Unlock({ busy }: { busy: boolean }) {
   const [secret, setSecret] = useState("");
   const { pending, error, run, clearError } = useAction();
   const working = pending || busy;
+  const [quick, setQuick] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    vault.quickUnlockStatus().then(
+      (enabled) => alive && setQuick(enabled),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -240,6 +251,12 @@ export function Unlock({ busy }: { busy: boolean }) {
             </>
           )}
         </button>
+        {quick && (
+          <button type="button" className="btn btn-block" disabled={working} onClick={() => void run(() => vault.unlockWithDevice())}>
+            <IconFingerprint size={16} />
+            {msg.quickUnlock.unlockButton}
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-ghost btn-block"

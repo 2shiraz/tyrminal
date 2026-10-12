@@ -15,7 +15,7 @@ mod vault;
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
-pub use tyrminal_platform::restrict_to_owner;
+pub use tyrminal_platform::{MemorySecretStore, OsSecretStore, SecretStore, UnavailableSecretStore, restrict_to_owner};
 pub use vault::VaultService;
 
 use std::path::Path;
@@ -42,13 +42,25 @@ impl Core {
     /// Opens the vault database at `db_path` (creating an empty one if needed). Blocking: the
     /// caller runs this once at startup, off the UI thread.
     pub fn open(db_path: &Path) -> Result<Self, IpcError> {
-        let db = Database::open(db_path).map_err(error::from_storage)?;
-        let preferences = PreferencesStore::open(&db_path.with_file_name("preferences.json"));
-        Ok(Self::with_database(db, preferences))
+        Self::open_with_store(db_path, Arc::new(tyrminal_platform::UnavailableSecretStore))
     }
 
-    fn with_database(db: Database, preferences: PreferencesStore) -> Self {
-        let vault = Arc::new(VaultService::new(db));
+    /// Like `open`, with the OS secret store used for quick unlock.
+    pub fn open_with_store(
+        db_path: &Path,
+        secret_store: Arc<dyn tyrminal_platform::SecretStore>,
+    ) -> Result<Self, IpcError> {
+        let db = Database::open(db_path).map_err(error::from_storage)?;
+        let preferences = PreferencesStore::open(&db_path.with_file_name("preferences.json"));
+        Ok(Self::with_database(db, preferences, secret_store))
+    }
+
+    fn with_database(
+        db: Database,
+        preferences: PreferencesStore,
+        secret_store: Arc<dyn tyrminal_platform::SecretStore>,
+    ) -> Self {
+        let vault = Arc::new(VaultService::new(db, secret_store));
         let sessions = Sessions::new(Arc::clone(&vault));
         Self { vault, sessions, preferences: Arc::new(preferences) }
     }

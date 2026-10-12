@@ -12,6 +12,10 @@ const COMMANDS: &[&str] = &[
     "vault_change_passphrase",
     "vault_rotate_recovery_key",
     "vault_activity",
+    "vault_quick_unlock_status",
+    "vault_quick_unlock_enable",
+    "vault_quick_unlock_disable",
+    "vault_unlock_device",
     // inventory
     "host_list",
     "host_save",

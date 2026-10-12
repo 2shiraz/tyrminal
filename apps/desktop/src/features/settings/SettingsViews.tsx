@@ -1,5 +1,5 @@
 import type { KnownHostSummary, Preferences, TerminalPreferences } from "@tyrminal/contracts";
-import { type FormEvent, Suspense, lazy, useState } from "react";
+import { type FormEvent, Suspense, lazy, useEffect, useState } from "react";
 
 import { DEFAULT_PREFERENCES, usePreferences } from "../../app/preferences";
 import { Dialog } from "../../components/ui/Dialog";
@@ -117,8 +117,9 @@ type Section = "appearance" | "terminal" | "security" | "backup" | "privacy";
 export function SettingsView() {
   const { prefs, update, saveError } = usePreferences();
   const [section, setSection] = useState<Section>("appearance");
-  const [dialog, setDialog] = useState<"passphrase" | "recovery" | "restore" | null>(null);
+  const [dialog, setDialog] = useState<"passphrase" | "recovery" | "restore" | "quick" | null>(null);
   const [changed, setChanged] = useState(false);
+  const [quickKey, setQuickKey] = useState(0);
   const setTerminal = (patch: Partial<TerminalPreferences>) => update((p: Preferences) => ({ ...p, terminal: { ...p.terminal, ...patch } }));
   const t = prefs.terminal;
 
@@ -336,6 +337,7 @@ export function SettingsView() {
                   {msg.settings.rotateRecovery}
                 </button>
               </div>
+              <QuickUnlockSetting key={quickKey} onEnable={() => setDialog("quick")} />
             </section>
 
             <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">
@@ -374,9 +376,102 @@ export function SettingsView() {
         />
       )}
       {dialog === "recovery" && <RotateRecoveryDialog onClose={() => setDialog(null)} />}
+      {dialog === "quick" && (
+        <EnableQuickUnlockDialog
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            setQuickKey((k) => k + 1);
+          }}
+        />
+      )}
       {/* After a restore the vault locks and the app shows the unlock screen on its own. */}
       {dialog === "restore" && <RestoreBackupDialog vaultExists onClose={() => setDialog(null)} onRestored={() => setDialog(null)} />}
     </div>
+  );
+}
+
+/** Quick unlock state for this device, with the switch to turn it on (via a dialog) or off. */
+function QuickUnlockSetting({ onEnable }: { onEnable: () => void }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const { pending, error, run } = useAction();
+  useEffect(() => {
+    let alive = true;
+    vault.quickUnlockStatus().then(
+      (on) => alive && setEnabled(on),
+      () => alive && setEnabled(false),
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return (
+    <div className="stack-sm" data-testid="quick-unlock">
+      <h3 style={{ fontSize: "var(--text-md)" }}>{msg.quickUnlock.title}</h3>
+      <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+        {msg.quickUnlock.body}
+      </p>
+      {enabled !== null && <p role="status">{enabled ? msg.quickUnlock.on : msg.quickUnlock.off}</p>}
+      <div>
+        {enabled ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={pending}
+            onClick={async () => {
+              const done = await run(async () => {
+                await vault.disableQuickUnlock();
+                return true;
+              });
+              if (done) setEnabled(false);
+            }}
+          >
+            {msg.quickUnlock.disable}
+          </button>
+        ) : (
+          <button type="button" className="btn" disabled={enabled === null} onClick={onEnable}>
+            <IconFingerprint size={15} />
+            {msg.quickUnlock.enable}
+          </button>
+        )}
+      </div>
+      <ErrorNotice error={error} />
+    </div>
+  );
+}
+
+function EnableQuickUnlockDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [passphrase, setPassphrase] = useState("");
+  const { pending, error, run } = useAction();
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!passphrase || pending) return;
+    const value = passphrase;
+    setPassphrase("");
+    const ok = await run(async () => {
+      await vault.enableQuickUnlock(value);
+      return true;
+    });
+    if (ok) onDone();
+  }
+  return (
+    <Dialog title={msg.quickUnlock.confirmTitle} icon={<IconFingerprint size={18} />} onDismiss={onClose}>
+      <form className="stack" onSubmit={submit} aria-busy={pending}>
+        <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+          {msg.quickUnlock.body} {msg.quickUnlock.confirmBody}
+        </p>
+        <SecretField label={msg.settings.current} value={passphrase} onChange={setPassphrase} autoFocus maxLength={1024} />
+        <ErrorNotice error={error} />
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            {msg.common.cancel}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={!passphrase || pending}>
+            {pending ? msg.common.working : msg.quickUnlock.confirm}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

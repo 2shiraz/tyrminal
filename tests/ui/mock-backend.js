@@ -217,6 +217,22 @@ export function installMockBackend(options) {
       return structuredClone(state.prefs);
     },
     vault_status: () => ({ ...state.vault }),
+    vault_quick_unlock_status: () => state.quickUnlock === true,
+    vault_quick_unlock_enable: (a) => {
+      if (a.passphrase !== "correct horse") throw { code: "WRONG_CREDENTIAL", message: "That did not unlock the vault. Nothing was changed." };
+      state.quickUnlock = true;
+      return null;
+    },
+    vault_quick_unlock_disable: () => {
+      state.quickUnlock = false;
+      return null;
+    },
+    vault_unlock_device: () => {
+      if (!state.quickUnlock) throw { code: "WRONG_CREDENTIAL", message: "Quick unlock is not set up on this device. Use your passphrase." };
+      state.vault = { state: "unlocked", generation: state.vault.generation };
+      emit("vault-status", state.vault);
+      return null;
+    },
     vault_activity: () => null,
     vault_create: () => {
       state.vault = { state: "unlocked", generation: state.vault.generation };

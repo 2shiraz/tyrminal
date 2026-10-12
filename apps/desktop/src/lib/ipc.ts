@@ -73,6 +73,11 @@ export const vault = {
   noteActivity: () => call<void>("vault_activity"),
   changePassphrase: (current: string, next: string) => call<void>("vault_change_passphrase", { current, new: next }),
   rotateRecoveryKey: (passphrase: string) => call<RecoveryKeyIssued>("vault_rotate_recovery_key", { passphrase }),
+  /** Whether this device can unlock without the passphrase (OS secret store). */
+  quickUnlockStatus: () => call<boolean>("vault_quick_unlock_status"),
+  enableQuickUnlock: (passphrase: string) => call<void>("vault_quick_unlock_enable", { passphrase }),
+  disableQuickUnlock: () => call<void>("vault_quick_unlock_disable"),
+  unlockWithDevice: () => call<void>("vault_unlock_device"),
   /** Subscribes to vault state changes pushed by the native side. Returns an unsubscribe function. */
   onStatus(handler: (status: VaultStatus) => void): () => void {
     let active = true;

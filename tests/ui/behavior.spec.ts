@@ -380,3 +380,23 @@ test("backup: export reports the file; restore checks first and needs an explici
     { cmd: "backup_restore", args: { kind: "passphrase", secret: "correct horse battery", replaceExisting: true } },
   ]);
 });
+
+test("quick unlock: turned on with the passphrase, then the unlock screen offers it", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  const setting = page.getByTestId("quick-unlock");
+  await expect(setting.getByRole("status")).toHaveText("Quick unlock is off.");
+  await setting.getByRole("button", { name: "Turn on quick unlock…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Turn on quick unlock" });
+  await dialog.getByLabel("Current passphrase").fill("nope");
+  await dialog.getByRole("button", { name: "Turn on" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("did not unlock");
+  await dialog.getByLabel("Current passphrase").fill("correct horse");
+  await dialog.getByRole("button", { name: "Turn on" }).click();
+  await expect(setting.getByRole("status")).toHaveText("Quick unlock is on for this device.");
+
+  await page.keyboard.press("Control+Shift+L");
+  await expect(page.getByRole("heading", { name: "Unlock your vault" })).toBeVisible();
+  await page.getByRole("button", { name: "Unlock with this device" }).click();
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+});

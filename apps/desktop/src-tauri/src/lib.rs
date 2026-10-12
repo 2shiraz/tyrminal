@@ -59,7 +59,11 @@ fn open_core(app: &tauri::App) -> Result<(Core, std::fs::File), IpcError> {
     };
     let path = vault_path(&data_dir)?;
     let lock = lock_instance(&data_dir)?;
-    Ok((Core::open(&path)?, lock))
+    // Quick-unlock material lives in the OS secret store under this application's own service
+    // name. Test builds use a separate name so they never touch a real installation's items.
+    let service = if cfg!(feature = "e2e") { "app.tyrminal.desktop.e2e" } else { "app.tyrminal.desktop" };
+    let store = std::sync::Arc::new(tyrminal_core::OsSecretStore::new(service));
+    Ok((Core::open_with_store(&path, store)?, lock))
 }
 
 pub fn run() {
@@ -112,6 +116,10 @@ pub fn run() {
             commands::vault::vault_change_passphrase,
             commands::vault::vault_rotate_recovery_key,
             commands::vault::vault_activity,
+            commands::vault::vault_quick_unlock_status,
+            commands::vault::vault_quick_unlock_enable,
+            commands::vault::vault_quick_unlock_disable,
+            commands::vault::vault_unlock_device,
             commands::inventory::host_list,
             commands::inventory::host_save,
             commands::inventory::host_delete,

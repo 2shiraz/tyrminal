@@ -20,11 +20,12 @@ use tyrminal_contracts::{
     KeyImportInput, KeySummary, KnownHostSummary, RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState,
     VaultStatus,
 };
+use tyrminal_platform::{KeystoreError, SecretStore};
 use tyrminal_ssh::{ClientKey, Endpoint, KnownHost, PresentedHostKey};
 use tyrminal_storage::{Database, RecordRow, WriteCondition};
 use tyrminal_vault::{
     BackupRecord, Credential, Id, MAX_BACKUP_LEN, ParsedBackup, Passphrase, RecordContext, RecoveryKey, SealedRecord,
-    UnlockedVault, VaultHeader, create_vault, decode_backup, random_id,
+    SecretKey, UnlockedVault, VaultHeader, create_vault, decode_backup, random_id,
 };
 use zeroize::Zeroizing;
 
@@ -88,6 +89,8 @@ pub(crate) enum PlanAuth {
 
 pub struct VaultService {
     db: Database,
+    /// OS secret store for quick unlock. Unavailable stores fail closed: there is no fallback.
+    secret_store: std::sync::Arc<dyn SecretStore>,
     inner: Mutex<Inner>,
     status: watch::Sender<VaultStatus>,
     generation: AtomicU32,
@@ -145,10 +148,11 @@ fn snippet_summary(id: &Id, record: &SnippetRecord) -> SnippetSummary {
 }
 
 impl VaultService {
-    pub(crate) fn new(db: Database) -> Self {
+    pub(crate) fn new(db: Database, secret_store: std::sync::Arc<dyn SecretStore>) -> Self {
         let (status, _) = watch::channel(VaultStatus { state: VaultState::Locked, generation: 0 });
         Self {
             db,
+            secret_store,
             inner: Mutex::new(Inner::default()),
             status,
             generation: AtomicU32::new(0),
@@ -383,6 +387,147 @@ impl VaultService {
             }
         }
         Ok(open)
+    }
+
+    // ---------- quick unlock (device slot + OS secret store) ----------
+
+    fn quick_account(vault_id: &Id) -> String {
+        format!("quick-unlock-{}", validate::id_text(vault_id))
+    }
+
+    /// Runs a secret-store call off the async reactor (Secret Service and Keychain can block).
+    async fn store_call<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&dyn SecretStore) -> Result<T, KeystoreError> + Send + 'static,
+    ) -> Result<T, IpcError> {
+        let store = std::sync::Arc::clone(&self.secret_store);
+        tokio::task::spawn_blocking(move || f(store.as_ref())).await.map_err(|_| internal())?.map_err(|_| {
+            err(
+                ErrorCode::SecretStoreUnavailable,
+                "The system keychain is not available, so quick unlock cannot be used. Use your passphrase.",
+            )
+        })
+    }
+
+    /// The stored entry: device slot id (16 bytes) then the device secret (32 bytes).
+    fn parse_entry(bytes: &[u8]) -> Option<(Id, SecretKey)> {
+        let id: Id = bytes.get(..16)?.try_into().ok()?;
+        let secret: [u8; 32] = bytes.get(16..48)?.try_into().ok()?;
+        (bytes.len() == 48).then(|| (id, SecretKey::from_bytes(secret)))
+    }
+
+    /// Whether this device can unlock without the passphrase: the vault has the device slot
+    /// named by this device's keychain entry. Works while locked; never reveals the secret.
+    pub async fn quick_unlock_enabled(&self) -> Result<bool, IpcError> {
+        let header = {
+            let mut inner = self.inner.lock().await;
+            self.ensure_loaded(&mut inner).await?;
+            match inner.header.clone() {
+                Some(header) => header,
+                None => return Ok(false),
+            }
+        };
+        let account = Self::quick_account(&header.vault_id());
+        let Ok(entry) = self.store_call(move |s| s.get(&account)).await else { return Ok(false) };
+        Ok(entry.and_then(|e| Self::parse_entry(&e)).is_some_and(|(id, _)| header.device_slot_ids().contains(&id)))
+    }
+
+    /// Turns on quick unlock for this device after re-checking the passphrase with a real unlock.
+    /// The keychain entry is written first; if the vault header then cannot be written, the
+    /// entry is removed again. Any earlier slot of this device is replaced.
+    pub async fn enable_quick_unlock(&self, passphrase: String) -> Result<(), IpcError> {
+        let passphrase = Passphrase::new(passphrase);
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        if inner.open.is_none() {
+            return Err(locked());
+        }
+        let header = inner.header.clone().ok_or_else(locked)?;
+        let check = header.clone();
+        tokio::task::spawn_blocking(move || check.unlock(&Credential::Passphrase(&passphrase)).map(drop))
+            .await
+            .map_err(|_| internal())?
+            .map_err(from_vault)?;
+        let account = Self::quick_account(&header.vault_id());
+        let previous = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await?
+        };
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut next = header.clone();
+        if let Some((old_id, _)) = previous.as_deref().and_then(|e| Self::parse_entry(e))
+            && next.device_slot_ids().contains(&old_id)
+        {
+            next = open.keys.remove_device_slot(&next, &old_id).map_err(from_vault)?;
+        }
+        let secret = SecretKey::generate().map_err(from_vault)?;
+        let (next, slot_id) = open.keys.add_device_slot(&next, &secret).map_err(from_vault)?;
+        let mut entry = Zeroizing::new(Vec::with_capacity(48));
+        entry.extend_from_slice(&slot_id);
+        entry.extend_from_slice(secret.expose());
+        {
+            let account = account.clone();
+            self.store_call(move |s| s.set(&account, &entry)).await?;
+        }
+        if let Err(e) = self.db.replace_header(header.encode(), next.encode()).await.map_err(from_storage) {
+            let _ = self.store_call(move |s| s.delete(&account)).await;
+            return Err(e);
+        }
+        inner.header = Some(next);
+        Ok(())
+    }
+
+    /// Turns quick unlock off: removes this device's slot from the vault, then its keychain entry.
+    /// If the keychain cannot be read, every device slot is removed (the safe direction).
+    pub async fn disable_quick_unlock(&self) -> Result<(), IpcError> {
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let header = inner.header.clone().ok_or_else(locked)?;
+        let account = Self::quick_account(&header.vault_id());
+        let entry = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await
+        };
+        let ids = match entry.ok().flatten().as_deref().and_then(|e| Self::parse_entry(e)) {
+            Some((id, _)) if header.device_slot_ids().contains(&id) => vec![id],
+            _ => header.device_slot_ids(),
+        };
+        let mut next = header.clone();
+        for id in &ids {
+            next = open.keys.remove_device_slot(&next, id).map_err(from_vault)?;
+        }
+        if !ids.is_empty() {
+            self.db.replace_header(header.encode(), next.encode()).await.map_err(from_storage)?;
+            inner.header = Some(next);
+        }
+        // The slot is gone, so a leftover entry could no longer open anything.
+        let _ = self.store_call(move |s| s.delete(&account)).await;
+        Ok(())
+    }
+
+    /// Unlocks with this device's keychain entry. A store that is unavailable, or an entry whose
+    /// slot no longer exists, fails: the passphrase is the way in, never a weaker fallback.
+    pub async fn unlock_with_device(&self) -> Result<(), IpcError> {
+        let header = {
+            let mut inner = self.inner.lock().await;
+            self.ensure_loaded(&mut inner).await?;
+            inner
+                .header
+                .clone()
+                .ok_or_else(|| err(ErrorCode::VaultNotInitialized, "There is no vault yet. Create one first."))?
+        };
+        let account = Self::quick_account(&header.vault_id());
+        let entry = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await?
+        };
+        let not_set_up =
+            || err(ErrorCode::WrongCredential, "Quick unlock is not set up on this device. Use your passphrase.");
+        let (slot_id, secret) = entry.as_deref().and_then(|e| Self::parse_entry(e)).ok_or_else(not_set_up)?;
+        if !header.device_slot_ids().contains(&slot_id) {
+            let _ = self.store_call(move |s| s.delete(&account)).await;
+            return Err(not_set_up());
+        }
+        self.unlock(move |h| h.unlock(&Credential::Device(&secret))).await
     }
 
     // ---------- backup and restore (docs/crypto-format.md §10) ----------

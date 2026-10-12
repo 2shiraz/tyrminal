@@ -730,3 +730,68 @@ async fn a_damaged_backup_restores_nothing_and_leaves_the_vault_intact() {
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
     assert_eq!(core.vault.list_hosts().await.unwrap()[0].label, "keep me");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn quick_unlock_uses_the_os_store_and_never_falls_back() {
+    use tyrminal_core::{MemorySecretStore, UnavailableSecretStore};
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(MemorySecretStore::default());
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.create(PASSPHRASE.into()).await.unwrap();
+    core.vault.save_host(host("alpha", HostAuthInput::AskPassword)).await.unwrap();
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+
+    // Enabling needs the real passphrase; a wrong one changes nothing.
+    assert_eq!(code(core.vault.enable_quick_unlock("wrong passphrase".into()).await), ErrorCode::WrongCredential);
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    assert!(core.vault.quick_unlock_enabled().await.unwrap());
+    // Enabling again replaces this device's slot rather than adding another.
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+
+    core.vault.lock().await;
+    assert!(core.vault.quick_unlock_enabled().await.unwrap(), "known while locked");
+    core.vault.unlock_with_device().await.unwrap();
+    assert_eq!(core.vault.list_hosts().await.unwrap()[0].label, "alpha");
+
+    // Survives a restart: the slot is in the vault file, the secret in the store.
+    drop(core);
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.unlock_with_device().await.unwrap();
+
+    // Turned off: the device can no longer unlock; the passphrase still can.
+    core.vault.disable_quick_unlock().await.unwrap();
+    core.vault.lock().await;
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+
+    // No OS store: enabling fails without touching the vault, and unlock says so plainly.
+    drop(core);
+    let core = Core::open_with_store(&db_path(&dir), Arc::new(UnavailableSecretStore)).unwrap();
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(code(core.vault.enable_quick_unlock(PASSPHRASE.into()).await), ErrorCode::SecretStoreUnavailable);
+    core.vault.lock().await;
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::SecretStoreUnavailable);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_quick_unlock_entry_opens_nothing_and_is_removed() {
+    use tyrminal_core::MemorySecretStore;
+    use tyrminal_core::contracts::BackupCredentialKind;
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(MemorySecretStore::default());
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.create(PASSPHRASE.into()).await.unwrap();
+    let before = core.vault.export_backup().await.unwrap(); // has no device slot
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    // Restoring the older backup drops the device slot; the keychain entry is now stale.
+    core.vault.restore_backup(before, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await.unwrap();
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    // Asking again gives the same answer (the stale entry was removed, not reused).
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+}

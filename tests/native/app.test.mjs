@@ -285,6 +285,36 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     }
   });
 
+  test("quick unlock uses the OS secret store, or refuses plainly when there is none", async (t) => {
+    await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    const setting = await s.waitFor('[data-testid="quick-unlock"]');
+    await s.until(async () => /Quick unlock is (on|off)/.test(await s.text(setting)), { describe: "quick unlock state" });
+    await s.clickButton("Turn on quick unlock…");
+    await s.fill("Current passphrase", PASSPHRASE, { within: "dialog" });
+    await s.clickButton("Turn on", { within: "dialog" });
+    const outcome = await s.until(async () => {
+      const text = await s.execute("return document.body.innerText");
+      if (/Quick unlock is on for this device/.test(text)) return "on";
+      if (/keychain is not available/.test(text)) return "unavailable";
+      return null;
+    }, { describe: "quick unlock outcome", timeout: 20_000 });
+    t.diagnostic(`quick unlock path: ${outcome}`);
+    if (outcome === "unavailable") {
+      // No OS secret store here (e.g. Linux without a Secret Service): nothing changed.
+      await s.clickButton("Cancel", { within: "dialog" });
+      assert.match(await s.text(await s.waitFor('[data-testid="quick-unlock"]')), /Quick unlock is off/);
+      return;
+    }
+    await s.click(await s.waitFor('nav.sidebar [data-nav="lock"]'));
+    await s.until(async () => (await heading()) === "Unlock your vault", { describe: "locked" });
+    await s.clickButton("Unlock with this device");
+    await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
+    // Turn it off again so the test leaves no keychain item behind.
+    await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    await s.clickButton("Turn off quick unlock");
+    await s.until(async () => /Quick unlock is off/.test(await s.text(await s.waitFor('[data-testid="quick-unlock"]'))), { describe: "off" });
+  });
+
   test("a second instance on the same data refuses to start and leaves the first untouched", async () => {
     const second = await App.launch({ dataDir: app.dataDir });
     try {
