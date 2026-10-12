@@ -5,14 +5,14 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, waitForTerminalText } from "./fixtures";
 
 const glanceCalls = (page: Page) =>
   page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((x) => x.cmd === "glance_get").length);
 
 async function connect(page: Page, host = "api-gateway") {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: `Connect to ${host}` }).click();
+  await connectHost(page, host);
 }
 
 async function connected(page: Page) {
@@ -113,7 +113,7 @@ test("server panel: never offered for a Telnet session", async ({ page }) => {
   await dialog.getByLabel("Name", { exact: true }).focus();
   await expect(dialog).toHaveAttribute("data-autosave", "clean");
   await expect(dialog).toHaveAttribute("data-created", "true");
-  await page.getByRole("button", { name: "Connect to old-switch" }).click();
+  await connectHost(page, "old-switch");
   await expect(page.getByText("Telnet is not encrypted").first()).toBeVisible();
   await expect(page.locator('.statusbar [role="status"]')).toContainText(/Connected/i);
   await expect(serverButton(page)).toHaveCount(0);

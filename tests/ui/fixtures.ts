@@ -91,3 +91,15 @@ export async function waitForTerminalText(page: Page, text: string) {
     text,
   );
 }
+
+/**
+ * Connects to a saved host the way a user does: double-click its row on Home or its row or card on
+ * Hosts (there is no Connect button on them).
+ */
+export async function connectHost(page: Page, label: string) {
+  await page
+    .locator('[data-testid="host-list"], table.home-hosts')
+    .getByRole("button", { name: label, exact: true })
+    .first()
+    .dblclick();
+}

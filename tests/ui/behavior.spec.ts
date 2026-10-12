@@ -2,7 +2,7 @@
 // backend. Native enforcement of the same rules is tested in crates/core and tests/native.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, openSettings, terminalText, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, openSettings, terminalText, waitForTerminalText } from "./fixtures";
 import { pointOf } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
@@ -293,7 +293,7 @@ test("every button has an accessible name and ids are unique", async ({ page }) 
 
 test("a changed host key blocks the session and leads to Known hosts", async ({ page }) => {
   await openApp(page, { hostKeyChangedFor: "db-primary" });
-  await page.getByRole("button", { name: "Connect to db-primary" }).first().click();
+  await connectHost(page, "db-primary");
   const overlay = page.getByRole("alert").filter({ hasText: "This server's identity has changed" });
   await expect(overlay).toBeVisible();
   await expect(overlay).toContainText("no password or key was sent");

@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, waitForTerminalText } from "./fixtures";
 
 const callsOf = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -12,7 +12,7 @@ const callsOf = (page: Page, cmd: string) =>
 async function connected(page: Page) {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Connect to api-gateway" }).click();
+  await connectHost(page, "api-gateway");
   await waitForTerminalText(page, "deploy@api-gateway");
 }
 

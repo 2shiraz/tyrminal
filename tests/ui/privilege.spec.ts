@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const SECRET = "synthetic-identity-pass";
 
@@ -37,7 +37,7 @@ async function identityForHost(page: Page, host: string) {
 test("nothing is typed until the user confirms, and the page never holds the password", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await identityForHost(page, "staging-web");
-  await page.getByRole("button", { name: "Connect to staging-web" }).first().click();
+  await connectHost(page, "staging-web");
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
 
   // Whatever the server prints, nothing is typed on its own.
@@ -69,7 +69,7 @@ test("nothing is typed until the user confirms, and the page never holds the pas
 
 test("the palette offers it in an SSH session; a host without an identity has nothing to type", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
-  await page.getByRole("button", { name: "Connect to db-primary" }).first().click();
+  await connectHost(page, "db-primary");
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
   await page.keyboard.press("Control+Shift+K");
   await page.getByRole("combobox", { name: /Type a command/ }).fill("identity password");

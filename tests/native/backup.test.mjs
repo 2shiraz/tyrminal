@@ -79,7 +79,9 @@ describe("backup and restore in the real application", { concurrency: false }, (
       await s.clickButton("Unlock");
       await s.until(async () => (await t.heading()) === "Home", { describe: "home", timeout: 20_000 });
       await t.nav("Hosts");
-      await s.waitFor('[aria-label="Connect to backup-host-alpha"]');
+      await s.until(() => s.execute(`return [...document.querySelectorAll('[data-testid="host-list"] .host-open')].some((b) => b.textContent.trim() === "backup-host-alpha")`), {
+        describe: "the restored host on Hosts",
+      });
     } finally {
       await app.quit();
     }

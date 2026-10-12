@@ -7,12 +7,12 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, openSettings, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, openSettings, waitForTerminalText } from "./fixtures";
 
 async function connected(page: Page) {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Connect to api-gateway" }).click();
+  await connectHost(page, "api-gateway");
   await waitForTerminalText(page, "deploy@api-gateway");
 }
 

@@ -138,8 +138,7 @@ export function ui(s) {
     /** Connects to the host card labelled `label`, trusting the server once. */
     async connect(label) {
       await api.nav("Hosts");
-      const button = await s.waitFor(`[data-testid="host-list"] button[aria-label="Connect to ${label}"]`);
-      await s.click(button);
+      await s.openHost('[data-testid="host-list"]', label);
       await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
       await s.clickButton("Trust once", { within: "dialog" });
       await s.waitGone("dialog");

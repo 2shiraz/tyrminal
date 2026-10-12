@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, waitForTerminalText } from "./fixtures";
 
 const nav = (page: Page, name: string) => page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: new RegExp(`^${name}`) }).first().click();
 const commandLine = (page: Page) =>
@@ -54,7 +54,7 @@ test("group variables are inherited, host values override them, refusals are rep
   expect((await envSets()).at(-1)?.args.vars.map((v) => v.name)).toEqual(["TYR_REGION"]);
 
   // Connecting reports the variable the server refused, by name.
-  await page.getByRole("button", { name: "Connect to api-gateway" }).click();
+  await connectHost(page, "api-gateway");
   await waitForTerminalText(page, "deploy@api-gateway");
   await expect(page.getByText("The server refused the environment variable LEGACY_MODE")).toBeVisible();
 
