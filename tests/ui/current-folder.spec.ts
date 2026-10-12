@@ -35,7 +35,7 @@ async function duplicateTab(page: Page, name: RegExp) {
 const panel = (page: Page) => page.getByRole("complementary", { name: "Files" });
 /** The folder the panel shows, by its list's name ("Contents of /path"). */
 const folderList = (page: Page) => panel(page).getByRole("grid", { name: /^Contents of \// });
-const shows = (page: Page, path: string) => expect(folderList(page)).toHaveAccessibleName(`Contents of ${path}`);
+const shows = (page: Page, path: string) => expect(folderList(page)).toHaveAccessibleName(`Contents of ${path} on api-gateway`);
 
 test("the files panel opens in the shell's folder and can go back to it", async ({ page }) => {
   await connected(page);
