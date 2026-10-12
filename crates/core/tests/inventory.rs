@@ -317,3 +317,52 @@ async fn imports_preview_first_then_create_hosts_and_groups_in_one_transaction()
     assert_eq!(code(v.import_hosts(one, Some("0".repeat(32))).await), ErrorCode::NotFound);
     assert_eq!(v.list_hosts().await.unwrap().len(), 4);
 }
+
+// agent D: inventory and snippets
+
+#[tokio::test]
+async fn host_os_is_set_in_bulk_follows_duplicates_and_goes_with_deleted_hosts() {
+    use tyrminal_core::contracts::HostOs;
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let a = v.save_host(host("web-1", None)).await.unwrap();
+    let b = v.save_host(host("web-2", None)).await.unwrap();
+    let c = v.save_host(host("win-1", None)).await.unwrap();
+
+    // All or nothing: one unknown host refuses the whole change.
+    let missing = "0".repeat(32);
+    assert_eq!(code(v.set_host_os(&[a.id.clone(), missing], Some(HostOs::Debian)).await), ErrorCode::NotFound);
+    assert!(v.list_host_appearances().await.unwrap().is_empty());
+    assert_eq!(code(v.set_host_os(&["../etc".into()], Some(HostOs::Debian)).await), ErrorCode::InvalidInput);
+
+    assert_eq!(v.set_host_os(&[a.id.clone(), b.id.clone(), a.id.clone()], Some(HostOs::Debian)).await.unwrap(), 2);
+    assert_eq!(v.set_host_os(std::slice::from_ref(&c.id), Some(HostOs::Windows)).await.unwrap(), 1);
+    // Setting the same value again changes nothing.
+    assert_eq!(v.set_host_os(std::slice::from_ref(&a.id), Some(HostOs::Debian)).await.unwrap(), 0);
+    assert_eq!(v.set_host_os(std::slice::from_ref(&b.id), None).await.unwrap(), 1);
+
+    let copy = v.duplicate_host(&c.id).await.unwrap();
+    let os_of = |list: &[tyrminal_core::contracts::HostAppearance], id: &str| {
+        list.iter().find(|x| x.host_id == id).map(|x| x.os)
+    };
+    let list = v.list_host_appearances().await.unwrap();
+    assert_eq!(os_of(&list, &a.id), Some(HostOs::Debian));
+    assert_eq!(os_of(&list, &b.id), None);
+    assert_eq!(os_of(&list, &copy.id), Some(HostOs::Windows));
+
+    // Deleting hosts deletes their appearance in the same transaction, single and in bulk.
+    v.delete_host(&a.id).await.unwrap();
+    v.bulk_update_hosts(std::slice::from_ref(&c.id), BulkHostChange::Delete).await.unwrap();
+    let list = v.list_host_appearances().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(os_of(&list, &copy.id), Some(HostOs::Windows));
+
+    // Survives a fresh process opening the same file.
+    drop(core);
+    let reopened = Core::open(&dir.path().join("vault.db")).unwrap();
+    reopened.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let list = reopened.vault.list_host_appearances().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(os_of(&list, &copy.id), Some(HostOs::Windows));
+}

@@ -76,6 +76,9 @@ const COMMANDS: &[&str] = &[
     "backup_choose",
     "backup_preview",
     "backup_restore",
+    // agent D: inventory and snippets
+    "host_appearance_list",
+    "host_set_os",
 ];
 
 fn main() {

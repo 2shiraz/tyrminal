@@ -12,6 +12,10 @@ pub mod limits;
 
 mod dto;
 mod error;
+// agent D: inventory and snippets
+mod inventory;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
+// agent D: inventory and snippets
+pub use inventory::*;

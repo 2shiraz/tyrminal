@@ -73,6 +73,8 @@
     "allow-backup-export",
     "allow-backup-choose",
     "allow-backup-preview",
-    "allow-backup-restore"
+    "allow-backup-restore",
+    "allow-host-appearance-list",
+    "allow-host-set-os"
   ]
 }

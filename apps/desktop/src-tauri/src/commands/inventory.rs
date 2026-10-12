@@ -123,3 +123,21 @@ pub async fn key_deploy(
 ) -> Result<KeyDeployPreview, IpcError> {
     state.core()?.sessions.deploy_key(window.label(), &session_id, &key_id).await
 }
+
+// agent D: inventory and snippets
+
+#[tauri::command]
+pub async fn host_appearance_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<tyrminal_core::contracts::HostAppearance>, IpcError> {
+    state.core()?.vault.list_host_appearances().await
+}
+
+#[tauri::command]
+pub async fn host_set_os(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    os: Option<tyrminal_core::contracts::HostOs>,
+) -> Result<u32, IpcError> {
+    state.core()?.vault.set_host_os(&ids, os).await
+}

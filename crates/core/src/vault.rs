@@ -39,6 +39,9 @@ use crate::records::{
     KeyRecord, KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
 };
 use crate::validate;
+// agent D: inventory and snippets
+use crate::records::{HostAppearanceRecord, KIND_HOST_APPEARANCE};
+use tyrminal_contracts::{HostAppearance, HostOs};
 
 struct Stored<T> {
     revision: u64,
@@ -54,6 +57,8 @@ struct Open {
     known_hosts: BTreeMap<Id, Stored<KnownHostRecord>>,
     snippets: BTreeMap<Id, Stored<SnippetRecord>>,
     groups: BTreeMap<Id, Stored<GroupRecord>>,
+    // agent D: inventory and snippets
+    appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
 }
 
 impl Open {
@@ -65,6 +70,8 @@ impl Open {
             known_hosts: BTreeMap::new(),
             snippets: BTreeMap::new(),
             groups: BTreeMap::new(),
+            // agent D: inventory and snippets
+            appearances: BTreeMap::new(),
         }
     }
 }
@@ -452,6 +459,8 @@ impl VaultService {
                 KIND_KNOWN_HOST => load!(KnownHostRecord, open.known_hosts),
                 KIND_SNIPPET => load!(SnippetRecord, open.snippets),
                 KIND_GROUP => load!(GroupRecord, open.groups),
+                // agent D: inventory and snippets
+                KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -966,7 +975,18 @@ impl VaultService {
         }
         let record = HostRecord { label, last_connected_at: None, ..copy_host(source) };
         let id = random_id().map_err(from_vault)?;
-        self.write(open, id, KIND_HOST, 1, Some((&record, host_content_len(&record)))).await?;
+        // agent D: the copy keeps the source's appearance, written in the same transaction.
+        let appearance = Self::appearance_of(open, &validate::id_text(&source_id))
+            .map(|(_, s)| HostAppearanceRecord { host_id: validate::id_text(&id), os: s.record.os });
+        let appearance_id = random_id().map_err(from_vault)?;
+        let mut rows = vec![self.seal_row(open, id, KIND_HOST, 1, Some((&record, host_content_len(&record))))?];
+        if let Some(a) = &appearance {
+            rows.push(self.seal_row(open, appearance_id, KIND_HOST_APPEARANCE, 1, Some((a, a.host_id.len())))?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        if let Some(record) = appearance {
+            open.appearances.insert(appearance_id, Stored { revision: 1, record });
+        }
         let summary = host_summary(&group_index(open), &id, &record);
         open.hosts.insert(id, Stored { revision: 1, record });
         Ok(summary)
@@ -977,7 +997,13 @@ impl VaultService {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
         let revision = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.revision + 1;
-        self.write::<HostRecord>(open, id, KIND_HOST, revision, None).await?;
+        // agent D: the host's appearance record goes in the same transaction.
+        let (mut rows, appearance_ids) = self.appearance_tombstones(open, &[id])?;
+        rows.push(self.seal_row::<HostRecord>(open, id, KIND_HOST, revision, None)?);
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        for appearance in appearance_ids {
+            open.appearances.remove(&appearance);
+        }
         open.hosts.remove(&id);
         Ok(())
     }
@@ -1032,13 +1058,23 @@ impl VaultService {
             };
             writes.push((*id, stored.revision + 1, next));
         }
-        let rows = writes
+        let mut rows = writes
             .iter()
             .map(|(id, revision, record)| {
                 self.seal_row(open, *id, KIND_HOST, *revision, record.as_ref().map(|r| (r, host_content_len(r))))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // agent D: deleted hosts take their appearance records with them, in the same transaction.
+        let (appearance_rows, appearance_ids) = if matches!(change, BulkHostChange::Delete) {
+            self.appearance_tombstones(open, &ids)?
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        rows.extend(appearance_rows);
         self.db.put_records(rows).await.map_err(from_storage)?;
+        for appearance in appearance_ids {
+            open.appearances.remove(&appearance);
+        }
         let changed = writes.len() as u32;
         for (id, revision, record) in writes {
             match record {
@@ -1630,6 +1666,110 @@ impl VaultService {
             return Err(locked());
         }
         Ok(self.generation())
+    }
+}
+
+// agent D: inventory and snippets
+/// Rows ready for one `put_records` transaction.
+type SealedRows = Vec<(RecordRow, WriteCondition)>;
+
+impl VaultService {
+    /// The appearance record of a host, if it has one.
+    fn appearance_of<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<HostAppearanceRecord>)> {
+        open.appearances.iter().find(|(_, s)| s.record.host_id == host_id).map(|(id, s)| (*id, s))
+    }
+
+    /// Tombstones for the appearance records of hosts that are being deleted, so a host and
+    /// everything that belongs to it go in one transaction. Returns the rows and the record ids
+    /// to drop from memory once they are written.
+    fn appearance_tombstones(&self, open: &Open, host_ids: &[Id]) -> Result<(SealedRows, Vec<Id>), IpcError> {
+        let texts: std::collections::HashSet<String> = host_ids.iter().map(validate::id_text).collect();
+        let mut rows = Vec::new();
+        let mut ids = Vec::new();
+        for (id, stored) in open.appearances.iter().filter(|(_, s)| texts.contains(&s.record.host_id)) {
+            rows.push(self.seal_row::<HostAppearanceRecord>(
+                open,
+                *id,
+                KIND_HOST_APPEARANCE,
+                stored.revision + 1,
+                None,
+            )?);
+            ids.push(*id);
+        }
+        Ok((rows, ids))
+    }
+
+    /// The OS recorded for each host that has one.
+    pub async fn list_host_appearances(&self) -> Result<Vec<HostAppearance>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<HostAppearance> = open
+            .appearances
+            .values()
+            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os })
+            .collect();
+        list.sort_by(|a, b| a.host_id.cmp(&b.host_id));
+        Ok(list)
+    }
+
+    /// Sets (or with `None` clears) the OS of several hosts in one transaction. Every host must
+    /// exist; returns how many hosts changed.
+    pub async fn set_host_os(&self, host_ids: &[String], os: Option<HostOs>) -> Result<u32, IpcError> {
+        if host_ids.is_empty() {
+            return Ok(0);
+        }
+        if host_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one change."));
+        }
+        let ids: Vec<Id> = host_ids.iter().map(|id| validate::id(id)).collect::<Result<_, _>>()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut writes: Vec<(Id, u64, Option<HostAppearanceRecord>)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for id in &ids {
+            if !open.hosts.contains_key(id) {
+                return Err(not_found("A selected host no longer exists."));
+            }
+            let host_id = validate::id_text(id);
+            if !seen.insert(host_id.clone()) {
+                continue;
+            }
+            let current = Self::appearance_of(open, &host_id);
+            match (current, os) {
+                (Some((record_id, stored)), Some(os)) if stored.record.os != os => {
+                    writes.push((record_id, stored.revision + 1, Some(HostAppearanceRecord { host_id, os })));
+                }
+                (Some((record_id, stored)), None) => writes.push((record_id, stored.revision + 1, None)),
+                (None, Some(os)) => {
+                    if open.appearances.len() + writes.len() >= MAX_RECORDS_PER_KIND {
+                        return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of items."));
+                    }
+                    writes.push((random_id().map_err(from_vault)?, 1, Some(HostAppearanceRecord { host_id, os })));
+                }
+                _ => {}
+            }
+        }
+        let rows = writes
+            .iter()
+            .map(|(id, revision, record)| {
+                self.seal_row(open, *id, KIND_HOST_APPEARANCE, *revision, record.as_ref().map(|r| (r, r.host_id.len())))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let changed = writes.len() as u32;
+        for (id, revision, record) in writes {
+            match record {
+                Some(record) => {
+                    open.appearances.insert(id, Stored { revision, record });
+                }
+                None => {
+                    open.appearances.remove(&id);
+                }
+            }
+        }
+        Ok(changed)
     }
 }
 

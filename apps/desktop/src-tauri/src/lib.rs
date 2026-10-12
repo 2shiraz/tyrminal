@@ -184,6 +184,9 @@ pub fn run() {
             commands::backup::backup_choose,
             commands::backup::backup_preview,
             commands::backup::backup_restore,
+            // agent D: inventory and snippets
+            commands::inventory::host_appearance_list,
+            commands::inventory::host_set_os,
         ])
         .build(tauri::generate_context!());
 

@@ -1,8 +1,8 @@
-import type { BulkHostChange, GroupSummary, HostSummary, KeySummary } from "@tyrminal/contracts";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import type { BulkHostChange, GroupSummary, HostOs, HostSummary, KeySummary } from "@tyrminal/contracts";
+import { type FormEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
-import { type Workspace, panesOf } from "../../app/workspace";
+import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
@@ -26,12 +26,15 @@ import {
   IconUpload,
   IconX,
 } from "../../components/ui/icons";
-import { groups as groupsApi, hosts as hostsApi } from "../../lib/ipc";
+import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
 import { HostEditor, groupPath } from "./HostEditor";
 import { ImportDialog } from "./ImportDialog";
+import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
+import { OsIcon } from "./OsIcon";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -82,7 +85,15 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 }
 
 type Layout = "grid" | "list";
-type Sort = "name" | "recent";
+type Sort = "name" | "recent" | "address" | "group";
+
+/** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
+function rangeBetween(order: string[], from: string, to: string): string[] {
+  const a = order.indexOf(from);
+  const b = order.indexOf(to);
+  if (a < 0 || b < 0) return [to];
+  return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
 
 export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
   const { hosts, keys, recent, groups } = useVaultData();
@@ -101,6 +112,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const [deletingGroup, setDeletingGroup] = useState<GroupSummary | null>(null);
   const [bulk, setBulk] = useState<"move" | "add_tag" | "remove_tag" | "delete" | null>(null);
   const [importing, setImporting] = useState(false);
+  const [osOf, setOsOf] = useState<Map<string, HostOs>>(new Map());
+  const [settingOs, setSettingOs] = useState<{ ids: string[]; initial: HostOs | null } | null>(null);
+  const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null } | null>(null);
+  const anchor = useRef<string | null>(null);
   const remove = useAction();
   const action = useAction();
   const keyList = keys.value ?? [];
@@ -118,6 +133,23 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     }
     return ids;
   }, [ws]);
+
+  // OS icons live in their own records; reload them with the host list.
+  useEffect(() => {
+    if (!hosts.value) return;
+    let live = true;
+    appearanceApi
+      .list()
+      .then((list) => {
+        if (live) setOsOf(new Map(list.map((a) => [a.hostId, a.os])));
+      })
+      .catch(() => {
+        if (live) setOsOf(new Map());
+      });
+    return () => {
+      live = false;
+    };
+  }, [hosts.value]);
 
   // Search runs in the core (names, addresses, users, tags, group paths; tag:/group: terms).
   useEffect(() => {
@@ -151,7 +183,13 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
       all = all.filter((h) => h.groupId !== null && inside.has(h.groupId));
     }
     if (query.trim() && searched) all = all.filter((h) => searched.ids.has(h.id));
-    if (sort === "recent") all.sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0));
+    const byLabel = (a: HostSummary, b: HostSummary) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
+    const path = (h: HostSummary) => (h.groupId ? groupPath(groupList, h.groupId) : "");
+    if (sort === "name") all.sort(byLabel);
+    if (sort === "recent") all.sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0) || byLabel(a, b));
+    if (sort === "address") all.sort((a, b) => a.address.localeCompare(b.address, undefined, { numeric: true }) || a.port - b.port || byLabel(a, b));
+    // Hosts without a group last.
+    if (sort === "group") all.sort((a, b) => Number(!a.groupId) - Number(!b.groupId) || path(a).localeCompare(path(b)) || byLabel(a, b));
     return all;
   }, [hosts.value, query, searched, sort, filter, groupList]);
 
@@ -163,13 +201,38 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     void groups.reload();
   };
   const selectedIds = [...selected].filter((id) => hosts.value?.some((h) => h.id === id));
-  const toggle = (id: string) =>
+  const toggle = (id: string, event?: MouseEvent) => {
+    const from = anchor.current;
+    anchor.current = id;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const on = !next.has(id);
+      const ids = event?.shiftKey && from ? rangeBetween(filtered.map((h) => h.id), from, id) : [id];
+      for (const x of ids) {
+        if (on) next.add(x);
+        else next.delete(x);
+      }
       return next;
     });
+  };
+  const shownSelected = filtered.filter((h) => selected.has(h.id)).length;
+  const toggleAllShown = () =>
+    setSelected((current) => {
+      const next = new Set(current);
+      const all = filtered.length > 0 && filtered.every((h) => next.has(h.id));
+      for (const h of filtered) {
+        if (all) next.delete(h.id);
+        else next.add(h.id);
+      }
+      return next;
+    });
+  const free = Math.max(0, MAX_PANES - paneCount(ws));
+  const hostsInGroup = (id: string) => {
+    const inside = descendantsOf(groupList, id);
+    return [...(hosts.value ?? [])]
+      .filter((h) => h.groupId !== null && inside.has(h.groupId))
+      .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+  };
 
   async function duplicate(host: HostSummary) {
     const copy = await action.run(() => hostsApi.duplicate(host.id));
@@ -244,12 +307,24 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
         {selectedIds.length > 0 && (
           <div className="bulk-bar" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
             <strong>{msg.hosts.selected(selectedIds.length)}</strong>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => setConnectAll({ hosts: (hosts.value ?? []).filter((h) => selected.has(h.id)), groupName: null })}
+            >
+              <IconPlay size={13} />
+              {msgD.inventory.connectSelected}
+            </button>
             {groupList.length > 0 && (
               <button type="button" className="btn btn-sm" onClick={() => setBulk("move")}>
                 <IconFolder size={13} />
                 {msg.hosts.moveTo}
               </button>
             )}
+            <button type="button" className="btn btn-sm" onClick={() => setSettingOs({ ids: selectedIds, initial: null })}>
+              <IconServer size={13} />
+              {msgD.inventory.setOs}
+            </button>
             <button type="button" className="btn btn-sm" onClick={() => setBulk("add_tag")}>
               {msg.hosts.addTag}
             </button>
@@ -269,6 +344,18 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
 
         {total > 0 && (
           <div className="toolbar">
+            <input
+              type="checkbox"
+              className="select-all"
+              aria-label={msgD.inventory.selectAll}
+              title={msgD.inventory.selectAll}
+              checked={filtered.length > 0 && shownSelected === filtered.length}
+              ref={(el) => {
+                if (el) el.indeterminate = shownSelected > 0 && shownSelected < filtered.length;
+              }}
+              disabled={filtered.length === 0}
+              onChange={toggleAllShown}
+            />
             <div className="input-with-icon">
               <IconSearch size={15} />
               <input
@@ -289,6 +376,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               options={[
                 { value: "name", label: msg.hosts.sortName },
                 { value: "recent", label: msg.hosts.sortRecent },
+                { value: "address", label: msgD.inventory.sortAddress },
+                { value: "group", label: msgD.inventory.sortGroup },
               ]}
             />
             <Segmented<Layout>
@@ -340,9 +429,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       aria-label={msg.hosts.select(host.label)}
                       checked={selected.has(host.id)}
                       data-visible={selected.size > 0}
-                      onChange={() => toggle(host.id)}
+                      onClick={(event) => toggle(host.id, event)}
+                      readOnly
                     />
-                    <Avatar label={host.label} />
+                    {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                     <div className="host-card-main">
                       <span className="host-card-title">
                         <span className="truncate">{host.label}</span>
@@ -397,8 +487,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           <ul className="list" aria-label={msg.hosts.title} data-testid="host-list">
             {filtered.map((host) => (
               <li key={host.id}>
-                <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onChange={() => toggle(host.id)} />
-                <Avatar label={host.label} />
+                <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onClick={(event) => toggle(host.id, event)} readOnly />
+                {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                 <div className="row-main">
                   <span className="row-title">{host.label}</span>
                   <span className="row-sub">
@@ -441,6 +531,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               icon: <IconCopy size={15} />,
               onSelect: () => void duplicate(menu.host),
             },
+            {
+              label: msgD.inventory.setOs,
+              icon: <IconServer size={15} />,
+              onSelect: () => setSettingOs({ ids: [menu.host.id], initial: osOf.get(menu.host.id) ?? null }),
+            },
             "separator",
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
           ]}
@@ -468,6 +563,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           anchor={groupMenu.anchor}
           onClose={() => setGroupMenu(null)}
           items={[
+            {
+              label: msgD.inventory.connectGroup,
+              icon: <IconPlay size={15} />,
+              onSelect: () => setConnectAll({ hosts: hostsInGroup(groupMenu.group.id), groupName: groupPath(groupList, groupMenu.group.id) }),
+            },
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => setEditingGroup({ group: groupMenu.group }) },
             {
               label: msg.hosts.newGroup,
@@ -546,6 +646,37 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             if (changed !== undefined && changed !== null) {
               notify("success", msg.hosts.bulkDone(changed));
               setSelected(new Set());
+              reload();
+            }
+          }}
+        />
+      )}
+
+      {connectAll && (
+        <ConnectAllDialog
+          hosts={connectAll.hosts}
+          groupName={connectAll.groupName}
+          free={free}
+          onClose={() => setConnectAll(null)}
+          onConfirm={(list) => {
+            setConnectAll(null);
+            notify("success", msgD.inventory.connectAllDone(list.length));
+            for (const host of list) onConnect(host);
+          }}
+        />
+      )}
+
+      {settingOs && (
+        <SetOsDialog
+          count={settingOs.ids.length}
+          initial={settingOs.initial}
+          onClose={() => setSettingOs(null)}
+          onApply={async (os) => {
+            const ids = settingOs.ids;
+            setSettingOs(null);
+            const changed = await action.run(() => appearanceApi.setOs(ids, os));
+            if (changed !== undefined && changed !== null) {
+              notify("success", msgD.inventory.osChanged(ids.length));
               reload();
             }
           }}

@@ -602,6 +602,19 @@ export function installMockBackend(options) {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
       window.__mockOpenedLinks.push(a.url);
     },
+    // agent D: inventory and snippets
+    host_appearance_list: () => Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os })),
+    host_set_os: (a) => {
+      state.os ??= {};
+      for (const hostId of a.ids) {
+        if (!state.hosts.some((h) => h.id === hostId)) throw { code: "NOT_FOUND", message: "A selected host no longer exists." };
+      }
+      for (const hostId of a.ids) {
+        if (a.os === null) delete state.os[hostId];
+        else state.os[hostId] = a.os;
+      }
+      return a.ids.length;
+    },
   };
 
   /** Writes raw terminal output (escape sequences included) to the most recent session. */

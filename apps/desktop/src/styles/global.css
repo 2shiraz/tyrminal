@@ -3057,3 +3057,21 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--danger);
   white-space: normal;
 }
+
+/* agent D: inventory and snippets */
+.os-icon {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.toolbar .select-all {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.connect-all-list {
+  max-height: 280px;
+  overflow: auto;
+}

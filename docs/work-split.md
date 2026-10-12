@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | Importers (PuTTY, MobaXterm, SecureCRT) and known-host conversion |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)

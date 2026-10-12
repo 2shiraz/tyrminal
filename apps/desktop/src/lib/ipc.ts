@@ -256,3 +256,12 @@ export const backup = {
     call<BackupPreview>("backup_restore", { kind, secret, replaceExisting }),
 };
 
+
+// agent D: inventory and snippets
+
+/** Presentation settings of hosts (the OS icon), apart from their connection settings. */
+export const appearance = {
+  list: () => call<import("@tyrminal/contracts").HostAppearance[]>("host_appearance_list"),
+  /** Sets or clears (`null`) the OS of several hosts, all or nothing; resolves to how many changed. */
+  setOs: (ids: string[], os: import("@tyrminal/contracts").HostOs | null) => call<number>("host_set_os", { ids, os }),
+};

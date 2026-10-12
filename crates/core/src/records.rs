@@ -114,6 +114,18 @@ pub(crate) struct TrustEventRecord {
     pub at: u64,
 }
 
+// agent D: inventory and snippets
+// Agent D's record kinds start at 200 so parallel branches never pick the same number.
+pub(crate) const KIND_HOST_APPEARANCE: u16 = 200;
+
+/// Presentation settings of a host (its OS icon), apart from its connection settings. At most
+/// one per host; deleting the host deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct HostAppearanceRecord {
+    pub host_id: String,
+    pub os: tyrminal_contracts::HostOs,
+}
+
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does
 /// not leave partial copies behind in freed heap blocks.
 struct FixedWriter {
