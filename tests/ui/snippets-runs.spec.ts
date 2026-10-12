@@ -26,7 +26,7 @@ async function runOnHosts(page: Page, snippet: string) {
   return page.getByRole("dialog", { name: `Run “${snippet}” on hosts` });
 }
 
-test("run on several hosts: review first, then each host's own result, skipped hosts reported", async ({ page }) => {
+test("run on several hosts: review first, then each host's own result; a host without a session gets its own connection", async ({ page }) => {
   await openApp(page);
   await connect(page, "api-gateway", "staging-web");
   const dialog = await runOnHosts(page, "Disk usage");
@@ -38,20 +38,21 @@ test("run on several hosts: review first, then each host's own result, skipped h
 
   const review = page.getByRole("dialog", { name: "Run “Disk usage”?" });
   await expect(review.locator("pre")).toHaveText("df -h");
-  await expect(review).toContainText("1 host has no open session and will be skipped");
+  await expect(review).toContainText("1 host has no open session: Tyrminal connects to it for this run");
   expect(await calls(page, "snippet_exec")).toHaveLength(0);
-  await review.getByRole("button", { name: "Run on 2 hosts" }).click();
+  await review.getByRole("button", { name: "Run on 3 hosts" }).click();
 
   const results = page.getByTestId("run-results");
-  await expect(page.getByTestId("run-summary")).toHaveText("1 succeeded, 1 failed, 1 skipped");
+  await expect(page.getByTestId("run-summary")).toHaveText("2 succeeded, 1 failed");
   await expect(results.locator('[data-host="api-gateway"]')).toContainText("Succeeded");
   await expect(results.locator('[data-host="staging-web"]')).toContainText("Exit status 2");
-  await expect(results.locator('[data-host="edge-cache"]')).toContainText("Skipped: no open session");
+  await expect(results.locator('[data-host="edge-cache"]')).toContainText("Succeeded");
   await results.locator('[data-host="staging-web"] summary').click();
   await expect(results.locator('[data-host="staging-web"]')).toContainText("permission denied");
   // Environment variables the server refused on that host are reported with its result (SNP-13).
   await expect(results.locator('[data-host="staging-web"]')).toContainText("Not set by the server: LEGACY_MODE");
-  expect(await calls(page, "snippet_exec")).toHaveLength(2);
+  expect(await calls(page, "snippet_exec")).toHaveLength(3);
+  expect(await calls(page, "session_open_exec")).toHaveLength(1);
   await page.getByRole("button", { name: "Done" }).click();
 });
 
@@ -66,7 +67,7 @@ test("a selection is saved as a target and picked again later", async ({ page })
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   dialog = await runOnHosts(page, "Tail app log");
-  await dialog.getByLabel("Saved targets").selectOption({ label: "prod pair (2)" });
+  await dialog.getByLabel("Saved targets").selectOption({ label: "prod pair (2 hosts)" });
   await expect(dialog.getByRole("checkbox", { name: "Select api-gateway" })).toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Select db-primary" })).toBeChecked();
   await expect(dialog.getByRole("button", { name: "Review 2 hosts" })).toBeEnabled();
@@ -84,7 +85,7 @@ test("running hosts can be cancelled; open sessions can be selected in one step"
   await expect(results.locator('[data-host="build-runner-03"]')).toContainText("Running");
   await expect(page.getByRole("button", { name: "Done" })).toBeDisabled();
   await page.getByRole("button", { name: "Cancel runs" }).click();
-  await expect(results.locator('[data-host="build-runner-03"]')).toContainText("The run was cancelled.");
+  await expect(results.locator('[data-host="build-runner-03"]')).toContainText("Cancelled");
   await expect(page.getByTestId("run-summary")).toHaveText("1 succeeded, 1 failed");
   expect(await calls(page, "snippet_exec_cancel")).toHaveLength(1);
 });

@@ -2444,11 +2444,14 @@ impl VaultService {
     fn target_summary(open: &Open, id: &Id, record: &ExecutionTargetRecord) -> ExecutionTarget {
         let (live, missing): (Vec<&String>, Vec<&String>) =
             record.host_ids.iter().partition(|h| validate::id(h).ok().is_some_and(|id| open.hosts.contains_key(&id)));
+        let (groups, gone): (Vec<&String>, Vec<&String>) =
+            record.group_ids.iter().partition(|g| validate::id(g).ok().is_some_and(|id| open.groups.contains_key(&id)));
         ExecutionTarget {
             id: validate::id_text(id),
             name: record.name.clone(),
             host_ids: live.into_iter().cloned().collect(),
-            missing: missing.len() as u32,
+            group_ids: groups.into_iter().cloned().collect(),
+            missing: (missing.len() + gone.len()) as u32,
         }
     }
 
@@ -2460,16 +2463,17 @@ impl VaultService {
         Ok(list)
     }
 
-    /// Saves a host selection. Every host must exist now; duplicates are dropped.
+    /// Saves a selection of hosts and groups. Every one must exist now; duplicates are dropped.
     pub async fn save_execution_target(&self, input: ExecutionTargetInput) -> Result<ExecutionTarget, IpcError> {
         let name = validate::label(&input.name)?;
-        if input.host_ids.is_empty() {
-            return Err(invalid("Choose at least one host."));
+        if input.host_ids.is_empty() && input.group_ids.is_empty() {
+            return Err(invalid("Choose at least one host or group."));
         }
-        if input.host_ids.len() > MAX_BULK_HOSTS {
-            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one target."));
+        if input.host_ids.len() > MAX_BULK_HOSTS || input.group_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts or groups for one target."));
         }
         let ids: Vec<Id> = input.host_ids.iter().map(|h| validate::id(h)).collect::<Result<_, _>>()?;
+        let group_ids: Vec<Id> = input.group_ids.iter().map(|g| validate::id(g)).collect::<Result<_, _>>()?;
         let existing = input.id.as_deref().map(validate::id).transpose()?;
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
@@ -2483,6 +2487,16 @@ impl VaultService {
                 host_ids.push(text);
             }
         }
+        let mut groups: Vec<String> = Vec::with_capacity(group_ids.len());
+        for id in &group_ids {
+            if !open.groups.contains_key(id) {
+                return Err(not_found("A selected group no longer exists."));
+            }
+            let text = validate::id_text(id);
+            if !groups.contains(&text) {
+                groups.push(text);
+            }
+        }
         let (id, revision) = match existing {
             Some(id) => {
                 (id, open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1)
@@ -2494,8 +2508,10 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1)
             }
         };
-        let record = ExecutionTargetRecord { name, host_ids };
-        let content_len = record.name.len() + record.host_ids.iter().map(String::len).sum::<usize>();
+        let record = ExecutionTargetRecord { name, host_ids, group_ids: groups };
+        let content_len = record.name.len()
+            + record.host_ids.iter().map(String::len).sum::<usize>()
+            + record.group_ids.iter().map(String::len).sum::<usize>();
         self.write(open, id, KIND_EXECUTION_TARGET, revision, Some((&record, content_len))).await?;
         let summary = Self::target_summary(open, &id, &record);
         open.targets.insert(id, Stored { revision, record });

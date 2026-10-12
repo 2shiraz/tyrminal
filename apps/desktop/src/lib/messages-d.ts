@@ -110,7 +110,7 @@ export const msgD = {
   runs: {
     runOnHosts: "Run on hosts…",
     title: (name: string) => `Run “${name}” on hosts`,
-    body: "Runs the snippet without a terminal on each chosen host's open session, and reports each host's result. Commands that ask for a password fail here: nothing is typed into prompts.",
+    body: "Runs the snippet without a terminal on each chosen host and reports each host's result. Hosts with an open session in this window use it; for the others Tyrminal connects for the run and disconnects after. Commands that ask for a password fail here: nothing is typed into prompts.",
     hosts: "Hosts",
     filter: "Filter hosts",
     savedTargets: "Saved targets",
@@ -138,7 +138,7 @@ export const msgD = {
     exit: (code: number) => `Exit status ${code}`,
     signal: (name: string) => `Stopped by ${name}`,
     skippedRow: "Skipped: no open session",
-    truncated: "Output was cut to 64 KiB per stream.",
+    truncated: "Output was cut to 512 KiB per stream.",
     stdout: "Output",
     stderr: "Errors",
     noOutput: "No output",

@@ -218,6 +218,16 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_key_install", { hostId, events });
   },
+  /**
+   * A run-only connection for running a snippet on a host without an open session (exec
+   * channels, no shell). Trust and sign-in prompts arrive as events; with `interactive` false a
+   * host that needs sign-in input closes with NEEDS_SIGN_IN instead of asking.
+   */
+  openExec(hostId: string, interactive: boolean, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_exec", { hostId, interactive, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {

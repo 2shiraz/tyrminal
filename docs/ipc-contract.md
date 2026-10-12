@@ -29,7 +29,7 @@ generated files are stale.
 
 Commands reject with `IpcError { code: ErrorCode, message }`. `message` is user-facing,
 already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND`, `CONFLICT`,
-`INVALID_INPUT`, `AUTH_FAILED`, `HOST_KEY_CHANGED`, `CANCELLED`, `IO_ERROR`; see
+`INVALID_INPUT`, `AUTH_FAILED`, `HOST_KEY_CHANGED`, `CANCELLED`, `IO_ERROR`, `NEEDS_SIGN_IN`; see
 `crates/contracts/bindings/ErrorCode.ts` for the full list.
 
 ## Commands
@@ -57,6 +57,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |
 | `session_open_ssh` | host id, size, output channel, event channel | session id | Host-key trust and auth prompts arrive as events |
 | `session_open_local` | size, optional `startIn` folder, channels | session id | Local PTY; `startIn` used only if absolute, existing and free of control characters, else home |
+| `session_open_exec` | host id, `interactive`, event channel | session id | SSH hosts only, for snippet runs on hosts without an open session (SNP-05): same trust and auth prompts, then nothing but the exec channels `snippet_exec` opens (no shell, PTY or SFTP); with `interactive` false a needed sign-in answer is not asked and the session closes with `NEEDS_SIGN_IN`; `session_close` ends it |
 | `session_open_files` | host id, event channel | session id | SSH hosts only: same trust and auth prompts, then the SFTP subsystem and no shell or PTY; `session_write`/`session_resize` refuse it; `files_*` commands take its id; `session_close` ends it |
 | `files_local_mkdir` / `files_local_rename` / `files_local_remove` / `files_local_chmod` | grant token, names below it, name(s) / mode | — | Inside a folder the user chose natively only: single-component names, no link in any step, rename never replaces, delete removes files, links (not their targets) and empty folders only |
 | `session_write` | session id, bytes | — | Chunked; at most `MAX_TERMINAL_INPUT_CHUNK` per call |

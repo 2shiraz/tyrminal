@@ -82,6 +82,21 @@ pub async fn session_open_key_install(
     state.core()?.sessions.open_for_key_install(window.label(), &host_id, sink).await
 }
 
+/// A run-only connection (SNP-05): host-key trust and sign-in as for a terminal, then exec
+/// channels for snippet runs only. With `interactive` false, a host that needs sign-in input
+/// fails with `NEEDS_SIGN_IN` instead of asking.
+#[tauri::command]
+pub async fn session_open_exec(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    host_id: String,
+    interactive: bool,
+    events: Channel<SessionEvent>,
+) -> Result<SessionOpened, IpcError> {
+    let sink = Arc::new(EventSink(events));
+    state.core()?.sessions.open_exec(window.label(), &host_id, interactive, sink).await
+}
+
 struct EventSink(Channel<SessionEvent>);
 
 impl SessionSink for EventSink {

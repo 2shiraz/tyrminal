@@ -22,6 +22,7 @@ import {
 import { snippets as snippetsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgRuns } from "../../lib/messages-runs";
 import { MultiRunDialog } from "./MultiRunDialog";
 import { MoveSnippetDialog, RenameFolderDialog } from "./OrganizeDialogs";
 import { SnippetEditor } from "./SnippetEditor";
@@ -67,7 +68,7 @@ export function SnippetLibrary({
   const [editing, setEditing] = useState<{ snippet: SnippetSummary | null; initial?: Partial<SnippetSummary> } | null>(null);
   const [deleting, setDeleting] = useState<SnippetSummary | null>(null);
   const [menu, setMenu] = useState<{ snippet: SnippetSummary; anchor: HTMLElement } | null>(null);
-  const [runMany, setRunMany] = useState<SnippetSummary | null>(null);
+  const [runMany, setRunMany] = useState<{ snippet: SnippetSummary; allOpen: boolean } | null>(null);
   const [moving, setMoving] = useState<{ snippet: SnippetSummary; copy: boolean } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const all = snippets.value ?? [];
@@ -223,7 +224,8 @@ export function SnippetLibrary({
           anchor={menu.anchor}
           onClose={() => setMenu(null)}
           items={[
-            { label: msgD.runs.runOnHosts, icon: <IconPlay size={15} />, onSelect: () => setRunMany(menu.snippet) },
+            { label: msgD.runs.runOnHosts, icon: <IconPlay size={15} />, onSelect: () => setRunMany({ snippet: menu.snippet, allOpen: false }) },
+            { label: msgRuns.runAllOpen, icon: <IconPlay size={15} />, onSelect: () => setRunMany({ snippet: menu.snippet, allOpen: true }) },
             "separator",
             { label: msg.snippets.edit, icon: <IconPencil size={15} />, onSelect: () => setEditing({ snippet: menu.snippet }) },
             {
@@ -243,7 +245,7 @@ export function SnippetLibrary({
         />
       )}
 
-      {runMany && <MultiRunDialog snippet={runMany} onClose={() => setRunMany(null)} />}
+      {runMany && <MultiRunDialog snippet={runMany.snippet} allOpen={runMany.allOpen} onClose={() => setRunMany(null)} />}
 
       {moving && (
         <MoveSnippetDialog
