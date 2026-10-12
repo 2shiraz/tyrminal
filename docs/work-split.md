@@ -8,7 +8,7 @@ no secrets in logs or artifacts, a blocked check is BLOCKED).
 | | Agent A (first session) | Agent B (second session) |
 |---|---|---|
 | Branch | `claude/blissful-brown-7h9l18` (PR 2shiraz/tyrminal#2) | `claude/agent-b-tunnels-logs` |
-| Started from | — | commit `1fad2ce` of agent A's branch |
+| Started from | — | commit `ed76320` of agent A's branch (includes this file) |
 | Scope | Phase 06 remainder (SFTP), Phase 05 remainder (workspaces, layouts, tabs), Phase 02 remainder (screen-lock hook), snippets (Phase 08 SNP rows), Phase 09 release-candidate work | Phase 07 (port forwarding, jump hosts, proxies, agent forwarding, advanced auth) and Phase 08 history, logs and session recording |
 | Feature-matrix rows | every other row (`FIL`, `WSP`, `TRM`, `HST`, `IMP`, `KEY`, `SNP`, `UX`, `VLT`, `SEC`, `P` except `P-14`/`P-16`, `CON` except those listed for B, and the later-phase `ACC`, `COL`, `MOB`, `VID`, `Q`, `H` rows) | `FWD-*`, `LOG-*`, `AUT-*`, `CON-09`, `CON-10`, `CON-11`, `CON-15`, `P-14`, `P-16` |
 
