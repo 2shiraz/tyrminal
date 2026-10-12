@@ -87,6 +87,17 @@ pub(crate) fn effective<'a>(groups: &GroupIndex<'_>, host: &'a HostRecord) -> Ef
     Effective { username, port, auth, inherited }
 }
 
+/// Why a host is a production host (P-26): its own flag first, else any group in its chain.
+pub(crate) fn production(groups: &GroupIndex<'_>, host: &HostRecord) -> Option<tyrminal_contracts::ProductionSource> {
+    if host.production {
+        Some(tyrminal_contracts::ProductionSource::Host)
+    } else if chain(groups, host.group.as_deref()).iter().any(|g| g.production) {
+        Some(tyrminal_contracts::ProductionSource::Group)
+    } else {
+        None
+    }
+}
+
 /// What the renderer may know about effective authentication (never a secret).
 pub(crate) fn auth_summary(auth: &EffectiveAuth<'_>) -> HostAuth {
     match auth {
@@ -212,7 +223,14 @@ mod tests {
     use super::*;
 
     fn group(name: &str, parent: Option<&str>) -> GroupRecord {
-        GroupRecord { name: name.into(), parent: parent.map(Into::into), username: None, port: None, key_id: None }
+        GroupRecord {
+            name: name.into(),
+            parent: parent.map(Into::into),
+            username: None,
+            port: None,
+            key_id: None,
+            production: false,
+        }
     }
 
     #[test]
@@ -238,6 +256,41 @@ mod tests {
         let mut with_other = deep.clone();
         with_other.insert("O".into(), &other);
         assert!(check_placement(&with_other, Some("0"), Some("O")).is_err_and(|e| matches!(e, TreeError::TooDeep)));
+    }
+
+    #[test]
+    fn production_comes_from_the_host_or_any_group_above_it() {
+        use tyrminal_contracts::ProductionSource;
+        let mut top = group("top", None);
+        let mid = group("mid", Some("T"));
+        let leaf = group("leaf", Some("M"));
+        let host = |group: Option<&str>, own: bool| HostRecord {
+            label: "h".into(),
+            address: "192.0.2.1".into(),
+            port: 0,
+            username: String::new(),
+            auth: StoredAuth::AskPassword,
+            group: group.map(Into::into),
+            tags: Vec::new(),
+            last_connected_at: None,
+            protocol: tyrminal_contracts::HostProtocol::Ssh,
+            terminal: tyrminal_contracts::HostTerminal::default(),
+            forward_agent: false,
+            production: own,
+            connection: crate::records::StoredConnection::default(),
+        };
+        {
+            let groups: GroupIndex<'_> =
+                [("T".to_owned(), &top), ("M".to_owned(), &mid), ("L".to_owned(), &leaf)].into();
+            assert_eq!(production(&groups, &host(Some("L"), false)), None);
+            assert_eq!(production(&groups, &host(Some("L"), true)), Some(ProductionSource::Host));
+            assert_eq!(production(&groups, &host(None, false)), None);
+        }
+        top.production = true;
+        let groups: GroupIndex<'_> = [("T".to_owned(), &top), ("M".to_owned(), &mid), ("L".to_owned(), &leaf)].into();
+        assert_eq!(production(&groups, &host(Some("L"), false)), Some(ProductionSource::Group));
+        assert_eq!(production(&groups, &host(Some("L"), true)), Some(ProductionSource::Host));
+        assert_eq!(production(&groups, &host(None, false)), None);
     }
 
     #[test]

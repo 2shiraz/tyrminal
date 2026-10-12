@@ -26,4 +26,9 @@ diagnostics: boolean,
 /**
  * Off by default; see `PasswordCheckPreferences`.
  */
-passwordCheck: PasswordCheckPreferences, };
+passwordCheck: PasswordCheckPreferences, 
+/**
+ * Hosts carrying this tag are production hosts (P-26), like hosts with the production flag.
+ * Empty: no tag marks production hosts.
+ */
+productionTag: string, };

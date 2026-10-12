@@ -2,10 +2,11 @@ import type { GroupSummary, KeySummary } from "@tyrminal/contracts";
 import { type FormEvent, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
-import { ErrorNotice, TextField } from "../../components/ui/controls";
+import { ErrorNotice, Switch, TextField } from "../../components/ui/controls";
 import { IconFolder } from "../../components/ui/icons";
 import { groups as groupsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
 import { groupPath } from "./HostEditor";
@@ -47,6 +48,7 @@ export function GroupEditor({
   const [username, setUsername] = useState(group?.username ?? "");
   const [port, setPort] = useState(group?.port ? String(group.port) : "");
   const [keyId, setKeyId] = useState(group?.keyId ?? "");
+  const [production, setProduction] = useState(group?.production ?? false);
   const { pending, error, run } = useAction();
   const defaults = useGroupDefaults(group?.id ?? null);
 
@@ -67,6 +69,7 @@ export function GroupEditor({
         username: username.trim() === "" ? null : username.trim(),
         port: portNumber,
         keyId: keyId === "" ? null : keyId,
+        production,
       });
       await defaults.saveAfter(result.id);
       return result;
@@ -127,6 +130,7 @@ export function GroupEditor({
           </label>
         </fieldset>
         <GroupDefaultsSection state={defaults} />
+        <Switch label={msgProduction.groupSwitch} hint={msgProduction.groupHint} checked={production} onChange={setProduction} />
         <ErrorNotice error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose}>

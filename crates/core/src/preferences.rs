@@ -62,6 +62,11 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     prefs.password_check.endpoint = crate::password_check::validate_endpoint(&prefs.password_check.endpoint)?;
     // agent C: workspaces
     prefs.workspace = prefs.workspace.map(crate::layouts::sanitize_workspace).transpose()?;
+    // The production tag follows the rules of host tags; empty turns the tag rule off.
+    prefs.production_tag = crate::validate::tags(std::slice::from_ref(&prefs.production_tag))
+        .map_err(|_| invalid("Use a production tag like those on hosts: 32 bytes at most, no commas."))?
+        .pop()
+        .unwrap_or_default();
     Ok(prefs)
 }
 
@@ -197,6 +202,21 @@ mod tests {
             assert!(sanitize(prefs).is_ok());
         }
         assert!(sanitize(Preferences::default()).is_ok(), "no choice means the login shell");
+    }
+
+    #[test]
+    fn the_production_tag_follows_host_tag_rules_and_can_be_off() {
+        assert_eq!(Preferences::default().production_tag, "prod");
+        let with = |tag: &str| sanitize(Preferences { production_tag: tag.into(), ..Preferences::default() });
+        assert_eq!(with("  live ").unwrap().production_tag, "live");
+        assert_eq!(with("").unwrap().production_tag, "", "empty turns the tag rule off");
+        assert_eq!(with("   ").unwrap().production_tag, "");
+        for bad in ["a,b", "pro\u{202e}d", "x\ny", &"t".repeat(33)] {
+            assert!(with(bad).is_err(), "{bad:?}");
+        }
+        // Older preference files without the field keep the default.
+        let old: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(old.production_tag, "prod");
     }
 
     #[test]

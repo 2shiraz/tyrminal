@@ -63,6 +63,7 @@ export function DeployKeyDialog({
         protocol: host.protocol,
         terminal: host.terminal,
         forwardAgent: host.forwardAgent,
+        production: host.production === "host",
       }),
     );
     if (saved) {

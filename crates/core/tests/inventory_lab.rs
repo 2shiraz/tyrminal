@@ -83,6 +83,7 @@ fn host(label: &str, port: u16) -> HostInput {
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 
@@ -522,6 +523,7 @@ async fn hosts_sign_in_with_their_groups_identity_and_follow_its_changes() {
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();
@@ -613,6 +615,7 @@ async fn environment_variables_are_inherited_sent_and_refusals_reported() {
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();

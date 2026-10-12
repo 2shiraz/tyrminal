@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 import { installMockBackend } from "./mock-backend.js";
 
 export interface MockOptions {
+  /** The production tag preference (P-26); default "prod". */
+  productionTag?: string;
   scenario?: "unlocked" | "empty" | "onboarding" | "locked";
   theme?: "dark" | "light";
   scheme?: string;

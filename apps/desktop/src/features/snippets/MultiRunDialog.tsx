@@ -9,6 +9,9 @@ import { IconPlay, IconSave, IconSearch, IconTrash2 } from "../../components/ui/
 import { type AppError, snippetsD, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgProduction } from "../../lib/messages-production";
+import { ProductionConfirm } from "../hosts/ProductionConfirm";
+import { useIsProduction } from "../hosts/production";
 import { useSnippetRunHost } from "./runContext";
 
 /** Runs at once; the rest wait their turn. */
@@ -38,6 +41,8 @@ export function MultiRunDialog({ snippet, onClose }: { snippet: SnippetSummary; 
   const [targetName, setTargetName] = useState("");
   const [problem, setProblem] = useState<AppError | null>(null);
   const [rows, setRows] = useState<Map<string, Row>>(new Map());
+  const [confirming, setConfirming] = useState(false);
+  const isProduction = useIsProduction();
   const [, refresh] = useState(0);
   const cancelled = useRef(false);
   const all = hosts.value ?? [];
@@ -185,6 +190,7 @@ export function MultiRunDialog({ snippet, onClose }: { snippet: SnippetSummary; 
                   <span className="row-title">{h.label}</span>
                   <span className="row-sub">{msg.hosts.destination(h.username, h.address, h.port)}</span>
                 </div>
+                {isProduction(h) && <span className="badge badge-production">{msgProduction.label}</span>}
                 <span className={`badge ${sessionOf.has(h.id) ? "badge-success" : ""}`}>{sessionOf.has(h.id) ? msgD.runs.sessionOpen : msgD.runs.noSession}</span>
               </li>
             ))}
@@ -234,6 +240,7 @@ export function MultiRunDialog({ snippet, onClose }: { snippet: SnippetSummary; 
                   <span className="row-title">{h.label}</span>
                   <span className="row-sub">{msg.hosts.destination(h.username, h.address, h.port)}</span>
                 </div>
+                {isProduction(h) && <span className="badge badge-production">{msgProduction.label}</span>}
                 <span className={`badge ${sessionOf.has(h.id) ? "badge-success" : ""}`}>{sessionOf.has(h.id) ? msgD.runs.sessionOpen : msgD.runs.noSession}</span>
               </li>
             ))}
@@ -243,12 +250,28 @@ export function MultiRunDialog({ snippet, onClose }: { snippet: SnippetSummary; 
             <button type="button" className="btn" onClick={() => setStep("choose")} autoFocus data-autofocus>
               {msgD.runs.back}
             </button>
-            <button type="button" className="btn btn-primary" disabled={runnable.length === 0} onClick={() => void run()}>
+            <button type="button" className="btn btn-primary" disabled={runnable.length === 0}
+              onClick={() => (runnable.some(isProduction) ? setConfirming(true) : void run())}
+            >
               <IconPlay size={14} />
               {msgD.runs.run(runnable.length)}
             </button>
           </div>
         </div>
+      )}
+
+      {confirming && (
+        <ProductionConfirm
+          title={msgProduction.runTitle}
+          body={msgProduction.runBody}
+          confirmLabel={msgProduction.runConfirm}
+          hosts={runnable.filter(isProduction).map((h) => h.label)}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            void run();
+          }}
+        />
       )}
 
       {step === "run" && (

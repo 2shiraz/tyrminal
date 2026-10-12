@@ -89,6 +89,7 @@ export function HomeView({
         protocol: { type: "ssh" },
         terminal: { encoding: "utf8", term: "xterm256color" },
         forwardAgent: false,
+        production: false,
         auth: { kind: "ask_password" },
       });
       setQuery("");

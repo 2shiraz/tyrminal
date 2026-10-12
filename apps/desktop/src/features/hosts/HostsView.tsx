@@ -33,6 +33,7 @@ import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, id
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -41,6 +42,7 @@ import { groupPath } from "./hostForm";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+import { useIsProduction } from "./production";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
 import { EnvironmentDialog } from "./EnvironmentDialog";
@@ -107,6 +109,7 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
 export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const notify = useToast();
+  const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   const [layout, setLayout] = useState<Layout>("grid");
@@ -568,6 +571,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       </div>
                       <div className="host-card-meta">
                         <div className="host-card-badges">
+                        {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                         {identityOf(host.id) ? (
                           <span className="badge">
                             <IconUser size={12} />
@@ -623,6 +627,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                     </span>
                   </div>
+                  {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                   {connected.has(host.id) && (
                     <span className="badge badge-success">
                       <span className="status-dot" data-tone="ok" aria-hidden="true" />

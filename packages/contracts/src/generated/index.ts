@@ -87,6 +87,7 @@ export type { PasswordCheckReport } from "./PasswordCheckReport";
 export type { PasswordCheckStatus } from "./PasswordCheckStatus";
 export type { PickedKeyFile } from "./PickedKeyFile";
 export type { Preferences } from "./Preferences";
+export type { ProductionSource } from "./ProductionSource";
 export type { ProxyInput } from "./ProxyInput";
 export type { ProxySummary } from "./ProxySummary";
 export type { ProxyType } from "./ProxyType";

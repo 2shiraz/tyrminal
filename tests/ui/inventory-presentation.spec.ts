@@ -79,7 +79,8 @@ test("set the OS of selected hosts: the tile shows its icon", async ({ page }) =
 });
 
 test("connect to every host of a group after reviewing the list", async ({ page }) => {
-  await openApp(page);
+  // Production confirmations (P-26) are covered in production.spec.ts; the tag is off here.
+  await openApp(page, { productionTag: "" });
   await openHosts(page);
   await page.getByRole("button", { name: "Actions for group Production" }).click();
   await page.getByRole("menuitem", { name: "Connect to every host" }).click();
@@ -100,7 +101,8 @@ test("connect to every host of a group after reviewing the list", async ({ page 
 });
 
 test("a group-wide connection that does not fit is refused, not cut short", async ({ page }) => {
-  await openApp(page);
+  // Production confirmations (P-26) are covered in production.spec.ts; the tag is off here.
+  await openApp(page, { productionTag: "" });
   // Twelve sessions open (six hosts, twice), so four more fit.
   for (let round = 0; round < 2; round++) {
     await openHosts(page);

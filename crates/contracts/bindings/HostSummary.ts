@@ -3,6 +3,7 @@ import type { HostAuth } from "./HostAuth";
 import type { HostProtocol } from "./HostProtocol";
 import type { HostTerminal } from "./HostTerminal";
 import type { InheritedFields } from "./InheritedFields";
+import type { ProductionSource } from "./ProductionSource";
 
 export type HostSummary = { id: string, label: string, address: string, 
 /**
@@ -25,4 +26,9 @@ inherited: InheritedFields, groupId: string | null, tags: Array<string>,
 /**
  * Unix seconds of the last connection that reached the shell, if any (recent connections).
  */
-lastConnectedAt: number | null, protocol: HostProtocol, terminal: HostTerminal, forwardAgent: boolean, };
+lastConnectedAt: number | null, protocol: HostProtocol, terminal: HostTerminal, forwardAgent: boolean, 
+/**
+ * Why the host is a production host (P-26), from its own flag or a group above it; `None`
+ * when neither sets it. The production tag (a preference) is applied by the interface.
+ */
+production: ProductionSource | null, };

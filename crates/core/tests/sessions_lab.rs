@@ -363,6 +363,7 @@ impl Fixture {
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -2234,6 +2235,7 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent,
+        production: false,
     };
     let hop = format!(
         "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {} {user}@127.0.0.1 echo HOP-$((40+2))",
@@ -2452,6 +2454,7 @@ async fn a_files_only_connection_is_refused_for_a_telnet_host() {
         protocol: HostProtocol::Telnet,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     };
     let host = f.core.vault.save_host(input).await.unwrap().id;
     let (tx, _inbox) = mpsc::unbounded_channel();
@@ -2480,6 +2483,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             username: None,
             port: None,
             key_id: None,
+            production: false,
         })
         .await
         .unwrap();
@@ -2496,6 +2500,7 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         })
         .await
         .unwrap()

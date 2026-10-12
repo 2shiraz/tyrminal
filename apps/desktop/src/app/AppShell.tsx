@@ -11,6 +11,8 @@ import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
 import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
 import { msgP } from "../lib/messages-privilege";
+import { ProductionConfirm } from "../features/hosts/ProductionConfirm";
+import { useIsProduction } from "../features/hosts/production";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
@@ -43,6 +45,7 @@ import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
+import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
@@ -215,14 +218,40 @@ function Shell() {
     panelMemory.retain(live);
   }, [ws, statuses]);
 
+  // Panes connected to a production host (P-26), with the host's label, from the saved host and
+  // the production tag; follows changes to either.
+  const isProduction = useIsProduction();
+  const productionPanes = useMemo(() => {
+    const byId = new Map((data.hosts.value ?? []).map((h) => [h.id, h]));
+    const out = new Map<number, string>();
+    for (const p of Object.values(ws.panes)) {
+      const host = p.target.kind === "ssh" ? byId.get(p.target.hostId) : undefined;
+      if (host && isProduction(host)) out.set(p.id, host.label);
+    }
+    return out as ReadonlyMap<number, string>;
+  }, [ws, data.hosts.value, isProduction]);
+  // Production panes the user agreed to broadcast to, per tab. Forgotten when broadcasting stops,
+  // so turning it on again asks again.
+  const [broadcastConsent, setBroadcastConsent] = useState<ReadonlyMap<number, ReadonlySet<number>>>(new Map());
+  const [confirmBroadcast, setConfirmBroadcast] = useState<{ tabId: number; panes: number[] } | null>(null);
+  useEffect(() => {
+    setBroadcastConsent((current) => {
+      if ([...current.keys()].every((id) => broadcasting.has(id))) return current;
+      return new Map([...current].filter(([id]) => broadcasting.has(id)));
+    });
+  }, [broadcasting]);
+
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
       if (!broadcasting.has(tabId)) return;
+      const consent = broadcastConsent.get(tabId);
       for (const id of broadcastPanes(tabId)) {
+        // A production pane gets broadcast input only after the user confirmed it (P-26).
+        if (productionPanes.has(id) && !consent?.has(id)) continue;
         if (id !== from) handles.current.get(id)?.receiveBroadcast(bytes);
       }
     },
-    [broadcasting, broadcastPanes],
+    [broadcasting, broadcastPanes, broadcastConsent, productionPanes],
   );
 
   // A Settings section to open at (the sidebar's version opens About); any navigation clears it.
@@ -696,6 +725,7 @@ function Shell() {
               ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
               : null
           }
+          production={productionPanes}
         />
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
@@ -785,6 +815,7 @@ function Shell() {
                 }}
                 broadcasting={broadcasting}
                 onUserInput={relayInput}
+                production={productionPanes}
               />
             )}
           </Suspense>
@@ -995,6 +1026,7 @@ function Shell() {
       {reviewing && (
         <BroadcastReview
           targets={reviewing.targets}
+          production={productionPanes}
           onCancel={() => {
             setReviewing(null);
             focusedHandle()?.focus();
@@ -1009,11 +1041,36 @@ function Shell() {
               now.length === panesOf(t.layout).length &&
               now.length === targets.length &&
               now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            const production = targets.filter((x) => productionPanes.has(x.paneId)).map((x) => x.paneId);
             if (!same) {
               notify("danger", msgC.broadcast.changed);
+            } else if (production.length > 0) {
+              // Production panes need their own confirmation, naming the hosts (P-26).
+              setConfirmBroadcast({ tabId, panes: production });
+              return;
             } else {
               setBroadcasting((current) => new Set([...current, tabId]));
             }
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {confirmBroadcast && (
+        <ProductionConfirm
+          title={msgProduction.broadcastTitle}
+          body={msgProduction.broadcastBody}
+          confirmLabel={msgProduction.broadcastConfirm}
+          hosts={[...new Set(confirmBroadcast.panes.map((p) => productionPanes.get(p) ?? ""))].filter(Boolean)}
+          onCancel={() => {
+            setConfirmBroadcast(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const { tabId, panes } = confirmBroadcast;
+            setConfirmBroadcast(null);
+            setBroadcastConsent((current) => new Map(current).set(tabId, new Set(panes)));
+            setBroadcasting((current) => new Set(current).add(tabId));
             focusedHandle()?.focus();
           }}
         />

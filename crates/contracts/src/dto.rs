@@ -126,6 +126,20 @@ pub struct HostSummary {
     pub protocol: HostProtocol,
     pub terminal: HostTerminal,
     pub forward_agent: bool,
+    /// Why the host is a production host (P-26), from its own flag or a group above it; `None`
+    /// when neither sets it. The production tag (a preference) is applied by the interface.
+    pub production: Option<ProductionSource>,
+}
+
+/// Where a host's production flag comes from (P-26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProductionSource {
+    /// The host's own flag.
+    Host,
+    /// The flag of its group or a group above it.
+    Group,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -140,6 +154,8 @@ pub struct GroupSummary {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    /// Hosts in this group and its subgroups are production hosts (P-26).
+    pub production: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -153,6 +169,9 @@ pub struct GroupInput {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    /// Hosts in this group and its subgroups are production hosts (P-26).
+    #[serde(default)]
+    pub production: bool,
 }
 
 /// One change applied to several hosts at once, in a single transaction.
@@ -288,6 +307,9 @@ pub struct HostInput {
     /// Let the server use this host's sign-in key while the session is open (agent forwarding).
     #[serde(default)]
     pub forward_agent: bool,
+    /// Mark the host as a production host (P-26); groups above it can also set it.
+    #[serde(default)]
+    pub production: bool,
 }
 
 /// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a
@@ -500,7 +522,7 @@ impl Default for TerminalPreferences {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Preferences {
@@ -522,6 +544,28 @@ pub struct Preferences {
     // compromised-password check (SEC-11)
     /// Off by default; see `PasswordCheckPreferences`.
     pub password_check: crate::PasswordCheckPreferences,
+    /// Hosts carrying this tag are production hosts (P-26), like hosts with the production flag.
+    /// Empty: no tag marks production hosts.
+    pub production_tag: String,
+}
+
+/// The default production tag (P-26).
+pub const DEFAULT_PRODUCTION_TAG: &str = "prod";
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::default(),
+            reduce_motion: false,
+            terminal: TerminalPreferences::default(),
+            local_shell: None,
+            editor_apps: Vec::new(),
+            diagnostics: false,
+            workspace: None,
+            password_check: crate::PasswordCheckPreferences::default(),
+            production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
+        }
+    }
 }
 
 /// Static facts about this build and the computer it runs on, for Settings → About and bug

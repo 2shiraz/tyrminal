@@ -27,7 +27,8 @@ async function runOnHosts(page: Page, snippet: string) {
 }
 
 test("run on several hosts: review first, then each host's own result, skipped hosts reported", async ({ page }) => {
-  await openApp(page);
+  // The production confirmation (P-26) is covered in production.spec.ts; the tag is off here.
+  await openApp(page, { productionTag: "" });
   await connect(page, "api-gateway", "staging-web");
   const dialog = await runOnHosts(page, "Disk usage");
   const hosts = dialog.getByTestId("run-hosts");
@@ -73,7 +74,8 @@ test("a selection is saved as a target and picked again later", async ({ page })
 });
 
 test("running hosts can be cancelled; open sessions can be selected in one step", async ({ page }) => {
-  await openApp(page);
+  // The production confirmation (P-26) is covered in production.spec.ts; the tag is off here.
+  await openApp(page, { productionTag: "" });
   await connect(page, "build-runner-03", "api-gateway");
   const dialog = await runOnHosts(page, "Disk usage");
   await dialog.getByRole("button", { name: "Select hosts with open sessions" }).click();

@@ -137,6 +137,25 @@ imported without a jump host, and the preview says why. An OpenSSH `known_hosts`
 imported too: after a review, its keys become trusted server identities, and a key that differs
 from one you already trust is never replaced.
 
+### Production hosts
+
+Mark a host as a **production host** with the switch in its editor, mark a whole group (every
+host in it and its subgroups) in the group editor, or give hosts the production tag (Settings →
+Security → **Production tag**, `prod` unless you change it; leave it empty to use only the
+switches). The host editor says when a host is a production host through its group or tag.
+
+Production hosts show a red **Production** badge in Hosts. Their sessions have a red edge on the
+tab and around the pane, together with the word **Production**. Tyrminal asks before:
+
+- **broadcasting** to a tab that has a production pane (and asks again each time you turn
+  broadcasting on);
+- **running a snippet on several hosts** when some of them are production hosts;
+- **connecting every host of a group** (or a selection) that includes production hosts.
+
+Each question names the production hosts and starts on **Cancel**, so Enter or Escape never
+confirms by accident. The production marking only adds these questions; it never turns any
+other check off.
+
 ## Connecting and host keys
 
 The first time you connect to a server, Tyrminal shows its host-key fingerprint and asks whether

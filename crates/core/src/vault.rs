@@ -228,6 +228,7 @@ fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSu
         protocol: record.protocol.clone(),
         terminal: record.terminal,
         forward_agent: record.forward_agent,
+        production: inventory::production(groups, record),
     }
 }
 
@@ -252,6 +253,7 @@ fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
         username: record.username.clone(),
         port: record.port,
         key_id: record.key_id.clone(),
+        production: record.production,
     }
 }
 
@@ -287,6 +289,7 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         protocol: record.protocol.clone(),
         terminal: record.terminal,
         forward_agent: record.forward_agent,
+        production: record.production,
         // agent B: tunnels and history
         connection: record.connection.clone(),
     }
@@ -1071,6 +1074,7 @@ impl VaultService {
             protocol,
             terminal: input.terminal,
             forward_agent: input.forward_agent,
+            production: input.production,
             connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
@@ -1336,6 +1340,7 @@ impl VaultService {
                                 username: None,
                                 port: None,
                                 key_id: None,
+                                production: false,
                             },
                         ));
                         validate::id_text(&id)
@@ -1394,6 +1399,7 @@ impl VaultService {
                 protocol: tyrminal_contracts::HostProtocol::Ssh,
                 terminal: tyrminal_contracts::HostTerminal::default(),
                 forward_agent: false,
+                production: false,
                 // agent B: tunnels and history
                 connection: crate::records::StoredConnection { jump_host, proxy: None, own: false },
             };
@@ -1486,8 +1492,14 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1)
             }
         };
-        let record =
-            GroupRecord { name, parent: parent_text, username, port, key_id: key_id.map(|k| validate::id_text(&k)) };
+        let record = GroupRecord {
+            name,
+            parent: parent_text,
+            username,
+            port,
+            key_id: key_id.map(|k| validate::id_text(&k)),
+            production: input.production,
+        };
         self.write(open, id, KIND_GROUP, revision, Some((&record, group_content_len(&record)))).await?;
         let summary = group_summary(&id, &record);
         open.groups.insert(id, Stored { revision, record });
@@ -3824,6 +3836,7 @@ mod privilege_tests {
             protocol: tyrminal_contracts::HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         }
     }
 
@@ -3852,6 +3865,7 @@ mod privilege_tests {
                 username: None,
                 port: None,
                 key_id: None,
+                production: false,
             })
             .await
             .unwrap();

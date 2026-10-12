@@ -73,6 +73,9 @@ pub(crate) struct HostRecord {
     /// Agent forwarding to this host (off, and absent, unless the user turned it on).
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub forward_agent: bool,
+    /// Production host (P-26). Absent (not production) in older records.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub production: bool,
     // agent B: tunnels and history
     /// Jump host and other advanced connection settings. Absent in older records.
     #[serde(default, skip_serializing_if = "StoredConnection::is_default")]
@@ -90,6 +93,9 @@ pub(crate) struct GroupRecord {
     pub port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_id: Option<String>,
+    /// Hosts in this group and below are production hosts (P-26). Absent in older records.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub production: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -429,12 +435,14 @@ mod tests {
             protocol: tyrminal_contracts::HostProtocol::Ssh,
             terminal: tyrminal_contracts::HostTerminal::default(),
             forward_agent: false,
+            production: true,
             connection: StoredConnection::default(),
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);
         let Decoded::Live(back) = decode::<HostRecord>(&bytes).unwrap() else { panic!("expected live") };
         assert_eq!(back.label, host.label);
+        assert!(back.production);
         assert!(matches!(back.auth, StoredAuth::Password { ref password } if password.as_str() == "p\u{0}ss\nword\\"));
 
         assert!(matches!(decode::<HostRecord>(&tombstone()).unwrap(), Decoded::Tombstone));

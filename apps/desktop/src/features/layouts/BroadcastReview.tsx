@@ -2,6 +2,7 @@ import { Dialog } from "../../components/ui/Dialog";
 import { IconRadio } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
+import { msgProduction } from "../../lib/messages-production";
 
 export interface BroadcastTarget {
   paneId: number;
@@ -15,7 +16,18 @@ export interface BroadcastTarget {
  * Shows exactly which panes will receive typed input before broadcast starts (P-13). The safe
  * choice has initial focus; nothing is enabled until the user confirms this list.
  */
-export function BroadcastReview({ targets, onConfirm, onCancel }: { targets: BroadcastTarget[]; onConfirm: () => void; onCancel: () => void }) {
+export function BroadcastReview({
+  targets,
+  production,
+  onConfirm,
+  onCancel,
+}: {
+  targets: BroadcastTarget[];
+  /** Panes connected to a production host (P-26), marked in the list. */
+  production?: ReadonlyMap<number, string>;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   return (
     <Dialog title={msgC.broadcast.title(targets.length)} icon={<IconRadio size={18} />} tone="warning" role="alertdialog" onDismiss={onCancel}>
       <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
@@ -29,6 +41,7 @@ export function BroadcastReview({ targets, onConfirm, onCancel }: { targets: Bro
               <span>{t.label}</span>
               <span className="faint mono">{t.identity}</span>
             </span>
+            {production?.has(t.paneId) && <span className="badge badge-production">{msgProduction.label}</span>}
           </li>
         ))}
       </ul>
