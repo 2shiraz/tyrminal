@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tyrminal overhaul prototype</title>
+<!-- Static mock-ups for docs/design/overhaul.md. Open with ?screen=<name>&theme=dark|light&palette=fjord|contrast.
+     Synthetic data only; nothing here talks to a backend. -->
+<link rel="stylesheet" href="../../../apps/desktop/src/styles/next/theme.css">
+<link rel="stylesheet" href="../../../apps/desktop/src/styles/next/motion.css">
+<link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+<div id="root"></div>
+<script src="icons.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const screen = q.get("screen") ?? "hosts";
+document.documentElement.dataset.theme = q.get("theme") ?? "dark";
+if (q.get("palette")) document.documentElement.dataset.palette = q.get("palette");
+if (q.get("blurred")) document.documentElement.classList.add("blurred");
+
+const i = (name, cls = "") => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const cursor = `<span class="cursor" aria-hidden="true"></span>`;
+
+const hosts = [
+  ["api-gateway", "deploy@10.20.0.11", "Deploy key", "Production", "10 min ago"],
+  ["build-runner-03", "builder@ci3.lab.example:2222", "Deploy key", "", "5 h ago"],
+  ["db-primary", "postgres@db1.internal.example", "Password, asks", "Production / Databases", "2 days ago"],
+  ["edge-cache", "ops@203.0.113.24", "Saved password", "", "Never"],
+  ["Home lab", "pi@192.168.1.40", "Deploy key", "Lab", "9 days ago"],
+  ["staging-web", "www@stg.example.net", "Password, asks", "", "Never"],
+];
+
+function sidebar(current, sessions = []) {
+  const nav = (id, icon, label, count) =>
+    `<button class="nav-item m-hover" ${current === id ? 'aria-current="page"' : ""}>${i(icon)}<span>${label}${current === id ? cursor : ""}</span>${count ? `<span class="count">${count}</span>` : ""}</button>`;
+  return `<nav class="sidebar" aria-label="Primary">
+    <div class="brand"><span class="mark">&gt;${cursor}</span><span>Tyrminal</span><button class="btn ghost sm icon-only collapse" aria-label="Collapse sidebar">${i("sidebar", "sm")}</button></div>
+    <div class="search">${i("search", "sm")}<span>Search</span><kbd>Ctrl+Shift+K</kbd></div>
+    ${nav("home", "house", "Home")}
+    ${nav("hosts", "server", "Hosts", screen === "empty" ? 0 : 6)}
+    ${nav("snippets", "scroll-text", "Snippets", screen === "empty" ? 0 : 5)}
+    ${nav("tunnels", "route", "Tunnels")}
+    <div class="nav-gap"></div>
+    ${nav("keychain", "key-round", "Keychain")}
+    ${nav("known", "fingerprint", "Known hosts")}
+    ${sessions.length ? `<div class="nav-heading">Sessions</div>` + sessions.map(([n, s, sel]) => `<button class="nav-item session m-hover" ${sel ? 'aria-current="true"' : ""}><span class="dot ${s}"></span><span>${n}</span></button>`).join("") : ""}
+    <div class="bottom">
+      ${nav("local", "square-terminal", "Local terminal")}
+      ${nav("settings", "settings", "Settings")}
+      ${nav("lock", "lock", "Lock")}
+    </div>
+  </nav>`;
+}
+
+function tabs(list) {
+  return `<div class="tabs" role="tablist">${list.map(([icon, label, sel, dot]) =>
+    `<div class="tab m-hover" role="tab" aria-selected="${!!sel}">${dot ? `<span class="dot ${dot}"></span>` : i(icon, "sm")}<span>${label}</span><span class="x">${i("x", "sm")}</span></div>`).join("")}
+    <div class="tab-new" aria-label="New tab">${i("plus", "sm")}</div></div>`;
+}
+
+function statusbar(session) {
+  if (!session) return `<div class="statusbar"><span class="item">${i("lock", "sm")}Vault unlocked</span><span class="right"><span class="toggle">${i("moon", "sm")}</span></span></div>`;
+  if (session === "verifying") return `<div class="statusbar"><span class="item"><span class="dot warn m-connecting"></span>Checking server identity</span><span class="item mono">www@stg.example.net</span></div>`;
+  return `<div class="statusbar">
+    <span class="item"><span class="dot ok"></span>Connected</span>
+    <span class="item mono">deploy@10.20.0.11</span>
+    <span class="item num">120×36</span>
+    <span class="right">
+      <span class="toggle" aria-pressed="${session === "files"}">${i("folder", "sm")}Files</span>
+      <span class="toggle" aria-pressed="${session === "snippets"}">${i("scroll-text", "sm")}Snippets</span>
+      <span class="toggle">${i("info", "sm")}Details</span>
+    </span></div>`;
+}
+
+const shell = (current, tabList, body, opts = {}) =>
+  `<div class="app">${sidebar(current, opts.sessions)}<div class="main">${tabs(tabList)}<div class="content">${body}</div>${statusbar(opts.session)}</div></div>`;
+
+const hostTable = (selected) => `<div class="table" role="grid" aria-label="Hosts" style="--cols: minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,0.9fr) minmax(0,0.9fr) 84px 96px">
+  <div class="thead"><span>Name</span><span>Address</span><span>Sign-in</span><span>Group</span><span>Last used</span><span></span></div>
+  ${hosts.map(([n, a, k, g, t], idx) => `<div class="row" aria-selected="${idx === selected}">
+    <span class="name">${i("server", "sm")}${n}</span><span class="mono muted">${a}</span><span class="muted">${k}</span><span class="muted">${g || '<span class="faint">None</span>'}</span><span class="faint num">${t}</span>
+    <span class="hover-actions"><button class="btn sm primary m-press">Connect</button><button class="btn ghost sm icon-only" aria-label="More">${i("ellipsis", "sm")}</button></span></div>`).join("")}
+</div>`;
+
+const screens = {
+  hosts: () => shell("hosts", [["server", "Hosts", true]], `
+    <div class="page"><div class="column" style="max-width:none">
+      <div class="page-head"><h1>Hosts<span class="count num">6</span></h1>
+        <div class="actions"><button class="btn m-press">${i("download", "sm")}Import</button><button class="btn primary m-press">${i("plus", "sm")}Add host</button></div></div>
+      <div class="toolbar">
+        <div class="field grow">${i("search", "sm")}<input placeholder="Filter by name, address or tag"></div>
+        <span class="select">Group <b>All hosts</b>${i("chevron-down", "sm")}</span>
+        <div class="end"><span class="select">Sort <b>Name</b>${i("chevron-down", "sm")}</span>
+          <span class="seg" role="radiogroup" aria-label="View"><span aria-checked="true">${i("list", "sm")}</span><span>${i("layout-grid", "sm")}</span></span></div>
+      </div>
+      ${hostTable(0)}
+    </div></div>
+    <aside class="panel m-panel" aria-label="Host details">
+      <div class="panel-head"><h3>api-gateway</h3><button class="btn ghost sm icon-only" aria-label="Edit">${i("pencil", "sm")}</button><button class="btn ghost sm icon-only" aria-label="Close">${i("x", "sm")}</button></div>
+      <div class="panel-body">
+        <div class="mono muted">deploy@10.20.0.11</div>
+        <button class="btn primary block m-press">${i("play", "sm")}Connect</button>
+        <dl class="facts">
+          <dt>Port</dt><dd class="num">22</dd>
+          <dt>Sign-in</dt><dd>Key: Deploy key</dd>
+          <dt>Group</dt><dd>Production</dd>
+          <dt>Tags</dt><dd><span class="tag">prod</span> <span class="tag">web</span></dd>
+          <dt>Server key</dt><dd class="mono">SHA256:3vQ0t1d7…</dd>
+          <dt>Last used</dt><dd>10 min ago</dd>
+        </dl>
+        <hr>
+        <div style="display:grid;gap:2px">
+          <div class="link">${i("folder", "sm")}Open files</div>
+          <div class="link">${i("route", "sm")}Tunnels for this host</div>
+          <div class="link">${i("copy", "sm")}Duplicate</div>
+          <div class="link" style="color:var(--danger)">${i("trash2", "sm")}Delete</div>
+        </div>
+      </div>
+    </aside>`),
+
+  home: () => shell("home", [["house", "Home", true]], `
+    <div class="page"><div class="column">
+      <h1>Home</h1>
+      <div style="margin-top:var(--space-4)" class="field lg">${i("terminal")}<input placeholder="user@host:port, or a saved host name"><span class="keys">Enter to connect</span></div>
+      <div class="home-grid">
+        <section><div class="section-title">Recent<a href="#">All hosts</a></div>
+          <div class="table recent">${hosts.slice(0, 5).map(([n, a, , , t]) => `<div class="row"><span style="display:flex">${i("server", "sm faint")}</span><span class="name" style="font-weight:500">${n}</span><span class="mono muted">${a}</span><span class="faint num" style="text-align:right">${t}</span></div>`).join("")}</div>
+        </section>
+        <section><div class="section-title">Start</div>
+          <div class="links">
+            <div class="link">${i("square-terminal")}Local terminal<span class="keys">Ctrl+Shift+T</span></div>
+            <div class="link">${i("plus")}Add host</div>
+            <div class="link">${i("download")}Import hosts</div>
+            <div class="link">${i("key-round")}Generate a key</div>
+            <div class="link">${i("command")}All commands<span class="keys">Ctrl+Shift+K</span></div>
+          </div>
+        </section>
+      </div>
+    </div></div>`),
+
+  terminal: () => shell("", [["house", "Home"], ["", "api-gateway", true, "ok"], ["", "db-primary", false, "warn"]], `
+    <div class="term"><span class="d">Welcome to Ubuntu 24.04.1 LTS</span>
+
+<span class="p">deploy@api-gateway</span>:~$ ls --color
+<span class="c">app</span>  <span class="c">config</span>  <span class="g">deploy.sh</span>  README.md  <span class="c">logs</span>
+<span class="p">deploy@api-gateway</span>:~$ git log --oneline -3
+<span class="y">a1f3c2e</span> Handle reconnect backoff
+<span class="y">9d02b71</span> Bump dependencies
+<span class="y">4c8e910</span> Docs: runbook for deploys
+<span class="p">deploy@api-gateway</span>:~$ <span class="blk"></span></div>
+    <aside class="panel files m-panel" aria-label="Files">
+      <div class="panel-head"><h3>Files</h3><button class="btn ghost sm icon-only" aria-label="Upload">${i("upload", "sm")}</button><button class="btn ghost sm icon-only" aria-label="New folder">${i("folder-plus", "sm")}</button><button class="btn ghost sm icon-only" aria-label="View options">${i("sliders-horizontal", "sm")}</button><button class="btn ghost sm icon-only" aria-label="Close">${i("x", "sm")}</button></div>
+      <div class="panel-body" style="gap:var(--space-3)">
+        <div class="pathbar"><button class="btn ghost sm icon-only" aria-label="Up one folder">${i("folder-up", "sm")}</button><div class="field mono"><input value="/home/deploy" aria-label="Folder on the server"></div><button class="btn ghost sm icon-only" aria-label="Refresh">${i("refresh-cw", "sm")}</button></div>
+        <div class="list">
+          ${[["folder", "app", "", "755", 1], ["folder", "logs", "", "755", 1], ["file", "backup.tar.gz", "700 MB", "644"], ["file", "deploy.sh", "1.3 KB", "755"], ["file", "README.md", "5.0 KB", "644"]].map(([ic, n, s, p, d], idx) =>
+            `<div class="row" aria-selected="${idx === 3}">${i(ic, "sm" + (d ? " dir" : ""))}<span>${n}</span><span class="faint num" style="text-align:right">${s}</span><span class="mono faint">${p}</span></div>`).join("")}
+        </div>
+        <div class="transfer"><div style="display:flex;justify-content:space-between"><span>Uploading site.zip</span><span class="faint num">62%</span></div><div class="bar"><span></span></div><div class="faint num" style="font-size:var(--text-sm)">31 of 50 MB, 12 MB/s</div></div>
+      </div>
+    </aside>`, { session: "files", sessions: [["api-gateway", "ok", 1], ["db-primary", "warn"]] }),
+
+  trust: () => shell("hosts", [["server", "Hosts"], ["", "staging-web", true, "warn"]], `<div class="term" style="--term-bg:#0b0f15"></div>`, { session: "verifying" }) + `
+    <div class="scrim"><div class="dialog m-dialog" role="alertdialog" aria-labelledby="t">
+      <div><h2 id="t">Check this server before connecting</h2>
+      <p class="lede">Tyrminal has not seen this server before. Compare the fingerprint with one from its administrator or console. Nothing has been sent yet.</p></div>
+      <dl class="facts"><dt>Server</dt><dd class="mono">stg.example.net:22</dd><dt>Address</dt><dd class="mono">198.51.100.7</dd><dt>Key type</dt><dd>Ed25519</dd></dl>
+      <div class="fingerprint"><span class="faint">SHA256</span> k3J9 vT0y Q2uX 5rB8 nM1c P4sD 7fG0 hL3w Z6qE 9tY2 iA8</div>
+      <div class="foot"><button class="btn ghost m-press">Cancel</button><button class="btn m-press">Trust once</button><button class="btn primary m-press">Trust and save</button></div>
+    </div></div>`,
+
+  palette: () => screens.terminal() + `
+    <div class="scrim" style="padding-top:10vh" data-opened-by="keyboard"><div class="palette" role="dialog" aria-label="Command palette">
+      <div class="input">${i("search")}<span>dep</span></div>
+      <div class="group"><div class="group-name">Snippets</div>
+        <div class="opt" aria-selected="true">${i("play", "sm")}<span><mark>Dep</mark>loy to staging</span><span class="end faint">Deploy / Staging</span></div>
+        <div class="opt">${i("play", "sm")}<span>Restart service</span><span class="end faint">Ops</span></div></div>
+      <div class="group"><div class="group-name">Hosts</div>
+        <div class="opt">${i("server", "sm")}<span>api-gateway</span><span class="end mono faint">deploy@10.20.0.11</span></div>
+        <div class="opt">${i("server", "sm")}<span>db-primary</span><span class="end mono faint">postgres@db1.internal.example</span></div></div>
+      <div class="group"><div class="group-name">Commands</div>
+        <div class="opt">${i("folder", "sm")}<span>Files panel</span><span class="end keys">Ctrl+Shift+O</span></div></div>
+      <div class="foot"><span>↑↓ move</span><span>Enter run</span><span>Esc close</span></div>
+    </div></div>`,
+
+  settings: () => shell("settings", [["settings", "Settings", true]], `
+    <div class="page"><div class="column">
+      <h1 style="margin-bottom:var(--space-5)">Settings</h1>
+      <div class="settings">
+        <div class="subnav">
+          <button class="nav-item" aria-current="page"><span>Appearance${cursor}</span></button>
+          <button class="nav-item"><span>Terminal</span></button>
+          <button class="nav-item"><span>Vault security</span></button>
+          <button class="nav-item"><span>Backup and restore</span></button>
+          <button class="nav-item"><span>Privacy</span></button>
+        </div>
+        <div>
+          <h2>Appearance</h2>
+          <p class="lede" style="margin-bottom:var(--space-3)">How Tyrminal looks. The terminal has its own colour scheme.</p>
+          <div class="setting-group" style="margin-bottom:0">
+            <div class="setting"><div class="label">Mode<p>System follows your computer's light or dark setting.</p></div>
+              <span class="seg"><span>${i("monitor", "sm")}System</span><span>${i("sun", "sm")}Light</span><span aria-checked="true">${i("moon", "sm")}Dark</span></span></div>
+            <div class="setting" style="display:block"><div class="label">Theme</div>
+              <div class="themes" role="radiogroup">
+                ${(document.documentElement.dataset.theme === "light"
+                  ? [["Paper", "#f2f3f5", "#ffffff", "#0b7184", "#16191d", true], ["Fjord", "#edf0f4", "#ffffff", "#2e6894", "#1b2230"], ["High contrast", "#ffffff", "#ffffff", "#0040a0", "#000000"]]
+                  : [["Graphite", "#111315", "#1f2226", "#52b4c3", "#e7e9ec", true], ["Fjord", "#141821", "#222833", "#88c0d0", "#e5e9f0"], ["High contrast", "#000000", "#101010", "#ffd65c", "#ffffff"]]).map(([n, s, b, a, t, on]) =>
+                  `<div class="theme-card" role="radio" aria-checked="${!!on}"><div class="swatch"><i style="background:${s}"></i><div style="background:${b}"><b style="background:${t};width:70%"></b><b style="background:${t};opacity:.5;width:45%"></b><b style="background:${a};width:30%"></b></div></div><div class="name">${n}${on ? `<span class="faint" style="margin-left:auto">${i("check", "sm")}</span>` : ""}</div></div>`).join("")}
+              </div></div>
+            <div class="setting"><div class="label">Reduce motion<p>Turns off interface animation. The system setting is always respected.</p></div><span class="switch"></span></div>
+          </div>
+        </div>
+      </div>
+    </div></div>`),
+
+  empty: () => shell("hosts", [["server", "Hosts", true]], `
+    <div class="page"><div class="column">
+      <div class="page-head"><h1>Hosts</h1></div>
+      <div class="empty">
+        <h2 style="margin:0">No hosts yet</h2>
+        <p class="lede">Save a server once and connect to it from anywhere in Tyrminal. You can also type an address to connect without saving it.</p>
+        <div class="field lg" style="margin-top:var(--space-2)">${i("terminal")}<input placeholder="user@host:port"><span class="keys">Enter to connect</span></div>
+        <div class="actions"><button class="btn primary m-press">${i("plus", "sm")}Add host</button><button class="btn m-press">${i("download", "sm")}Import from SSH config</button></div>
+      </div>
+    </div></div>`),
+
+  toast: () => screens.hosts() + `
+    <div class="toasts" role="status">
+      <div class="toast m-toast">${i("circle-check", "ok")}<span>Copied public key</span></div>
+      <div class="toast m-toast">${i("circle-alert", "bad")}<span>db-primary disconnected</span><a href="#">Reconnect</a></div>
+    </div>
+    <div class="menu m-pop" style="top:178px;right:352px">
+      <div class="opt hl">${i("play", "sm")}Connect</div>
+      <div class="opt">${i("columns2", "sm")}Connect in split</div>
+      <div class="opt">${i("folder", "sm")}Open files</div>
+      <hr>
+      <div class="opt">${i("pencil", "sm")}Edit<span class="keys">F2</span></div>
+      <div class="opt">${i("copy", "sm")}Duplicate</div>
+      <div class="opt" style="color:var(--danger)">${i("trash2", "sm")}Delete<span class="keys">Del</span></div>
+    </div>`,
+
+  unlock: () => `<div class="lock"><div class="box">
+      <span class="mark">&gt;${cursor}</span>
+      <div><h1>Unlock Tyrminal</h1><p class="lede" style="margin-top:4px">Your vault is encrypted on this device.</p></div>
+      <div class="fieldset"><label for="pp">Passphrase</label><div class="field lg focus" style="background:var(--bg-inset)"><input id="pp" type="password" value="correct horse"></div></div>
+      <button class="btn primary block m-press" style="height:36px">Unlock</button>
+      <p class="hint">Forgot it? <a href="#" style="color:var(--accent-text)">Use your recovery key</a></p>
+    </div></div>`,
+};
+
+document.getElementById("root").innerHTML = (screens[screen] ?? screens.hosts)();
+</script>
+</body>
+</html>
