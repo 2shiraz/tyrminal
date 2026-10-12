@@ -25,6 +25,8 @@ export interface MockOptions {
   passwordCheckAvailable?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
+  /** Keep the browser's real clock (perf.spec.ts: the fixed clock replaces performance.now and requestAnimationFrame). */
+  realClock?: boolean;
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {
@@ -40,7 +42,7 @@ export async function openApp(page: Page, options: MockOptions = {}) {
     });
   }
   // A fixed clock so relative times ("2 h ago") are stable in screenshots; timers still run.
-  await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
+  if (!options.realClock) await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
   await page.addInitScript(installMockBackend, options);
   await page.goto("/");
   await page.evaluate(() => document.fonts.ready);

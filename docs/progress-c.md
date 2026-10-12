@@ -149,6 +149,46 @@ from the palette.
 
 UI test: `workspaces.spec.ts` "navigation shortcuts".
 
+## Perceived performance (interaction-polish §1)
+
+Plan: `docs/design/interaction-polish.md`, section 1. Landed as small commits, one per item.
+
+### Measure: `tests/ui/perf.spec.ts`
+
+Click-to-paint for open host, switch tab, open settings, open palette (sidebar search), expand group
+(group chip in Hosts) and select a file (Files panel). The clock starts in a capture-phase
+`pointerdown` listener on Playwright's real (trusted) pointer event; frames are polled until the
+expected DOM change is rendered, and the clock stops at the following animation frame (after
+paint). Each action runs 7 times after a warm-up; the median must be at most 100 ms. Medians and
+"handler work" (main-thread time inside the pointer and click handlers, i.e. React's render and
+commit) are printed and attached as annotations.
+
+Measuring notes:
+- The fixed clock of `openApp` replaces `performance.now` and `requestAnimationFrame`, so the perf
+  spec opens the app with `realClock: true`.
+- It runs as its own Playwright project (`perf`): one worker, after the functional project, so other
+  workers do not skew it. Alone: `npx playwright test -c playwright.config.ts --project=perf --no-deps`.
+- That project rasterizes on the CPU (`--disable-gpu-rasterization`). GPU raster on SwiftShader
+  (an emulated GPU) costs 100–250 ms per full repaint in the container: a full repaint without
+  any app work (toggling one element's `display`) took 100–270 ms with GPU raster and a steady
+  33 ms (two frames) with CPU raster. That measures the emulator, not the app; a real WebView
+  rasterizes on a GPU, or on the CPU when there is none. Functional and visual projects keep the
+  SwiftShader settings.
+
+Baseline before any app change (local, CPU raster, one worker; click-to-paint median / handler work):
+
+| Action | Baseline |
+|---|---|
+| open host | 25 ms / 12 ms |
+| switch tab | 22 ms / 5 ms |
+| open settings | 73–84 ms / 59–63 ms |
+| open palette | 25–28 ms / 8–13 ms |
+| expand group | 25–27 ms / 1.5 ms |
+| select a file | 25 ms / 1.5 ms |
+
+With SwiftShader GPU raster the same run measured open host 260 ms, open settings 73 ms and open
+palette 49 ms (the others 21–25 ms): the open-host time was raster of the relaid-out page.
+
 ## Next
 
 Replace the per-session client-side encoding choice with #8's native per-host setting.
