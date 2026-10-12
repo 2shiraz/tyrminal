@@ -5,7 +5,7 @@
 // after the edit, and identities reload on `identityEvents`.
 
 import type { GroupSummary, HostSummary, IdentitySummary, KeySummary, SnippetSummary } from "@tyrminal/contracts";
-import { type ReactNode, createContext, useContext, useEffect, useMemo } from "react";
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useRef } from "react";
 
 import { identityEvents } from "../features/credentials/identityEvents";
 import { groups as groupsApi, hosts as hostsApi, identities as identitiesApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
@@ -20,6 +20,8 @@ interface VaultData {
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
   identities: Loaded<IdentitySummary[]>;
+  /** Derived, non-secret results computed once per unlock (Home's security review counts). */
+  memo: Map<string, unknown>;
 }
 
 const Context = createContext<VaultData | null>(null);
@@ -33,9 +35,10 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   const identities = useLoaded(identitiesApi.list);
   const reloadIdentities = identities.reload;
   useEffect(() => identityEvents.subscribe(() => void reloadIdentities()), [reloadIdentities]);
+  const memo = useRef(new Map<string, unknown>()).current;
   const value = useMemo(
-    () => ({ hosts, recent, keys, snippets, groups, identities }),
-    [hosts, recent, keys, snippets, groups, identities],
+    () => ({ hosts, recent, keys, snippets, groups, identities, memo }),
+    [hosts, recent, keys, snippets, groups, identities, memo],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

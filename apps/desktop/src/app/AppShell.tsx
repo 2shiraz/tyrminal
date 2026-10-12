@@ -821,7 +821,19 @@ function Shell() {
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
           {!terminalVisible && destination === "home" && (
-            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onSftp={openSftp} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
+            <HomeView
+              ws={ws}
+              statuses={statuses}
+              onConnect={connect}
+              onLocal={openLocal}
+              onSftp={openSftp}
+              onNavigate={navigate}
+              onSelectTab={(id) => setWs((c) => selectTab(c, id))}
+              onOpenSettings={(section) => {
+                navigate("settings");
+                setSettingsAt((current) => ({ section, n: (current?.n ?? 0) + 1 }));
+              }}
+            />
           )}
           {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onOpenSftp={(host) => openSftpHost(host)} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
