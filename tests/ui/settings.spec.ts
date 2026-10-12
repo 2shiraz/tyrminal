@@ -158,3 +158,20 @@ test("settings: Backup says when the vault was last exported, and an export upda
   await page.getByRole("button", { name: "Save a backup…" }).click();
   await expect(last).toHaveText("Last exported just now");
 });
+
+test("known hosts: a counted box, and every trust date in one relative format with the exact date on hover", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Known hosts/ }).click();
+  const box = page.getByRole("region", { name: "Trusted servers" });
+  await expect(box).toBeVisible();
+  const rows = box.locator("ul.list > li");
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(1);
+  await expect(box.locator(".box-count")).toHaveText(String(count));
+  const dates = box.locator("time");
+  await expect(dates).toHaveCount(count);
+  for (const date of await dates.all()) {
+    await expect(date).toHaveText(/^Trusted (just now|yesterday|(an?|\d+) (min|h|days?|months?|years?) ago)$/);
+    await expect(date).toHaveAttribute("title", /\d/);
+  }
+});
