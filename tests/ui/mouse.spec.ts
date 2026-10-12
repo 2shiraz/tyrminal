@@ -8,7 +8,7 @@ import { inputs, privateClipboard, sentSince } from "./input-helpers";
 
 async function settings(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "Shortcuts and input" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Keyboard shortcuts" })).toBeVisible();
 }
 
 async function connect(page: Page) {

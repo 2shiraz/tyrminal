@@ -503,7 +503,9 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   }
   await expect(list.getByRole("list", { name: "Files" }).locator("li")).toHaveCount(1);
   await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
-  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(29);
+  // The command jumps (shell integration) are listed with the terminal actions.
+  await expect(list.getByRole("list", { name: "Terminal" })).toContainText("Jump to the previous command");
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(31);
 
   // Search filters by name and by keys; no match says so.
   await search.fill("zoom");
