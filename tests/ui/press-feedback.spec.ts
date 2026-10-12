@@ -44,12 +44,12 @@ test("press: buttons, rows and menu items show a pressed state on pointer down, 
   await page.mouse.up();
   await page.keyboard.press("Escape");
 
-  // A disabled button is not pressed.
-  await add.click();
-  const save = page.getByTestId("host-panel").getByRole("button", { name: "Save", exact: true });
-  await expect(save).toBeDisabled();
-  await pressOn(page, save);
-  await expect(save).not.toHaveAttribute("data-pressed", /.*/);
+  // A disabled button is not pressed (the snippets page has no terminal to send to).
+  await nav(page, /^Snippets/).click();
+  const run = page.getByRole("button", { name: "Run Disk usage in the terminal" });
+  await expect(run).toBeDisabled();
+  await pressOn(page, run);
+  await expect(run).not.toHaveAttribute("data-pressed", /.*/);
   await page.mouse.up();
 });
 
