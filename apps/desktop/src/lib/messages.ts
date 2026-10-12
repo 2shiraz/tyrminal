@@ -219,6 +219,7 @@ export const msg = {
     key: "Use a key from the keychain",
     keyHint: "Recommended. The private key never leaves the vault.",
     keyChoose: "Choose a key",
+    keyChooseOne: "Choose a key…",
     keyNone: "There are no keys yet. Create or import one in Keychain first.",
     effective: (user: string, address: string, port: number) => `Connects to ${address} on port ${port} as ${user}.`,
     subtitle: (n: number) => (n === 1 ? "1 server in your vault" : `${n} servers in your vault`),

@@ -67,6 +67,19 @@ pub async fn session_open_files(
     state.core()?.sessions.open_files(window.label(), &host_id, sink).await
 }
 
+/// A files-only connection that signs in with a password the user types, whatever the host is
+/// set to use, to install a key the server does not accept yet. Trust and prompts as usual.
+#[tauri::command]
+pub async fn session_open_key_install(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    host_id: String,
+    events: Channel<SessionEvent>,
+) -> Result<SessionOpened, IpcError> {
+    let sink = Arc::new(EventSink(events));
+    state.core()?.sessions.open_for_key_install(window.label(), &host_id, sink).await
+}
+
 struct EventSink(Channel<SessionEvent>);
 
 impl SessionSink for EventSink {

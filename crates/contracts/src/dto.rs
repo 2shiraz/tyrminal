@@ -687,6 +687,16 @@ pub enum SessionEvent {
     /// A notice from Tyrminal itself, never server text, shown when it happens (for example
     /// that the server used a forwarded key, or that a Telnet session is not encrypted).
     Notice { text: String },
+    /// The server refused the Keychain key a hop signed in with. Sent just before the session
+    /// ends with `AUTH_FAILED`, so the app can offer to install that key. `hop` is set during a
+    /// jump-host chain (the destination is the hop whose index equals the total). Names only.
+    #[serde(rename_all = "camelCase")]
+    KeyRejected {
+        key_id: String,
+        label: String,
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
+    },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
     Closed { error: Option<IpcError>, exit_status: Option<u32> },

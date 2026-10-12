@@ -8,6 +8,43 @@ export const KEYS = { ctrl: "", shift: "", alt: "", meta: "", enter:
 /** The Host details panel on the Hosts view. */
 export const HOST_PANEL = '[data-testid="host-panel"]';
 
+/**
+ * Chooses "Use a key from the keychain" in the open Host details panel and picks the key whose
+ * label is `label` (the first key when omitted). A new host never has a key chosen for it. The
+ * pick sets the select's value and dispatches "change": WebDriver clicks on an <option> do
+ * nothing on some platforms (WebKitGTK).
+ */
+export async function chooseKey(s, label) {
+  const radios = `${HOST_PANEL} input[type="radio"][name="auth"]`;
+  const index = await s.until(
+    async () => {
+      const i = await s.execute(
+        `return [...document.querySelectorAll(arguments[0])].findIndex((r) => r.closest("label")?.textContent.includes("Use a key from the keychain"))`,
+        [radios],
+      );
+      return i >= 0 ? i + 1 : null;
+    },
+    { describe: "key sign-in choice" },
+  );
+  await s.click((await s.findAll(radios))[index - 1]);
+  const value = await s.until(
+    () =>
+      s.execute(
+        `const options = [...document.querySelectorAll('${HOST_PANEL} select[aria-label="Choose a key"] option')].filter((o) => o.value !== "");
+         const option = arguments[0] ? options.find((o) => o.textContent.startsWith(arguments[0] + " (")) : options[0];
+         return option?.value ?? null;`,
+        [label ?? null],
+      ),
+    { describe: `key option ${label ?? "(first)"}` },
+  );
+  await s.execute(
+    `const select = document.querySelector('${HOST_PANEL} select[aria-label="Choose a key"]');
+     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, arguments[0]);
+     select.dispatchEvent(new Event("change", { bubbles: true }));`,
+    [value],
+  );
+}
+
 /** Saves the Host details panel, waits for the save to land, and closes the panel. */
 export async function saveAndCloseHostPanel(s) {
   await s.clickButton("Save", { within: HOST_PANEL });
@@ -74,7 +111,8 @@ export function ui(s) {
       await s.clickButton("Import key", { within: "dialog" });
       await s.waitGone("dialog");
     },
-    async addHost({ label, port, user }) {
+    /** Adds a host that signs in with the key labelled `key` (the first key when omitted). */
+    async addHost({ label, port, user, key }) {
       await api.nav("Hosts");
       await s.clickButton("Add host");
       await s.fill("Name", label, { within: HOST_PANEL });
@@ -83,6 +121,7 @@ export function ui(s) {
       await s.clear(portField);
       await s.type(portField, String(port));
       await s.fill("User name", user, { within: HOST_PANEL });
+      await chooseKey(s, key);
       await saveAndCloseHostPanel(s);
     },
     /** Connects to the host card labelled `label`, trusting the server once. */
