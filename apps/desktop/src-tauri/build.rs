@@ -71,7 +71,7 @@ const COMMANDS: &[&str] = &[
     // settings and shell
     "prefs_get",
     "prefs_set",
-    "shells_list",
+    "terminal_choices",
     "editor_pick_app",
     "host_recent",
     "link_open",

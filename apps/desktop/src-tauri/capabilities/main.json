@@ -70,7 +70,7 @@
     "allow-snippet-send",
     "allow-prefs-get",
     "allow-prefs-set",
-    "allow-shells-list",
+    "allow-terminal-choices",
     "allow-editor-pick-app",
     "allow-host-recent",
     "allow-link-open",

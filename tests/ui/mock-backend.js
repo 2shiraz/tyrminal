@@ -292,7 +292,7 @@ export function installMockBackend(options) {
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
-    shells_list: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
+    terminal_choices: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {
       const extension = a.extension.replace(/^\./, "").toLowerCase();
       state.prefs = {

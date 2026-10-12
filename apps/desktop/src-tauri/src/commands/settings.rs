@@ -44,7 +44,7 @@ pub async fn editor_pick_app(
 
 /// Shells that can be chosen for local terminals (absolute paths of installed shells).
 #[tauri::command]
-pub async fn shells_list() -> Result<Vec<String>, IpcError> {
+pub async fn terminal_choices() -> Result<Vec<String>, IpcError> {
     Ok(tyrminal_core::available_shells().into_iter().filter_map(|p| p.to_str().map(str::to_owned)).collect())
 }
 

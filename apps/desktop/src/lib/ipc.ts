@@ -260,7 +260,7 @@ export const preferences = {
   /** Stores preferences; returns them as validated and clamped by the native side. */
   set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
   /** Installed shells that can be chosen for local terminals. */
-  shells: () => call<string[]>("shells_list"),
+  shells: () => call<string[]>("terminal_choices"),
   /** Chooses (natively) the app that edits remote files with `extension`; null if cancelled. */
   pickEditor: (extension: string) => call<Preferences | null>("editor_pick_app", { extension }),
 };
