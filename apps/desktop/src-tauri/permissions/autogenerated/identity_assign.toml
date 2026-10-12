@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-identity-assign"
+description = "Enables the identity_assign command without any pre-configured scope."
+commands.allow = ["identity_assign"]
+
+[[permission]]
+identifier = "deny-identity-assign"
+description = "Denies the identity_assign command without any pre-configured scope."
+commands.deny = ["identity_assign"]

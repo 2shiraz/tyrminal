@@ -31,6 +31,8 @@ tauri-build = { version = "=2.7.1", features = [] }
 # Opaque tokens for local file grants (already used by tyrminal-core).
 getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
+# Clears a picked private-key file from memory (already used by tyrminal-core; agent D, ADR 0006).
+zeroize = "1.9.1"
 tauri = { version = "=2.12.1", features = [] }
 tauri-plugin-wdio-webdriver = { version = "=1.5.0", optional = true }
 # Hands a validated http(s) URL to the OS default browser (link opener, TRM link policy).

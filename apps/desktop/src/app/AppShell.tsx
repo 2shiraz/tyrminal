@@ -1,5 +1,5 @@
 import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, useMemo } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
@@ -17,9 +17,14 @@ import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { SnippetRunContext } from "../features/snippets/runContext";
+import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
+import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
-import { snippets as snippetsApi, vault } from "../lib/ipc";
+import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
+import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { actionFor, tabIndexFor } from "../lib/shortcuts";
 import { usePreferences } from "./preferences";
@@ -91,6 +96,9 @@ function Shell() {
   // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  // agent D: suggestions for the focused SSH pane.
+  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
+  const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
   const wsRef = useRef(ws);
@@ -287,6 +295,15 @@ function Shell() {
         case "lock":
           void vault.lock().catch(() => undefined);
           break;
+        // agent D: inventory and snippets
+        case "suggest": {
+          const p = activePane(wsRef.current);
+          const handle = p ? handles.current.get(p.id) : undefined;
+          const sessionId = handle?.connected() ? handle.sessionId() : null;
+          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId, hostId: p.target.hostId });
+          else notify("info", msgD.suggest.needsTerminal);
+          break;
+        }
         case "renameTab": {
           const t = activeTab(wsRef.current);
           if (t) setRenaming(t.id);
@@ -330,7 +347,26 @@ function Shell() {
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
+  // agent D: inventory and snippets
+  const snippetRunHost = useMemo(
+    () => ({
+      sessions: () =>
+        wsRef.current.tabs.flatMap((tab) =>
+          panesOf(tab.layout).flatMap((id) => {
+            const pane = wsRef.current.panes[id];
+            const handle = handles.current.get(id);
+            const sessionId = handle?.connected() ? handle.sessionId() : null;
+            return pane?.target.kind === "ssh" && sessionId ? [{ hostId: pane.target.hostId, sessionId }] : [];
+          }),
+        ),
+      connect,
+    }),
+    [connect],
+  );
+
   return (
+    // agent D: snippet runs on several sessions read this window's open SSH sessions.
+    <SnippetRunContext.Provider value={snippetRunHost}>
     <div className="shell" data-sidebar={collapsed ? "collapsed" : "expanded"}>
       <Sidebar
         destination={terminalVisible ? null : destination}
@@ -501,6 +537,15 @@ function Shell() {
                 }
               : undefined
           }
+          onShellIntegration={
+            pane && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (pane.target.kind === "local") setIntegrating({ kind: "local" });
+                  else if (sessionId) setIntegrating({ kind: "ssh", sessionId });
+                }
+              : undefined
+          }
         />
       )}
 
@@ -520,6 +565,47 @@ function Shell() {
         />
       )}
 
+      {suggesting && (
+        <SuggestDialog
+          sessionId={suggesting.sessionId}
+          hostId={suggesting.hostId}
+          onClose={() => {
+            setSuggesting(null);
+            handles.current.get(suggesting.paneId)?.focus();
+          }}
+          onSnippet={(snippet) => {
+            setSuggesting(null);
+            requestSnippet(snippet, "paste");
+          }}
+          onIntegration={() => {
+            const target = suggesting;
+            setSuggesting(null);
+            setIntegrating({ kind: "ssh", sessionId: target.sessionId });
+          }}
+          onInsert={(text) => {
+            const target = suggesting;
+            setSuggesting(null);
+            const handle = handles.current.get(target.paneId);
+            // Only into the same live session the dialog was opened for; never with Enter.
+            if (!handle || handle.sessionId() !== target.sessionId) return;
+            void sessionsApi
+              .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
+              .then(() => handle.focus())
+              .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {integrating && (
+        <IntegrationDialog
+          target={integrating}
+          onClose={() => {
+            setIntegrating(null);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
       {runRequest && (
         <SnippetRunDialog
           request={runRequest}
@@ -535,5 +621,6 @@ function Shell() {
         />
       )}
     </div>
+    </SnippetRunContext.Provider>
   );
 }

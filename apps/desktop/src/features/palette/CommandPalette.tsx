@@ -29,6 +29,7 @@ import {
   IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
+import { msgD } from "../../lib/messages-d";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 
@@ -90,6 +91,7 @@ export function CommandPalette({
   onDeployKey,
   broadcast,
   onToggleBroadcast,
+  onShellIntegration,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -105,6 +107,8 @@ export function CommandPalette({
   /** Whether the active tab broadcasts input; toggle offered only for split, connected tabs. */
   broadcast?: boolean | undefined;
   onToggleBroadcast?: (() => void) | undefined;
+  /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
+  onShellIntegration?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -165,6 +169,9 @@ export function CommandPalette({
       list.push(action("zoom-out", msg.palette.zoomOut, <IconZoomOut size={16} />, () => onAction("zoomOut"), "zoomOut"));
       list.push(action("zoom-reset", msg.palette.zoomReset, <IconZoomIn size={16} />, () => onAction("zoomReset"), "zoomReset"));
       list.push(action("close-pane", msg.palette.closePane, <IconX size={16} />, () => onAction("closePane"), "closePane"));
+      // agent D: inventory and snippets
+      if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
+      if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
     }
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));

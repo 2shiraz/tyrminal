@@ -25,6 +25,7 @@ import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
+import { attachShellContext } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
 
@@ -252,6 +253,8 @@ export class TerminalController {
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
       return true;
     });
+    // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
+    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
 
     this.term.attachCustomKeyEventHandler((event) => this.onKey(event));
 
