@@ -24,6 +24,7 @@ import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
+import { AboutSection } from "./AboutSection";
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
 const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -143,11 +144,14 @@ function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary
   );
 }
 
-type Section = "appearance" | "terminal" | "security" | "backup" | "privacy";
+export type Section = "appearance" | "terminal" | "security" | "backup" | "privacy" | "about";
 
-export function SettingsView() {
+export function SettingsView({ initialSection }: { initialSection?: Section | undefined } = {}) {
   const { prefs, update, saveError } = usePreferences();
-  const [section, setSection] = useState<Section>("appearance");
+  const [section, setSection] = useState<Section>(initialSection ?? "appearance");
+  useEffect(() => {
+    if (initialSection) document.getElementById(`settings-${initialSection}`)?.scrollIntoView({ block: "start" });
+  }, [initialSection]);
   const [dialog, setDialog] = useState<"passphrase" | "recovery" | "restore" | "quick" | null>(null);
   const [changed, setChanged] = useState(false);
   const [quickKey, setQuickKey] = useState(0);
@@ -167,6 +171,7 @@ export function SettingsView() {
     { id: "security", label: msg.settings.security },
     { id: "backup", label: msg.backup.title },
     { id: "privacy", label: msg.settings.privacy },
+    { id: "about", label: msg.about.title },
   ];
 
   return (
@@ -435,6 +440,8 @@ export function SettingsView() {
                 <strong>{msg.settings.status}.</strong> {msg.settings.statusBody}
               </Notice>
             </section>
+
+            <AboutSection />
           </div>
         </div>
       </section>

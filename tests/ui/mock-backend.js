@@ -872,6 +872,14 @@ export function installMockBackend(options) {
         if (host) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
+    app_info: () => ({
+      commit: "1a2b3c4",
+      buildDate: "2026-10-12",
+      os: "linux",
+      arch: "x86_64",
+      tauriVersion: "2.12.1",
+      webviewVersion: "2.50.1",
+    }),
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
       window.__mockOpenedLinks.push(a.url);

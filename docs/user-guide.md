@@ -222,6 +222,12 @@ Tyrminal makes no network connections of its own. Settings → Privacy has:
   settings.
 - **Updates**: the version you are using and a button that opens the releases page.
 
+Settings → About (or the version at the foot of the sidebar) shows which build you are running:
+version, channel (Pre-release or Release), build commit and date, OS and architecture, and the
+Tauri and WebView versions. **Copy version info** copies exactly those lines for a bug report;
+it never includes hosts, paths, user names or vault data. The releases page and the licences
+open in your browser only when you click them.
+
 ## Keyboard shortcuts
 
 | Action | Windows and Linux | macOS |
@@ -252,4 +258,4 @@ Tyrminal makes no network connections of its own. Settings → Privacy has:
 | "There is not enough space on this computer" | A download stopped because the disk is full. Nothing partial was left; free space and try again. |
 | "The file changed on the server since you opened it" | Someone changed the file while you edited it. Download it again to compare, or choose to overwrite. |
 | Quick unlock is unavailable | The OS keychain is not available (on Linux this needs a Secret Service such as GNOME Keyring). Use the passphrase. |
-| Something else failed | Turn on Settings → Privacy → Diagnostics, repeat what failed, then save a diagnostic report and attach it to an issue. |
+| Something else failed | Turn on Settings → Privacy → Diagnostics, repeat what failed, then save a diagnostic report and attach it to an issue together with Settings → About → Copy version info. |

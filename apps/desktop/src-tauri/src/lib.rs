@@ -203,6 +203,7 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::settings::app_info,
             commands::backup::backup_export,
             commands::backup::backup_choose,
             commands::backup::backup_preview,

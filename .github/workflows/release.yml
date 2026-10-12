@@ -87,6 +87,8 @@ jobs:
 
       - name: Build installers
         env:
+          # The app shows this pre-release tag as its version (validated above and in vite.config.ts).
+          TYRMINAL_RELEASE_TAG: ${{ inputs.tag }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

@@ -68,6 +68,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
+| `app_info` | — | `AppInfo` | Static build and platform facts (commit, build date, OS, architecture, Tauri and WebView versions); nothing about the user or the vault |
 
 ## Events
 

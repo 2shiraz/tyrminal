@@ -10,7 +10,7 @@ import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
-import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
+import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
@@ -159,10 +159,17 @@ function Shell() {
     [broadcasting, broadcastPanes],
   );
 
+  // A Settings section to open at (the sidebar's version opens About); any navigation clears it.
+  const [settingsAt, setSettingsAt] = useState<{ section: SettingsSection; n: number } | null>(null);
   const navigate = useCallback((next: Destination) => {
     setDestination(next);
     setWs((current) => selectTab(current, null));
+    setSettingsAt(null);
   }, []);
+  const openAbout = useCallback(() => {
+    navigate("settings");
+    setSettingsAt((current) => ({ section: "about", n: (current?.n ?? 0) + 1 }));
+  }, [navigate]);
 
   const open = useCallback((target: TerminalTarget, label: string, identity: string, startIn?: string) => {
     setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
@@ -386,6 +393,7 @@ function Shell() {
         onLocalTerminal={openLocal}
         onToggleCollapsed={() => setCollapsed((v) => !v)}
         onLock={() => void vault.lock().catch(() => undefined)}
+        onOpenAbout={openAbout}
         hostCount={data.hosts.value?.length ?? 0}
         snippetCount={data.snippets.value?.length ?? 0}
       />
@@ -426,7 +434,7 @@ function Shell() {
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
-          {!terminalVisible && destination === "settings" && <SettingsView />}
+          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} />}
           {/* agent B: tunnels and history */}
           {!terminalVisible && destination === "tunnels" && (
             <TunnelsView

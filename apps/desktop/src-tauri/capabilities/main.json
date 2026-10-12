@@ -83,6 +83,7 @@
     "allow-serial-ports",
     "allow-host-recent",
     "allow-link-open",
+    "allow-app-info",
     "allow-backup-export",
     "allow-backup-choose",
     "allow-backup-preview",
