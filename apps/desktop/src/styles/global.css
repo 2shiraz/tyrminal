@@ -3488,3 +3488,59 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   flex-direction: column;
   min-width: 0;
 }
+
+/* Highlight kinds (TRM-07): a toggle per kind with a sample in the scheme's own colors. */
+.highlight-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.highlight-kinds legend {
+  margin-bottom: var(--space-2);
+}
+
+.highlight-kind {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.highlight-kind:has(input:checked) {
+  border-color: var(--border);
+}
+
+.highlight-kind-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight-kind-sample {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.highlight-kind:has(input:not(:checked)) .highlight-kind-sample {
+  opacity: 0.45;
+}
+
+.highlight-preview {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}

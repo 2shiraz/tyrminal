@@ -285,3 +285,6 @@ Never merge these by hand; regenerate them after resolving the sources:
   renders `features/mouse/MouseSettings.tsx` instead of its right-click switch;
   `TerminalController.ts` creates `features/mouse/mouseMap.ts` and lets it swallow the X11 paste
   that follows a handled middle click.
+- `tests/ui/workspaces.spec.ts` "highlighting: words and IP addresses…": expectations now list every
+  decoration on the row (built-in kinds are on by default), read with `tests/ui/highlight-helpers.ts`.
+  `HighlightPreferences` gained the built-in kind toggles and a `Default` with highlighting on.

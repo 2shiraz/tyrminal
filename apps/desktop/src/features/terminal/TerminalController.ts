@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { HighlightTone, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -23,6 +23,8 @@ import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import type { TokenKind } from "../highlight/builtins";
+import { highlightPalette } from "../highlight/palette";
 import { MouseMap } from "../mouse/mouseMap";
 import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
@@ -365,9 +367,9 @@ export class TerminalController {
     });
   }
 
-  private toneColors(): Record<HighlightTone, string> {
-    const s = schemeById(this.prefs.scheme);
-    return { danger: s.brightRed, warning: s.brightYellow, success: s.brightGreen, info: s.brightCyan };
+  /** Highlight colors from the current scheme, each readable on its background. */
+  private toneColors(): Record<TokenKind, string> {
+    return highlightPalette(schemeById(this.prefs.scheme));
   }
 
   /** Workspace preferences: output highlighting, Option as Meta, right click. Display only. */

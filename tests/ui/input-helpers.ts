@@ -39,3 +39,22 @@ export async function paletteRun(page: Page, text: string) {
   await expect(page.getByRole("option").first()).toContainText(text);
   await page.keyboard.press("Enter");
 }
+
+/**
+ * A clipboard private to this page. The browser's clipboard is shared by every test running in
+ * parallel, so a test that writes and later reads it can see another test's text.
+ */
+export async function privateClipboard(page: Page, initial = "") {
+  await page.evaluate((text) => {
+    let value = text;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: async () => value,
+        writeText: async (t: string) => {
+          value = t;
+        },
+      },
+    });
+  }, initial);
+}

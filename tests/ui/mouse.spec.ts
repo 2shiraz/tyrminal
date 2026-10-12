@@ -4,7 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
-import { inputs, sentSince } from "./input-helpers";
+import { inputs, privateClipboard, sentSince } from "./input-helpers";
 
 async function settings(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
@@ -21,12 +21,10 @@ async function connect(page: Page) {
 const screen = (page: Page) => page.locator(".pane:not([hidden]) .xterm-screen");
 const output = (page: Page, text: string) => page.evaluate((t) => (window as unknown as { __mockOutput: (t: string) => void }).__mockOutput(t), text);
 
-test.beforeEach(async ({ context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-});
 
 test("right click: select word, paste or nothing; the choice is saved", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
+  await privateClipboard(page);
   await settings(page);
   const right = page.getByRole("radiogroup", { name: "Right click" });
   await right.locator("label").filter({ hasText: /^Paste$/ }).click();
@@ -63,6 +61,7 @@ test("right click: select word, paste or nothing; the choice is saved", async ({
 
 test("middle click pastes only when turned on", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
+  await privateClipboard(page);
   await connect(page);
   await page.evaluate(() => navigator.clipboard.writeText("hostname"));
   const before = await inputs(page);
@@ -80,6 +79,7 @@ test("middle click pastes only when turned on", async ({ page }) => {
 
 test("an application that asked for mouse reports gets the click; Shift pastes anyway", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
+  await privateClipboard(page);
   await settings(page);
   await page.getByRole("radiogroup", { name: "Right click" }).locator("label").filter({ hasText: /^Paste$/ }).click();
   await connect(page);

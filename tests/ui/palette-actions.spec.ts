@@ -4,7 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp, waitForTerminalText } from "./fixtures";
-import { paletteRun } from "./input-helpers";
+import { paletteRun, privateClipboard } from "./input-helpers";
 
 async function connect(page: Page, host: string) {
   await page.keyboard.press("Control+Shift+K");
@@ -72,9 +72,9 @@ test("palette: every application action is reachable where it can act", async ({
   }
 });
 
-test("palette: tab and pane actions run the same code as their shortcuts", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("palette: tab and pane actions run the same code as their shortcuts", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
+  await privateClipboard(page);
   await connect(page, "api-gateway");
   await page.keyboard.press("Alt+Shift+Equal");
   await expect(page.locator(".pane")).toHaveCount(2);
@@ -98,9 +98,9 @@ test("palette: tab and pane actions run the same code as their shortcuts", async
   await expect(page.locator(".tabstrip .tab:not(.tab-page)")).toHaveCount(0);
 });
 
-test("connection details: from the palette and from a failed connection; lines are copied as text", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("connection details: from the palette and from a failed connection; lines are copied as text", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
+  await privateClipboard(page);
   await connect(page, "api-gateway");
   await paletteRun(page, "Connection details");
   const dialog = page.getByRole("dialog", { name: "Connection details: api-gateway" });

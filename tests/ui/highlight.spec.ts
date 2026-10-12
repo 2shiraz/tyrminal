@@ -4,6 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
+import { marksOnRow } from "./highlight-helpers";
 
 async function openSettings(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
@@ -43,13 +44,13 @@ test("patterns: a match is drawn over exactly its cells; earlier rules win; the 
   await connect(page);
   const line = "login user=alice id=7 ok";
   await output(page, `\r\n${line}\r\n`);
-  const marks = page.locator(".term-highlight");
-  await expect(marks).toHaveCount(2);
-  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(1);
-  await expect(page.locator('.term-highlight[data-tone="danger"]')).toHaveCount(1);
-  // "user=alice" is ten cells, "ok" two.
-  const widths = await marks.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width).sort((a, b) => a - b));
-  expect(Math.round((widths[1] as number) / (widths[0] as number))).toBe(5);
+  // Exactly the cells of each match: the pattern, then the user's word over the built-in "ok";
+  // "alice" loses to the earlier pattern; the built-in number kind still colors "7".
+  await expect.poll(() => marksOnRow(page, "login user=alice")).toEqual([
+    ["info", "user=alice"],
+    ["number", "7"],
+    ["danger", "ok"],
+  ]);
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
 });
 
@@ -99,7 +100,7 @@ test("patterns: one that takes too long is switched off, the others keep working
   await output(page, `\r\n${rows}\r\nid=42\r\n`);
   await expect(page.getByText("The highlight pattern /[a-z]{0,99}[a-z]*[a-z]*[a-z]*!/ took too long and was switched off.")).toBeVisible({ timeout: 10_000 });
   // The other pattern still applies once the slow one is off.
-  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(1);
+  await expect.poll(() => marksOnRow(page, "id=42")).toEqual([["info", "id=42"]]);
   // Typing still reaches the session.
   await page.keyboard.type("echo hi");
   await page.keyboard.press("Enter");

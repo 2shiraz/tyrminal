@@ -3,6 +3,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
+import { marksOnRow } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -496,9 +497,16 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   const line = "build ERROR at 10.0.0.12 from fe80::1 at 12:30:45, mac aa:bb:cc:dd:ee:ff, errors=0";
   await output(page, `\r\n${line}\r\n`);
   const marks = page.locator(".term-highlight");
-  await expect(marks).toHaveCount(3);
-  await expect(page.locator('.term-highlight[data-tone="danger"]')).toHaveCount(1);
-  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(2);
+  // The user's word first; the built-in kinds (on by default) color the rest of the plain text.
+  await expect.poll(() => marksOnRow(page, "build ERROR")).toEqual([
+    ["danger", "ERROR"],
+    ["address", "10.0.0.12"],
+    ["address", "fe80::1"],
+    ["date", "12:30:45"],
+    ["address", "aa:bb:cc:dd:ee:ff"],
+    ["danger", "errors"],
+    ["number", "0"],
+  ]);
   // The screen text is exactly what arrived, and highlighting sent nothing.
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   expect(await calls(page, "session_write")).toHaveLength(writesBefore);
@@ -507,6 +515,7 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   await openSettings(page);
   await page.getByLabel("Highlight output").first().uncheck();
   await page.getByRole("tab", { name: /api-gateway/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   await expect(marks).toHaveCount(0);
 });
 

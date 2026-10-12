@@ -20,6 +20,7 @@ All commands run from the repository root. Only the commands listed here exist.
 | `pnpm build:desktop` | Unsigned release build for the current platform | — |
 | `pnpm contracts` / `pnpm contracts:check` | Regenerate / verify generated TypeScript contracts | — |
 | `node tests/performance/measure.mjs` | Launch, unlock, idle and stream measurements | `node scripts/build-e2e.mjs --release` |
+| `node --experimental-strip-types tests/performance/highlight-bench.mjs` | Output highlighting cost on a full screen of adversarial rows (budget) | Node 22+ |
 
 A suite prints each step with its command, exit code and duration, and writes
 `docs/reports/raw/verify-<suite>.json`. A step whose prerequisite is missing is `BLOCKED` and

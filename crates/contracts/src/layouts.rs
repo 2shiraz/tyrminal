@@ -109,13 +109,47 @@ pub struct WorkspacePreferences {
 
 /// Output highlighting: colors drawn over the screen only. The bytes received, shown as text,
 /// copied or sent are never changed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct HighlightPreferences {
     pub enabled: bool,
     pub ip_addresses: bool,
     pub keywords: Vec<HighlightKeyword>,
+    // terminal input: built-in token kinds, each can be turned off
+    /// Numbers, sizes (12K, 3.4GiB), percentages and durations (15ms).
+    pub numbers: bool,
+    pub urls: bool,
+    pub mac_addresses: bool,
+    /// ISO dates, date-times and clock times.
+    pub dates: bool,
+    /// Text in double or single quotes.
+    pub quoted: bool,
+    /// File system paths (/etc/hosts, ~/src, ./build).
+    pub paths: bool,
+    /// 0x values, UUIDs and commit hashes.
+    pub hex: bool,
+    /// Status words: error/fail/denied (red), warn (yellow), ok/success/done (green), info/debug (dim).
+    pub levels: bool,
+}
+
+/// On by default, every kind included: highlighting only ever recolors plain output.
+impl Default for HighlightPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ip_addresses: true,
+            keywords: Vec::new(),
+            numbers: true,
+            urls: true,
+            mac_addresses: true,
+            dates: true,
+            quoted: true,
+            paths: true,
+            hex: true,
+            levels: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

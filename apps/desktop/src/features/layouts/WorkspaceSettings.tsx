@@ -2,6 +2,7 @@ import type { KeyBindingPreference, WorkspacePreferences } from "@tyrminal/contr
 import { useEffect, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
+import { BuiltinKinds } from "../highlight/BuiltinKinds";
 import { HighlightRules } from "../highlight/HighlightRules";
 import { MouseSettings } from "../mouse/MouseSettings";
 import { Keys, Switch } from "../../components/ui/controls";
@@ -21,7 +22,20 @@ import {
 } from "../../lib/shortcuts";
 
 export const WORKSPACE_DEFAULTS: WorkspacePreferences = {
-  highlight: { enabled: false, ipAddresses: true, keywords: [] },
+  // On by default, every kind included (TRM-07): only plain output is ever recolored.
+  highlight: {
+    enabled: true,
+    ipAddresses: true,
+    keywords: [],
+    numbers: true,
+    urls: true,
+    macAddresses: true,
+    dates: true,
+    quoted: true,
+    paths: true,
+    hex: true,
+    levels: true,
+  },
   bindings: [],
   optionAsMeta: isMac,
   rightClickSelectsWord: isMac,
@@ -74,12 +88,7 @@ export function WorkspaceSettings() {
         />
         {ws.highlight.enabled && (
           <>
-            <Switch
-              label={msgC.highlight.ipAddresses}
-              hint={msgC.highlight.ipHint}
-              checked={ws.highlight.ipAddresses}
-              onChange={(ipAddresses) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ipAddresses } }))}
-            />
+            <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
             <HighlightRules
               words={ws.highlight.keywords}
               onChange={(keywords) => setWs((w) => ({ ...w, highlight: { ...w.highlight, keywords } }))}

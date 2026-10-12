@@ -16,6 +16,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 5 | Palette completeness (UX-03), Connection details view (CON-15) | Done: UI tests; native waits for `session_diagnostics` |
 | 6 | Connection side panel: snippets, history, appearance (TRM-14) | Done: UI tests; visual baselines updated in the pinned container |
 | 7 | Mouse mappings and native persistence (TRM-08), recent connections native test (UX-04) | Done: core, UI and native tests on Linux |
+| 8 | Termius-like highlighting, on by default (TRM-07, owner priority) | Done: UI tests, benchmark; visual baselines re-recorded |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -103,6 +104,26 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Observed once in 3 full native runs: "16 panes of real local shells" (PR #7's test) timed out;
   it passed in isolation and in the next full run. Not seen in the UI suite.
 
+## Slice 8: highlighting on by default (TRM-07)
+
+- Built-in kinds, each with its own toggle (`HighlightPreferences`: numbers, urls, macAddresses,
+  dates, quoted, paths, hex, levels, plus the existing ipAddresses; on by default through a
+  `Default` impl, so files written earlier get the new kinds on): addresses (IPv4 with CIDR or
+  port, IPv6, MAC), numbers with sizes/percentages/durations, links, ISO dates and clock times,
+  quoted text, paths, 0x/UUID/commit hashes, status words (error… red, warn… yellow, ok… green,
+  info/debug dim). Rules live in `features/highlight/builtins.ts`, in rank order; the user's
+  own words and patterns rank first.
+- Only plain output is colored: a match is drawn only if every cell is in the default colors,
+  not inverse or invisible. Nothing is drawn on the alternate screen (vim, htop, tmux).
+- Colors come from the current scheme (`features/highlight/palette.ts`): per kind, the first of
+  its preferred ANSI colors that reaches 4.5:1 on the scheme background (3:1 for dimmed words),
+  else the most readable of them.
+- Settings show each kind with a sample in the scheme's colors and a preview line matched by the
+  same code as the terminal.
+- `tests/performance/highlight-bench.mjs`: a full 80×300 screen takes ≤ 7 ms for every
+  adversarial shape tried (budget 50 ms); matching runs once after output settles (60 ms).
+- Visual baselines 09/10/11/17 re-recorded in the pinned container (plain numbers now colored).
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -127,3 +148,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Mouse: "Settings → Shortcuts and input → Right click chooses between selecting a word, pasting
   and nothing; Middle click pastes can be turned on. A paste from the mouse is reviewed like any
   paste. Programs that use the mouse (vim, htop, mc) get the click; hold Shift to paste anyway."
+- Highlighting: "Tyrminal colors addresses, numbers, links, dates, quoted text, paths, hashes and
+  status words in plain output, in your color scheme's colors. It never recolors text a program
+  colored itself, and never touches full-screen programs. Turn kinds on or off, or the whole
+  feature, in Settings → Output highlighting."
