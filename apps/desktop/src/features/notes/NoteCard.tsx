@@ -33,6 +33,7 @@ export function NoteCard({
     let alive = true;
     setNote(undefined);
     setDraft(null);
+    onDirty?.(false);
     setInherited([]);
     notesApi.get(target).then(
       (value) => alive && setNote(value),
@@ -50,8 +51,14 @@ export function NoteCard({
     // The target is identified by its id.
   }, [target.kind, key]);
 
-  const dirty = draft !== null && (draft.text !== (note?.text ?? "") || draft.format !== (note?.format ?? "markdown"));
-  useEffect(() => onDirty?.(dirty), [dirty]);
+  const isDirty = (d: typeof draft) => d !== null && (d.text !== (note?.text ?? "") || d.format !== (note?.format ?? "markdown"));
+  const dirty = isDirty(draft);
+  // Reported from the edit itself, not after render, so an Escape right after typing still finds
+  // the change and the panel asks before discarding it.
+  const edit = (next: typeof draft) => {
+    setDraft(next);
+    onDirty?.(isDirty(next));
+  };
   const tooLong = draft !== null && new TextEncoder().encode(draft.text).length > MAX_NOTE_BYTES;
 
   async function save(text: string, format: NoteFormat) {
@@ -59,6 +66,7 @@ export function NoteCard({
     if (saved !== undefined) {
       setNote(saved);
       setDraft(null);
+      onDirty?.(false);
     }
   }
 
@@ -69,7 +77,7 @@ export function NoteCard({
           {msg.notes.title}
         </h3>
         {draft === null && note !== undefined && (
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setDraft({ text: note?.text ?? "", format: note?.format ?? "markdown" })}>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => edit({ text: note?.text ?? "", format: note?.format ?? "markdown" })}>
             {note ? <IconPencil size={14} /> : <IconPlus size={14} />}
             {note ? msg.notes.edit : msg.notes.add}
           </button>
@@ -87,7 +95,7 @@ export function NoteCard({
           <Segmented
             label={msg.notes.format}
             value={draft.format}
-            onChange={(format) => setDraft({ ...draft, format })}
+            onChange={(format) => edit({ ...draft, format })}
             options={[
               { value: "markdown", label: msg.notes.markdown },
               { value: "plain", label: msg.notes.plain },
@@ -98,7 +106,7 @@ export function NoteCard({
             value={draft.text}
             onChange={(text) => {
               clearError();
-              setDraft({ ...draft, text });
+              edit({ ...draft, text });
             }}
             hint={msg.notes.hint}
             rows={8}
@@ -118,7 +126,7 @@ export function NoteCard({
               className="btn btn-sm"
               onClick={() => {
                 clearError();
-                setDraft(null);
+                edit(null);
               }}
             >
               {msg.common.cancel}
