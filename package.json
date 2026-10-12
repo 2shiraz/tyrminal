@@ -22,6 +22,9 @@
     "verify:fast": "node scripts/verify.mjs fast",
     "test:integration": "node scripts/verify.mjs integration",
     "test:security": "node scripts/verify.mjs security",
-    "check:release": "node scripts/check-release.mjs"
+    "check:release": "node scripts/check-release.mjs",
+    "test:ui": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests test",
+    "test:ui:update": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests update",
+    "check:contrast": "node scripts/check-contrast.mjs"
   }
 }

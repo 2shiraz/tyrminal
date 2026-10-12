@@ -4,7 +4,7 @@ names = sys.argv[3].split()
 def pascal(n): return ''.join(p.capitalize() for p in re.split(r'[-]', n))
 lines = ['// Generated from lucide-static 1.47.0 (ISC License, Copyright (c) 2026 Lucide Icons and Contributors).',
          '// Bundled as inline SVG so no icon is ever fetched at run time. Regenerate with scripts/gen-icons.py',
-         '// (list in docs/design-system.md) rather than hand-editing. See NOTICE for the license text.',
+         '// (list in src/components/ui/icons.list) rather than hand-editing. See NOTICE for the license text.',
          '',
          'import type { SVGProps } from "react";',
          '',
@@ -28,8 +28,7 @@ lines = ['// Generated from lucide-static 1.47.0 (ISC License, Copyright (c) 202
          '        {...rest}',
          '      >',
          '        {body.map((d, i) => (',
-         '          // Fixed geometry; index keys are stable.',
-         '          // biome-ignore lint: static list',
+         '          // Fixed geometry from the generated list; position is the identity.',
          '          <Shape key={i} d={d} />',
          '        ))}',
          '      </svg>',

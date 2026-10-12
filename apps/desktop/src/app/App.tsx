@@ -1,11 +1,13 @@
 import type { VaultStatus } from "@tyrminal/contracts";
 import { Component, type ReactNode, useCallback, useEffect, useState } from "react";
 
+import { ToastProvider } from "../components/ui/Toasts";
 import { ErrorNotice } from "../components/ui/controls";
 import { Onboarding, Unlock } from "../features/vault/VaultScreens";
 import { type AppError, toAppError, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
 import { AppShell } from "./AppShell";
+import { PreferencesProvider } from "./preferences";
 
 /** How often, at most, input activity is reported to the native idle-lock timer. */
 const ACTIVITY_REPORT_INTERVAL_MS = 5_000;
@@ -34,6 +36,16 @@ function useActivityReports(enabled: boolean) {
 }
 
 export function App() {
+  return (
+    <PreferencesProvider>
+      <ToastProvider>
+        <Root />
+      </ToastProvider>
+    </PreferencesProvider>
+  );
+}
+
+function Root() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   // While the recovery key from vault creation is on screen, stay on onboarding even though the
@@ -61,8 +73,8 @@ export function App() {
 
   if (error) {
     return (
-      <div className="center-screen">
-        <div className="card" role="alert">
+      <div className="auth-screen">
+        <div className="auth-card" role="alert">
           <h1>{msg.app.startupFailed}</h1>
           <ErrorNotice error={error} />
           <button type="button" className="btn btn-primary" onClick={() => void refresh()}>
@@ -74,8 +86,11 @@ export function App() {
   }
   if (!status) {
     return (
-      <div className="center-screen" role="status">
-        <p className="muted">{msg.app.loading}</p>
+      <div className="auth-screen" role="status">
+        <div className="row-flex muted">
+          <span className="spinner" aria-hidden="true" />
+          {msg.app.loading}
+        </div>
       </div>
     );
   }
@@ -99,8 +114,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div className="center-screen">
-        <div className="card" role="alert">
+      <div className="auth-screen">
+        <div className="auth-card" role="alert">
           <h1>{msg.app.startupFailed}</h1>
           <p className="muted">{msg.terminal.safe}</p>
           <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>

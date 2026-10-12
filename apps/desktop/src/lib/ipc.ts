@@ -14,9 +14,13 @@ import type {
   KeyImportInput,
   KeySummary,
   KnownHostSummary,
+  Preferences,
   RecoveryKeyIssued,
   SessionEvent,
   SessionOpened,
+  SnippetInput,
+  SnippetSendMode,
+  SnippetSummary,
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
@@ -85,6 +89,8 @@ export const vault = {
 
 export const hosts = {
   list: () => call<HostSummary[]>("host_list"),
+  /** Hosts with a recorded connection, most recent first. */
+  recent: () => call<HostSummary[]>("host_recent"),
   save: (host: HostInput) => call<HostSummary>("host_save", { host }),
   remove: (id: string) => call<void>("host_delete", { id }),
 };
@@ -135,4 +141,27 @@ export const sessions = {
   /** `secret: null` dismisses the prompt. */
   answerAuth: (sessionId: string, promptId: string, secret: string | null) =>
     call<void>("session_auth_answer", { sessionId, promptId, secret }),
+};
+
+export const snippets = {
+  list: () => call<SnippetSummary[]>("snippet_list"),
+  save: (snippet: SnippetInput) => call<SnippetSummary>("snippet_save", { snippet }),
+  remove: (id: string) => call<void>("snippet_delete", { id }),
+  /**
+   * Sends a saved snippet to a session this window owns. The native side reads the text from the
+   * vault; `bracketed` reports whether the terminal has bracketed-paste mode on.
+   */
+  send: (snippetId: string, sessionId: string, mode: SnippetSendMode, bracketed: boolean) =>
+    call<void>("snippet_send", { snippetId, sessionId, mode, bracketed }),
+};
+
+export const preferences = {
+  get: () => call<Preferences>("prefs_get"),
+  /** Stores preferences; returns them as validated and clamped by the native side. */
+  set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
+};
+
+export const links = {
+  /** Opens an http(s) link in the OS browser after the user confirmed it. Validated natively. */
+  open: (url: string) => call<void>("link_open", { url }),
 };

@@ -11,11 +11,15 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
+    "@tyrminal/contracts": "workspace:*",
     "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/addon-unicode-graphemes": "0.4.0",
+    "@xterm/addon-web-links": "0.12.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "6.0.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "@tyrminal/contracts": "workspace:*"
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.1",

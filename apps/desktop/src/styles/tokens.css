@@ -1,17 +1,26 @@
 /* Design tokens. Components use these variables only; no raw colors elsewhere.
-   Contrast targets are WCAG 2.2 AA (4.5:1 body text, 3:1 large text and UI boundaries). */
+   Contrast is checked by scripts/check-contrast.mjs (WCAG 2.2 AA: 4.5:1 for text, 3:1 for
+   large text, icons and control boundaries) for every text/surface pair in both themes.
+   The terminal palette is separate (features/terminal/schemes.ts) and independent of the theme. */
 
 :root {
-  color-scheme: dark;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Inter", "Ubuntu", "Cantarell",
+    system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Symbols Nerd Font Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+    "Liberation Mono", monospace;
 
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
-
+  --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
   --text-md: 14px;
   --text-lg: 16px;
-  --text-xl: 22px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  --weight-regular: 450;
+  --weight-medium: 550;
+  --weight-semibold: 620;
+  --weight-bold: 680;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -19,96 +28,133 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
 
+  --radius-xs: 4px;
+  --radius-sm: 6px;
   --radius-control: 8px;
   --radius-panel: 12px;
-  --control-height: 34px;
+  --radius-dialog: 16px;
+  --radius-pill: 999px;
 
+  --control-height: 34px;
+  --control-height-sm: 28px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed: 60px;
+  --tabstrip-height: 42px;
+  --statusbar-height: 28px;
+  --panel-width: 340px;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
   --motion-fast: 120ms;
   --motion-base: 180ms;
+  --motion-slow: 260ms;
 
-  /* Dark theme (default) */
-  --canvas: #0b1016;
-  --panel: #121a24;
-  --elevated: #1b2634;
-  --hover: #223043;
-  --border: #2a3a4f;
-  --border-strong: #3d5270;
-  --text: #e8edf3;
-  --text-muted: #a3b1c2;
-  --text-faint: #7f8ea1;
-  --accent: #5694ff;
-  --accent-strong: #7aabff;
-  --accent-contrast: #06101f;
-  --focus: #8ab6ff;
-  --success: #4ccb8f;
-  --warning: #f0b44c;
-  --danger: #ff7a7a;
-  --danger-surface: #3a1a1f;
-  --warning-surface: #33270f;
-  --success-surface: #12301f;
-  --scrim: rgb(3 6 10 / 0.66);
+  /* ---------- dark theme (default) ---------- */
+  color-scheme: dark;
+  --bg-app: #080b10;
+  --bg-sidebar: #0c1017;
+  --bg-surface: #0f141c;
+  --bg-raised: #151b25;
+  --bg-raised-hover: #1a2230;
+  --bg-overlay: #181f2b;
+  --bg-inset: #0a0e14;
+  --bg-hover: rgb(255 255 255 / 0.055);
+  --bg-active: rgb(255 255 255 / 0.09);
+  --bg-selected: rgb(94 145 255 / 0.16);
 
-  /* The terminal palette is independent of the application theme. */
-  --terminal-bg: #0b1016;
-  --terminal-fg: #e8edf3;
-  --terminal-cursor: #5694ff;
-  --terminal-selection: #27405f;
-}
+  --border-subtle: rgb(255 255 255 / 0.06);
+  --border: rgb(255 255 255 / 0.1);
+  --border-strong: rgb(255 255 255 / 0.2);
+  /* Control boundaries must reach 3:1 against their surface. */
+  --border-control: #6b7789;
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
-    --canvas: #f5f7fa;
-    --panel: #ffffff;
-    --elevated: #ffffff;
-    --hover: #eaeef4;
-    --border: #d5dce6;
-    --border-strong: #aab6c6;
-    --text: #152131;
-    --text-muted: #46556a;
-    --text-faint: #5f6e83;
-    --accent: #2563eb;
-    --accent-strong: #1d4fc4;
-    --accent-contrast: #ffffff;
-    --focus: #1d4fc4;
-    --success: #12794a;
-    --warning: #8a5a00;
-    --danger: #c0262d;
-    --danger-surface: #fde8e8;
-    --warning-surface: #fdf2d8;
-    --success-surface: #e2f5ea;
-    --scrim: rgb(21 33 49 / 0.4);
-  }
+  --text: #e8edf4;
+  --text-muted: #a2aebf;
+  --text-faint: #8693a6;
+  --text-on-accent: #050a14;
+
+  --accent: #6c9cff;
+  --accent-hover: #87afff;
+  --accent-soft: rgb(108 156 255 / 0.14);
+  --accent-text: #8fb3ff;
+  --focus: #8fb3ff;
+
+  --success: #43d394;
+  --success-soft: rgb(67 211 148 / 0.13);
+  --warning: #f2b84b;
+  --warning-soft: rgb(242 184 75 / 0.13);
+  --danger: #ff7b7b;
+  --danger-soft: rgb(255 123 123 / 0.13);
+  --info: #6cc4ff;
+
+  --scrim: rgb(2 4 8 / 0.62);
+  --shadow-1: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-2: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 6px 16px -4px rgb(0 0 0 / 0.5), 0 2px 4px rgb(0 0 0 / 0.3);
+  --shadow-3: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 60px -12px rgb(0 0 0 / 0.65), 0 8px 20px -6px rgb(0 0 0 / 0.45);
+  --glow-accent: 0 0 0 1px rgb(108 156 255 / 0.5), 0 0 0 4px rgb(108 156 255 / 0.16);
+  --app-backdrop: radial-gradient(1200px 600px at 100% -10%, rgb(108 156 255 / 0.07), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(67 211 148 / 0.045), transparent 60%);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --canvas: #f5f7fa;
-  --panel: #ffffff;
-  --elevated: #ffffff;
-  --hover: #eaeef4;
-  --border: #d5dce6;
-  --border-strong: #aab6c6;
-  --text: #152131;
-  --text-muted: #46556a;
-  --text-faint: #5f6e83;
+  --bg-app: #e9edf3;
+  --bg-sidebar: #f3f5f8;
+  --bg-surface: #fbfcfd;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #f6f8fb;
+  --bg-overlay: #ffffff;
+  --bg-inset: #eef1f5;
+  --bg-hover: rgb(15 30 55 / 0.05);
+  --bg-active: rgb(15 30 55 / 0.09);
+  --bg-selected: rgb(37 99 235 / 0.1);
+
+  --border-subtle: rgb(15 30 55 / 0.07);
+  --border: rgb(15 30 55 / 0.12);
+  --border-strong: rgb(15 30 55 / 0.22);
+  --border-control: #7a8595;
+
+  --text: #101826;
+  --text-muted: #4a5568;
+  --text-faint: #5b6779;
+  --text-on-accent: #ffffff;
+
   --accent: #2563eb;
-  --accent-strong: #1d4fc4;
-  --accent-contrast: #ffffff;
+  --accent-hover: #1d55d6;
+  --accent-soft: rgb(37 99 235 / 0.1);
+  --accent-text: #1d4fc4;
   --focus: #1d4fc4;
-  --success: #12794a;
+
+  --success: #11784a;
+  --success-soft: rgb(17 120 74 / 0.1);
   --warning: #8a5a00;
+  --warning-soft: rgb(196 132 0 / 0.13);
   --danger: #c0262d;
-  --danger-surface: #fde8e8;
-  --warning-surface: #fdf2d8;
-  --success-surface: #e2f5ea;
-  --scrim: rgb(21 33 49 / 0.4);
+  --danger-soft: rgb(192 38 45 / 0.09);
+  --info: #0b6aa8;
+
+  --scrim: rgb(16 24 38 / 0.36);
+  --shadow-1: 0 1px 2px rgb(16 24 38 / 0.08), 0 0 0 1px rgb(16 24 38 / 0.04);
+  --shadow-2: 0 6px 16px -6px rgb(16 24 38 / 0.18), 0 2px 4px rgb(16 24 38 / 0.06);
+  --shadow-3: 0 24px 60px -16px rgb(16 24 38 / 0.32), 0 8px 20px -8px rgb(16 24 38 / 0.16);
+  --glow-accent: 0 0 0 1px rgb(37 99 235 / 0.6), 0 0 0 4px rgb(37 99 235 / 0.14);
+  --app-backdrop: radial-gradient(1200px 600px at 100% -10%, rgb(37 99 235 / 0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(17 120 74 / 0.04), transparent 60%);
 }
 
+/* Reduced motion: the OS setting or the in-app preference. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0ms;
     --motion-base: 0ms;
+    --motion-slow: 0ms;
   }
+}
+
+:root[data-reduce-motion="true"] {
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
 }

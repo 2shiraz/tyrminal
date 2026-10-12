@@ -1,6 +1,6 @@
 // Generated from lucide-static 1.47.0 (ISC License, Copyright (c) 2026 Lucide Icons and Contributors).
-// Bundled as inline SVG so no icon is ever fetched at run time. Regenerate rather than hand-edit:
-// the source list is in docs/design-system.md. See NOTICE for the license text.
+// Bundled as inline SVG so no icon is ever fetched at run time. Regenerate with scripts/gen-icons.py
+// (list in src/components/ui/icons.list) rather than hand-editing. See NOTICE for the license text.
 
 import type { SVGProps } from "react";
 
@@ -116,3 +116,4 @@ export const IconCpu = svg(["path|d=M12 20v2", "path|d=M12 2v2", "path|d=M17 20v
 export const IconLink2 = svg(["path|d=M9 17H7A5 5 0 0 1 7 7h2", "path|d=M15 7h2a5 5 0 1 1 0 10h-2", "line|x1=8|x2=16|y1=12|y2=12"]);
 export const IconArrowUpRight = svg(["path|d=M7 7h10v10", "path|d=M7 17 17 7"]);
 export const IconSidebar = svg(["rect|width=18|height=18|x=3|y=3|rx=2", "path|d=M9 3v18"]);
+export const IconTextCursorInput = svg(["path|d=M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6", "path|d=M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7", "path|d=M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1", "path|d=M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1", "path|d=M9 6v12"]);

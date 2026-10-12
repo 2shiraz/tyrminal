@@ -1,19 +1,35 @@
 import { type FormEvent, useMemo, useState } from "react";
 
+import { BrandMark } from "../../components/layout/Sidebar";
 import { ErrorNotice, Notice, SecretField, TextField } from "../../components/ui/controls";
+import { IconCopy, IconLock, IconShieldCheck } from "../../components/ui/icons";
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 
 function Brand() {
   return (
-    <div className="brand">
-      <span className="brand-mark" aria-hidden="true">
-        &gt;_
+    <div className="brand" style={{ padding: 0, margin: 0 }}>
+      <BrandMark size={30} />
+      <span className="brand-name" style={{ fontSize: "var(--text-lg)" }}>
+        {msg.app.name}
       </span>
-      <strong>{msg.app.name}</strong>
     </div>
   );
+}
+
+/**
+ * A rough guide only (length and character variety); the KDF, not this meter, protects the
+ * vault. It never blocks a passphrase that meets the minimum length.
+ */
+export function passphraseScore(value: string): 0 | 1 | 2 | 3 | 4 {
+  if (value.length === 0) return 0;
+  if (value.length < 8) return 1;
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(value)).length;
+  const words = value.trim().split(/\s+/).length;
+  if (value.length >= 20 || (value.length >= 16 && (classes >= 3 || words >= 4))) return 4;
+  if (value.length >= 12 || classes >= 3) return 3;
+  return 2;
 }
 
 /** First launch: create the local vault, then make sure the recovery key was actually saved. */
@@ -26,6 +42,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const tooShort = passphrase.length > 0 && passphrase.length < 8;
   const mismatch = confirm.length > 0 && confirm !== passphrase;
   const ready = passphrase.length >= 8 && confirm === passphrase;
+  const score = passphraseScore(passphrase);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -52,22 +69,30 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="center-screen">
-      <form className="card" onSubmit={submit} aria-busy={pending}>
-        <Brand />
-        <div className="stack-sm">
+    <div className="auth-screen">
+      <form className="auth-card" onSubmit={submit} aria-busy={pending}>
+        <div className="auth-head">
+          <Brand />
           <h1>{msg.onboarding.title}</h1>
-          <p className="muted">{msg.onboarding.intro}</p>
+          <p>{msg.onboarding.intro}</p>
         </div>
-        <SecretField
-          label={msg.onboarding.passphrase}
-          value={passphrase}
-          onChange={setPassphrase}
-          hint={msg.onboarding.passphraseHint}
-          error={tooShort ? msg.onboarding.tooShort : undefined}
-          autoFocus
-          maxLength={1024}
-        />
+        <div className="stack-sm">
+          <SecretField
+            label={msg.onboarding.passphrase}
+            value={passphrase}
+            onChange={setPassphrase}
+            hint={msg.onboarding.passphraseHint}
+            error={tooShort ? msg.onboarding.tooShort : undefined}
+            autoFocus
+            maxLength={1024}
+          />
+          <div className="strength" data-score={score} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
         <SecretField
           label={msg.onboarding.confirm}
           value={confirm}
@@ -75,13 +100,22 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           error={mismatch ? msg.onboarding.mismatch : undefined}
           maxLength={1024}
         />
-        <Notice tone="warning" icon="!">
-          {msg.onboarding.noRecovery}
-        </Notice>
+        <Notice tone="warning">{msg.onboarding.noRecovery}</Notice>
         <ErrorNotice error={error} />
-        <button type="submit" className="btn btn-primary" disabled={!ready || pending}>
-          {pending ? msg.onboarding.creating : msg.onboarding.create}
+        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!ready || pending}>
+          {pending ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              {msg.onboarding.creating}
+            </>
+          ) : (
+            msg.onboarding.create
+          )}
         </button>
+        <div className="auth-foot">
+          <IconShieldCheck size={14} />
+          {msg.unlock.localOnly}
+        </div>
       </form>
     </div>
   );
@@ -94,6 +128,7 @@ export function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; 
   const challenge = useMemo(() => 2 + Math.floor(Math.random() * Math.max(1, groups.length - 4)), [groups.length]);
   const [answer, setAnswer] = useState("");
   const [wrong, setWrong] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -103,15 +138,31 @@ export function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; 
   }
 
   return (
-    <div className="center-screen">
-      <form className="card" onSubmit={submit}>
-        <Brand />
-        <div className="stack-sm">
+    <div className="auth-screen">
+      <form className="auth-card auth-card-wide" onSubmit={submit}>
+        <div className="auth-head">
+          <Brand />
           <h1>{msg.onboarding.recoveryTitle}</h1>
-          <p className="muted">{msg.onboarding.recoveryIntro}</p>
+          <p>{msg.onboarding.recoveryIntro}</p>
         </div>
         <div className="recovery-key" aria-label={msg.unlock.recoveryKey}>
-          {groups.join(" ")}
+          {groups.map((group, index) => (
+            // Fixed positions of one key.
+            <span key={`${index}-${group}`}>{group} </span>
+          ))}
+        </div>
+        <div>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              // The user's own explicit copy of a secret they must store elsewhere.
+              void navigator.clipboard.writeText(recoveryKey).then(() => setCopied(true)).catch(() => undefined);
+            }}
+          >
+            <IconCopy size={14} />
+            <span aria-live="polite">{copied ? msg.common.copied : msg.common.copy}</span>
+          </button>
         </div>
         <TextField
           label={msg.onboarding.recoveryVerify(challenge + 1)}
@@ -125,7 +176,7 @@ export function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; 
           autoComplete="off"
           className="input mono"
         />
-        <button type="submit" className="btn btn-primary" disabled={answer.trim().length === 0}>
+        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={answer.trim().length === 0}>
           {msg.onboarding.recoveryDone}
         </button>
       </form>
@@ -148,12 +199,12 @@ export function Unlock({ busy }: { busy: boolean }) {
   }
 
   return (
-    <div className="center-screen">
-      <form className="card" onSubmit={submit} aria-busy={working}>
-        <Brand />
-        <div className="stack-sm">
+    <div className="auth-screen">
+      <form className="auth-card" onSubmit={submit} aria-busy={working}>
+        <div className="auth-head">
+          <Brand />
           <h1>{msg.unlock.title}</h1>
-          <p className="muted">{msg.unlock.localOnly}</p>
+          <p>{msg.unlock.localOnly}</p>
         </div>
         {mode === "passphrase" ? (
           <SecretField label={msg.unlock.passphrase} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
@@ -170,12 +221,22 @@ export function Unlock({ busy }: { busy: boolean }) {
           />
         )}
         <ErrorNotice error={error} />
-        <button type="submit" className="btn btn-primary" disabled={!secret || working}>
-          {working ? msg.unlock.unlocking : msg.unlock.unlock}
+        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!secret || working}>
+          {working ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              {msg.unlock.unlocking}
+            </>
+          ) : (
+            <>
+              <IconLock size={16} />
+              {msg.unlock.unlock}
+            </>
+          )}
         </button>
         <button
           type="button"
-          className="btn btn-quiet"
+          className="btn btn-ghost btn-block"
           onClick={() => {
             setMode(mode === "passphrase" ? "recovery" : "passphrase");
             setSecret("");
