@@ -1776,6 +1776,67 @@ kbd,
   pointer-events: none;
 }
 
+/* The host's OS logo in the slot: compact, without the tile it has in the host list. A small dot
+   on its corner shows a session that is connecting, waiting or dropped; none while simply open. */
+.tab-os {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.tab-lead .os-icon {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: none;
+}
+
+.tab-lead .os-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tab-os:not([data-tone="ok"])::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 1.5px var(--bg-strip);
+}
+
+.tab-os[data-tone="busy"]::after {
+  background: var(--warning);
+}
+
+.tab-os[data-tone="attention"]::after {
+  background: var(--accent);
+}
+
+.tab-os[data-tone="bad"]::after {
+  background: var(--danger);
+}
+
+.tab:hover .tab-lead .tab-os,
+.tab[aria-selected="true"] .tab-lead .tab-os {
+  opacity: 0;
+}
+
+/* On an inactive tab the red top edge marks a production host, so the name keeps its room; the
+   label is still read out, and the active tab shows it in full. */
+.tab:not([aria-selected="true"]) .tab-production {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 /* Unread output in a background tab shows in its name rather than as a ring round the dot. */
 .tab[data-unread]:not([aria-selected="true"]) .tab-label {
   color: var(--text);
