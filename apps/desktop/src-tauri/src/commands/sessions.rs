@@ -40,6 +40,23 @@ pub async fn session_open_ssh(
     state.core()?.sessions.open_ssh(window.label(), &host_id, cols, rows, sink).await
 }
 
+// quick connect
+/// A session to an address that is not saved (Home's quick connect). Nothing is stored; a typed
+/// password in `input` is used for this session only.
+#[tauri::command]
+pub async fn session_open_quick(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    input: tyrminal_core::contracts::QuickConnectInput,
+    cols: u16,
+    rows: u16,
+    output: Channel<InvokeResponseBody>,
+    events: Channel<SessionEvent>,
+) -> Result<SessionOpened, IpcError> {
+    let sink = Arc::new(ChannelSink { output, events });
+    state.core()?.sessions.open_quick(window.label(), input, cols, rows, sink).await
+}
+
 #[tauri::command]
 pub async fn session_open_local(
     window: WebviewWindow,

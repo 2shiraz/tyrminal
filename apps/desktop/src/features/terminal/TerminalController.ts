@@ -20,7 +20,9 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 
-import { detach, sessions, toAppError } from "../../lib/ipc";
+import { AppError, detach, sessions, toAppError } from "../../lib/ipc";
+import { msgQuick } from "../../lib/messages-quick";
+import { quickUsed, takeQuick } from "../../lib/quickConnect";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import type { TokenKind } from "../highlight/builtins";
@@ -40,6 +42,8 @@ import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/sh
 
 export type TerminalTarget =
   | { kind: "ssh"; hostId: string }
+  /** Quick connect: an address that is not saved. `token` names the one-time handoff of its input. */
+  | { kind: "quick"; token: string; protocol: "ssh" | "telnet" }
   | { kind: "local" }
   /** P-33: a shell in a container, on the connection of the SSH session `sessionId`. */
   | { kind: "container"; sessionId: string; engine: ContainerEngine; containerId: string };
@@ -389,6 +393,8 @@ export class TerminalController {
         ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
         : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
+          : target.kind === "quick"
+            ? await openQuick(target.token, cols, rows, onOutput, onEvent)
           : target.kind === "container"
             ? await sessions.openContainer(target.sessionId, target.engine, target.containerId, cols, rows, onOutput, onEvent)
             : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
@@ -815,4 +821,14 @@ export class TerminalController {
     this.disposeWebgl();
     this.term.dispose();
   }
+}
+
+// quick connect
+/** Opens a quick connection from its one-time handoff; gone (another window, a reopened tab): an error. */
+async function openQuick(token: string, cols: number, rows: number, onOutput: (bytes: Uint8Array) => void, onEvent: (event: SessionEvent) => void) {
+  const input = takeQuick(token);
+  if (!input) throw new AppError({ code: "NOT_FOUND", message: msgQuick.gone });
+  const opened = await sessions.openQuick(input, cols, rows, onOutput, onEvent);
+  quickUsed(token);
+  return opened;
 }

@@ -503,7 +503,8 @@ export function templateTabs(ws: Workspace): LayoutTab[] {
 }
 
 function terminalOnly(ws: Workspace, tab: Tab): boolean {
-  return panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp");
+  // quick connect: an unsaved connection is not part of a template either.
+  return panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp" && ws.panes[id]?.target.kind !== "quick");
 }
 
 function tabTemplate(ws: Workspace, tab: Tab): LayoutTab {

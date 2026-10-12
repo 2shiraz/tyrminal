@@ -6,6 +6,7 @@ import { ErrorNotice } from "../components/ui/controls";
 import { Onboarding, Unlock } from "../features/vault/VaultScreens";
 import { type AppError, toAppError, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
+import { clearQuick } from "../lib/quickConnect";
 import { AppShell } from "./AppShell";
 import { PreferencesProvider } from "./preferences";
 
@@ -67,6 +68,10 @@ function Root() {
   }, [refresh]);
 
   const unlocked = status?.state === "unlocked" && !onboarding;
+  // quick connect: an unsaved connection's details never outlive the unlocked period.
+  useEffect(() => {
+    if (!unlocked) clearQuick();
+  }, [unlocked]);
   useActivityReports(unlocked);
 
   if (error) {

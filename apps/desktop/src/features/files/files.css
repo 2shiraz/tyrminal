@@ -137,6 +137,18 @@ th.ft-col-size .ft-head {
   transition: background var(--duration-press) var(--ease-out);
 }
 
+/* A windowed folder's spacer rows hold the height of the rows not in the DOM; they are not rows. */
+.ft-table tbody tr.ft-spacer {
+  height: auto;
+  cursor: auto;
+}
+
+.ft-table tbody tr.ft-spacer td,
+.ft-table tbody tr.ft-spacer:hover td {
+  padding: 0;
+  background: none;
+}
+
 .ft-table tbody tr.is-selected td {
   background: var(--bg-selected);
   color: var(--accent-text);

@@ -329,7 +329,7 @@ export function TerminalView(props: TerminalViewProps) {
             setAuth(null);
             setClipboardAsk(null);
             setClosed({ error: event.error, exitStatus: event.exitStatus });
-            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
+            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind === "quick" ? (target.protocol === "ssh" ? "ssh" : "local") : target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
               autoAttempts.current += 1;
               setAutoRetry({ attempt: autoAttempts.current, dueAt: Date.now() + reconnectDelayMs(autoAttempts.current) });
             }
@@ -483,6 +483,8 @@ export function TerminalView(props: TerminalViewProps) {
 
   // connection track: the host's OS for the sheet's host tile (null: a generic mark).
   const hostId = target.kind === "ssh" ? target.hostId : null;
+  // quick connect: an SSH connection to an unsaved address shows the same sheet as a saved host.
+  const sshLike = target.kind === "ssh" || (target.kind === "quick" && target.protocol === "ssh");
   const [hostOs, setHostOs] = useState<HostOs | null>(null);
   useEffect(() => {
     if (!hostId) return;
@@ -660,7 +662,7 @@ export function TerminalView(props: TerminalViewProps) {
         <ConnectionSheet
           os={hostOs}
           settling={settling && !showSheet}
-          ssh={target.kind === "ssh"}
+          ssh={sshLike}
           label={label}
           identity={identity}
           timeline={timeline}
@@ -684,7 +686,7 @@ export function TerminalView(props: TerminalViewProps) {
           onStopRetry={() => setAutoRetry(null)}
           onCloseTab={() => handlers.current.onClose()}
           onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
-          onOpenLog={target.kind === "ssh" ? () => setLogOpen(true) : null}
+          onOpenLog={sshLike ? () => setLogOpen(true) : null}
           onInstallKey={target.kind === "ssh" && rejectedKey && closed?.error?.code === "AUTH_FAILED" ? () => setInstalling(true) : null}
           canReconnect={props.canReconnect !== false}
         />

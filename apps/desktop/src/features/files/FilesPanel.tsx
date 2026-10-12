@@ -19,6 +19,7 @@ import { KeyedMemory, useMemory } from "./memory";
 import { msgFiles } from "./messages";
 import { TransferDrawer } from "./TransferDrawer";
 import { type QueuedTransfer, useTransferQueue } from "./useTransferQueue";
+import { useExit } from "../../lib/exitGhost";
 
 export interface FilesTarget {
   sessionId: string;
@@ -178,8 +179,11 @@ export function FilesPanel({
     ...(onOpenSftp ? [{ label: msgSftp.openInPanel, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(dir) }] : []),
   ];
 
+  // Closing, the panel fades and drifts back toward its edge (lib/exitGhost).
+  const exitRef = useExit<HTMLElement>({ transform: "translateX(4px)" });
   return (
     <aside
+      ref={exitRef}
       className={`side-panel side-panel-wide fp${twoPane ? " side-panel-two" : ""}`}
       aria-label={msg.files.panel}
       onKeyDown={(event) => {

@@ -46,6 +46,8 @@ pub mod password_check;
 mod security_review;
 // tmux and screen session awareness (P-31)
 mod multiplexers;
+// OS auto-detection
+mod os_detect;
 // command history
 mod command_history;
 // server at a glance
