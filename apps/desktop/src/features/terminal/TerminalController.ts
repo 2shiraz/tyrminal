@@ -27,6 +27,8 @@ import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { CommandOutputs } from "./commandOutput";
+import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
@@ -176,6 +178,8 @@ export class TerminalController {
   private joiner: number | null = null;
   private renderer: RendererKind = "dom";
   private sessionId: string | null = null;
+  /** P-29: command output ranges from shell-integration marks. */
+  readonly commandOutputs: CommandOutputs;
   private disposed = false;
   private pendingAck = 0;
   private ackTimer: number | undefined;
@@ -272,6 +276,9 @@ export class TerminalController {
     });
     // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries.
     this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+    // P-29: the output of each command between its shell-integration marks.
+    this.commandOutputs = new CommandOutputs(this.term, () => this.sessionId);
+    this.cleanups.push(() => this.commandOutputs.dispose());
     this.cleanups.push(
       shellContexts.onMark((mark) => {
         const pending = this.pendingFolder;
@@ -357,6 +364,19 @@ export class TerminalController {
       const appError = toAppError(error);
       this.callbacks.onEvent({ type: "closed", error: { code: appError.code, message: appError.message }, exitStatus: null });
     }
+  }
+
+  /** P-28: matches for `query` in this terminal's scrollback (in memory only). */
+  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult {
+    const buffer = this.term.buffer.normal;
+    return searchLines((y) => buffer.getLine(y), buffer.length, query, caseSensitive);
+  }
+
+  /** P-28: scrolls a match into view and selects it. */
+  revealMatch(match: { row: number; col: number; length: number }): void {
+    if (this.disposed || this.term.buffer.active.type !== "normal") return;
+    this.term.scrollToLine(Math.max(0, match.row - Math.floor(this.term.rows / 2)));
+    this.term.select(match.col, match.row, match.length);
   }
 
   get id(): string | null {

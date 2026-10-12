@@ -512,6 +512,11 @@ export function installMockBackend(options) {
     files_upload_abort: (a) => {
       streams.delete(a.uploadId);
     },
+    // P-29: the system save dialog is not shown in UI tests; the text is kept for assertions.
+    terminal_output_save: (a) => {
+      window.__mockSavedOutput = a.text;
+      return "command-output.txt";
+    },
     diagnostics_report: (a) => {
       window.__mockReports.push(a.entries);
       return "tyrminal-diagnostics-2026-10-12.txt";
