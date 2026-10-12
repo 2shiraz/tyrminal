@@ -2,6 +2,7 @@
 import type { CommandNotifications } from "./CommandNotifications";
 import type { EditorApp } from "./EditorApp";
 import type { HostsViewPreferences } from "./HostsViewPreferences";
+import type { PanelWidths } from "./PanelWidths";
 import type { PasswordCheckPreferences } from "./PasswordCheckPreferences";
 import type { TerminalPreferences } from "./TerminalPreferences";
 import type { ThemePreference } from "./ThemePreference";
@@ -52,4 +53,9 @@ hostsView?: HostsViewPreferences,
  * Interface size in percent, one of [`INTERFACE_SCALES`]. `None`: automatic, from the
  * window size.
  */
-interfaceScale: number | null, };
+interfaceScale: number | null, 
+/**
+ * Widths the user dragged side panels to, in CSS pixels; kept across restarts. Absent in
+ * files written before it existed. Clamped natively per panel in core `preferences::sanitize`.
+ */
+panelWidths?: PanelWidths, };

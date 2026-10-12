@@ -23,6 +23,7 @@ import { msgSftp } from "../sftp/messages";
 import { msg } from "../../lib/messages";
 import type { Unsaved } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { useHostAutosave } from "./hostAutosave";
 import { NoteCard } from "../notes/NoteCard";
 import { HostFormCards, type HostFormOptions, groupPath, useHostForm } from "./hostForm";
@@ -206,6 +207,7 @@ export function HostPanel({
           ]}
         />
       )}
+      <ResizeHandle panel="hostPanel" />
     </aside>
   );
 }
