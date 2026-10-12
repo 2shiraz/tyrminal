@@ -99,6 +99,8 @@ a tab, and installing a public key on the connected server.
 **Hosts** lists your saved servers as a grid or a list. Each host has an address, port, user name
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
+Hosts opens as a list. It remembers the layout (list or cards), the sort order and the group you picked, also after
+you visit another view or restart Tyrminal.
 
 A **group** can also give its hosts defaults: a user name, port and key, and, under
 **Defaults for hosts in this group**, a route (a jump host and/or a proxy) and an icon. Hosts
@@ -136,6 +138,25 @@ loop, more than seven jump hosts, or a host that two chains would route differen
 imported without a jump host, and the preview says why. An OpenSSH `known_hosts` file can be
 imported too: after a review, its keys become trusted server identities, and a key that differs
 from one you already trust is never replaced.
+
+### Production hosts
+
+Mark a host as a **production host** with the switch in its editor, mark a whole group (every
+host in it and its subgroups) in the group editor, or give hosts the production tag (Settings →
+Security → **Production tag**, `prod` unless you change it; leave it empty to use only the
+switches). The host editor says when a host is a production host through its group or tag.
+
+Production hosts show a red **Production** badge in Hosts. Their sessions have a red edge on the
+tab and around the pane, together with the word **Production**. Tyrminal asks before:
+
+- **broadcasting** to a tab that has a production pane (and asks again each time you turn
+  broadcasting on);
+- **running a snippet on several hosts** when some of them are production hosts;
+- **connecting every host of a group** (or a selection) that includes production hosts.
+
+Each question names the production hosts and starts on **Cancel**, so Enter or Escape never
+confirms by accident. The production marking only adds these questions; it never turns any
+other check off.
 
 ## Connecting and host keys
 
@@ -254,9 +275,11 @@ like any paste. On Linux the system's middle-click paste of the selected text is
 middle click with the setting off sends nothing. Programs that use the mouse (vim, htop, mc) get
 the click; hold Shift to paste anyway.
 
-**Search all sessions** (command palette) finds text in the scrollback of every open terminal
-and lists the matches by tab; choosing one brings its tab to the front and selects the match.
-The search runs in memory only: nothing is saved or logged.
+**Search all sessions** (command palette, or Alt+Shift+F / ⌘⇧F) finds text in the scrollback of
+every open terminal and lists the matches by tab; choosing one brings its tab to the front and
+selects the match. It lists the first 500 matches, and **More…** continues. SFTP tabs are not
+searched. The search runs in memory only, a little at a time so typing never waits: nothing is
+saved, sent or logged.
 
 **Copy or save a command's output** (command palette) lists the commands the shell integration
 marked in the focused terminal, newest first. Copy or save the output of one of them, without
@@ -490,6 +513,7 @@ open in your browser only when you click them.
 | Close pane | Ctrl+Shift+W | ⌘W |
 | Split right / down | Alt+Shift+= / Alt+Shift+- | ⌘D / ⌘⇧D |
 | Find in terminal | Ctrl+Shift+F | ⌘F |
+| Search all sessions | Alt+Shift+F | ⌘⇧F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | ⌘⇧] / ⌘⇧[ |
 | Move focus between panes | Alt+arrow keys | ⌘⌥ + arrow keys |

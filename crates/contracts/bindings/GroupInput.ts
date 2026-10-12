@@ -4,4 +4,8 @@ export type GroupInput = {
 /**
  * `None` creates a group; `Some` edits that group.
  */
-id: string | null, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, };
+id: string | null, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, 
+/**
+ * Hosts in this group and its subgroups are production hosts (P-26).
+ */
+production: boolean, };

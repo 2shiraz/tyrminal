@@ -16,8 +16,9 @@ async function openHosts(page: Page) {
   await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
 }
 
-const fresh = (page: Page) => page.getByRole("complementary", { name: "New host" });
-const status = (page: Page) => page.getByTestId("host-panel").getByTestId("host-panel-status");
+// The panel is renamed "Host details" once autosave creates the host.
+const fresh = (page: Page) => page.getByTestId("host-panel");
+const keySaves = async (page: Page) => (await calls(page, "host_save")).filter((c) => (c.args as { host: { auth: { kind: string } } }).host.auth.kind === "key");
 
 test("a new host never signs in with a key nobody chose", async ({ page }) => {
   await openHosts(page);
@@ -34,14 +35,16 @@ test("a new host never signs in with a key nobody chose", async ({ page }) => {
   await panel.getByRole("radio", { name: /Use a key from the keychain/ }).check();
   const picker = panel.getByRole("combobox", { name: "Choose a key" });
   await expect(picker).toHaveValue("");
-  await expect(panel.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-  await expect(status(page)).toHaveText("To save, fill in: Sign-in method.");
-  expect(await calls(page, "host_save")).toHaveLength(0);
+  await expect(panel.getByText("Choose a key. Until you do, the host keeps its current sign-in.")).toBeVisible();
+  // Autosave created the host with the password sign-in; a key sign-in without a key is never sent.
+  await panel.getByLabel("Name", { exact: true }).focus();
+  await expect(panel).toHaveAttribute("data-autosave", "clean");
+  expect(await keySaves(page)).toHaveLength(0);
+  expect((await calls(page, "host_save")).at(-1)?.args).toMatchObject({ host: { auth: { kind: "ask_password" } } });
 
   await picker.selectOption({ label: "Legacy RSA (rsa-sha2-512)" });
-  await panel.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(status(page)).toHaveText("Saved");
-  const saved = (await calls(page, "host_save")).at(-1)?.args as { host: { auth: unknown } };
+  await expect.poll(async () => (await keySaves(page)).length).toBe(1);
+  const saved = (await keySaves(page)).at(-1)?.args as { host: { auth: unknown } };
   expect(saved.host.auth).toEqual({ kind: "key", keyId: expect.any(String) });
   const keyId = (saved.host.auth as { keyId: string }).keyId;
   const keys = await page.evaluate(() => (window as unknown as { __mockState: { keys: { id: string; label: string }[] } }).__mockState.keys);
@@ -55,8 +58,8 @@ test("a new host saved as is asks for the password", async ({ page }) => {
   await panel.getByLabel("Address").fill("10.0.0.10");
   await panel.getByLabel("Name", { exact: true }).fill("pw-box");
   await panel.getByLabel("User name").fill("ops");
-  await panel.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(status(page)).toHaveText("Saved");
+  await panel.getByLabel("Name", { exact: true }).focus();
+  await expect(panel).toHaveAttribute("data-autosave", "clean");
   const saved = (await calls(page, "host_save")).at(-1)?.args as { host: { auth: unknown } };
   expect(saved.host.auth).toEqual({ kind: "ask_password" });
 });

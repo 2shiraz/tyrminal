@@ -37,10 +37,17 @@ describe("command history and the server panel in the real application", { concu
     await app?.quit();
   });
 
-  /** A Bash whose prompt carries the integration's marks: A and B around the prompt, C from PS0. */
+  /** A Bash whose prompt carries the integration's marks: A and B around the prompt, C as a
+   * command starts. C comes from PS0 (Bash 4.4 and newer, as in the integration); an older Bash
+   * (the macOS lab's /bin/bash 3.2) prints it from a DEBUG trap instead. A trap firing again
+   * within the same line finds no prompt to read and adds nothing. */
   async function markedShell() {
     await t.type("exec bash --norc --noprofile -i\n");
-    await t.type("PS1='\\[\\e]133;A\\a\\]tyr$ \\[\\e]133;B\\a\\]'; PS0=$'\\e]133;C\\a'; clear\n");
+    await t.type(
+      "PS1='\\[\\e]133;A\\a\\]tyr$ \\[\\e]133;B\\a\\]'; " +
+        "if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then PS0=$'\\e]133;C\\a'; " +
+        "else trap 'printf \"\\033]133;C\\007\"' DEBUG; fi; clear\n",
+    );
     await t.waitForText(/^tyr\$ \s*$/m, "marked prompt");
   }
 
@@ -155,28 +162,45 @@ describe("command history and the server panel in the real application", { concu
     await markedShell();
     await s.click(await s.waitFor('.statusbar button[data-panel="server"][aria-pressed="false"]'));
     const panel = await s.waitFor('.side-panel[data-panel-kind="server"]');
-    await s.until(async () => (await s.findAll('.side-panel [data-glance="uptime"]')).length === 1, { describe: "values", timeout: 20_000 });
-    const uptime = await s.text(await s.waitFor('.side-panel [data-glance="uptime"]'));
-    assert.match(uptime, /^\d+ (d \d+ h|h \d+ min|min)$/, `uptime: ${uptime}`);
-    const load = await s.text(await s.waitFor('.side-panel [data-glance="load"]'));
-    assert.match(load, /^\d+\.\d\d\s+\d+\.\d\d\s+\d+\.\d\d$/, `load: ${load}`);
-    assert.match(await s.text(await s.waitFor('.side-panel [data-glance="memory"]')), /used/);
-    const mounts = await s.execute(`return [...document.querySelectorAll('.side-panel [data-glance="disks"] li > .mono')].map((e) => e.textContent)`);
-    assert.ok(mounts.includes("/"), `the root filesystem is listed: ${mounts}`);
-    assert.ok(mounts.every((m) => m.startsWith("/")), `mount points only: ${mounts}`);
+    // A Linux lab server gives values; another system (the macOS lab is the Mac's own sshd) is
+    // reported as not Linux, with nothing guessed.
+    const linux = (lab.serverOs ?? "linux") === "linux";
+    const shown = linux ? '.side-panel [data-glance="uptime"]' : '.side-panel [data-glance="unavailable"]';
+    await s.waitFor(shown, { describe: "the panel's answer", timeout: 20_000 });
+    if (linux) {
+      const uptime = await s.text(await s.waitFor('.side-panel [data-glance="uptime"]'));
+      assert.match(uptime, /^\d+ (d \d+ h|h \d+ min|min)$/, `uptime: ${uptime}`);
+      const load = await s.text(await s.waitFor('.side-panel [data-glance="load"]'));
+      assert.match(load, /^\d+\.\d\d\s+\d+\.\d\d\s+\d+\.\d\d$/, `load: ${load}`);
+      const memory = await s.text(await s.waitFor('.side-panel [data-glance="memory"]'));
+      if (memory === "Unavailable") {
+        // Only when the server has no MemAvailable line (WSL 1 has none): it is not estimated.
+        await t.type("echo mem-available-$(grep -c '^MemAvailable:' /proc/meminfo)\n");
+        await t.waitForText(/^mem-available-0\s*$/m, "the server reports no MemAvailable");
+        await t.type("clear\n");
+        await t.waitForText(/^tyr\$ \s*$/m, "cleared");
+      } else {
+        assert.match(memory, /used/);
+      }
+      const mounts = await s.execute(`return [...document.querySelectorAll('.side-panel [data-glance="disks"] li > .mono')].map((e) => e.textContent)`);
+      assert.ok(mounts.includes("/"), `the root filesystem is listed: ${mounts}`);
+      assert.ok(mounts.every((m) => m.startsWith("/")), `mount points only: ${mounts}`);
+    } else {
+      assert.equal(await s.text(await s.waitFor(shown)), "Not available. This works on Linux servers only.");
+    }
     await app.screenshot("h03-server-panel");
 
     // It reads again while open, on its own channel: the shell saw none of it.
     await new Promise((r) => setTimeout(r, 6_000));
-    assert.equal((await s.findAll('.side-panel [data-glance="uptime"]')).length, 1);
+    assert.equal((await s.findAll(shown)).length, 1);
     const screen = await t.terminalText();
-    assert.doesNotMatch(screen, /proc|loadavg|meminfo|uname/, "nothing was typed into the shell");
+    assert.doesNotMatch(screen, /proc\/|loadavg|uname/, "nothing was typed into the shell");
 
     // Off for this host, then on again.
     await s.click(await s.waitFor('.side-panel input[role="switch"]'));
     await s.until(async () => /Off for this host\./.test(await s.text(panel)), { describe: "off for the host" });
     await s.click(await s.waitFor('.side-panel input[role="switch"]'));
-    await s.waitFor('.side-panel [data-glance="uptime"]', { timeout: 20_000 });
+    await s.waitFor(shown, { timeout: 20_000 });
 
     // Locking closes the panel with the session.
     await s.clickButton("Lock vault", { within: "nav.sidebar" });

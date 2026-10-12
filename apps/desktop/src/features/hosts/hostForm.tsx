@@ -2,20 +2,26 @@
 // the validation and save order, and the cards that render it. Stored passwords are write-only:
 // the field starts empty, is masked until the user presses its reveal button, and is cleared after
 // every save attempt.
-import type { GroupSummary, HostAuthInput, HostOs, HostSummary, IdentitySummary, KeySummary } from "@tyrminal/contracts";
+import type { GroupSummary, HostAuthInput, HostOs, HostSummary, HostTerminal, IdentitySummary, KeySummary, SerialSettings } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
-import { SecretField, TextField } from "../../components/ui/controls";
+import { usePreferences } from "../../app/preferences";
+import { SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconKeyRound, IconPlus, IconServer, IconX } from "../../components/ui/icons";
 import { hosts as hostsApi, identities as identitiesApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { identityEvents } from "../credentials/IdentitiesSection";
 import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
+import { validAddress, validLabel, validTags, validUsername } from "./fieldRules";
+import { DropSecretNotice, type LiveProxySecret, LiveSecretField } from "./LiveSecret";
 import { OsIcon } from "./OsIcon";
+import { productionReason } from "./production";
 import {
   AgentForwarding,
   DEFAULT_SERIAL,
@@ -67,7 +73,10 @@ export interface HostFormOptions {
   identity?: { list: IdentitySummary[]; current: string | null } | undefined;
 }
 
-export function useHostForm({ host, initial, keys, groups = [], defaultGroupId = null, identity }: HostFormOptions) {
+export function useHostForm({ host: hostProp, initial, keys, groups = [], defaultGroupId = null, identity }: HostFormOptions) {
+  // The host as the form opened it. An autosaving owner passes newer summaries as it writes; the
+  // form keeps its own fields and never reloads under the user's typing.
+  const [host] = useState(hostProp);
   const source = host ?? initial;
   // The starting point is fixed for the life of the form; owners remount it to start over.
   const [start] = useState(() => {
@@ -93,6 +102,7 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
       serial: host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL,
       terminal: host?.terminal ?? DEFAULT_TERMINAL,
       forwardAgent: host?.forwardAgent ?? false,
+      production: host?.production === "host",
     };
   });
   const [groupId, setGroupId] = useState<string | null>(start.groupId);
@@ -111,6 +121,7 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
   const [serial, setSerial] = useState(start.serial);
   const [terminal, setTerminal] = useState(start.terminal);
   const [forwardAgent, setForwardAgent] = useState(start.forwardAgent);
+  const [production, setProduction] = useState(start.production);
   const [certified, setCertified] = useState<Set<string>>(new Set());
   const { pending, error, run } = useAction();
 
@@ -145,46 +156,39 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
       : protocol === "telnet"
         ? label.trim() !== "" && address.trim() !== "" && (port === "" || portValid)
         : label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid && advanced.valid;
-  /** What still stops a save, in the order of the cards, for the footer's explanation. */
-  const missing = (
-    protocol === "serial"
-      ? [label.trim() === "" && msg.hosts.label, serial.path.trim() === "" && msg.hosts.serialPort]
-      : protocol === "telnet"
-        ? [address.trim() === "" && msg.hosts.address, label.trim() === "" && msg.hosts.label, port !== "" && !portValid && msg.hosts.port]
-        : [
-            address.trim() === "" && msg.hosts.address,
-            label.trim() === "" && msg.hosts.label,
-            !portValid && msg.hosts.port,
-            effectiveUser === "" && msg.hosts.username,
-            !authValid && (authKind === "stored_password" ? msg.hosts.password : msg.hosts.auth),
-            !advanced.valid && msgD.hostPanel.more,
-          ]
-  ).filter((x): x is string => typeof x === "string");
+  /** Inline errors per field: shown at once, and an autosaving owner never stores the field. */
+  const errors = {
+    address: protocol === "serial" ? undefined : address.trim() === "" ? (host ? msgAutosave.addressEmpty : undefined) : validAddress(address) ? undefined : msgAutosave.address,
+    label: label.trim() === "" ? (host ? msgAutosave.label : undefined) : validLabel(label) ? undefined : msgAutosave.label,
+    username: protocol === "ssh" && !validUsername(username) ? msgAutosave.username : undefined,
+    tags: validTags(tags) ? undefined : msgAutosave.tags,
+    // A key sign-in needs a key the user chose; none is ever picked for them.
+    key: protocol === "ssh" && authKind === "key" && keyId === "" ? msgAutosave.keyMissing : undefined,
+  };
+  const fieldsValid = !errors.address && !errors.label && !errors.username && !errors.tags && !errors.key;
   /** Follows the protocol's usual port unless the user chose another. */
   const setProtocol = (next: ProtocolKind) => {
     if (next === "telnet" && port === "22") setPort("23");
     if (next === "ssh" && port === "23") setPort("22");
     setProtocolState(next);
   };
-  const dirty =
-    groupId !== start.groupId ||
-    label !== start.label ||
-    address !== start.address ||
-    port !== start.port ||
-    username !== start.username ||
-    tags !== start.tags ||
-    authKind !== start.authKind ||
-    (authKind === "key" && keyId !== start.keyId) ||
-    password.length > 0 ||
-    identityId !== start.identityId ||
-    protocol !== start.protocol ||
-    (protocol === "serial" && JSON.stringify(serial) !== JSON.stringify(start.serial)) ||
-    terminal.encoding !== start.terminal.encoding ||
-    terminal.term !== start.terminal.term ||
-    terminal.pasteSkipMultiline !== start.terminal.pasteSkipMultiline ||
-    terminal.pasteSkipTrailingNewline !== start.terminal.pasteSkipTrailingNewline ||
-    forwardAgent !== start.forwardAgent ||
-    advanced.changed;
+  /** Undo: puts every non-secret field back to `to` (a typed, unset password stays). */
+  function restore(to: HostFields) {
+    setGroupId(to.groupId);
+    setLabel(to.label);
+    setAddress(to.address);
+    setPort(to.port);
+    setUsername(to.username);
+    setTags(to.tags);
+    setAuthKind(to.authKind);
+    setKeyId(to.keyId);
+    setIdentityId(to.identityId);
+    setProtocolState(to.protocol);
+    setSerial(to.serial);
+    setTerminal(to.terminal);
+    setForwardAgent(to.forwardAgent);
+    setProduction(to.production);
+  }
 
   /** Saves the host; resolves to the saved host, or `undefined` when the core refused it. */
   async function save(): Promise<HostSummary | undefined> {
@@ -216,6 +220,7 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
           protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
           terminal,
           forwardAgent: false,
+          production,
         });
       }
       // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
@@ -232,6 +237,7 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
         protocol: { type: "ssh" },
         terminal,
         forwardAgent: forwardAgent && authKind === "key",
+        production,
       });
       await advanced.saveAfter(result.id);
       if (identity && identityId !== start.identityId) {
@@ -250,7 +256,10 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     groups,
     identity,
     advanced,
-    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId, protocol, serial, terminal, forwardAgent },
+    start: start as HostFields,
+    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId, protocol, serial, terminal, forwardAgent, production },
+    errors,
+    restore,
     set: {
       setGroupId,
       setLabel,
@@ -266,6 +275,7 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
       setSerial,
       setTerminal,
       setForwardAgent,
+      setProduction,
     },
     certified,
     inherited,
@@ -274,16 +284,48 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     portValid,
     effectiveUser,
     effectivePort,
-    ready,
-    missing,
-    dirty,
+    ready: ready && fieldsValid,
     pending,
     error,
     save,
   };
 }
 
-export type HostForm = ReturnType<typeof useHostForm>;
+export type HostForm = ReturnType<typeof useHostForm> & {
+  /** Set by an autosaving owner (the Host details panel): secrets get their own buttons. */
+  live?: LiveHost | undefined;
+};
+
+/** Every non-secret field of the form, as the form holds it. */
+export interface HostFields {
+  groupId: string | null;
+  label: string;
+  address: string;
+  port: string;
+  username: string;
+  tags: string;
+  authKind: AuthKind;
+  keyId: string;
+  identityId: string;
+  protocol: ProtocolKind;
+  serial: SerialSettings;
+  terminal: HostTerminal;
+  forwardAgent: boolean;
+  production: boolean;
+}
+
+/** What an autosaving owner adds to the cards: explicit secret actions and held removals. */
+export interface LiveHost {
+  passwordStored: boolean;
+  /** The host exists or can be created now, so a secret can be written. */
+  canSet: boolean;
+  setPassword: () => void;
+  /** The sign-in change would remove the stored password: it waits for `removePassword`. */
+  dropsPassword: boolean;
+  removePassword: () => void;
+  proxy: LiveProxySecret;
+  isNew: boolean;
+}
 
 /** One card of the form, a group named by its heading. */
 function Card({ title, children }: { title: string; children: ReactNode }) {
@@ -313,7 +355,10 @@ function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | nul
         label={msg.hosts.address}
         value={form.fields.address}
         onChange={form.set.setAddress}
-        hint={msg.hosts.addressHint}
+        // A new host in the panel: says it is saved once the address is valid (in the field's own
+        // hint, so the panel does not shift when the host is created).
+        hint={form.live?.isNew ? msgAutosave.newHostHint : msg.hosts.addressHint}
+        error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
         maxLength={253}
         autoFocus={autoFocus}
       />
@@ -326,7 +371,14 @@ function GeneralCard({ form }: { form: HostForm }) {
   const { fields, set, groups } = form;
   return (
     <Card title={msgD.hostPanel.general}>
-      <TextField label={msg.hosts.label} value={fields.label} onChange={set.setLabel} maxLength={256} />
+      <TextField
+        label={msg.hosts.label}
+        value={fields.label}
+        onChange={set.setLabel}
+        maxLength={256}
+        error={form.errors.label ?? (form.live && !form.live.isNew && fields.label.trim() === "" ? msgAutosave.label : undefined)}
+        hint={form.live?.isNew && fields.label.trim() === "" ? msgAutosave.labelDefault : undefined}
+      />
       {groups.length > 0 && (
         <label className="field">
           <span className="label">{msg.hosts.group}</span>
@@ -348,7 +400,8 @@ function GeneralCard({ form }: { form: HostForm }) {
           </select>
         </label>
       )}
-      <TextField label={msg.hosts.tags} value={fields.tags} onChange={set.setTags} hint={msg.hosts.tagsHint} maxLength={600} />
+      <TextField label={msg.hosts.tags} value={fields.tags} onChange={set.setTags} hint={msg.hosts.tagsHint} error={form.errors.tags} maxLength={600} />
+      <ProductionSwitch form={form} />
     </Card>
   );
 }
@@ -413,6 +466,9 @@ function ProtocolCard({ form }: { form: HostForm }) {
           {hint}
         </span>
       ) : null}
+      {form.live?.dropsPassword && fields.protocol !== "ssh" && (
+        <DropSecretNotice text={msgAutosave.removesPassword} action={msgAutosave.removePassword} onRemove={form.live.removePassword} />
+      )}
       {fields.protocol === "telnet" && <TelnetWarning />}
       {fields.protocol === "serial" && <SerialFields value={fields.serial} onChange={set.setSerial} />}
     </Card>
@@ -425,6 +481,7 @@ function CredentialsCard({ form }: { form: HostForm }) {
   const [showIdentity, setShowIdentity] = useState(fields.identityId !== "");
   // Installing the chosen key on this (saved) host, signing in once with its password.
   const [installing, setInstalling] = useState(false);
+  const keyErrorId = useId();
   const plainKeys = keys.filter((k) => !certified.has(k.id));
   const certKeys = keys.filter((k) => certified.has(k.id));
   const chosenIdentity = identity?.list.find((i) => i.id === fields.identityId);
@@ -435,6 +492,7 @@ function CredentialsCard({ form }: { form: HostForm }) {
         value={fields.username}
         onChange={set.setUsername}
         maxLength={255}
+        error={form.errors.username}
         placeholder={inherited.username ?? undefined}
         hint={
           fields.groupId && fields.username === ""
@@ -466,6 +524,8 @@ function CredentialsCard({ form }: { form: HostForm }) {
                 className="select"
                 style={{ marginTop: 6 }}
                 aria-label={msg.hosts.keyChoose}
+                aria-invalid={form.errors.key ? true : undefined}
+                aria-describedby={form.errors.key ? keyErrorId : undefined}
                 value={fields.keyId}
                 onChange={(event) => set.setKeyId(event.target.value)}
               >
@@ -492,6 +552,11 @@ function CredentialsCard({ form }: { form: HostForm }) {
                 )}
               </select>
             )}
+            {form.errors.key && (
+              <span id={keyErrorId} className="field-error" role="alert">
+                {form.errors.key}
+              </span>
+            )}
             {fields.authKind === "key" && form.host && fields.keyId !== "" && (
               <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", marginTop: 4 }} onClick={() => setInstalling(true)}>
                 <IconKeyRound size={14} />
@@ -515,14 +580,28 @@ function CredentialsCard({ form }: { form: HostForm }) {
             <span className="hint">{msg.hosts.storedPasswordHint}</span>
           </span>
         </label>
-        {fields.authKind === "stored_password" && (
-          <SecretField
-            label={msg.hosts.password}
-            value={fields.password}
-            onChange={set.setPassword}
-            hint={form.hadStoredPassword ? msg.hosts.passwordKeep : undefined}
-            maxLength={1024}
-          />
+        {fields.authKind === "stored_password" &&
+          (form.live ? (
+            <LiveSecretField
+              label={msg.hosts.password}
+              value={fields.password}
+              onChange={set.setPassword}
+              stored={form.live.passwordStored}
+              maxLength={1024}
+              canSet={form.live.canSet}
+              onSet={form.live.setPassword}
+            />
+          ) : (
+            <SecretField
+              label={msg.hosts.password}
+              value={fields.password}
+              onChange={set.setPassword}
+              hint={form.hadStoredPassword ? msg.hosts.passwordKeep : undefined}
+              maxLength={1024}
+            />
+          ))}
+        {form.live?.dropsPassword && (
+          <DropSecretNotice text={msgAutosave.removesPassword} action={msgAutosave.removePassword} onRemove={form.live.removePassword} />
         )}
       </fieldset>
 
@@ -572,8 +651,13 @@ function CredentialsCard({ form }: { form: HostForm }) {
 function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
   const advanced = form.advanced;
   const configured = advanced.jumpHostId !== null || advanced.proxy.kind !== "none" || advanced.groupRoute !== null;
+  // Held in state so a re-render after an autosave never folds it while the user is in it.
+  const [open, setOpen] = useState(configured);
+  useEffect(() => {
+    if (configured) setOpen(true);
+  }, [configured]);
   return (
-    <details className="host-section host-more" open={configured ? true : undefined}>
+    <details className="host-section host-more" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
       <div className="stack-sm host-more-body">
         <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />
@@ -582,10 +666,33 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
           <AgentForwarding checked={form.fields.forwardAgent} onChange={form.set.setForwardAgent} />
         )}
         {/* agent B: tunnels and history */}
-        {form.fields.protocol === "ssh" && <HostAdvancedSection host={form.host} state={advanced} embedded />}
+        {form.fields.protocol === "ssh" && <HostAdvancedSection host={form.host} state={advanced} embedded live={form.live?.proxy} />}
         {form.fields.protocol === "ssh" && extra}
       </div>
     </details>
+  );
+}
+
+/** The host's own production flag, with a note when it is a production host anyway (P-26). */
+function ProductionSwitch({ form }: { form: HostForm }) {
+  const { prefs } = usePreferences();
+  const { fields, set, groups } = form;
+  // What the host would be without its own flag, from the values in the form.
+  let id: string | null = fields.groupId;
+  let fromGroup = false;
+  for (let depth = 0; id && depth < 16; depth += 1) {
+    const g = groups.find((x) => x.id === id);
+    if (!g) break;
+    if (g.production) fromGroup = true;
+    id = g.parentId;
+  }
+  const reason = fromGroup ? "group" : productionReason({ production: null, tags: fields.tags.split(",").map((t) => t.trim()) }, prefs.productionTag);
+  return (
+    <div className="stack-xs">
+      <Switch label={msgProduction.hostSwitch} hint={msgProduction.hostHint} checked={fields.production} onChange={set.setProduction} />
+      {!fields.production && reason === "group" && <p className="hint">{msgProduction.inheritedGroup}</p>}
+      {!fields.production && reason === "tag" && <p className="hint">{msgProduction.inheritedTag(prefs.productionTag)}</p>}
+    </div>
   );
 }
 

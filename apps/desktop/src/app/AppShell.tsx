@@ -11,6 +11,8 @@ import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
 import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
 import { msgP } from "../lib/messages-privilege";
+import { ProductionConfirm } from "../features/hosts/ProductionConfirm";
+import { useIsProduction } from "../features/hosts/production";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
@@ -25,6 +27,7 @@ import { SnippetsView } from "../features/snippets/SnippetsView";
 import { TunnelsView } from "../features/tunnels/TunnelsView";
 import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
+import { sftpRequests } from "../features/sftp/requests";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
@@ -51,6 +54,7 @@ import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
+import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
@@ -273,6 +277,25 @@ function Shell() {
     panelMemory.retain(live);
   }, [ws, statuses]);
 
+  // Panes connected to a production host (P-26), with the host's label, from the saved host and
+  // the production tag; follows changes to either.
+  const isProduction = useIsProduction();
+  const productionPanes = useMemo(() => {
+    const byId = new Map((data.hosts.value ?? []).map((h) => [h.id, h]));
+    const out = new Map<number, string>();
+    for (const p of Object.values(ws.panes)) {
+      const host = p.target.kind === "ssh" ? byId.get(p.target.hostId) : undefined;
+      if (host && isProduction(host)) out.set(p.id, host.label);
+    }
+    return out as ReadonlyMap<number, string>;
+  }, [ws, data.hosts.value, isProduction]);
+  // A broadcast that includes production panes waits for its own confirmation (P-26).
+  const [confirmBroadcast, setConfirmBroadcast] = useState<{
+    tabId: number;
+    confirmed: ReadonlyMap<number, string>;
+    production: number[];
+  } | null>(null);
+
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
       const live = (paneId: number) => {
@@ -312,6 +335,21 @@ function Shell() {
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
   // An SFTP tab: two file panes (this computer and a host picker); never split.
   const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
+  /**
+   * Open in SFTP: focuses the SFTP tab in front (or the first one; a new one when there is none)
+   * and shows `host` in its right pane, at `path` when given.
+   */
+  const openSftpHost = useCallback(
+    (host: { id: string; label: string }, path: string | null = null) => {
+      const current = wsRef.current;
+      const isSftp = (t: { focused: number }) => current.panes[t.focused]?.target.kind === "sftp";
+      const front = current.tabs.find((t) => t.id === current.active && isSftp(t)) ?? current.tabs.find(isSftp);
+      if (front) setWs((c) => selectTab(c, front.id));
+      else openSftp();
+      sftpRequests.push({ source: { kind: "host", hostId: host.id, label: host.label }, path });
+    },
+    [openSftp],
+  );
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -568,6 +606,9 @@ function Shell() {
         case "lock":
           void vault.lock().catch(() => undefined);
           break;
+        case "searchSessions":
+          if (wsRef.current.tabs.some((t) => panesOf(t.layout).some((id) => wsRef.current.panes[id]?.target.kind !== "sftp"))) setSearchingSessions(true);
+          break;
         // agent D: inventory and snippets
         case "suggest": {
           const p = activePane(wsRef.current);
@@ -767,6 +808,7 @@ function Shell() {
               ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
               : null
           }
+          production={productionPanes}
         />
         {/* terminal notifications (P-23): announced to assistive technology as well */}
         <div className="visually-hidden" role="status" data-testid="command-finished">
@@ -777,7 +819,7 @@ function Shell() {
           {!terminalVisible && destination === "home" && (
             <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onSftp={openSftp} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
           )}
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onOpenSftp={(host) => openSftpHost(host)} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
@@ -815,6 +857,7 @@ function Shell() {
                   ) : showPanel && sidePanel === "files" ? (
                     <FilesPanel
                       target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
+                      onOpenSftp={pane?.target.kind === "ssh" ? (path: string | null) => pane.target.kind === "ssh" && openSftpHost({ id: pane.target.hostId, label: pane.label }, path) : undefined}
                       others={Object.values(ws.panes).flatMap((p) => {
                         const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
                         return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
@@ -876,6 +919,7 @@ function Shell() {
                 broadcasting={broadcasting}
                 broadcastPaneIds={memberPanes(members)}
                 onUserInput={relayInput}
+                production={productionPanes}
               />
             )}
           </Suspense>
@@ -904,6 +948,7 @@ function Shell() {
 
       {pickingSplit && (
         <CommandPalette
+          onSftpHost={(host) => openSftpHost(host)}
           hasTerminal={false}
           terminalConnected={false}
           pick={{
@@ -929,6 +974,7 @@ function Shell() {
 
       {paletteOpen && (
         <CommandPalette
+          onSftpHost={(host) => openSftpHost(host)}
           hasTerminal={terminalVisible && pane !== null && !sftpVisible}
           terminalConnected={paneStatus?.state === "connected"}
           onClose={() => {
@@ -1086,34 +1132,6 @@ function Shell() {
         />
       )}
 
-      {reviewing && (
-        <BroadcastReview
-          targets={reviewing.targets}
-          onCancel={() => {
-            setReviewing(null);
-            focusedHandle()?.focus();
-          }}
-          onConfirm={(chosen) => {
-            const { tabId, targets } = reviewing;
-            setReviewing(null);
-            const t = wsRef.current.tabs.find((x) => x.id === tabId);
-            const now = broadcastTargets(tabId);
-            const same =
-              t !== undefined &&
-              now.length === panesOf(t.layout).length &&
-              now.length === targets.length &&
-              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
-            if (!same) {
-              notify("danger", msgC.broadcast.changed);
-            } else {
-              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
-              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
-            }
-            focusedHandle()?.focus();
-          }}
-        />
-      )}
-
       {savingAs && (
         <SaveLayoutDialog
           initialName={ws.template?.name ?? ""}
@@ -1152,7 +1170,8 @@ function Shell() {
             panes: panesOf(t.layout).flatMap((paneId) => {
               const handle = handles.current.get(paneId);
               const p = ws.panes[paneId];
-              return handle && p ? [{ paneId, label: p.label, handle }] : [];
+              // Terminals only: an SFTP tab has no scrollback to search.
+              return handle && p && p.target.kind !== "sftp" ? [{ paneId, label: p.label, handle }] : [];
             }),
           }))}
           onReveal={(paneId, match) => {
@@ -1169,6 +1188,61 @@ function Shell() {
           }}
           onClose={() => {
             setSearchingSessions(false);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {reviewing && (
+        <BroadcastReview
+          targets={reviewing.targets}
+          production={productionPanes}
+          onCancel={() => {
+            setReviewing(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={(chosen) => {
+            const { tabId, targets } = reviewing;
+            setReviewing(null);
+            const t = wsRef.current.tabs.find((x) => x.id === tabId);
+            const now = broadcastTargets(tabId);
+            const same =
+              t !== undefined &&
+              now.length === panesOf(t.layout).length &&
+              now.length === targets.length &&
+              now.every((x, i) => x.paneId === targets[i]?.paneId && x.sessionId === targets[i]?.sessionId);
+            if (!same) {
+              notify("danger", msgC.broadcast.changed);
+            } else {
+              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
+              const production = [...confirmed.keys()].filter((id) => productionPanes.has(id));
+              if (confirmed.size >= 2 && production.length > 0) {
+                // Production panes join only after their own confirmation, naming the hosts (P-26).
+                setConfirmBroadcast({ tabId, confirmed, production });
+                return;
+              }
+              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
+            }
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
+      {confirmBroadcast && (
+        <ProductionConfirm
+          title={msgProduction.broadcastTitle}
+          body={msgProduction.broadcastBody}
+          confirmLabel={msgProduction.broadcastConfirm}
+          hosts={[...new Set(confirmBroadcast.production.map((p) => productionPanes.get(p) ?? ""))].filter(Boolean)}
+          onCancel={() => {
+            setConfirmBroadcast(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const { tabId, confirmed } = confirmBroadcast;
+            setConfirmBroadcast(null);
+            // The same rules as any broadcast: pruned if a pane leaves, reconnects or stops.
+            setMembers((current) => withTab(current, tabId, confirmed));
             focusedHandle()?.focus();
           }}
         />

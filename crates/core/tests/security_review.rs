@@ -87,6 +87,7 @@ fn host(label: &str, auth: HostAuthInput, group: Option<&str>) -> HostInput {
         protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 
@@ -138,6 +139,7 @@ async fn the_review_reads_the_vault_and_reports_what_needs_attention() {
             username: None,
             port: Some(2222),
             key_id: Some(rsa2048.id.clone()),
+            production: false,
         })
         .await
         .unwrap();

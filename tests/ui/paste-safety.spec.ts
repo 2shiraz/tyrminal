@@ -88,10 +88,18 @@ test("a host can lower the line and newline reviews but never the hidden-charact
   await expect(editor.getByText("always reviewed, on every host")).toBeVisible();
   await editor.getByRole("switch", { name: "Paste several lines or a large text without review" }).click();
   await editor.getByRole("switch", { name: "Paste one line ending in a newline without review" }).click();
-  await editor.getByRole("button", { name: "Save", exact: true }).click();
+  // Saved as you go.
+  await expect(page.getByTestId("host-panel")).toHaveAttribute("data-autosave", "clean");
   await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((c) => c.cmd === "host_save").length))
-    .toBeGreaterThan(0);
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __mockCalls: { cmd: string; args: { host: { terminal: { pasteSkipTrailingNewline?: boolean } } } }[] }).__mockCalls
+            .filter((c) => c.cmd === "host_save")
+            .at(-1)?.args.host.terminal.pasteSkipTrailingNewline,
+      ),
+    )
+    .toBe(true);
   const saved = await page.evaluate(() =>
     (window as unknown as { __mockCalls: { cmd: string; args: { host: { terminal: unknown } } }[] }).__mockCalls.filter((c) => c.cmd === "host_save").at(-1)?.args.host.terminal,
   );

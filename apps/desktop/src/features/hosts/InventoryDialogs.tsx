@@ -5,7 +5,10 @@ import { Dialog } from "../../components/ui/Dialog";
 import { IconPlay, IconServer } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD, osNames } from "../../lib/messages-d";
+import { msgProduction } from "../../lib/messages-production";
 import { OS_CHOICES } from "./OsIcon";
+import { ProductionConfirm } from "./ProductionConfirm";
+import { useIsProduction } from "./production";
 
 /**
  * Reviews the hosts a group-wide (or multi-selection) connection would open before anything
@@ -28,6 +31,9 @@ export function ConnectAllDialog({
 }) {
   const tooMany = hosts.length > free;
   const ready = hosts.length > 0 && !tooMany;
+  const isProduction = useIsProduction();
+  const production = hosts.filter(isProduction);
+  const [confirming, setConfirming] = useState(false);
   return (
     <Dialog title={msgD.inventory.connectAllTitle(hosts.length)} icon={<IconPlay size={18} />} onDismiss={onClose}>
       <div className="stack">
@@ -46,6 +52,7 @@ export function ConnectAllDialog({
                     <span className="row-title">{host.label}</span>
                     <span className="row-sub">{msg.hosts.destination(host.username, host.address, host.port)}</span>
                   </div>
+                  {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                 </li>
               ))}
             </ul>
@@ -63,12 +70,28 @@ export function ConnectAllDialog({
           <button type="button" className="btn" onClick={onClose} autoFocus={!ready} data-autofocus={!ready || undefined}>
             {msg.common.cancel}
           </button>
-          <button type="button" className="btn btn-primary" disabled={!ready} onClick={() => onConfirm(hosts)} data-autofocus={ready || undefined}>
+          <button type="button" className="btn btn-primary" disabled={!ready}
+            onClick={() => (production.length > 0 ? setConfirming(true) : onConfirm(hosts))}
+            data-autofocus={ready || undefined}
+          >
             <IconPlay size={14} />
             {msgD.inventory.connectAllConfirm(hosts.length)}
           </button>
         </div>
       </div>
+      {confirming && (
+        <ProductionConfirm
+          title={msgProduction.connectTitle}
+          body={msgProduction.connectBody}
+          confirmLabel={msgProduction.connectConfirm}
+          hosts={production.map((h) => h.label)}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            onConfirm(hosts);
+          }}
+        />
+      )}
     </Dialog>
   );
 }

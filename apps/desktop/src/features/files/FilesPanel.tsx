@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Dialog } from "../../components/ui/Dialog";
 import type { MenuEntry } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
-import { IconCopy, IconFolderOpen, IconHardDrive, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconCopy, IconFolderOpen, IconHardDrive, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
 import { files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { shellContexts } from "../autocomplete/shellContext";
+import { msgSftp } from "../sftp/messages";
 import type { Loc } from "../sftp/model";
 import { visibleName } from "../sftp/model";
 import { droppedFileJob, droppedFiles } from "./dropUpload";
@@ -62,11 +63,14 @@ type Prompt =
 export function FilesPanel({
   target,
   others = [],
+  onOpenSftp,
   onClose,
 }: {
   target: FilesTarget | null;
   /** Other connected SSH sessions in this window, for copying between servers. */
   others?: FilesTarget[];
+  /** Open in SFTP tab: this host at the folder shown (SSH sessions of a saved host). */
+  onOpenSftp?: ((path: string | null) => void) | undefined;
   onClose: () => void;
 }) {
   const sessionId = target?.sessionId ?? null;
@@ -169,7 +173,10 @@ export function FilesPanel({
     ];
   };
 
-  const menuExtras: MenuEntry[] = [{ label: msgFiles.showLocal, checked: twoPane, onSelect: () => change((m) => ({ ...m, twoPane: !m.twoPane })) }];
+  const menuExtras: MenuEntry[] = [
+    { label: msgFiles.showLocal, checked: twoPane, onSelect: () => change((m) => ({ ...m, twoPane: !m.twoPane })) },
+    ...(onOpenSftp ? [{ label: msgSftp.openInPanel, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(dir) }] : []),
+  ];
 
   return (
     <aside

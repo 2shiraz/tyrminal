@@ -138,6 +138,7 @@ async fn vault_with_passwords(dir: &TempDir) -> Core {
             protocol: tyrminal_core::contracts::HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         })
         .await
         .unwrap();

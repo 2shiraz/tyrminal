@@ -4253,6 +4253,79 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   overflow-wrap: anywhere;
 }
 
+/* Autosave status (host details, group editor, environment): "Saving…", then "Saved" fading out,
+   "Couldn't save – Retry" on failure, and "Undo" while the last write can be undone. */
+.autosave-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.dialog-head .autosave-status {
+  margin-left: auto;
+  padding-top: 6px;
+}
+
+.autosave-status[data-state="error"] .autosave-text {
+  color: var(--danger);
+}
+
+.autosave-status[data-state="saved"] .autosave-text,
+.autosave-status[data-state="undone"] .autosave-text {
+  animation: autosave-fade 2s ease forwards;
+}
+
+@keyframes autosave-fade {
+  0%,
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: the text stays until it is removed, without a fade. */
+@media (prefers-reduced-motion: reduce) {
+  .autosave-status .autosave-text {
+    animation: none !important;
+  }
+}
+
+:root[data-reduce-motion="true"] .autosave-status .autosave-text {
+  animation: none !important;
+}
+
+.autosave-action {
+  padding-inline: var(--space-2);
+}
+
+/* A secret field with its own "Set password" button beside it. */
+.live-secret {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2);
+}
+
+.live-secret-set {
+  margin-top: 22px;
+}
+
+.live-secret-remove {
+  margin-top: var(--space-1);
+}
+
+.dialog-actions-hint {
+  margin-right: auto;
+  align-self: center;
+}
+
 /* server at a glance */
 .glance {
   display: flex;
@@ -4306,6 +4379,81 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 .glance-usage .muted {
   font-size: var(--text-xs);
+}
+
+/* Production hosts (P-26): a coloured edge together with the text "Production", never colour
+   alone. Red keeps it apart from broadcast (amber). */
+/* Resolved on the root, so the badge keeps the app theme's colours inside chrome drawn in the
+   terminal scheme's colours (tab, pane header), and opaque, so it keeps its contrast on tinted
+   rows. */
+:root {
+  --production-fg: var(--danger);
+  --production-bg: color-mix(in srgb, var(--danger) 12%, var(--bg-raised));
+}
+
+.badge-production {
+  background: var(--production-bg);
+  color: var(--production-fg);
+  font-weight: 600;
+}
+
+.tab[data-production="true"] {
+  box-shadow: inset 0 2px 0 var(--danger);
+}
+
+.tab-production {
+  flex: none;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--text-xs);
+}
+
+.pane[data-production="true"],
+.panes[data-split="true"] .pane[data-production="true"]:not([data-focused="true"]) {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent);
+}
+
+/* Focus in a split keeps the production edge and adds the accent inside it. */
+.panes[data-split="true"] .pane[data-production="true"][data-focused="true"] {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent),
+    inset 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.pane[data-production="true"][data-broadcast="true"] {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--danger) 80%, transparent),
+    inset 0 0 0 4px color-mix(in srgb, var(--warning) 70%, transparent);
+}
+
+.pane-production {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--danger));
+}
+
+.btn-warning {
+  --btn-bg: var(--warning);
+  --btn-fg: #ffffff;
+  --btn-border: transparent;
+}
+
+:root:not([data-theme="light"]) .btn-warning {
+  --btn-fg: #1a1200;
+}
+
+.production-list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: var(--text-sm);
 }
 
 /* P-30: host and group notes. Plain token styling. */

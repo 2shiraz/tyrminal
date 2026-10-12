@@ -96,6 +96,7 @@ async fn fixture() -> Fixture {
             protocol: HostProtocol::Ssh,
             terminal: Default::default(),
             forward_agent: false,
+            production: false,
         })
         .await
         .unwrap();

@@ -1,4 +1,4 @@
-// Telnet and serial hosts in the Host details panel. The protocols themselves are tested
+// Telnet and serial hosts in the Host details panel (saved as you go). The protocols themselves are tested
 // natively in crates/core/tests/protocols.rs (a real Telnet server; a pseudo-terminal pair).
 import { type Page, expect, test } from "@playwright/test";
 
@@ -11,7 +11,14 @@ async function addHost(page: Page) {
   await openApp(page);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await page.getByRole("button", { name: "Add host" }).click();
-  return page.getByRole("complementary", { name: "New host" });
+  // The panel is renamed "Host details" once autosave creates the host.
+  return page.getByTestId("host-panel");
+}
+
+/** The last write once the panel has saved everything. */
+async function lastSave(page: Page) {
+  await expect(page.getByTestId("host-panel")).toHaveAttribute("data-autosave", "clean");
+  return (await calls(page, "host_save")).at(-1);
 }
 
 test("protocols: a Telnet host warns that nothing is encrypted and stores no credentials", async ({ page }) => {
@@ -28,9 +35,7 @@ test("protocols: a Telnet host warns that nothing is encrypted and stores no cre
   await dialog.getByText("Show more").click();
   await dialog.getByRole("combobox", { name: "Character encoding" }).selectOption("koi8-r");
   await dialog.getByRole("combobox", { name: "Terminal type" }).selectOption("vt100");
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
-  const saves = await calls(page, "host_save");
-  expect(saves.at(-1)?.args).toMatchObject({
+  await expect.poll(async () => (await lastSave(page))?.args).toMatchObject({
     host: {
       address: "192.0.2.40",
       port: 23,
@@ -47,7 +52,9 @@ test("protocols: a serial host picks a device and line settings", async ({ page 
   await dialog.getByLabel("Name", { exact: true }).fill("router console");
   await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("serial");
   await expect(dialog.getByLabel("Address")).toHaveCount(0);
-  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  // Nothing to create without a device.
+  await page.waitForTimeout(600);
+  expect(await calls(page, "host_save")).toHaveLength(0);
   await dialog.getByLabel("Serial port").fill("/dev/ttyUSB0");
   await dialog.getByRole("combobox", { name: "Speed (baud)" }).selectOption("9600");
   await dialog.getByRole("combobox", { name: "Parity" }).selectOption("even");
@@ -55,9 +62,7 @@ test("protocols: a serial host picks a device and line settings", async ({ page 
   // A serial line has no terminal type to report.
   await dialog.getByText("Show more").click();
   await expect(dialog.getByRole("combobox", { name: "Terminal type" })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
-  const saves = await calls(page, "host_save");
-  expect(saves.at(-1)?.args).toMatchObject({
+  await expect.poll(async () => (await lastSave(page))?.args).toMatchObject({
     host: {
       address: "/dev/ttyUSB0",
       port: null,
@@ -73,7 +78,7 @@ test("protocols: notices from Tyrminal show in the session, not only inside a pa
   await dialog.getByLabel("Name", { exact: true }).fill("old switch");
   await dialog.getByRole("combobox", { name: "Protocol" }).selectOption("telnet");
   await dialog.getByLabel("Address").fill("192.0.2.40");
-  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await lastSave(page);
   await page.getByRole("button", { name: "Connect to old switch" }).first().click();
   await expect(page.getByText("Telnet is not encrypted: anything you type here")).toBeVisible();
 });
