@@ -28,6 +28,8 @@ import { msgC } from "../../lib/messages-c";
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgI } from "../../lib/messages-input";
 import { ConnectionDetails } from "../connection/ConnectionDetails";
+import { TokenMenu } from "../tokens/TokenMenu";
+import type { Token } from "../tokens/tokenLinks";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { encodingById } from "./encoding";
 import { schemeById } from "./schemes";
@@ -143,6 +145,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  const [token, setToken] = useState<Token | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -192,6 +195,8 @@ export function TerminalView(props: TerminalViewProps) {
     const controller = new TerminalController(container, handlers.current.prefs, {
       onTitle: (title) => handlers.current.onTitle(title),
       onLink: (url) => setLink(url),
+      // terminal input: actions on addresses and paths in the output
+      onToken: (token) => setToken(token),
       onClipboardWrite: (text) => {
         if (clipboardAllowed.current) {
           void navigator.clipboard
@@ -515,6 +520,15 @@ export function TerminalView(props: TerminalViewProps) {
         </div>
       )}
 
+      {token && (
+        <TokenMenu
+          token={token}
+          onClose={() => {
+            setToken(null);
+            controllerRef.current?.focus();
+          }}
+        />
+      )}
       {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {closed && (
         <div className="terminal-overlay">

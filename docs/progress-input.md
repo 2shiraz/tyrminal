@@ -17,6 +17,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 6 | Connection side panel: snippets, history, appearance (TRM-14) | Done: UI tests; visual baselines updated in the pinned container |
 | 7 | Mouse mappings and native persistence (TRM-08), recent connections native test (UX-04) | Done: core, UI and native tests on Linux |
 | 8 | Termius-like highlighting, on by default (TRM-07, owner priority) | Done: UI tests, benchmark; visual baselines re-recorded |
+| 9 | Actions on addresses and paths in the output | Done: UI tests |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -124,6 +125,15 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   adversarial shape tried (budget 50 ms); matching runs once after output settles (60 ms).
 - Visual baselines 09/10/11/17 re-recorded in the pinned container (plain numbers now colored).
 
+## Slice 9: token actions
+
+- An xterm link provider (`features/tokens/tokenLinks.ts`) underlines IPv4 (with port), IPv6
+  (bracketed with port), MAC addresses and, in local terminals only, paths on hover; a plain
+  click (no drag) opens a menu: Copy / Copy path, and for addresses "New host for …", which opens
+  the host editor prefilled with address and port (`NewHostFromTerminal`, through a module-level
+  request channel, `features/tokens/requests.ts`). Nothing connects until the user saves and
+  connects. URLs keep the existing confirmed-link flow; nothing on the alternate screen.
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -152,3 +162,6 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   status words in plain output, in your color scheme's colors. It never recolors text a program
   colored itself, and never touches full-screen programs. Turn kinds on or off, or the whole
   feature, in Settings → Output highlighting."
+- Addresses in output: "Point at an IP or MAC address in the output to underline it; click it to
+  copy it or to start a new host with that address (Tyrminal does not connect until you save
+  and connect). In a local terminal, file paths can be copied the same way."

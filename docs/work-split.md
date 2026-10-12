@@ -288,3 +288,6 @@ Never merge these by hand; regenerate them after resolving the sources:
 - `tests/ui/workspaces.spec.ts` "highlighting: words and IP addresses…": expectations now list every
   decoration on the row (built-in kinds are on by default), read with `tests/ui/highlight-helpers.ts`.
   `HighlightPreferences` gained the built-in kind toggles and a `Default` with highlighting on.
+- `TerminalController.ts`: registers `features/tokens/tokenLinks.ts` as a link provider and keeps the
+  pane's target; `TerminalView.tsx`: one `onToken` callback and a `<TokenMenu>`; `AppShell.tsx`: one
+  `<NewHostFromTerminal>` line (prefilled host editor from a clicked address).

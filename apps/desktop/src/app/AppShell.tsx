@@ -27,6 +27,7 @@ import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice
 import { extraPaletteItems } from "../features/commands/extraActions";
 import { ConnectionDetails } from "../features/connection/ConnectionDetails";
 import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
+import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
@@ -853,6 +854,9 @@ function Shell() {
           }}
         />
       )}
+
+      {/* terminal input: an address clicked in the output becomes a prefilled new host */}
+      <NewHostFromTerminal onDone={() => focusedHandle()?.focus()} />
 
       {details && (
         <ConnectionDetails

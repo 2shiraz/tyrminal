@@ -100,4 +100,12 @@ export const msgI = {
     middleClick: "Middle click pastes",
     middleClickHint: "Pastes the clipboard. Like every paste, several lines are shown to you before anything is sent.",
   },
+  tokens: {
+    menu: (text: string) => `Actions for ${text}`,
+    copy: "Copy",
+    copyPath: "Copy path",
+    newHost: (address: string) => `New host for ${address}…`,
+    copied: (text: string) => `Copied ${text}`,
+    copyFailed: "The clipboard is not available.",
+  },
 };

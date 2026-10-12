@@ -26,6 +26,7 @@ import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import type { TokenKind } from "../highlight/builtins";
 import { highlightPalette } from "../highlight/palette";
 import { MouseMap } from "../mouse/mouseMap";
+import { type Token, tokenLinkProvider } from "../tokens/tokenLinks";
 import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
@@ -54,6 +55,8 @@ export interface TerminalCallbacks {
   onOutput?(): void;
   /** Typed characters the session's encoding cannot represent; they were not sent. */
   onUnencodable?(chars: string[]): void;
+  /** The user clicked an address or (local terminals) a path in the output. */
+  onToken?(token: Token): void;
   /** The shell reported its working directory (OSC 7), already validated. */
   onDirectory?(path: string): void;
 }
@@ -195,6 +198,11 @@ export class TerminalController {
     this.term.unicode.activeVersion = "15-graphemes";
     // Detected URLs: activation is a click and then a confirmation dialog (never automatic).
     this.term.loadAddon(new WebLinksAddon((event, uri) => this.activateLink(event, uri)));
+    // Addresses and (local terminals) paths: hover underlines, a click opens their menu.
+    const tokens = this.term.registerLinkProvider(
+      tokenLinkProvider(this.term, { paths: () => this.target?.kind === "local", onToken: (token) => this.callbacks.onToken?.(token) }),
+    );
+    this.cleanups.push(() => tokens.dispose());
     this.term.options.linkHandler = {
       activate: (event, text) => this.activateLink(event, text),
       allowNonHttpProtocols: false,
@@ -284,6 +292,7 @@ export class TerminalController {
    * tab). Events (state, prompts, close) arrive through the callbacks.
    */
   async start(target: TerminalTarget, attachToken?: string): Promise<void> {
+    this.target = target;
     await fontsReady(this.prefs);
     if (this.disposed) return;
     this.fitNow();
@@ -654,6 +663,7 @@ export class TerminalController {
   }
 
   private released = false;
+  private target: TerminalTarget | null = null;
 
   /** The session is moving to another window: disposing this terminal must not close it. */
   release(on: boolean): void {
