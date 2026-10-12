@@ -18,8 +18,8 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tyrminal_contracts::limits::{
     AUTH_PROMPT_TIMEOUT_SECS, MAX_AUTH_ATTEMPTS, MAX_CONCURRENT_CONNECTS, MAX_DIR_ENTRIES, MAX_SECRET_LEN,
-    MAX_SESSIONS, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS, MAX_UNACKED_OUTPUT,
-    TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
+    MAX_SESSIONS, MAX_STARTUP_LINE_LEN, MAX_TERMINAL_DIMENSION, MAX_TERMINAL_INPUT_CHUNK, MAX_TRANSFERS,
+    MAX_UNACKED_OUTPUT, TERMINAL_OUTPUT_BATCH, TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostProtocol, IpcError, KeyDeployPreview, RemoteEntryKind,
@@ -1665,6 +1665,16 @@ where
             note("startup snippet skipped: it was deleted");
             continue;
         };
+        // A line longer than the terminal's line buffer is cut or garbled, not run (macOS keeps
+        // 1024 bytes of an unfinished line while the shell is not reading), so it is not typed.
+        if let Some(line) = text.trim_end_matches('\n').split('\n').position(|l| l.len() > MAX_STARTUP_LINE_LEN) {
+            note(&format!(
+                "line {} of startup snippet \"{}\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed",
+                line + 1,
+                item.name
+            ));
+            continue;
+        }
         let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
         for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
             if !send(chunk.to_vec()).await {
@@ -2106,6 +2116,52 @@ mod snippet_tests {
                 "startup snippet \"one\" typed",
                 "startup snippet skipped: it was deleted",
                 "startup snippet \"two\" typed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_startup_snippet_with_a_line_too_long_for_a_terminal_is_skipped_not_garbled() {
+        let item = |name: &str, text: String| StartupItem { name: name.into(), text: Some(Zeroizing::new(text)) };
+        let fits = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 5));
+        let too_long = format!("echo {}", "x".repeat(MAX_STARTUP_LINE_LEN - 4));
+        assert_eq!(fits.len(), MAX_STARTUP_LINE_LEN);
+        let sent = std::sync::Mutex::new(Vec::<u8>::new());
+        let notes = std::sync::Mutex::new(Vec::<String>::new());
+        type_startup(
+            vec![
+                item("before", "echo before".into()),
+                // Every line counts, not just the first.
+                item("long", format!("echo ok\n{too_long}\necho never")),
+                item("multibyte", format!("echo {}", "é".repeat(MAX_STARTUP_LINE_LEN / 2))),
+                item("fits", format!("{fits}\n{fits}\n")),
+                item("after", "echo after".into()),
+            ],
+            |chunk| {
+                sent.lock().unwrap().extend_from_slice(&chunk);
+                async { true }
+            },
+            |line| notes.lock().unwrap().push(line.to_owned()),
+        )
+        .await;
+        let sent = String::from_utf8(sent.into_inner().unwrap()).unwrap();
+        assert!(
+            !sent.contains("echo ok") && !sent.contains("never") && !sent.contains('é'),
+            "nothing of a refused snippet is typed"
+        );
+        assert_eq!(sent, format!("echo before\r{fits}\r{fits}\recho after\r"));
+        assert_eq!(
+            *notes.lock().unwrap(),
+            [
+                "startup snippet \"before\" typed".to_owned(),
+                format!(
+                    "line 2 of startup snippet \"long\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                format!(
+                    "line 1 of startup snippet \"multibyte\" is longer than {MAX_STARTUP_LINE_LEN} bytes; terminals in line mode can't take it, so it was not typed"
+                ),
+                "startup snippet \"fits\" typed".to_owned(),
+                "startup snippet \"after\" typed".to_owned(),
             ]
         );
     }

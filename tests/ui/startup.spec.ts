@@ -111,3 +111,26 @@ test("snippets: variables a snippet uses are listed with how the session set the
   await panel.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
   await expect.poll(async () => (await calls(page, "snippet_send")).length).toBe(2);
 });
+
+test("a startup snippet with a line too long for a terminal is flagged as skipped", async ({ page }) => {
+  await openApp(page);
+  await nav(page, "Snippets");
+  await page.getByRole("button", { name: "New snippet" }).click();
+  const editor = page.getByRole("dialog", { name: "New snippet" });
+  await editor.getByLabel("Name").fill("Huge line");
+  await editor.getByLabel("Command").fill(`echo ok\necho ${"é".repeat(500)}`);
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor).toHaveCount(0);
+  await nav(page, "Hosts");
+  await page.getByRole("button", { name: "More actions for api-gateway" }).first().click();
+  await page.getByRole("menuitem", { name: "Environment…" }).click();
+  const section = page.getByRole("dialog", { name: "Environment for api-gateway" }).getByTestId("startup-section");
+  await section.getByRole("radio", { name: /Run these snippets/ }).check();
+  await section.getByRole("combobox", { name: "Add a snippet" }).selectOption({ label: "Disk usage" });
+  await expect(section.getByRole("alert")).toHaveCount(0);
+  await section.getByRole("combobox", { name: "Add a snippet" }).selectOption({ label: "Huge line" });
+  const items = section.getByRole("list", { name: "Startup snippets" }).getByRole("listitem");
+  // 500 × "é" is 1000 bytes; with "echo " in front the second line is over the limit.
+  await expect(items.nth(1).getByRole("alert")).toHaveText(/Line 2 is longer than 1000 bytes; terminals in line mode can't take it, so this snippet is not typed at startup/);
+  await expect(items.nth(0).getByRole("alert")).toHaveCount(0);
+});
