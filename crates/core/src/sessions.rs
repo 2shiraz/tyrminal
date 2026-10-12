@@ -2609,6 +2609,28 @@ impl Sessions {
     }
 }
 
+// tmux and screen session awareness (P-31)
+impl Sessions {
+    /// The tmux and screen sessions on the server behind an SSH session the caller owns, listed
+    /// with a fixed command on a separate exec channel; nothing is typed into the shell. Telnet,
+    /// serial and local sessions have no verified connection and are refused. A listing stops
+    /// when the session closes or the vault locks.
+    pub async fn multiplexer_sessions(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::MultiplexerList, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let mut closed = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        tokio::select! {
+            list = crate::multiplexers::list(&conn) => Ok(list),
+            _ = closed.wait_for(|closed| *closed) => Err(err(ErrorCode::Cancelled, "The session was closed.")),
+            () = locked_since(&mut vault, entry.generation) => Err(err(ErrorCode::VaultLocked, "The vault was locked.")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod start_folder_tests {
     use super::*;

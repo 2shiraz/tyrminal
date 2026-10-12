@@ -305,6 +305,14 @@ shell. It reads them every 5 s, and only while the panel is open. A value the se
 report in the expected form shows as "Unavailable" instead of a guess. Turn off "Show for this
 host" in the panel to stop it for one host.
 
+**tmux and screen.** The same panel lists the server's tmux and screen sessions when it opens
+(and on **Refresh sessions**), again over a separate channel without typing anything. Session
+names come from the server and are shown as text. **Attach** types the attach command into the
+terminal, and only when you click it. A session whose name contains characters such as spaces,
+quotes or `;` is listed without **Attach**; attach to it yourself. If the connection drops and
+Tyrminal reconnects, the pane offers to reattach the session you attached from the panel; it
+never reattaches by itself.
+
 ## Files (SFTP)
 
 Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH session. You can:

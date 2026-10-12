@@ -622,6 +622,12 @@ export const glance = {
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
 };
 
+// tmux and screen session awareness (P-31)
+export const multiplexers = {
+  /** The server's tmux and screen sessions, listed with a fixed command; nothing is typed. */
+  list: (sessionId: string) => call<import("@tyrminal/contracts").MultiplexerList>("multiplexer_list", { sessionId }),
+};
+
 /** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
 export const notes = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").Note | null>("note_get", { target }),

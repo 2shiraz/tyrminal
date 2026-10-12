@@ -42,6 +42,8 @@ mod snippet_runs;
 pub mod password_check;
 // security review (P-27)
 mod security_review;
+// tmux and screen session awareness (P-31)
+mod multiplexers;
 // command history
 mod command_history;
 // server at a glance

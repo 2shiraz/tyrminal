@@ -1,10 +1,11 @@
-import type { DiskUse, ServerGlance } from "@tyrminal/contracts";
+import type { DiskUse, MultiplexerSession, ServerGlance } from "@tyrminal/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorNotice, IconButton, Switch } from "../../components/ui/controls";
 import { IconPanelRightClose } from "../../components/ui/icons";
 import { type AppError, glance, toAppError } from "../../lib/ipc";
 import { msgG } from "../../lib/messages-glance";
+import { MultiplexerSection } from "../multiplexers/MultiplexerSection";
 import { formatSize } from "../sftp/model";
 
 /** The SSH session the panel reads; Telnet, serial and local sessions never get here. */
@@ -19,7 +20,16 @@ export interface GlanceTarget {
 export const GLANCE_REFRESH_MS = 5_000;
 
 /** Server at a glance (P-32): uptime, load, memory and disk use, refreshed only while open. */
-export function ServerPanel({ target, onClose }: { target: GlanceTarget | null; onClose: () => void }) {
+export function ServerPanel({
+  target,
+  onClose,
+  onAttach,
+}: {
+  target: GlanceTarget | null;
+  onClose: () => void;
+  /** tmux and screen session awareness (P-31): types a chosen session's attach command. */
+  onAttach?: ((session: MultiplexerSession) => void) | undefined;
+}) {
   const ref = useRef<HTMLElement>(null);
   const [value, setValue] = useState<ServerGlance | null>(null);
   const [error, setError] = useState<AppError | null>(null);
@@ -115,6 +125,8 @@ export function ServerPanel({ target, onClose }: { target: GlanceTarget | null; 
             {hostId && enabled !== null && (
               <Switch label={msgG.enabled} hint={msgG.enabledHint} checked={enabled} onChange={(on) => void toggle(on)} />
             )}
+            {/* tmux and screen session awareness (P-31) */}
+            {onAttach && <MultiplexerSection sessionId={target.sessionId} onAttach={onAttach} />}
           </>
         )}
       </div>

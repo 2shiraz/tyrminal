@@ -4352,6 +4352,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   list-style: none;
 }
 
+/* tmux and screen session awareness (P-31) */
+.mux-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mux-sessions li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .glance-disks li,
 .glance-usage {
   display: flex;

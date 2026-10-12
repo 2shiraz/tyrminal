@@ -1,4 +1,4 @@
-import type { IpcError, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
@@ -13,6 +13,7 @@ import {
   IconFolder,
   IconKeyRound,
   IconPlug,
+  IconRefreshCw,
   IconSearch,
   IconShieldAlert,
   IconX,
@@ -21,6 +22,8 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+// tmux and screen session awareness (P-31)
+import { msgMx } from "../../lib/messages-multiplexers";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
@@ -92,6 +95,9 @@ export interface PaneHandle {
   commandOutput(id: number): string | null;
   /** P-30: offers text for pasting, always through the paste review; never sent without it. */
   reviewPaste(text: string): void;
+  // tmux and screen session awareness (P-31)
+  /** Types the core-built attach command of a session the user chose; remembered for a reattach offer. */
+  attachMultiplexer(session: MultiplexerSession): boolean;
 }
 
 export interface SessionEnvironment {
@@ -195,6 +201,11 @@ export function TerminalView(props: TerminalViewProps) {
   const unreadReported = useRef(false);
   // The return-to-directory offer is made at most once per restored pane.
   const [directoryOffer, setDirectoryOffer] = useState<"waiting" | "shown" | "done">(props.restoreDirectory ? "waiting" : "done");
+  // tmux and screen session awareness (P-31): the session last attached from the server panel,
+  // offered again (never attached without a click) once a reconnect of this pane is connected.
+  const lastMultiplexer = useRef<MultiplexerSession | null>(null);
+  const reattachOfferedFor = useRef(0);
+  const [reattachOffer, setReattachOffer] = useState<MultiplexerSession | null>(null);
   const [encodingId, setEncodingId] = useState("utf-8");
   const encodingRef = useRef("utf-8");
   const lastUnencodable = useRef(0);
@@ -419,10 +430,28 @@ export function TerminalView(props: TerminalViewProps) {
       reviewPaste: (text) => {
         if (status.current.state === "connected") controllerRef.current?.reviewPaste(text);
       },
+      attachMultiplexer: (session) => {
+        if (status.current.state !== "connected" || !session.attachCommand || !controllerRef.current) return false;
+        controllerRef.current.sendConfirmedCommand(session.attachCommand);
+        lastMultiplexer.current = session;
+        return true;
+      },
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);
   }, []);
+
+  // tmux and screen session awareness (P-31): offered once per reconnect, only while connected.
+  useEffect(() => {
+    if (state !== "connected") {
+      setReattachOffer(null);
+      return;
+    }
+    if (attempt > 0 && reattachOfferedFor.current !== attempt && lastMultiplexer.current) {
+      reattachOfferedFor.current = attempt;
+      setReattachOffer(lastMultiplexer.current);
+    }
+  }, [state, attempt]);
 
   // Offered once the restored session is connected; never sent without a click.
   useEffect(() => {
@@ -551,6 +580,41 @@ export function TerminalView(props: TerminalViewProps) {
         connected={state === "connected" && !closed}
         onDone={(port) => setPortOffers((list) => (port === "all" ? [] : list.filter((p) => p !== port)))}
       />
+
+      {/* tmux and screen session awareness (P-31) */}
+      {reattachOffer?.attachCommand && state === "connected" && visible && (
+        <div className="term-banner" role="group" aria-label={msgMx.reattachTitle}>
+          <IconRefreshCw size={16} />
+          <span className="stack-xs" style={{ minWidth: 0 }}>
+            {/* The name came from the server; shown as text. The command was built by the core. */}
+            <span>{msgMx.reattachBody(reattachOffer.kind, reattachOffer.name)}</span>
+            <code className="mono truncate" data-testid="reattach-command">
+              {reattachOffer.attachCommand}
+            </code>
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              controllerRef.current?.sendConfirmedCommand(reattachOffer.attachCommand as string);
+              setReattachOffer(null);
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgMx.reattach}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              setReattachOffer(null);
+              controllerRef.current?.focus();
+            }}
+          >
+            {msgMx.dismiss}
+          </button>
+        </div>
+      )}
 
       {findOpen && (
         <FindBar

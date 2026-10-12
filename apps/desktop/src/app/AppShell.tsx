@@ -21,6 +21,8 @@ import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "..
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+// tmux and screen session awareness (P-31)
+import { msgMx } from "../lib/messages-multiplexers";
 import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
@@ -813,6 +815,14 @@ function Shell() {
                   showPanel && sidePanel === "server" ? (
                     <ServerPanel
                       target={glanceTarget}
+                      // tmux and screen session awareness (P-31): typed into the focused pane only.
+                      onAttach={(session) => {
+                        const handle = focusedHandle();
+                        if (handle?.attachMultiplexer(session)) {
+                          notify("success", msgMx.attachedNotice(session.name));
+                          handle.focus();
+                        }
+                      }}
                       onClose={() => {
                         setSidePanel(null);
                         focusedHandle()?.focus();
