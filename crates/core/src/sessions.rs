@@ -1340,6 +1340,33 @@ async fn run_local(
 enum Transport {
     Ssh { reader: ShellReader, writer: ShellWriter },
     Local { reader: PtyReader, handle: PtyHandle, recheck_size: Option<tokio::time::Instant> },
+    Telnet(Box<TelnetLink>),
+    Serial(crate::serial::SerialLink),
+}
+
+/// A Telnet connection: the socket halves, the protocol state and replies not yet sent.
+struct TelnetLink {
+    reader: tokio::net::tcp::OwnedReadHalf,
+    writer: tokio::net::tcp::OwnedWriteHalf,
+    codec: crate::telnet::Codec,
+    replies: Vec<u8>,
+}
+
+impl TelnetLink {
+    /// Sends what can be sent of the pending negotiation replies without waiting (they are a
+    /// few bytes; whatever does not fit now goes with the next read or keystroke).
+    fn flush_replies(&mut self) -> bool {
+        while !self.replies.is_empty() {
+            match self.writer.try_write(&self.replies) {
+                Ok(n) => {
+                    self.replies.drain(..n);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return true,
+                Err(_) => return false,
+            }
+        }
+        true
+    }
 }
 
 enum TransportEvent {
@@ -1368,13 +1395,43 @@ impl Transport {
                 PtyEvent::Output(data) => Some(TransportEvent::Output(data)),
                 PtyEvent::Exit(code) => Some(TransportEvent::Exit(code)),
             },
+            Self::Serial(link) => match link.events.recv().await? {
+                crate::serial::SerialEvent::Data(data) => Some(TransportEvent::Output(data)),
+                crate::serial::SerialEvent::Lost => Some(TransportEvent::Lost),
+            },
+            Self::Telnet(link) => loop {
+                if !link.flush_replies() {
+                    return Some(TransportEvent::Lost);
+                }
+                let mut buf = vec![0u8; 16 * 1024];
+                // `read` is cancel-safe; decoding happens only after it completed.
+                let n = match tokio::io::AsyncReadExt::read(&mut link.reader, &mut buf).await {
+                    Ok(0) => return None,
+                    Ok(n) => n,
+                    Err(_) => return Some(TransportEvent::Lost),
+                };
+                let mut output = Vec::with_capacity(n);
+                let link = &mut **link;
+                link.codec.receive(&buf[..n], &mut output, &mut link.replies);
+                if !link.flush_replies() {
+                    return Some(TransportEvent::Lost);
+                }
+                if !output.is_empty() {
+                    return Some(TransportEvent::Output(output));
+                }
+            },
         }
     }
 
-    async fn write(&self, data: &[u8]) -> bool {
+    async fn write(&mut self, data: &[u8]) -> bool {
         match self {
             Self::Ssh { writer, .. } => writer.write(data).await.is_ok(),
             Self::Local { handle, .. } => handle.write(data).await.is_ok(),
+            Self::Serial(link) => link.write(data).await,
+            Self::Telnet(link) => {
+                let encoded = crate::telnet::encode_input(data);
+                link.flush_replies() && tokio::io::AsyncWriteExt::write_all(&mut link.writer, &encoded).await.is_ok()
+            }
         }
     }
 
@@ -1389,13 +1446,20 @@ impl Transport {
                 // shortly afterwards (see `PtyHandle::ensure_size`).
                 *recheck_size = Some(tokio::time::Instant::now() + Duration::from_millis(150));
             }
+            // A serial line has no window size.
+            Self::Serial(_) => {}
+            Self::Telnet(link) => {
+                let size = link.codec.resize(cols, rows);
+                link.replies.extend_from_slice(&size);
+                let _ = link.flush_replies();
+            }
         }
     }
 
     fn recheck_deadline(&self) -> Option<tokio::time::Instant> {
         match self {
             Self::Local { recheck_size, .. } => *recheck_size,
-            Self::Ssh { .. } => None,
+            Self::Ssh { .. } | Self::Telnet(_) | Self::Serial(_) => None,
         }
     }
 

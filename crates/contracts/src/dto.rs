@@ -798,3 +798,53 @@ pub struct LocalListing {
     pub entries: Vec<RemoteEntry>,
     pub truncated: bool,
 }
+
+// ---------- serial connections (CON-06) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SerialParity {
+    #[default]
+    None,
+    Odd,
+    Even,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SerialFlowControl {
+    #[default]
+    None,
+    Software,
+    Hardware,
+}
+
+/// How to open a serial port: the device (`/dev/ttyUSB0`, `COM3`) and its line settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SerialSettings {
+    pub path: String,
+    pub baud: u32,
+    /// 5 to 8.
+    pub data_bits: u8,
+    pub parity: SerialParity,
+    /// 1 or 2.
+    pub stop_bits: u8,
+    pub flow_control: SerialFlowControl,
+}
+
+impl Default for SerialSettings {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            baud: 115_200,
+            data_bits: 8,
+            parity: SerialParity::None,
+            stop_bits: 1,
+            flow_control: SerialFlowControl::None,
+        }
+    }
+}
