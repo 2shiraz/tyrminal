@@ -34,7 +34,7 @@ describe("backup and restore in the real application", { concurrency: false }, (
       await s.fill("Address", "192.0.2.44", { within: HOST_PANEL });
       await s.fill("User name", "deploy", { within: HOST_PANEL });
       await saveAndCloseHostPanel(s);
-      await t.nav("Settings");
+      await t.settings("Backup");
       await s.clickButton("Save a backup…");
       await s.until(async () => /Backup saved as lab\.tyrbackup/.test(await s.execute("return document.body.innerText")), { describe: "saved toast" });
       await app.screenshot("b01-backup-saved");
@@ -79,7 +79,9 @@ describe("backup and restore in the real application", { concurrency: false }, (
       await s.clickButton("Unlock");
       await s.until(async () => (await t.heading()) === "Home", { describe: "home", timeout: 20_000 });
       await t.nav("Hosts");
-      await s.waitFor('[aria-label="Connect to backup-host-alpha"]');
+      await s.until(() => s.execute(`return [...document.querySelectorAll('[data-testid="host-list"] .host-open')].some((b) => b.textContent.trim() === "backup-host-alpha")`), {
+        describe: "the restored host on Hosts",
+      });
     } finally {
       await app.quit();
     }

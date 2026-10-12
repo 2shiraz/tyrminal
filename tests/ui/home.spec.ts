@@ -3,7 +3,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -61,7 +61,7 @@ test("home: snippets need an open session, and Run in… only opens the review",
   const run = snippets.getByRole("button", { name: "Run Disk usage in…" });
   await expect(run).toBeDisabled();
 
-  await page.getByRole("button", { name: "Connect to api-gateway" }).click();
+  await connectHost(page, "api-gateway");
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Home" }).click();
   await expect(run).toBeEnabled();

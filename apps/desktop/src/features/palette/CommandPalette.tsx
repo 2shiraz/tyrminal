@@ -47,7 +47,8 @@ import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
 import { msgRuns } from "../../lib/messages-runs";
 import { msgOutput } from "../../lib/messages-output";
-import { keyLabels } from "../../lib/platform";
+import { msgSelect } from "../../lib/messages-select";
+import { isMac, keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 // privilege prompts (KEY-18)
 import { msgP } from "../../lib/messages-privilege";
@@ -68,13 +69,19 @@ interface Item {
   shortcut?: ActionId | undefined;
   keywords?: string | undefined;
   run: () => void;
+  /** Hosts: Cmd/Ctrl+Enter opens in a split, Shift+Enter in SFTP. */
+  runSplit?: (() => void) | undefined;
+  runSftp?: (() => void) | undefined;
 }
 
-/** Subsequence match with a score that favors consecutive and word-start matches. */
-export function fuzzyScore(needle: string, haystack: string): { score: number; positions: number[] } | null {
+/**
+ * Subsequence match with a score that favors consecutive and word-start matches. `quality` is the
+ * match alone; `score` also prefers shorter text, to rank items that match equally well.
+ */
+export function fuzzyScore(needle: string, haystack: string): { score: number; quality: number; positions: number[] } | null {
   const n = needle.toLowerCase();
   const h = haystack.toLowerCase();
-  if (!n) return { score: 0, positions: [] };
+  if (!n) return { score: 0, quality: 0, positions: [] };
   let score = 0;
   let last = -2;
   const positions: number[] = [];
@@ -88,7 +95,7 @@ export function fuzzyScore(needle: string, haystack: string): { score: number; p
     last = index;
     from = index + 1;
   }
-  return { score: score - h.length * 0.01, positions };
+  return { score: score - h.length * 0.01, quality: score, positions };
 }
 
 function Highlighted({ text, positions }: { text: string; positions: number[] }) {
@@ -109,6 +116,7 @@ export function CommandPalette({
   terminalConnected,
   onClose,
   onConnect,
+  onConnectSplit,
   onNavigate,
   onAction,
   onToggleTheme,
@@ -137,6 +145,8 @@ export function CommandPalette({
   terminalConnected: boolean;
   onClose: () => void;
   onConnect: (host: HostSummary) => void;
+  /** Cmd/Ctrl+Enter on a host: beside the focused pane. */
+  onConnectSplit?: ((host: HostSummary) => void) | undefined;
   onNavigate: (d: Destination) => void;
   onAction: (a: ActionId) => void;
   onToggleTheme: () => void;
@@ -216,6 +226,10 @@ export function CommandPalette({
   }, []);
 
   const items = useMemo<Item[]>(() => {
+    const hostAlternatives = (host: HostSummary) => ({
+      runSplit: onConnectSplit ? () => onConnectSplit(host) : undefined,
+      runSftp: onSftpHost && host.protocol.type === "ssh" ? () => onSftpHost(host) : undefined,
+    });
     const list: Item[] = [];
     if (pick) {
       for (const host of hosts.value ?? []) {
@@ -255,6 +269,7 @@ export function CommandPalette({
         keywords: `${host.address} ${host.username}`,
         icon: <Avatar label={host.label} size="sm" />,
         run: () => onConnect(host),
+        ...hostAlternatives(host),
       });
     }
     for (const host of hosts.value ?? []) {
@@ -267,6 +282,7 @@ export function CommandPalette({
         keywords: `${host.address} ${host.username}`,
         icon: <Avatar label={host.label} size="sm" />,
         run: () => onConnect(host),
+        ...hostAlternatives(host),
       });
     }
     if (hasTerminal && terminalConnected) {
@@ -423,7 +439,7 @@ export function CommandPalette({
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;
-  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onRunAllOpen, onLocal, onSftp, onSftpHost, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onConnectSplit, onSnippet, onRunAllOpen, onLocal, onSftp, onSftpHost, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items
@@ -431,14 +447,31 @@ export function CommandPalette({
         const label = fuzzyScore(query, item.label);
         const extra = label ? null : fuzzyScore(query, `${item.detail ?? ""} ${item.keywords ?? ""}`);
         if (!label && !extra) return null;
-        return { item, score: label ? label.score + 2 : (extra?.score ?? 0), positions: label?.positions ?? [] };
+        return {
+          item,
+          score: label ? label.score + 2 : (extra?.score ?? 0),
+          quality: label ? label.quality + 2 : (extra?.quality ?? 0),
+          positions: label?.positions ?? [],
+        };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
     if (query) {
-      // Keep each group together; groups are ordered by their best match, items by score.
+      // Keep each group together; groups are ordered by their best match, items by score. Text
+      // length only ranks items: groups that match equally well keep their listed order (open
+      // tabs first, then recent connections, hosts, ... actions), so a long tab detail never
+      // puts an action that names the same address above the tab itself.
       const best = new Map<string, number>();
-      for (const r of scored) best.set(r.item.group, Math.max(best.get(r.item.group) ?? -Infinity, r.score));
-      scored.sort((a, b) => (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) || b.score - a.score);
+      const order = new Map<string, number>();
+      for (const r of scored) {
+        best.set(r.item.group, Math.max(best.get(r.item.group) ?? -Infinity, r.quality));
+        if (!order.has(r.item.group)) order.set(r.item.group, order.size);
+      }
+      scored.sort(
+        (a, b) =>
+          (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) ||
+          (order.get(a.item.group) ?? 0) - (order.get(b.item.group) ?? 0) ||
+          b.score - a.score,
+      );
     }
     return scored.slice(0, 60);
   }, [items, query]);
@@ -454,11 +487,13 @@ export function CommandPalette({
     onClose();
   }
 
-  function choose(index: number) {
+  function choose(index: number, how: "run" | "split" | "sftp" = "run") {
     const result = results[index];
     if (!result) return;
+    const run = how === "split" ? result.item.runSplit : how === "sftp" ? result.item.runSftp : result.item.run;
+    if (!run) return;
     dismiss();
-    result.item.run();
+    run();
   }
 
   let lastGroup = "";
@@ -497,7 +532,7 @@ export function CommandPalette({
               setSelected((s) => Math.max(0, s - 1));
             } else if (event.key === "Enter") {
               event.preventDefault();
-              choose(selected);
+              choose(selected, (isMac ? event.metaKey : event.ctrlKey) ? "split" : event.shiftKey ? "sftp" : "run");
             }
           }}
         />
@@ -545,6 +580,16 @@ export function CommandPalette({
         <span>
           <IconCornerDownLeft size={12} /> {msg.palette.run}
         </span>
+        {results[selected]?.item.runSplit && (
+          <span>
+            <Keys caps={[isMac ? "⌘" : "Ctrl", "↵"]} /> {msgSelect.inSplit}
+          </span>
+        )}
+        {results[selected]?.item.runSftp && (
+          <span>
+            <Keys caps={["⇧", "↵"]} /> {msgSelect.inSftp}
+          </span>
+        )}
         <span>
           <Keys caps={[keyLabels.esc]} /> {msg.palette.close}
         </span>

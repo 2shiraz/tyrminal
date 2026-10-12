@@ -3,7 +3,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 import { marksOnRow } from "./highlight-helpers";
 import { inputs, sentSince } from "./input-helpers";
 import { MOTD_ADDRESSES, MOTD_LINES } from "./motd-fixture";
@@ -18,8 +18,8 @@ async function connect(page: Page) {
 const output = (page: Page, text: string) => page.evaluate((t) => (window as unknown as { __mockOutput: (t: string) => void }).__mockOutput(t), text);
 
 async function settings(page: Page) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "Output highlighting" })).toBeVisible();
+  await openSettings(page, "Highlighting");
+  await expect(page.getByRole("heading", { name: "Highlighting" })).toBeVisible();
 }
 
 test("on by default: addresses, numbers, links, dates, quotes, paths, hashes and status words in plain output", async ({ page }) => {

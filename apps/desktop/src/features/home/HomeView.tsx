@@ -31,6 +31,8 @@ export function HomeView({
   ws,
   statuses,
   onConnect,
+  onConnectSplit,
+  onSftpHost,
   onLocal,
   onSftp,
   onNavigate,
@@ -40,6 +42,10 @@ export function HomeView({
   ws: Workspace;
   statuses: Record<number, PaneStatus>;
   onConnect: (host: HostSummary) => void;
+  /** Cmd/Ctrl+Enter on a host row. */
+  onConnectSplit?: (host: HostSummary) => void;
+  /** Shift+Enter on a host row (SSH hosts). */
+  onSftpHost?: (host: HostSummary) => void;
   onLocal: () => void;
   /** Opens a new SFTP tab. */
   onSftp?: () => void;
@@ -123,8 +129,8 @@ export function HomeView({
           <div className="home-grid">
             <div className="box-grid home-column">
               {ws.tabs.length > 0 && <SessionsBox ws={ws} statuses={statuses} onSelectTab={onSelectTab} onNewTab={onLocal} />}
-              <FavouritesBox onConnect={onConnect} />
-              <HostsBox onConnect={onConnect} onAllHosts={() => onNavigate("hosts")} />
+              <FavouritesBox onConnect={onConnect} onConnectSplit={onConnectSplit} onSftpHost={onSftpHost} />
+              <HostsBox onConnect={onConnect} onConnectSplit={onConnectSplit} onSftpHost={onSftpHost} onAllHosts={() => onNavigate("hosts")} />
               <SnippetsBox canRun={canRun} onRun={setRunning} onLibrary={() => onNavigate("snippets")} />
             </div>
             <div className="box-grid home-column">

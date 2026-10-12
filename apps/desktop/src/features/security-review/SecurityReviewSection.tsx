@@ -178,11 +178,7 @@ export function SecurityReviewSection({ onOpenKeychain }: { onOpenKeychain: () =
   const editing = fix?.kind === "editHost" ? hosts.value?.find((h) => h.id === fix.hostId) : undefined;
 
   return (
-    <section id="settings-review" className="settings-section" aria-labelledby="settings-review-title" data-testid="security-review">
-      <header>
-        <h2 id="settings-review-title">{msgSR.title}</h2>
-        <p>{msgSR.body}</p>
-      </header>
+    <div className="stack" data-testid="security-review">
       <ErrorNotice error={load.error} />
       {review === null && !load.error && <SkeletonRows count={2} />}
       {review && (
@@ -233,6 +229,6 @@ export function SecurityReviewSection({ onOpenKeychain }: { onOpenKeychain: () =
         <HostEditor host={editing} keys={keys.value ?? []} groups={groups.value ?? []} onClose={() => setFix(null)} onSaved={fixed} />
       )}
       {fix?.kind === "removeKnownHost" && <RemoveTrustDialog entry={fix} onClose={() => setFix(null)} onDone={fixed} />}
-    </section>
+    </div>
   );
 }

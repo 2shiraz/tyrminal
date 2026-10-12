@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, waitForTerminalText } from "./fixtures";
+import { connectHost, openApp, waitForTerminalText } from "./fixtures";
 
 const ESC = "\u001b";
 const ST = `${ESC}\\`;
@@ -24,7 +24,7 @@ const ran = (command: string) =>
 async function connected(page: Page) {
   await openApp(page, { renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Connect to api-gateway" }).click();
+  await connectHost(page, "api-gateway");
   await waitForTerminalText(page, "deploy@api-gateway");
 }
 
