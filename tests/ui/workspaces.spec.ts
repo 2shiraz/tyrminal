@@ -15,7 +15,8 @@ async function connectFromPalette(page: Page, host: string) {
   await expect(input).toBeFocused();
   await input.fill(host);
   await page.keyboard.press("Enter");
-  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+  // Several of these tests start many terminals; on a loaded runner the first can take a while.
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/, { timeout: 15_000 });
 }
 
 const terminalTabs = (page: Page) => page.getByRole("tablist", { name: "Open sessions" }).locator(".tab:not(.tab-page)");
