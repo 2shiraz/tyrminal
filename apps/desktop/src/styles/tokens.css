@@ -116,10 +116,10 @@
   --ease-linear: linear; /* progress only */
   /* Second pass (docs/design/motion.md §2). No overshoot anywhere, and nothing over 220 ms. */
   --duration-exit: 100ms; /* every exit: fade only, faster than any entrance */
-  --duration-glide: 180ms; /* something moving to a new place: FLIP, nav and tab glides */
+  --duration-glide: 140ms; /* something moving to a new place: FLIP, nav and tab glides */
   --duration-progress: 200ms; /* progress bars retargeting between ticks (linear) */
   --duration-flash: 400ms; /* one-shot "this changed" tint */
-  --stagger: 30ms; /* per item, capped at 8 items */
+  --stagger: 20ms; /* per item, capped at 6 items, opacity only */
   --distance-xs: 2px; /* disclosure, tooltips */
   --distance-sm: 4px; /* menus, rows entering */
   --distance-md: 8px; /* panels, toasts, dialogs */
