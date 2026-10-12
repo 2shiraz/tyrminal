@@ -119,6 +119,7 @@
     "allow-env-set",
     "allow-env-effective",
     "allow-session-identity",
-    "allow-session-insert-identity-password"
+    "allow-session-insert-identity-password",
+    "allow-identity-usage"
   ]
 }

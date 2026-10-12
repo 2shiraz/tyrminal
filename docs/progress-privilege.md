@@ -11,6 +11,8 @@ earlier parallel identities implementation on this branch was reverted (commits 
 |---|---|---|
 | KEY-18: explicit, confirmed insertion of the host's identity password, no Enter | `core:vault::privilege_tests` (identity checked at insert time, host identity beats group identity, control characters refused, no password, nothing after a lock); `crates/core/tests/privilege_lab.rs` (fake prompt receives nothing, with a control proving the check counts bytes; wrong identity and other window refused; the insert reaches a real no-echo `read`, submitted only by Enter); `tests/ui/privilege.spec.ts` 2/2 (mock); `tests/native/privilege.test.mjs` | KEY-18 |
 
+| Identity deletion safety (BUILD_SPEC §10.2): refused while in use unless reassigned or removed, with a preview of each host's fallback | `crates/core/tests/identity_deletion.rs` (real vault: preview, refusal, reassign, remove, reload); D's `core:inventory` updated for the explicit choice; `tests/ui/identity-deletion.spec.ts` 2/2 (mock). D's `inventory_lab` already covers sign-in following an identity edit, and `tests/native/privilege.test.mjs` signs in with an identity through the real UI | KEY-15, KEY-16 |
+
 ## Next
 
 - SEC-11: compromised-password check (opt-in, k-anonymity, configurable endpoint, local stub

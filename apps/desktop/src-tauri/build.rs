@@ -125,6 +125,8 @@ const COMMANDS: &[&str] = &[
     // privilege prompts (KEY-18)
     "session_identity",
     "session_insert_identity_password",
+    // identity deletion (BUILD_SPEC §10.2)
+    "identity_usage",
 ];
 
 fn main() {

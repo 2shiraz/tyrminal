@@ -243,6 +243,8 @@ pub fn run() {
             // privilege prompts (KEY-18)
             commands::privilege::session_identity,
             commands::privilege::session_insert_identity_password,
+            // identity deletion (BUILD_SPEC §10.2)
+            commands::inventory::identity_usage,
         ])
         .build(tauri::generate_context!());
 

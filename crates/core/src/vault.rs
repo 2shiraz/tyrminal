@@ -2760,11 +2760,26 @@ impl VaultService {
         id: &Id,
         host: &HostRecord,
     ) -> Option<(String, &'a IdentityRecord, SettingOrigin)> {
+        Self::identity_for_host_without(open, id, host, None)
+    }
+
+    // identity deletion (BUILD_SPEC §10.2): the same resolution as if `excluded` were removed
+    // from every host and group, to show what each host would use instead.
+    fn identity_for_host_without<'a>(
+        open: &'a Open,
+        id: &Id,
+        host: &HostRecord,
+        excluded: Option<&str>,
+    ) -> Option<(String, &'a IdentityRecord, SettingOrigin)> {
         let lookup = |identity: &str| {
+            if Some(identity) == excluded {
+                return None;
+            }
             validate::id(identity).ok().and_then(|i| open.identities.get(&i)).map(|s| (identity.to_owned(), &s.record))
         };
         if let Some((_, own)) = Self::workflow_of_host(open, &validate::id_text(id))
             && let Some(identity) = own.record.identity_id.as_deref()
+            && Some(identity) != excluded
         {
             return lookup(identity).map(|(i, r)| (i, r, SettingOrigin::Host));
         }
@@ -2855,19 +2870,51 @@ impl VaultService {
 
     /// Deletes an identity. Hosts and groups that used it fall back to their own settings; their
     /// references are removed in the same transaction. Returns how many were using it.
-    pub async fn delete_identity(&self, id: &str) -> Result<u32, IpcError> {
+    /// Deletes an identity. While hosts or groups name it, this is refused unless `references`
+    /// says what happens to them: reassigned to another identity, or the identity removed from
+    /// them (BUILD_SPEC §10.2: never a silent fallback to another secret). All in one
+    /// transaction. Returns how many hosts and groups changed.
+    pub async fn delete_identity(
+        &self,
+        id: &str,
+        references: Option<tyrminal_contracts::IdentityReferences>,
+    ) -> Result<u32, IpcError> {
         let id = validate::id(id)?;
         let text = validate::id_text(&id);
+        let replacement = match &references {
+            Some(tyrminal_contracts::IdentityReferences::Reassign { identity_id }) => {
+                Some(validate::id_text(&validate::id(identity_id)?))
+            }
+            _ => None,
+        };
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
         let revision =
             open.identities.get(&id).ok_or_else(|| not_found("That identity no longer exists."))?.revision + 1;
+        let users: Vec<(Id, &Stored<WorkflowRecord>)> = open
+            .workflows
+            .iter()
+            .filter(|(_, w)| w.record.identity_id.as_deref() == Some(text.as_str()))
+            .map(|(wid, w)| (*wid, w))
+            .collect();
+        if !users.is_empty() && references.is_none() {
+            return Err(err(
+                ErrorCode::InUse,
+                "Hosts or groups use this identity. Choose another identity for them or remove it from them.",
+            ));
+        }
+        if let Some(replacement) = &replacement {
+            if *replacement == text {
+                return Err(invalid("Choose a different identity to use instead."));
+            }
+            if !validate::id(replacement).is_ok_and(|r| open.identities.contains_key(&r)) {
+                return Err(not_found("The identity to use instead no longer exists."));
+            }
+        }
         let mut writes: Vec<(Id, u64, Option<WorkflowRecord>)> = Vec::new();
-        for (wid, stored) in
-            open.workflows.iter().filter(|(_, w)| w.record.identity_id.as_deref() == Some(text.as_str()))
-        {
-            let next = WorkflowRecord { identity_id: None, ..stored.record.clone() };
-            writes.push((*wid, stored.revision + 1, (!next.is_empty()).then_some(next)));
+        for (wid, stored) in users {
+            let next = WorkflowRecord { identity_id: replacement.clone(), ..stored.record.clone() };
+            writes.push((wid, stored.revision + 1, (!next.is_empty()).then_some(next)));
         }
         let mut rows = vec![self.seal_row::<IdentityRecord>(open, id, KIND_IDENTITY, revision, None)?];
         for (wid, revision, record) in &writes {
@@ -3001,6 +3048,73 @@ impl VaultService {
                 "The identity of this host changed. Check which identity it uses and try again.",
             )),
         }
+    }
+}
+
+// identity deletion (BUILD_SPEC §10.2)
+impl VaultService {
+    /// How a host signs in without the identity `excluded`.
+    fn sign_in_without(open: &Open, id: &Id, host: &HostRecord, excluded: &str) -> tyrminal_contracts::SignInAfter {
+        use tyrminal_contracts::SignInAfter;
+        if let Some((identity_id, record, _)) = Self::identity_for_host_without(open, id, host, Some(excluded)) {
+            return SignInAfter::Identity { identity_id, label: record.label.clone() };
+        }
+        let key = |key_id: &str| SignInAfter::Key {
+            key_id: key_id.to_owned(),
+            label: validate::id(key_id)
+                .ok()
+                .and_then(|k| open.ssh_keys.get(&k))
+                .map(|k| k.record.label.clone())
+                .unwrap_or_default(),
+        };
+        match inventory::effective(&group_index(open), host).auth {
+            EffectiveAuth::Own(StoredAuth::Password { .. }) => SignInAfter::StoredPassword,
+            EffectiveAuth::Own(StoredAuth::Key { key_id }) => key(key_id),
+            EffectiveAuth::GroupKey(key_id) => key(&key_id),
+            EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => {
+                SignInAfter::AskPassword
+            }
+        }
+    }
+
+    /// The hosts and groups an identity applies to, and how each host would sign in without it.
+    /// Shown before a deletion so the user sees exactly what changes.
+    pub async fn identity_usage(&self, id: &str) -> Result<Vec<tyrminal_contracts::IdentityUse>, IpcError> {
+        let id = validate::id(id)?;
+        let text = validate::id_text(&id);
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if !open.identities.contains_key(&id) {
+            return Err(not_found("That identity no longer exists."));
+        }
+        let mut uses = Vec::new();
+        for (gid, group) in &open.groups {
+            let group_text = validate::id_text(gid);
+            if Self::workflow_of_group(open, &group_text).and_then(|(_, w)| w.record.identity_id.clone()).as_deref()
+                == Some(text.as_str())
+            {
+                uses.push(tyrminal_contracts::IdentityUse {
+                    target: SettingsTarget::Group { group_id: group_text },
+                    label: group.record.name.clone(),
+                    direct: true,
+                    after_removal: None,
+                });
+            }
+        }
+        for (hid, host) in &open.hosts {
+            let Some((identity_id, _, origin)) = Self::identity_for_host(open, hid, &host.record) else { continue };
+            if identity_id != text {
+                continue;
+            }
+            uses.push(tyrminal_contracts::IdentityUse {
+                target: SettingsTarget::Host { host_id: validate::id_text(hid) },
+                label: host.record.label.clone(),
+                direct: matches!(origin, SettingOrigin::Host),
+                after_removal: Some(Self::sign_in_without(open, hid, &host.record, &text)),
+            });
+        }
+        uses.sort_by_key(|u| u.label.to_lowercase());
+        Ok(uses)
     }
 }
 

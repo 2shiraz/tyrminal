@@ -18,6 +18,8 @@ mod tunnels;
 mod inventory;
 // privilege prompts (KEY-18)
 mod privilege;
+// identity deletion (KEY-15/16, BUILD_SPEC §10.2)
+mod identity_removal;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
@@ -27,3 +29,5 @@ pub use tunnels::*;
 pub use inventory::*;
 // privilege prompts (KEY-18)
 pub use privilege::*;
+// identity deletion (KEY-15/16, BUILD_SPEC §10.2)
+pub use identity_removal::*;

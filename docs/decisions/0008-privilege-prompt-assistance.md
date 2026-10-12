@@ -1,4 +1,4 @@
-# ADR 0008: User-invoked identity password insertion (KEY-18)
+# ADR 0008: User-invoked identity password insertion (KEY-18) and identity deletion safety
 
 Status: accepted, 2026-10-12
 
@@ -33,3 +33,18 @@ sign-in method.
 
 - No new dependency, record kind or stored field.
 - The feature only covers SSH sessions to saved hosts that use an identity with a password.
+
+## Addendum: deleting an identity that is in use (BUILD_SPEC §10.2)
+
+The first identity implementation (ADR 0006) cleared an identity's references when it was
+deleted, so a host could fall back to its own stored password without the user choosing it.
+§10.2 requires "prompts for reassignment or explicit removal, never fallback to a different
+secret". Now:
+
+- `identity_delete(id, references)` is refused with `IN_USE` while any host or group names the
+  identity, unless `references` is `reassign { identityId }` (another existing identity, written
+  in the same transaction) or `remove`.
+- `identity_usage(id)` lists every host and group the identity applies to (directly or through
+  a group) and, for each host, how it would sign in without it: another identity from a group
+  further up, a key, its own stored password, or asking. The delete dialog shows this list and
+  enables Delete only after the user picks reassignment or removal; Cancel has focus.

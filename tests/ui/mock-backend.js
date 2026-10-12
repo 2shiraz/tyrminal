@@ -970,13 +970,44 @@ export function installMockBackend(options) {
       return handlers.identity_list().find((i) => i.id === record.id);
     },
     identity_delete: (a) => {
+      // identity deletion (BUILD_SPEC §10.2): refused while in use unless the caller chooses.
+      const users = [...identityState.uses].filter(([, v]) => v === a.id).map(([k]) => k);
+      if (users.length > 0 && !a.references)
+        throw { code: "IN_USE", message: "Hosts or groups use this identity. Choose another identity for them or remove it from them." };
+      const replacement = a.references?.kind === "reassign" ? a.references.identityId : null;
       identityState.list = identityState.list.filter((i) => i.id !== a.id);
-      let n = 0;
-      for (const [k, v] of identityState.uses) if (v === a.id) {
-        identityState.uses.delete(k);
-        n += 1;
+      for (const k of users) {
+        if (replacement) identityState.uses.set(k, replacement);
+        else identityState.uses.delete(k);
       }
-      return n;
+      return users.length;
+    },
+    // identity deletion (BUILD_SPEC §10.2)
+    identity_usage: (a) => {
+      const uses = [];
+      for (const g of state.groups)
+        if (identityState.uses.get(`group:${g.id}`) === a.id) uses.push({ target: { kind: "group", groupId: g.id }, label: g.name, direct: true, afterRemoval: null });
+      for (const h of state.hosts) {
+        const target = { kind: "host", hostId: h.id };
+        const now = identityAssignment(target);
+        if (now.effectiveIdentityId !== a.id) continue;
+        // What the host uses without it: the same resolution with the identity's uses removed.
+        const saved = new Map(identityState.uses);
+        for (const [k, v] of saved) if (v === a.id) identityState.uses.delete(k);
+        const next = identityAssignment(target).effectiveIdentityId;
+        identityState.uses = saved;
+        const other = identityState.list.find((i) => i.id === next);
+        const key = h.auth.kind === "key" ? state.keys.find((k) => k.id === h.auth.keyId) : null;
+        const afterRemoval = other
+          ? { kind: "identity", identityId: other.id, label: other.label }
+          : key
+            ? { kind: "key", keyId: key.id, label: key.label }
+            : h.auth.kind === "stored_password"
+              ? { kind: "stored_password" }
+              : { kind: "ask_password" };
+        uses.push({ target, label: h.label, direct: now.origin?.kind === "host", afterRemoval });
+      }
+      return uses.sort((x, y) => x.label.toLowerCase().localeCompare(y.label.toLowerCase()));
     },
     identity_assignments: () => [
       ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
