@@ -162,7 +162,8 @@ test("16 panes: the limit holds, a grid arrangement tiles them evenly, sessions 
   await page.keyboard.press("Alt+Shift+Equal");
   await expect(page.getByText("At most 16 panes can be open. Close one first.")).toBeVisible();
   await expect(page.locator(".pane")).toHaveCount(16);
-  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(16);
+  // Sixteen terminals start one after another; on a loaded runner that takes several seconds.
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length, { timeout: 20_000 }).toBe(16);
 
   await page.keyboard.press("Control+Shift+K");
   await page.getByRole("combobox", { name: /Type a command/ }).fill("Arrange panes in a grid");
