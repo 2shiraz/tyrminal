@@ -113,3 +113,9 @@ pub const MAX_HISTORY_ENTRIES: usize = 1_000;
 pub const MAX_HISTORY_COMMAND_LEN: usize = 1_024;
 /// Suggestions returned for one query.
 pub const MAX_HISTORY_SUGGESTIONS: usize = 8;
+
+// server at a glance
+/// Filesystems shown in the server panel.
+pub const MAX_GLANCE_DISKS: usize = 16;
+/// The shortest time between two reads of one server's values, in milliseconds.
+pub const GLANCE_MIN_INTERVAL_MS: u64 = 5_000;

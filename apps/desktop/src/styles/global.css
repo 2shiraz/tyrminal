@@ -4157,3 +4157,58 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .command-list .row-title {
   overflow-wrap: anywhere;
 }
+
+/* server at a glance */
+.glance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.glance-target {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.glance-values {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.glance-values dt {
+  color: var(--text-muted);
+}
+
+.glance-values dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.glance-disks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.glance-disks li,
+.glance-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.glance-usage meter {
+  width: 100%;
+  height: 6px;
+}
+
+.glance-usage .muted {
+  font-size: var(--text-xs);
+}

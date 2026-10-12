@@ -1,5 +1,5 @@
 /* Component sketches for the static prototype only. They consume the tokens in
-   apps/desktop/src/styles/next/theme.css and the utilities in motion.css; the real component layer is
+   apps/desktop/src/styles/tokens.css and the utilities in motion.css; the real component layer is
    written in Stage B (docs/design/overhaul.md, "Implementation order"). */
 
 @font-face {
@@ -18,6 +18,17 @@
    SF Pro / Segoe UI here only; the app itself uses the system stack in theme.css. */
 :root {
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, sans-serif;
+  /* The final type scale under its final names; tokens.css still carries the older names. */
+  --text-xs: 11px;
+  --leading-xs: 14px;
+  --text-sm: 12px;
+  --leading-sm: 16px;
+  --text-md: 13px;
+  --leading-md: 18px;
+  --text-lg: 15px;
+  --leading-lg: 20px;
+  --text-xl: 20px;
+  --leading-xl: 26px;
 }
 
 * {
@@ -904,7 +915,7 @@ hr {
   width: 480px;
   background: var(--bg-overlay);
   border-radius: var(--radius-dialog);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--elevation-2);
   padding: var(--space-5);
   display: grid;
   gap: var(--space-4);
@@ -934,7 +945,7 @@ hr {
   width: 600px;
   background: var(--bg-overlay);
   border-radius: var(--radius-dialog);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--elevation-2);
   overflow: hidden;
 }
 
@@ -1012,7 +1023,7 @@ hr {
   padding: 10px var(--space-3);
   border-radius: var(--radius-panel);
   background: var(--bg-overlay);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--elevation-1);
 }
 
 .toast .icon.ok {
@@ -1036,7 +1047,7 @@ hr {
   padding: var(--space-1);
   background: var(--bg-overlay);
   border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--elevation-1);
   z-index: var(--z-menu);
 }
 
@@ -1221,7 +1232,7 @@ hr {
   width: 500px;
   background: var(--bg-overlay);
   border-radius: var(--radius-dialog);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--elevation-2);
   padding: var(--space-5);
   display: grid;
   gap: var(--space-4);
@@ -1229,7 +1240,7 @@ hr {
 }
 
 .sheet.danger {
-  box-shadow: var(--shadow-2), inset 3px 0 0 var(--danger);
+  box-shadow: var(--elevation-2), inset 3px 0 0 var(--danger);
 }
 
 .sheet-head {
