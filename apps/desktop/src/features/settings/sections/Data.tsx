@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { usePreferences } from "../../../app/preferences";
-import { ErrorNotice, Notice, SettingRow, Switch } from "../../../components/ui/controls";
-import { diagnostics, links as linksApi } from "../../../lib/ipc";
+import { ErrorNotice, Notice, SettingRow, Switch, relativeTime } from "../../../components/ui/controls";
+import { backup, diagnostics, links as linksApi } from "../../../lib/ipc";
 import { msg } from "../../../lib/messages";
 import { msgB } from "../../../lib/messages-b";
 import { useAction } from "../../../lib/useAsync";
@@ -12,11 +12,26 @@ import { SettingsGroup } from "../SettingsGroup";
 
 export function BackupSection() {
   const [restoring, setRestoring] = useState(false);
+  // When this vault was last exported; `undefined` until known.
+  const [lastExport, setLastExport] = useState<number | null | undefined>(undefined);
+  const loadLastExport = () =>
+    void backup
+      .status()
+      .then((s) => setLastExport(s.lastExportAt))
+      .catch(() => undefined);
+  useEffect(loadLastExport, []);
   return (
     <>
       <SettingsGroup title={msgSettings.backupGroup} hint={msg.backup.body}>
         <SettingRow label={msgSettings.exportRow} hint={msgSettings.exportHint} id="export" variant="action">
-          <ExportBackupButton />
+          <div className="row-flex" style={{ alignItems: "center", gap: "var(--space-3)" }}>
+            {lastExport !== undefined && (
+              <span className="muted" data-testid="last-export">
+                {lastExport === null ? msg.backup.neverExported : msg.backup.lastExported(relativeTime(lastExport))}
+              </span>
+            )}
+            <ExportBackupButton onExported={loadLastExport} />
+          </div>
         </SettingRow>
         <SettingRow label={msgSettings.restoreRow} hint={msgSettings.restoreHint} id="restore" variant="action">
           <button type="button" className="btn" onClick={() => setRestoring(true)}>

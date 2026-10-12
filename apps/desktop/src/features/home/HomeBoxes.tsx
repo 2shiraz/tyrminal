@@ -2,14 +2,7 @@
 // filled with rows from data the app already has. Nothing here connects, runs or sends without the
 // existing flows: connecting goes through the trust and sign-in prompts, snippets through the run
 // review, and the security review is local and read-only.
-import type {
-  ActiveTunnel,
-  HostSummary,
-  SecurityFinding,
-  SecurityReview,
-  SnippetSummary,
-  TunnelSummary,
-} from "@tyrminal/contracts";
+import type { ActiveTunnel, HostSummary, SecurityFinding, SecurityReview, SnippetSummary, TunnelSummary } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
@@ -17,12 +10,7 @@ import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { Box } from "../../components/ui/Box";
 import { BoxEmpty, relativeTime } from "../../components/ui/controls";
 import { IconPlay, IconServer, IconX } from "../../components/ui/icons";
-import {
-  backup as backupApi,
-  securityReview as reviewApi,
-  tunnels as tunnelsApi,
-  vault as vaultApi,
-} from "../../lib/ipc";
+import { securityReview as reviewApi, tunnels as tunnelsApi, vault as vaultApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgSelect } from "../../lib/messages-select";
 import { isMac } from "../../lib/platform";
@@ -50,11 +38,7 @@ export function SessionsBox({
       count={ws.tabs.length}
       flush
       actions={
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onNewTab}
-        >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onNewTab}>
           {msg.home.newTab}
         </button>
       }
@@ -66,29 +50,14 @@ export function SessionsBox({
           const summary = tabStatus(ws, tab);
           return (
             <li key={tab.id}>
-              <button
-                type="button"
-                className="home-row"
-                onClick={() => onSelectTab(tab.id)}
-              >
-                <span
-                  className="status-dot"
-                  data-tone={summary.indicator}
-                  data-unread={summary.unread || undefined}
-                  aria-hidden="true"
-                />
+              <button type="button" className="home-row" onClick={() => onSelectTab(tab.id)}>
+                <span className="status-dot" data-tone={summary.indicator} data-unread={summary.unread || undefined} aria-hidden="true" />
                 <span className="home-row-title truncate">
                   {tabTitle(ws, tab)}
-                  <span className="visually-hidden">
-                    {msgC.status.describe(summary)}
-                  </span>
+                  <span className="visually-hidden">{msgC.status.describe(summary)}</span>
                 </span>
-                <span className="home-row-detail mono truncate">
-                  {pane?.identity}
-                </span>
-                <span className="home-row-meta">
-                  {status?.cols ? `${status.cols}×${status.rows}` : ""}
-                </span>
+                <span className="home-row-detail mono truncate">{pane?.identity}</span>
+                <span className="home-row-meta">{status?.cols ? `${status.cols}×${status.rows}` : ""}</span>
               </button>
             </li>
           );
@@ -102,121 +71,30 @@ export function SessionsBox({
  * Saved hosts, most recently used first. A click selects a row and a double-click connects; the
  * Connect button in each row is the keyboard and assistive-technology path.
  */
-type HostRowActions = {
+export function HostsBox({
+  onConnect,
+  onConnectSplit,
+  onSftpHost,
+  onAllHosts,
+}: {
   onConnect: (host: HostSummary) => void;
   /** Cmd/Ctrl+Enter on a host. */
   onConnectSplit?: ((host: HostSummary) => void) | undefined;
   /** Shift+Enter on a host (SSH hosts). */
   onSftpHost?: ((host: HostSummary) => void) | undefined;
-};
-
-/** The hosts table shared by the hosts and favourites boxes. */
-function HostRows({
-  rows,
-  onConnect,
-  onConnectSplit,
-  onSftpHost,
-}: { rows: HostSummary[] } & HostRowActions) {
+  onAllHosts: () => void;
+}) {
+  const { hosts } = useVaultData();
   const [selected, setSelected] = useState<string | null>(null);
-  return (
-    <div className="box-scroll">
-      <table className="dt home-hosts">
-        <thead>
-          <tr>
-            <th scope="col">{msg.home.colName}</th>
-            <th scope="col">{msg.home.colAddress}</th>
-            <th scope="col">{msg.home.colSignIn}</th>
-            <th scope="col">{msg.home.colWhen}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((host) => (
-            // Like rows on Hosts: a click selects, double-click or Enter connects (no Connect button).
-            <tr
-              key={host.id}
-              className={selected === host.id ? "is-selected" : undefined}
-              onClick={() => setSelected(host.id)}
-              onDoubleClick={() => onConnect(host)}
-            >
-              <td>
-                <button
-                  type="button"
-                  className="home-host"
-                  title={msgSelect.doubleClickHint}
-                  onFocus={() => setSelected(host.id)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    event.preventDefault();
-                    if (
-                      (isMac ? event.metaKey : event.ctrlKey) &&
-                      onConnectSplit
-                    )
-                      onConnectSplit(host);
-                    else if (event.shiftKey) {
-                      if (onSftpHost && host.protocol.type === "ssh")
-                        onSftpHost(host);
-                    } else onConnect(host);
-                  }}
-                >
-                  <IconServer size={14} className="faint" />
-                  <span className="truncate">{host.label}</span>
-                </button>
-              </td>
-              <td className="mono muted">
-                {msg.hosts.destination(host.username, host.address, host.port)}
-              </td>
-              <td className="muted">{msg.home.signIn[host.auth.kind]}</td>
-              <td className="muted">
-                {host.lastConnectedAt
-                  ? relativeTime(host.lastConnectedAt)
-                  : msg.home.never}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/** Starred hosts, by name. Shown only when there are any. */
-export function FavouritesBox(actions: HostRowActions) {
-  const { hosts } = useVaultData();
-  const rows = (hosts.value ?? [])
-    .filter((h) => h.favourite)
-    .sort((a, b) => a.label.localeCompare(b.label));
-  if (rows.length === 0) return null;
-  return (
-    <Box title={msg.home.favourites} count={rows.length} flush>
-      <HostRows rows={rows} {...actions} />
-    </Box>
-  );
-}
-
-export function HostsBox({
-  onAllHosts,
-  ...actions
-}: HostRowActions & { onAllHosts: () => void }) {
-  const { hosts } = useVaultData();
   const all = hosts.value ?? [];
-  const rows = [...all]
-    .sort(
-      (a, b) =>
-        (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0) ||
-        a.label.localeCompare(b.label),
-    )
-    .slice(0, ROWS);
+  const rows = [...all].sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0) || a.label.localeCompare(b.label)).slice(0, ROWS);
   return (
     <Box
       title={msg.home.hosts}
       count={all.length}
       flush
       actions={
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onAllHosts}
-        >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onAllHosts}>
           {msg.home.allHosts}
         </button>
       }
@@ -224,25 +102,55 @@ export function HostsBox({
       {rows.length === 0 ? (
         <BoxEmpty>{msg.home.recentEmpty}</BoxEmpty>
       ) : (
-        <HostRows rows={rows} {...actions} />
+        <div className="box-scroll">
+          <table className="dt home-hosts">
+            <thead>
+              <tr>
+                <th scope="col">{msg.home.colName}</th>
+                <th scope="col">{msg.home.colAddress}</th>
+                <th scope="col">{msg.home.colSignIn}</th>
+                <th scope="col">{msg.home.colWhen}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((host) => (
+                // Like rows on Hosts: a click selects, double-click or Enter connects (no Connect button).
+                <tr key={host.id} className={selected === host.id ? "is-selected" : undefined} onClick={() => setSelected(host.id)} onDoubleClick={() => onConnect(host)}>
+                  <td>
+                    <button
+                      type="button"
+                      className="home-host"
+                      title={msgSelect.doubleClickHint}
+                      onFocus={() => setSelected(host.id)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        if ((isMac ? event.metaKey : event.ctrlKey) && onConnectSplit) onConnectSplit(host);
+                        else if (event.shiftKey) {
+                          if (onSftpHost && host.protocol.type === "ssh") onSftpHost(host);
+                        } else onConnect(host);
+                      }}
+                    >
+                      <IconServer size={14} className="faint" />
+                      <span className="truncate">{host.label}</span>
+                    </button>
+                  </td>
+                  <td className="mono muted">{msg.hosts.destination(host.username, host.address, host.port)}</td>
+                  <td className="muted">{msg.home.signIn[host.auth.kind]}</td>
+                  <td className="muted">{host.lastConnectedAt ? relativeTime(host.lastConnectedAt) : msg.home.never}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Box>
   );
 }
 
-export function SnippetsBox({
-  canRun,
-  onRun,
-  onLibrary,
-}: {
-  canRun: boolean;
-  onRun: (snippet: SnippetSummary) => void;
-  onLibrary: () => void;
-}) {
+export function SnippetsBox({ canRun, onRun, onLibrary }: { canRun: boolean; onRun: (snippet: SnippetSummary) => void; onLibrary: () => void }) {
   const { snippets } = useVaultData();
-  const list = [...(snippets.value ?? [])]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 6);
+  const list = [...(snippets.value ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6);
   if (list.length === 0) return null;
   return (
     <Box
@@ -250,11 +158,7 @@ export function SnippetsBox({
       count={snippets.value?.length}
       flush
       actions={
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onLibrary}
-        >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onLibrary}>
           {msg.home.library}
         </button>
       }
@@ -263,9 +167,7 @@ export function SnippetsBox({
         {list.map((snippet) => (
           <li key={snippet.id} className="home-row" data-static="">
             <span className="home-row-title truncate">{snippet.name}</span>
-            <span className="home-row-detail mono truncate">
-              {snippet.text.split("\n")[0]}
-            </span>
+            <span className="home-row-detail mono truncate">{snippet.text.split("\n")[0]}</span>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -297,50 +199,25 @@ export function VaultBox({ onLock }: { onLock: () => void }) {
       live = false;
     };
   }, []);
-  // When this vault was last backed up; `undefined` until known.
-  const [lastBackup, setLastBackup] = useState<number | null | undefined>(
-    undefined,
-  );
-  const loadBackup = () =>
-    void backupApi
-      .status()
-      .then((s) => setLastBackup(s.lastExportAt))
-      .catch(() => undefined);
-  useEffect(loadBackup, []);
-  const counts = msg.home.counts(
-    hosts.value?.length ?? 0,
-    keys.value?.length ?? 0,
-    snippets.value?.length ?? 0,
-  );
+  const counts = msg.home.counts(hosts.value?.length ?? 0, keys.value?.length ?? 0, snippets.value?.length ?? 0);
   return (
     <Box title={msg.home.vault} flush>
       <div className="home-facts">
         <p>
           <span>{msg.home.unlocked}</span>
-          {quick !== null && (
-            <span className="muted">
-              {quick ? msg.home.quickUnlockOn : msg.home.quickUnlockOff}
-            </span>
-          )}
+          {quick !== null && <span className="muted">{quick ? msg.home.quickUnlockOn : msg.home.quickUnlockOff}</span>}
         </p>
         <p className="muted">
           {counts.map((c) => (
             <span key={c}>{c}</span>
           ))}
         </p>
-        {lastBackup !== undefined && (
-          <p className="muted" data-testid="home-last-backup">
-            {lastBackup === null
-              ? msg.home.neverBackedUp
-              : msg.home.lastBackup(relativeTime(lastBackup))}
-          </p>
-        )}
       </div>
       <div className="home-box-foot">
         <button type="button" className="btn btn-sm" onClick={onLock}>
           {msg.home.lockNow}
         </button>
-        <ExportBackupButton onExported={loadBackup} />
+        <ExportBackupButton />
       </div>
     </Box>
   );
@@ -357,17 +234,8 @@ function summarise(review: SecurityReview): ReviewRow[] {
   const rows = new Map<SecurityFinding["kind"], ReviewRow>();
   for (const finding of review.findings) {
     const severity = severityOf(finding);
-    const tone =
-      severity === "high"
-        ? "danger"
-        : severity === "medium"
-          ? "warning"
-          : "note";
-    const row = rows.get(finding.kind) ?? {
-      kind: finding.kind,
-      count: 0,
-      tone,
-    };
+    const tone = severity === "high" ? "danger" : severity === "medium" ? "warning" : "note";
+    const row = rows.get(finding.kind) ?? { kind: finding.kind, count: 0, tone };
     row.count += 1;
     rows.set(finding.kind, row);
   }
@@ -384,9 +252,7 @@ const REVIEW_KEY = "home.securityReview";
  */
 export function ReviewBox({ onOpen }: { onOpen: () => void }) {
   const { memo } = useVaultData();
-  const [review, setReview] = useState<SecurityReview | null>(
-    () => (memo.get(REVIEW_KEY) as SecurityReview | undefined) ?? null,
-  );
+  const [review, setReview] = useState<SecurityReview | null>(() => (memo.get(REVIEW_KEY) as SecurityReview | undefined) ?? null);
   useEffect(() => {
     if (review) return;
     let live = true;
@@ -398,9 +264,7 @@ export function ReviewBox({ onOpen }: { onOpen: () => void }) {
           if (live) setReview(result);
         })
         .catch(() => undefined);
-    const idle = window.requestIdleCallback
-      ? window.requestIdleCallback(run, { timeout: 1500 })
-      : window.setTimeout(run, 200);
+    const idle = window.requestIdleCallback ? window.requestIdleCallback(run, { timeout: 1500 }) : window.setTimeout(run, 200);
     return () => {
       live = false;
       if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
@@ -426,22 +290,13 @@ export function ReviewBox({ onOpen }: { onOpen: () => void }) {
       ) : (
         <ul className="home-rows home-findings">
           {rows.slice(0, 3).map((row) => (
-            <li
-              key={row.kind}
-              className="home-row"
-              data-static=""
-              data-tone={row.tone}
-            >
+            <li key={row.kind} className="home-row" data-static="" data-tone={row.tone}>
               {msg.home.reviewKinds[row.kind]?.(row.count)}
             </li>
           ))}
         </ul>
       )}
-      {review && (
-        <p className="home-box-note">
-          {msg.home.reviewChecked(relativeTime(review.reviewedAt))}
-        </p>
-      )}
+      {review && <p className="home-box-note">{msg.home.reviewChecked(relativeTime(review.reviewedAt))}</p>}
     </Box>
   );
 }
@@ -475,11 +330,7 @@ export function ForwardsBox({ onTunnels }: { onTunnels: () => void }) {
       count={active.length}
       flush
       actions={
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onTunnels}
-        >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onTunnels}>
           {msg.home.tunnels}
         </button>
       }
@@ -491,26 +342,15 @@ export function ForwardsBox({ onTunnels }: { onTunnels: () => void }) {
               <span className="status-dot" data-tone="ok" aria-hidden="true" />
               <span className="home-row-title truncate">{t.name}</span>
               <span className="home-row-detail mono truncate">
-                {t.kind === "dynamic"
-                  ? `${endpoint(t.bindHost, t.boundPort)} ${msg.home.forwardSocks}`
-                  : msg.home.forwardRoute(
-                      endpoint(t.bindHost, t.boundPort),
-                      endpoint(t.destHost, t.destPort),
-                    )}
+                {t.kind === "dynamic" ? `${endpoint(t.bindHost, t.boundPort)} ${msg.home.forwardSocks}` : msg.home.forwardRoute(endpoint(t.bindHost, t.boundPort), endpoint(t.destHost, t.destPort))}
               </span>
-              <span className="home-row-meta">
-                {msg.home.forwardConnections(t.activeConnections)}
-              </span>
+              <span className="home-row-meta">{msg.home.forwardConnections(t.activeConnections)}</span>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm btn-icon"
                 aria-label={msg.home.stopForward(t.name)}
                 data-tooltip={msg.home.stopForward(t.name)}
-                onClick={() =>
-                  void tunnelsApi
-                    .stop(t.runId)
-                    .finally(() => setVersion((v) => v + 1))
-                }
+                onClick={() => void tunnelsApi.stop(t.runId).finally(() => setVersion((v) => v + 1))}
               >
                 <IconX size={13} />
               </button>
@@ -518,34 +358,18 @@ export function ForwardsBox({ onTunnels }: { onTunnels: () => void }) {
           ))}
         </ul>
       )}
-      <p className="home-box-note">
-        {msg.home.forwardsSaved(saved.length, auto)}
-      </p>
+      <p className="home-box-note">{msg.home.forwardsSaved(saved.length, auto)}</p>
     </Box>
   );
 }
 
-export function GetStartedBox({
-  rows,
-}: {
-  rows: {
-    key: string;
-    title: string;
-    body: string;
-    icon: ReactNode;
-    onClick: () => void;
-  }[];
-}) {
+export function GetStartedBox({ rows }: { rows: { key: string; title: string; body: string; icon: ReactNode; onClick: () => void }[] }) {
   return (
     <Box title={msg.home.getStarted}>
       <ul className="home-rows">
         {rows.map((row) => (
           <li key={row.key}>
-            <button
-              type="button"
-              className="home-row home-start"
-              onClick={row.onClick}
-            >
+            <button type="button" className="home-row home-start" onClick={row.onClick}>
               <span className="home-start-icon" aria-hidden="true">
                 {row.icon}
               </span>
