@@ -19,7 +19,7 @@
 // `logFile` (local) holding the sshd VERBOSE log that tests inspect for authentication activity.
 
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -305,7 +305,7 @@ function removeLocalUser(name) {
 
 const toConfigPath = (p) => (isWindows ? p.replaceAll("\\", "/") : p);
 
-function sshdConfig({ port, inDir, version, kbdOnly = false }) {
+function sshdConfig({ port, inDir, authFile, version, kbdOnly = false }) {
   const lines = [
     "# Tyrminal local lab sshd (generated per run by scripts/lab.mjs). Never use outside tests.",
     `Port ${port}`,
@@ -320,7 +320,7 @@ function sshdConfig({ port, inDir, version, kbdOnly = false }) {
     `PasswordAuthentication ${kbdOnly ? "no" : "yes"}`,
     `KbdInteractiveAuthentication ${kbdOnly ? "yes" : "no"}`,
     `PubkeyAuthentication ${kbdOnly ? "no" : "yes"}`,
-    `AuthorizedKeysFile ${toConfigPath(join(inDir, "authorized_keys"))}`,
+    `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))}`,
     // Lab only: the generated files live in the checkout, owned by the CI user rather than the
     // lab accounts, so the ownership walk would refuse them. Never copy this to a real server.
     "StrictModes no",
@@ -366,6 +366,11 @@ function localDown() {
       run("sc.exe", ["delete", service], { allowFail: true });
     }
   }
+  const authDirFile = join(runDir, "authdir");
+  if (existsSync(authDirFile)) {
+    const dir = readFileSync(authDirFile, "utf8").trim();
+    if (/^\/tmp\/tyrminal-lab-[A-Za-z0-9]+$/.test(dir)) rmSync(dir, { recursive: true, force: true });
+  }
   const usersFile = join(runDir, "users.json");
   if (existsSync(usersFile)) for (const name of JSON.parse(readFileSync(usersFile, "utf8"))) removeLocalUser(name);
 }
@@ -384,6 +389,21 @@ function startWindowsService(name, sshd, config, logFile) {
 
 function restrictWindowsAcl(path) {
   run("icacls", [path, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q"]);
+  // Win32-OpenSSH loads a host key only if SYSTEM or Administrators owns it.
+  run("icacls", [path, "/setowner", "*S-1-5-32-544", "/T", "/Q"]);
+}
+
+/**
+ * sshd reads authorized_keys as the lab account, which cannot traverse a CI user's home
+ * directory (mode 750 on GitHub's Linux runners). Unix labs keep those files in a directory
+ * under /tmp that every account can traverse; `down` removes it.
+ */
+function authorizedKeysDir() {
+  if (isWindows) return null;
+  const dir = mkdtempSync("/tmp/tyrminal-lab-");
+  chmodSync(dir, 0o755);
+  writeFileSync(join(runDir, "authdir"), dir);
+  return dir;
 }
 
 async function localUp() {
@@ -430,15 +450,24 @@ async function localUp() {
   };
   const pids = [];
   const services = [];
+  const authDir = authorizedKeysDir();
   // Windows OpenSSH has no PAM, so it cannot serve keyboard-interactive; tests that need the
   // "kbd" server report BLOCKED there.
   for (const name of isWindows ? SERVERS : [...SERVERS, "kbd"]) {
     const inDir = serverHostKeys(name);
     if (!isWindows) chmodSync(inDir, 0o711);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
+    let authFile = null;
+    if (authDir) {
+      mkdirSync(join(authDir, name), { mode: 0o755 });
+      chmodSync(join(authDir, name), 0o755);
+      authFile = join(authDir, name, "authorized_keys");
+      writeFileSync(authFile, `${material.authorized}\n`, { mode: 0o644 });
+      chmodSync(authFile, 0o644);
+    }
     const port = await freePort();
     const config = join(inDir, "sshd_config");
-    writeFileSync(config, sshdConfig({ port, inDir, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
+    writeFileSync(config, sshdConfig({ port, inDir, authFile, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
     const logFile = join(inDir, "sshd.log");
     writeFileSync(logFile, "", { mode: 0o644 });
     if (isWindows) {

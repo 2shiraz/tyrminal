@@ -22,7 +22,7 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { schemeById } from "./schemes";
-import { checkLink, groupFingerprint, lineCount } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -106,6 +106,11 @@ export function TerminalView(props: TerminalViewProps) {
   const [findOpen, setFindOpen] = useState(false);
   const [findCount, setFindCount] = useState({ index: 0, total: 0 });
   const clipboardAllowed = useRef(false);
+  // Automatic reconnect after a dropped connection: counted across attempts, reset on success.
+  const everConnected = useRef(false);
+  const autoAttempts = useRef(0);
+  const [autoRetry, setAutoRetry] = useState<{ attempt: number; dueAt: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const status = useRef<PaneStatus>({ state: "connecting", renderer: "dom", cols: 0, rows: 0, clipboardAllowed: false });
 
   // Callbacks change identity every render; the controller needs stable ones.
@@ -156,6 +161,10 @@ export function TerminalView(props: TerminalViewProps) {
           case "state":
             setState(event.state);
             publish({ state: event.state });
+            if (event.state === "connected") {
+              everConnected.current = true;
+              autoAttempts.current = 0;
+            }
             break;
           case "trust_prompt":
             setTrust(event);
@@ -177,6 +186,10 @@ export function TerminalView(props: TerminalViewProps) {
             setAuth(null);
             setClipboardAsk(null);
             setClosed({ error: event.error, exitStatus: event.exitStatus });
+            if (shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
+              autoAttempts.current += 1;
+              setAutoRetry({ attempt: autoAttempts.current, dueAt: Date.now() + reconnectDelayMs(autoAttempts.current) });
+            }
             publish({ state: event.error ? "failed" : "closed" });
             break;
         }
@@ -193,6 +206,27 @@ export function TerminalView(props: TerminalViewProps) {
     // `target` is fixed for the life of a pane; `attempt` drives reconnects.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt]);
+
+  // Counts down to the next automatic attempt; cancelled by unmount, Cancel or Reconnect now.
+  useEffect(() => {
+    if (!autoRetry) return;
+    setNow(Date.now());
+    const tick = window.setInterval(() => setNow(Date.now()), 250);
+    const fire = window.setTimeout(() => {
+      setAutoRetry(null);
+      setAttempt((n) => n + 1);
+    }, Math.max(0, autoRetry.dueAt - Date.now()));
+    return () => {
+      window.clearInterval(tick);
+      window.clearTimeout(fire);
+    };
+  }, [autoRetry]);
+
+  function reconnectNow() {
+    setAutoRetry(null);
+    autoAttempts.current = 0;
+    setAttempt((n) => n + 1);
+  }
 
   // Live preference changes keep the session and screen.
   useEffect(() => {
@@ -354,6 +388,11 @@ export function TerminalView(props: TerminalViewProps) {
             ) : closed.error ? (
               <>
                 <p>{closed.error.message}</p>
+                {autoRetry && (
+                  <p role="status" data-testid="auto-reconnect">
+                    {msg.terminal.autoReconnect(Math.max(0, Math.ceil((autoRetry.dueAt - now) / 1000)), autoRetry.attempt, RECONNECT_MAX_ATTEMPTS)}
+                  </p>
+                )}
                 <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
                   {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
                 </p>
@@ -370,10 +409,17 @@ export function TerminalView(props: TerminalViewProps) {
                   {msg.terminal.openKnownHosts}
                 </button>
               ) : (
-                <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)} autoFocus={visible && focused} data-autofocus>
-                  <IconRefreshCw size={15} />
-                  {msg.terminal.reconnect}
-                </button>
+                <>
+                  {autoRetry && (
+                    <button type="button" className="btn" onClick={() => setAutoRetry(null)}>
+                      {msg.terminal.cancelAutoReconnect}
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-primary" onClick={reconnectNow} autoFocus={visible && focused} data-autofocus>
+                    <IconRefreshCw size={15} />
+                    {autoRetry ? msg.terminal.reconnectNow : msg.terminal.reconnect}
+                  </button>
+                </>
               )}
             </div>
           </div>

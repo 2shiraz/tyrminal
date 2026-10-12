@@ -47,6 +47,9 @@ pub fn run() {
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
+    // Native file dialogs for backups, used from Rust only (no renderer permission).
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+
     let app = builder
         .setup(|app| {
             let core = open_core(app);
@@ -108,6 +111,10 @@ pub fn run() {
             commands::settings::prefs_set,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::backup::backup_export,
+            commands::backup::backup_choose,
+            commands::backup::backup_preview,
+            commands::backup::backup_restore,
         ])
         .build(tauri::generate_context!());
 

@@ -205,6 +205,45 @@ impl Database {
         .await
     }
 
+    /// Replaces the whole vault, header and every record, in one transaction (restore from a
+    /// backup). `expected_header` is the header the caller saw (`None`: no vault yet); if the
+    /// stored one differs, nothing changes (`Conflict`). Either the old vault or the new one is on
+    /// disk, never a mixture.
+    pub async fn replace_vault(
+        &self,
+        expected_header: Option<Vec<u8>>,
+        header: Vec<u8>,
+        rows: Vec<RecordRow>,
+    ) -> Result<(), StorageError> {
+        if rows.len() > MAX_LIST_ROWS {
+            return Err(StorageError::Constraint);
+        }
+        self.call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current: Option<Vec<u8>> =
+                tx.query_row("SELECT header FROM vault_header WHERE id = 1", [], |r| r.get(0)).optional()?;
+            if current != expected_header {
+                return Err(StorageError::Conflict);
+            }
+            tx.execute("DELETE FROM records", [])?;
+            tx.execute("DELETE FROM vault_header", [])?;
+            tx.execute("INSERT INTO vault_header (id, header) VALUES (1, ?1)", params![header])?;
+            for row in &rows {
+                let revision = i64::try_from(row.revision).map_err(|_| StorageError::Constraint)?;
+                if row.revision == 0 {
+                    return Err(StorageError::Constraint);
+                }
+                tx.execute(
+                    &format!("INSERT INTO records ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+                    params![row.record_id, row.kind, revision, row.key_version, row.nonce, row.ciphertext, row.deleted],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Writes one record under an optimistic-concurrency condition.
     pub async fn put_record(&self, row: RecordRow, condition: WriteCondition) -> Result<(), StorageError> {
         self.put_records(vec![(row, condition)]).await

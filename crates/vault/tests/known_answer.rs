@@ -79,3 +79,29 @@ fn libsodium_record_ciphertexts_open_to_the_expected_payloads() {
         assert_eq!(&*unlocked.open(&ctx, &resealed).unwrap(), &bytes(&r["payload"]));
     }
 }
+
+const BACKUP: &str = include_str!("../../../tests/fixtures/vault-vectors/backup.json");
+
+/// A backup file packed by an independent stdlib implementation (generate_backup.py) decodes,
+/// authenticates under K_backup, opens every record, and re-encodes byte for byte.
+#[test]
+fn independent_backup_file_verifies_and_reencodes_identically() {
+    let v = vectors();
+    let b: Value = serde_json::from_str(BACKUP).unwrap();
+    let file = bytes(&b["backup"]);
+    let parsed = tyrminal_vault::decode_backup(&file).expect("independent backup decodes");
+    assert_eq!(parsed.created_at, b["created_at"].as_u64().unwrap());
+    assert_eq!(parsed.header.encode(), bytes(&v["header"]));
+    let order: Vec<[u8; 16]> = b["record_ids_in_order"].as_array().unwrap().iter().map(array::<16>).collect();
+    assert_eq!(parsed.records.iter().map(|r| r.record_id).collect::<Vec<_>>(), order);
+
+    let recovery = RecoveryKey::parse(v["recovery_key_text"].as_str().unwrap()).unwrap();
+    let unlocked = parsed.header.unlock(&Credential::Recovery(&recovery)).unwrap();
+    unlocked.verify_backup(&parsed).expect("K_backup MAC verifies");
+    for r in &parsed.records {
+        let ctx = RecordContext { record_id: r.record_id, kind: r.kind, revision: r.revision };
+        unlocked.open(&ctx, &r.sealed).expect("record opens");
+    }
+    let again = unlocked.encode_backup(&parsed.header, parsed.created_at, &parsed.records).unwrap();
+    assert_eq!(again, file, "the Rust encoder produces the specified bytes");
+}

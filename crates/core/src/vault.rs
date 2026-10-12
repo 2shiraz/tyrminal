@@ -16,18 +16,19 @@ use serde::Serialize;
 use tokio::sync::{Mutex, watch};
 use tyrminal_contracts::limits::{MAX_RECENT_HOSTS, MAX_RECORDS_PER_KIND};
 use tyrminal_contracts::{
-    ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError, KeyImportInput, KeySummary, KnownHostSummary,
-    RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState, VaultStatus,
+    BackupCredentialKind, BackupPreview, ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError,
+    KeyImportInput, KeySummary, KnownHostSummary, RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState,
+    VaultStatus,
 };
 use tyrminal_ssh::{ClientKey, Endpoint, KnownHost, PresentedHostKey};
 use tyrminal_storage::{Database, RecordRow, WriteCondition};
 use tyrminal_vault::{
-    Credential, Id, Passphrase, RecordContext, RecoveryKey, SealedRecord, UnlockedVault, VaultHeader, create_vault,
-    random_id,
+    BackupRecord, Credential, Id, MAX_BACKUP_LEN, ParsedBackup, Passphrase, RecordContext, RecoveryKey, SealedRecord,
+    UnlockedVault, VaultHeader, create_vault, decode_backup, random_id,
 };
 use zeroize::Zeroizing;
 
-use crate::error::{err, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
+use crate::error::{err, from_backup, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
 use crate::records::{
     Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT, KeyRecord,
     KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
@@ -366,6 +367,141 @@ impl VaultService {
             }
         }
         Ok(open)
+    }
+
+    // ---------- backup and restore (docs/crypto-format.md §10) ----------
+
+    /// A portable backup of the unlocked vault: the header and every live record envelope as
+    /// stored, authenticated under `K_backup`. Nothing is decrypted to write it.
+    pub async fn export_backup(&self) -> Result<Vec<u8>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let header = inner.header.as_ref().ok_or_else(locked)?;
+        let rows = self.db.list_records().await.map_err(from_storage)?;
+        let records: Vec<BackupRecord> = rows
+            .into_iter()
+            .filter(|row| !row.deleted)
+            .map(|row| BackupRecord {
+                record_id: row.record_id,
+                kind: row.kind,
+                revision: row.revision,
+                sealed: SealedRecord { key_version: row.key_version, nonce: row.nonce, ciphertext: row.ciphertext },
+            })
+            .collect();
+        open.keys.encode_backup(header, now_unix(), &records).map_err(from_vault)
+    }
+
+    /// Fully validates a backup with the secret it was made with: strict parse, unlock of its own
+    /// header (Argon2id, off the reactor), header and backup MACs, then every record opened and
+    /// decoded exactly as an unlock would. Nothing is written.
+    async fn open_backup(
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+    ) -> Result<(ParsedBackup, BackupPreview), IpcError> {
+        if bytes.len() > MAX_BACKUP_LEN {
+            return Err(err(ErrorCode::LimitExceeded, "The file is too large to be a Tyrminal backup."));
+        }
+        let secret = Zeroizing::new(secret);
+        let (parsed, keys) = tokio::task::spawn_blocking(move || {
+            let parsed = decode_backup(&bytes)?;
+            let keys = match kind {
+                BackupCredentialKind::Passphrase => {
+                    parsed.header.unlock(&Credential::Passphrase(&Passphrase::new(secret.to_string())))?
+                }
+                BackupCredentialKind::RecoveryKey => {
+                    parsed.header.unlock(&Credential::Recovery(&RecoveryKey::parse(&secret)?))?
+                }
+            };
+            keys.verify_backup(&parsed)?;
+            Ok::<_, tyrminal_vault::VaultError>((parsed, keys))
+        })
+        .await
+        .map_err(|_| internal())?
+        .map_err(from_backup)?;
+        let rows = parsed
+            .records
+            .iter()
+            .map(|r| RecordRow {
+                record_id: r.record_id,
+                kind: r.kind,
+                revision: r.revision,
+                key_version: r.sealed.key_version,
+                nonce: r.sealed.nonce,
+                ciphertext: r.sealed.ciphertext.clone(),
+                deleted: false,
+            })
+            .collect();
+        // A record that fails here was inside an authenticated backup; still report it as a bad
+        // backup, never as damage to this device's vault.
+        let open = Self::load_records(keys, rows).map_err(|e| {
+            if e.code == ErrorCode::VaultDamaged { from_vault(tyrminal_vault::VaultError::BackupTampered) } else { e }
+        })?;
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        let preview = BackupPreview {
+            created_at: parsed.created_at,
+            hosts: count(open.hosts.len()),
+            keys: count(open.ssh_keys.len()),
+            known_hosts: count(open.known_hosts.len()),
+            snippets: count(open.snippets.len()),
+        };
+        Ok((parsed, preview))
+    }
+
+    /// What a backup contains, after full validation. Changes nothing.
+    pub async fn preview_backup(
+        &self,
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+    ) -> Result<BackupPreview, IpcError> {
+        // One KDF at a time, like unlock.
+        let _serial = self.inner.try_lock().map_err(|_| busy())?;
+        Self::open_backup(bytes, kind, secret).await.map(|(_, preview)| preview)
+    }
+
+    /// Replaces this device's vault with a validated backup, in one transaction, and leaves it
+    /// locked: it then opens with the backup's passphrase or recovery key. Ends every session
+    /// first. An existing vault is replaced only when `replace_existing` is set.
+    pub async fn restore_backup(
+        &self,
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+        replace_existing: bool,
+    ) -> Result<BackupPreview, IpcError> {
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        self.ensure_loaded(&mut inner).await?;
+        if inner.header.is_some() && !replace_existing {
+            return Err(err(ErrorCode::VaultAlreadyExists, "A vault already exists here. It was not replaced."));
+        }
+        let (parsed, preview) = Self::open_backup(bytes, kind, secret).await?;
+        // From here on the old vault's keys and sessions must not outlive the replacement.
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        inner.open = None;
+        let expected = inner.header.as_ref().map(VaultHeader::encode);
+        let rows = parsed
+            .records
+            .into_iter()
+            .map(|r| RecordRow {
+                record_id: r.record_id,
+                kind: r.kind,
+                revision: r.revision,
+                key_version: r.sealed.key_version,
+                nonce: r.sealed.nonce,
+                ciphertext: r.sealed.ciphertext,
+                deleted: false,
+            })
+            .collect();
+        let result = self.db.replace_vault(expected, parsed.header.encode(), rows).await.map_err(from_storage);
+        // Whatever happened, the vault is locked now; on failure the old vault is untouched.
+        if result.is_ok() {
+            inner.header = Some(parsed.header);
+        }
+        let state = if inner.header.is_some() { VaultState::Locked } else { VaultState::Uninitialized };
+        self.set_state(state);
+        self.failed_unlocks.store(0, Ordering::Relaxed);
+        result.map(|()| preview)
     }
 
     /// Locks the vault: bumps the generation (ending sessions and invalidating handles), then

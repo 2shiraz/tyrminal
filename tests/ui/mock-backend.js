@@ -198,6 +198,19 @@ export function installMockBackend(options) {
     "plugin:event|unlisten": (a) => {
       listeners.delete(a.eventId);
     },
+    backup_export: () => "tyrminal-backup-2026-10-11.tyrbackup",
+    backup_choose: () => ({ fileName: "tyrminal-backup-2026-10-11.tyrbackup", size: 48213 }),
+    backup_preview: (a) => {
+      if (a.secret !== "correct horse battery") throw { code: "WRONG_CREDENTIAL", message: "That did not open the backup. Nothing was restored." };
+      return { createdAt: 1760140800, hosts: state.hosts.length, keys: 2, knownHosts: 3, snippets: 5 };
+    },
+    backup_restore: (a) => {
+      if (a.secret !== "correct horse battery") throw { code: "WRONG_CREDENTIAL", message: "That did not open the backup. Nothing was restored." };
+      state.vault = { state: "locked", generation: state.vault.generation + 1 };
+      state.sessions.clear();
+      setTimeout(() => emit("vault-status", state.vault), 10);
+      return { createdAt: 1760140800, hosts: state.hosts.length, keys: 2, knownHosts: 3, snippets: 5 };
+    },
     prefs_get: () => structuredClone(state.prefs),
     prefs_set: (a) => {
       state.prefs = structuredClone(a.prefs);
@@ -278,6 +291,14 @@ export function installMockBackend(options) {
   window.__mockOutput = (text) => {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
+  };
+  /** Ends the newest session as a network drop (or with another error code). */
+  window.__mockDrop = (code = "DISCONNECTED") => {
+    const last = [...state.sessions.values()].at(-1);
+    if (!last) return;
+    state.sessions.delete(last.id);
+    channelSend(last.events, { type: "state", state: "failed" });
+    channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
   };
   window.__mockCalls = calls;
   window.__mockOpenedLinks = [];

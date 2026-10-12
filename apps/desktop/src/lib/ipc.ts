@@ -7,6 +7,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  BackupCredentialKind,
+  BackupFile,
+  BackupPreview,
   ErrorCode,
   HostInput,
   HostSummary,
@@ -165,3 +168,17 @@ export const links = {
   /** Opens an http(s) link in the OS browser after the user confirmed it. Validated natively. */
   open: (url: string) => call<void>("link_open", { url }),
 };
+
+/** Portable backups. Files are picked in native dialogs; paths and bytes never reach the page. */
+export const backup = {
+  /** Saves a backup of the unlocked vault; resolves to the file name, or null if cancelled. */
+  export: () => call<string | null>("backup_export"),
+  /** Picks a backup file to restore; null if cancelled. */
+  choose: () => call<BackupFile | null>("backup_choose"),
+  /** Fully validates the chosen backup with its secret and reports what it holds. */
+  preview: (kind: BackupCredentialKind, secret: string) => call<BackupPreview>("backup_preview", { kind, secret }),
+  /** Replaces this device's vault with the chosen backup and locks it. */
+  restore: (kind: BackupCredentialKind, secret: string, replaceExisting: boolean) =>
+    call<BackupPreview>("backup_restore", { kind, secret, replaceExisting }),
+};
+

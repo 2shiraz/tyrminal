@@ -6,11 +6,14 @@ use tyrminal_core::contracts::IpcError;
 /// instead of the window never appearing.
 pub struct AppState {
     core: Result<Core, IpcError>,
+    /// The backup file picked for restore (name and bytes), held natively between the preview
+    /// and the restore so the renderer never handles paths or file contents.
+    pub chosen_backup: std::sync::Mutex<Option<(String, Vec<u8>)>>,
 }
 
 impl AppState {
     pub fn new(core: Result<Core, IpcError>) -> Self {
-        Self { core }
+        Self { core, chosen_backup: std::sync::Mutex::new(None) }
     }
 
     pub fn core(&self) -> Result<&Core, IpcError> {

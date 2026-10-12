@@ -116,3 +116,28 @@ export function ligatureRanges(text: string): [number, number][] {
   return ranges;
 }
 
+
+/** Automatic reconnect: at most this many tries after a working session drops. */
+export const RECONNECT_MAX_ATTEMPTS = 6;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_CAP_MS = 30_000;
+
+/**
+ * Delay before reconnect attempt `attempt` (1-based): doubling from 1 s, capped at 30 s, with
+ * ±20% jitter so many tabs (or many clients) do not retry in lockstep. Servers that throttle
+ * repeated connections from one address (OpenSSH PerSourcePenalties) see a slowing client.
+ */
+export function reconnectDelayMs(attempt: number, random: () => number = Math.random): number {
+  const step = Math.min(Math.max(attempt, 1) - 1, 16);
+  const base = Math.min(RECONNECT_BASE_MS * 2 ** step, RECONNECT_CAP_MS);
+  return Math.round(base * (0.8 + 0.4 * Math.min(Math.max(random(), 0), 1)));
+}
+
+/**
+ * Only an SSH session that had reached its shell and then lost the network is retried on its
+ * own. Authentication failures, a changed or rejected host key, cancellation, a locked vault,
+ * and a normal exit are never retried automatically.
+ */
+export function shouldAutoReconnect(kind: "ssh" | "local", wasConnected: boolean, code: string | null): boolean {
+  return kind === "ssh" && wasConnected && code !== null && ["DISCONNECTED", "TIMEOUT", "UNREACHABLE"].includes(code);
+}

@@ -873,9 +873,9 @@ async fn snippets_reach_only_owned_sessions_and_stop_at_lock() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!client.text.contains("pasted-2"), "Paste must not execute: {:?}", client.text);
     client.send("\u{3}").await; // Ctrl+C discards the pasted line.
-    client.output_until("^C").await;
-    // Let the shell redraw its prompt before typing on, as a person would.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Let the shell discard the line and redraw its prompt before typing on, as a person would.
+    // (Whether "^C" is echoed depends on the shell: bash 3.2 on macOS does not.)
+    tokio::time::sleep(Duration::from_millis(700)).await;
     client.send("echo after-$((1+1))-paste\n").await;
     client.output_until("after-2-paste").await;
     assert!(!client.text.contains("pasted-2"), "Paste must not execute: {:?}", client.text);

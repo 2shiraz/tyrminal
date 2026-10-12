@@ -47,6 +47,10 @@ runners do not provide Linux containers, so the Docker SSH lab cannot run there.
 | cargo-cyclonedx | 0.5.9 | Apache-2.0 | Rust SBOMs in the release workflow |
 | gitleaks | 8.30.0 (checksum-pinned) | MIT | Secret scan of the full history |
 | GitHub actions: checkout 7.0.1, setup-node 7.1.0, pnpm/action-setup 6.1.0, upload-artifact 7.0.2, download-artifact 8.0.2, Swatinem/rust-cache 2.9.2 | SHA-pinned | MIT | CI |
+| `tauri-plugin-dialog` (pulls `rfd` 0.16.0, `tauri-plugin-fs` 2.7.0) | 2.8.2 | Apache-2.0 OR MIT | Native open/save dialogs for backup files, called from Rust only; no dialog or fs permission is granted to the renderer (`check:release` enforces this) |
+| `open` | 5.4.4 | MIT | Hands a validated http(s) link to the OS browser |
+| `lucide-static` (build-time icon source, not shipped as a package) | 1.47.0 | ISC | Inline SVG icons generated into `icons.tsx` |
+| Playwright container image (CI/dev only) | `mcr.microsoft.com/playwright:v1.56.1-noble` by digest | Apache-2.0 | Identical fonts and Chromium for visual baselines in CI and locally |
 | Ubuntu packages (CI/dev only): WebKitGTK 4.1, GTK 3, xvfb, gnome-keyring, openssh-server | distro | various | Linux build, headless native tests, lab |
 
 ## Accepted advisories (reviewed at each release)

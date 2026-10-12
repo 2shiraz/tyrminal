@@ -41,6 +41,11 @@ const COMMANDS: &[&str] = &[
     "prefs_set",
     "host_recent",
     "link_open",
+    // backup and restore
+    "backup_export",
+    "backup_choose",
+    "backup_preview",
+    "backup_restore",
 ];
 
 fn main() {

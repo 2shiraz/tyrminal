@@ -7,6 +7,7 @@ useDefault = true
 description = "Public known-answer vectors and documentation examples"
 paths = [
   '''tests/fixtures/vault-vectors/vectors\.json''',
+  '''tests/fixtures/vault-vectors/backup\.json''',
   '''docs/crypto-format\.md''',
 ]
 # Algorithm names in prose match the generic-api-key entropy rule.

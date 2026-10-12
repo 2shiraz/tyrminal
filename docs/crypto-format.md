@@ -30,7 +30,7 @@ device secret (32 random bytes, OS keystore) ──HKDF──► KEK_device     
 VRK (vault root key, 32 random bytes, generation = key_version)
  ├─ HKDF info "tyrminal.subkey.v1.records"     ► K_records     record envelopes
  ├─ HKDF info "tyrminal.subkey.v1.header-mac"  ► K_header_mac  header integrity
- ├─ HKDF info "tyrminal.subkey.v1.backup"      ► K_backup      portable backups   (Phase 02)
+ ├─ HKDF info "tyrminal.subkey.v1.backup"      ► K_backup      portable backups (§10)
  ├─ HKDF info "tyrminal.subkey.v1.logs"        ► K_logs        session recordings (Phase 08)
  └─ HKDF info "tyrminal.subkey.v1.sync-auth"   ► K_sync_auth   sync authentication (Phase 10)
 ```
@@ -153,3 +153,49 @@ library for HKDF/HMAC/base32) by
 `tests/fixtures/vault-vectors/generate.py`, committed as `vectors.json`, and checked by
 `crates/vault/tests/known_answer.rs`. The vector keys are public test values and must never be used
 for real data.
+
+## 10. Portable backup (version 1)
+
+A backup is a single file that restores a vault on any device with the vault's own passphrase or
+recovery key. It contains the vault header and every live record envelope exactly as stored (still
+sealed under `K_records`), and an HMAC over the whole file under `K_backup`. Writing a backup
+decrypts nothing.
+
+```
+magic           8   "TYRBACKP"
+backup_version  2   0x0001
+created_at      8   seconds since the Unix epoch (cleartext, informational)
+header_len      4   ≤ 801 (the largest valid header)
+header          header_len   the vault header (§4), byte for byte
+record_count    4   ≤ 100,000 (the vault's own listing bound)
+record × record_count, strictly increasing by record_id (no duplicates):
+    record_id   16
+    kind         2
+    revision     8   ≥ 1
+    key_version  4   must equal the header's key_version
+    nonce       24
+    ct_len       4   272 ≤ ct_len ≤ 1,048,848 and (ct_len − 16) a multiple of 256
+    ciphertext  ct_len   the record envelope (§5)
+backup_mac     32   HMAC-SHA-256(K_backup, every preceding byte)
+```
+
+The whole file is at most 256 MiB. Tombstones are not included.
+
+Restore: parse strictly and within the bounds above before any cryptography (a hostile count or
+length is rejected before allocation) → unlock the embedded header with the presented credential
+(§4; a wrong credential is `WrongCredential`) → verify the header MAC → verify `backup_mac` in
+constant time (`BackupTampered`) → open every record (§5), which re-checks each record's binding to
+its vault, id, kind, revision and key generation. Only a backup that passes every step can replace
+a vault, and it replaces the vault as a whole.
+
+What this protects: any change to any byte, truncation, trailing data, a dropped, added, duplicated
+or reordered record, a header from another vault, and records from another key generation are all
+rejected. What it does not: the cleartext metadata of §7 (plus `created_at` and the record count) is
+visible to whoever holds the file, and someone who knows the passphrase or recovery key at the time
+of the backup can always open it. A backup made before a passphrase change still opens with the old
+passphrase (rewrap, §8).
+
+Vector: `tests/fixtures/vault-vectors/generate_backup.py` (Python standard library only) packs the
+§9 vector vault into `backup.json`; `crates/vault/tests/known_answer.rs` checks that the Rust code
+verifies it and re-encodes it byte for byte.
+

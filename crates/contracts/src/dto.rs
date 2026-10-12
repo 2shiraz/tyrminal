@@ -34,6 +34,40 @@ pub struct RecoveryKeyIssued {
     pub recovery_key: String,
 }
 
+/// What a backup file contains, shown before anything is restored. Counts only: names and
+/// secrets stay encrypted until the restored vault is unlocked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupPreview {
+    /// Seconds since the Unix epoch when the backup was written.
+    #[ts(type = "number")]
+    pub created_at: u64,
+    pub hosts: u32,
+    pub keys: u32,
+    pub known_hosts: u32,
+    pub snippets: u32,
+}
+
+/// A backup file the user picked in the native dialog. Its bytes stay on the native side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupFile {
+    pub file_name: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+/// Which secret opens a backup: the passphrase or the recovery key it was made with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BackupCredentialKind {
+    Passphrase,
+    RecoveryKey,
+}
+
 impl core::fmt::Debug for RecoveryKeyIssued {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("RecoveryKeyIssued(<redacted>)")

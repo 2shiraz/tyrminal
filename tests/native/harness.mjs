@@ -71,9 +71,10 @@ export class App {
   /**
    * Starts the application. Reuses `dataDir` when given (to test restarts), else a fresh one.
    * `prefs` seeds preferences.json (non-secret settings) before the first launch, for example
-   * the DOM renderer so tests can read terminal text from the document.
+   * the DOM renderer so tests can read terminal text from the document. `env` adds variables
+   * (never secrets), e.g. the e2e-only backup file path that stands in for native file dialogs.
    */
-  static async launch({ dataDir, prefs } = {}) {
+  static async launch({ dataDir, prefs, env = {} } = {}) {
     if (!existsSync(appBinary)) {
       throw new Error(`BLOCKED: e2e application binary not found at ${appBinary}. Run \`pnpm build:e2e\`.`);
     }
@@ -83,7 +84,7 @@ export class App {
     }
     const port = await freePort();
     const child = spawn(appBinary, [], {
-      env: { ...process.env, TYRMINAL_DATA_DIR: dir, TAURI_WEBDRIVER_PORT: String(port) },
+      env: { ...process.env, ...env, TYRMINAL_DATA_DIR: dir, TAURI_WEBDRIVER_PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";

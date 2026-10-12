@@ -117,3 +117,5 @@ export const IconLink2 = svg(["path|d=M9 17H7A5 5 0 0 1 7 7h2", "path|d=M15 7h2a
 export const IconArrowUpRight = svg(["path|d=M7 7h10v10", "path|d=M7 17 17 7"]);
 export const IconSidebar = svg(["rect|width=18|height=18|x=3|y=3|rx=2", "path|d=M9 3v18"]);
 export const IconTextCursorInput = svg(["path|d=M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6", "path|d=M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7", "path|d=M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1", "path|d=M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1", "path|d=M9 6v12"]);
+export const IconDownload = svg(["path|d=M12 15V3", "path|d=M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "path|d=m7 10 5 5 5-5"]);
+export const IconUpload = svg(["path|d=M12 3v12", "path|d=m17 8-5-5-5 5", "path|d=M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"]);

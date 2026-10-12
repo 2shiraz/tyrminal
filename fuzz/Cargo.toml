@@ -29,3 +29,9 @@ path = "fuzz_targets/recovery_key_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "backup_decode"
+path = "fuzz_targets/backup_decode.rs"
+test = false
+doc = false

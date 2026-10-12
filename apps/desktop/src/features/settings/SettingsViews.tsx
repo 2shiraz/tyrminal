@@ -21,6 +21,7 @@ import { knownHosts as knownHostsApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
+import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
@@ -111,12 +112,12 @@ function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary
   );
 }
 
-type Section = "appearance" | "terminal" | "security" | "privacy";
+type Section = "appearance" | "terminal" | "security" | "backup" | "privacy";
 
 export function SettingsView() {
   const { prefs, update, saveError } = usePreferences();
   const [section, setSection] = useState<Section>("appearance");
-  const [dialog, setDialog] = useState<"passphrase" | "recovery" | null>(null);
+  const [dialog, setDialog] = useState<"passphrase" | "recovery" | "restore" | null>(null);
   const [changed, setChanged] = useState(false);
   const setTerminal = (patch: Partial<TerminalPreferences>) => update((p: Preferences) => ({ ...p, terminal: { ...p.terminal, ...patch } }));
   const t = prefs.terminal;
@@ -125,6 +126,7 @@ export function SettingsView() {
     { id: "appearance", label: msg.settings.appearance },
     { id: "terminal", label: msg.settings.terminal },
     { id: "security", label: msg.settings.security },
+    { id: "backup", label: msg.backup.title },
     { id: "privacy", label: msg.settings.privacy },
   ];
 
@@ -336,6 +338,19 @@ export function SettingsView() {
               </div>
             </section>
 
+            <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">
+              <header>
+                <h2 id="settings-backup-title">{msg.backup.title}</h2>
+                <p>{msg.backup.body}</p>
+              </header>
+              <div className="row-flex" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+                <ExportBackupButton />
+                <button type="button" className="btn" onClick={() => setDialog("restore")}>
+                  {msg.backup.restore}
+                </button>
+              </div>
+            </section>
+
             <section id="settings-privacy" className="settings-section" aria-labelledby="settings-privacy-title">
               <header>
                 <h2 id="settings-privacy-title">{msg.settings.privacy}</h2>
@@ -359,6 +374,8 @@ export function SettingsView() {
         />
       )}
       {dialog === "recovery" && <RotateRecoveryDialog onClose={() => setDialog(null)} />}
+      {/* After a restore the vault locks and the app shows the unlock screen on its own. */}
+      {dialog === "restore" && <RestoreBackupDialog vaultExists onClose={() => setDialog(null)} onRestored={() => setDialog(null)} />}
     </div>
   );
 }

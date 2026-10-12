@@ -6,6 +6,7 @@ import { IconCopy, IconLock, IconShieldCheck } from "../../components/ui/icons";
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { RestoreBackupDialog } from "./BackupRestore";
 
 function Brand() {
   return (
@@ -34,6 +35,7 @@ export function passphraseScore(value: string): 0 | 1 | 2 | 3 | 4 {
 
 /** First launch: create the local vault, then make sure the recovery key was actually saved. */
 export function Onboarding({ onDone }: { onDone: () => void }) {
+  const [restoring, setRestoring] = useState(false);
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
@@ -112,11 +114,15 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             msg.onboarding.create
           )}
         </button>
+        <button type="button" className="btn btn-ghost btn-block" onClick={() => setRestoring(true)}>
+          {msg.backup.restoreFirstRun}
+        </button>
         <div className="auth-foot">
           <IconShieldCheck size={14} />
           {msg.unlock.localOnly}
         </div>
       </form>
+      {restoring && <RestoreBackupDialog vaultExists={false} onClose={() => setRestoring(false)} onRestored={onDone} />}
     </div>
   );
 }

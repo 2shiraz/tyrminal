@@ -30,6 +30,12 @@ pub enum VaultError {
     PayloadTooLarge,
     #[error("the record was written with a different key generation")]
     KeyVersionMismatch,
+    #[error("the backup file is malformed or truncated")]
+    MalformedBackup,
+    #[error("the backup was written by a newer version")]
+    UnsupportedBackupVersion,
+    #[error("the backup failed its integrity check")]
+    BackupTampered,
     #[error("the recovery key is not valid")]
     InvalidRecoveryKey,
     #[error("the operating system random number generator failed")]

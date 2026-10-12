@@ -319,3 +319,64 @@ test("IME: composition is not sent until committed, then the exact text arrives 
   expect(text).not.toContain("にほんご");
   expect(text.match(/日本語/g)?.length).toBe(2);
 });
+
+test("a dropped SSH session reconnects on its own with backoff; Stop retrying and auth failures do not", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  const opens = async () => (await calls(page, "session_open_ssh")).length;
+  const before = await opens();
+
+  await page.evaluate(() => (window as unknown as { __mockDrop: () => void }).__mockDrop());
+  const notice = page.getByTestId("auto-reconnect");
+  await expect(notice).toContainText(/Reconnecting in [12] s \(attempt 1 of 6\)/);
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/, { timeout: 5000 });
+  expect(await opens()).toBe(before + 1);
+
+  // Stop retrying leaves the normal failure view with a manual Reconnect.
+  await page.evaluate(() => (window as unknown as { __mockDrop: () => void }).__mockDrop());
+  await expect(notice).toBeVisible();
+  await page.getByRole("button", { name: "Stop retrying" }).click();
+  await expect(notice).toHaveCount(0);
+  await page.waitForTimeout(2500);
+  expect(await opens()).toBe(before + 1);
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+
+  // An authentication failure is never retried automatically.
+  await page.evaluate(() => (window as unknown as { __mockDrop: (c: string) => void }).__mockDrop("AUTH_FAILED"));
+  await expect(page.getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  await page.waitForTimeout(2500);
+  expect(await opens()).toBe(before + 2);
+});
+
+test("backup: export reports the file; restore checks first and needs an explicit replace", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Save a backup…" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Backup saved as tyrminal-backup-2026-10-11.tyrbackup" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Restore from a backup…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Restore from a backup" });
+  await expect(dialog.getByRole("button", { name: "Check backup" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Choose backup file…" }).click();
+  await expect(dialog.getByTestId("backup-file")).toHaveText("tyrminal-backup-2026-10-11.tyrbackup (47 KiB)");
+  await dialog.getByLabel("The backup's passphrase").fill("wrong");
+  await dialog.getByRole("button", { name: "Check backup" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("did not open the backup");
+  // Switching to the recovery key clears what was typed.
+  await dialog.locator(".segmented label", { hasText: "Recovery key" }).click();
+  await expect(dialog.getByLabel("The backup's recovery key")).toHaveValue("");
+  await dialog.locator(".segmented label", { hasText: "Passphrase" }).click();
+  await dialog.getByLabel("The backup's passphrase").fill("correct horse battery");
+  await dialog.getByRole("button", { name: "Check backup" }).click();
+  await expect(dialog.getByTestId("backup-preview")).toContainText(/hosts · 2 keys · 3 trusted servers · 5 snippets/);
+  const restore = dialog.getByRole("button", { name: "Restore", exact: true });
+  await expect(restore).toBeDisabled();
+  await dialog.getByRole("switch", { name: "Replace the vault on this device" }).click();
+  await restore.click();
+  await expect(page.getByRole("heading", { name: "Unlock your vault" })).toBeVisible();
+  expect(await calls(page, "backup_restore")).toEqual([
+    { cmd: "backup_restore", args: { kind: "passphrase", secret: "correct horse battery", replaceExisting: true } },
+  ]);
+});

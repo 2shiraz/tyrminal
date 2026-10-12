@@ -652,3 +652,81 @@ async fn preferences_are_available_while_locked_and_validated() {
     drop(core);
     assert_eq!(open(&dir).preferences.get().theme, ThemePreference::Dark);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backup_restores_on_a_fresh_install_and_never_overwrites_silently() {
+    use tyrminal_core::contracts::{BackupCredentialKind, SnippetInput};
+    let dir = TempDir::new().unwrap();
+    let (core, recovery_key) = created(&dir).await;
+    core.vault.save_host(host("alpha", HostAuthInput::StoredPassword { password: Some("pw-1".into()) })).await.unwrap();
+    let doomed = core.vault.save_host(host("deleted", HostAuthInput::AskPassword)).await.unwrap();
+    core.vault.delete_host(&doomed.id).await.unwrap();
+    core.vault.generate_key("k").await.unwrap();
+    core.vault
+        .save_snippet(SnippetInput { id: None, name: "s".into(), folder: String::new(), text: "uptime".into() })
+        .await
+        .unwrap();
+    let backup = core.vault.export_backup().await.unwrap();
+    assert!(!backup.windows(4).any(|w| w == b"pw-1"), "no plaintext in the backup");
+    assert!(!backup.windows(6).any(|w| w == b"uptime"));
+
+    // Locked: no export.
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.export_backup().await), ErrorCode::VaultLocked);
+
+    // Preview validates fully and changes nothing; a wrong secret is reported as such.
+    let fresh_dir = TempDir::new().unwrap();
+    let fresh = open(&fresh_dir);
+    let wrong = fresh.vault.preview_backup(backup.clone(), BackupCredentialKind::Passphrase, "wrong passphrase".into());
+    assert_eq!(code(wrong.await), ErrorCode::WrongCredential);
+    let preview = fresh
+        .vault
+        .preview_backup(backup.clone(), BackupCredentialKind::RecoveryKey, recovery_key.clone())
+        .await
+        .unwrap();
+    assert_eq!((preview.hosts, preview.keys, preview.known_hosts, preview.snippets), (1, 1, 0, 1));
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Uninitialized);
+
+    // Restore on a fresh install: locked afterwards, opens with the backup's passphrase.
+    fresh
+        .vault
+        .restore_backup(backup.clone(), BackupCredentialKind::Passphrase, PASSPHRASE.into(), false)
+        .await
+        .unwrap();
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Locked);
+    fresh.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let hosts = fresh.vault.list_hosts().await.unwrap();
+    assert_eq!(hosts.iter().map(|h| h.label.as_str()).collect::<Vec<_>>(), ["alpha"]);
+    assert_eq!(fresh.vault.list_snippets().await.unwrap()[0].text, "uptime");
+    // Restored records keep their revisions, so editing them works normally.
+    let mut edit = host("alpha 2", HostAuthInput::AskPassword);
+    edit.id = Some(hosts[0].id.clone());
+    fresh.vault.save_host(edit).await.unwrap();
+
+    // An existing vault is replaced only on request, and a replacement locks it.
+    let again = fresh.vault.restore_backup(backup.clone(), BackupCredentialKind::Passphrase, PASSPHRASE.into(), false);
+    assert_eq!(code(again.await), ErrorCode::VaultAlreadyExists);
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Unlocked);
+    fresh.vault.restore_backup(backup, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await.unwrap();
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Locked);
+    fresh.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(fresh.vault.list_hosts().await.unwrap()[0].label, "alpha", "back to the backup's state");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_damaged_backup_restores_nothing_and_leaves_the_vault_intact() {
+    use tyrminal_core::contracts::BackupCredentialKind;
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    core.vault.save_host(host("keep me", HostAuthInput::AskPassword)).await.unwrap();
+    let mut backup = core.vault.export_backup().await.unwrap();
+    let last = backup.len() - 40;
+    backup[last] ^= 0x80;
+    for bad in [backup.clone(), backup[..backup.len() / 2].to_vec(), b"not a backup".to_vec(), Vec::new()] {
+        let result = core.vault.restore_backup(bad, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await;
+        assert_eq!(code(result), ErrorCode::VaultDamaged);
+    }
+    // Still unlocked and unchanged: validation happens before anything is touched.
+    assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
+    assert_eq!(core.vault.list_hosts().await.unwrap()[0].label, "keep me");
+}

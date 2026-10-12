@@ -240,3 +240,34 @@ async fn many_concurrent_callers_are_served_through_the_bounded_queue() {
 fn rusqlite_open(path: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(path).unwrap()
 }
+
+#[tokio::test]
+async fn replacing_the_vault_is_atomic_and_guarded_by_the_expected_header() {
+    let dir = TempDir::new().unwrap();
+    let db = open(&dir);
+    db.init_header(b"old header".to_vec()).await.unwrap();
+    db.put_record(row(1, 1, 1), WriteCondition::Create).await.unwrap();
+
+    // A stale expectation changes nothing.
+    let stale = db.replace_vault(Some(b"other".to_vec()), b"new header".to_vec(), vec![row(2, 5, 2)]).await;
+    assert_eq!(stale.unwrap_err(), StorageError::Conflict);
+    // A failure part-way (duplicate id) rolls everything back.
+    let broken =
+        db.replace_vault(Some(b"old header".to_vec()), b"new header".to_vec(), vec![row(2, 5, 2), row(2, 6, 3)]).await;
+    assert!(broken.is_err());
+    assert_eq!(db.read_header().await.unwrap().unwrap(), b"old header");
+    assert_eq!(db.list_records().await.unwrap(), vec![row(1, 1, 1)]);
+
+    // Success: the old records are gone, the new ones keep their revisions.
+    db.replace_vault(Some(b"old header".to_vec()), b"new header".to_vec(), vec![row(2, 5, 2), row(3, 9, 3)])
+        .await
+        .unwrap();
+    assert_eq!(db.read_header().await.unwrap().unwrap(), b"new header");
+    assert_eq!(db.list_records().await.unwrap(), vec![row(2, 5, 2), row(3, 9, 3)]);
+
+    // Into an empty database (restore on a fresh install).
+    let dir2 = TempDir::new().unwrap();
+    let fresh = open(&dir2);
+    fresh.replace_vault(None, b"h".to_vec(), vec![row(4, 1, 4)]).await.unwrap();
+    assert_eq!(fresh.list_records().await.unwrap(), vec![row(4, 1, 4)]);
+}
