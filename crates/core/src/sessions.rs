@@ -1621,6 +1621,12 @@ async fn authenticate(
             match conn.authenticate_key(username, &key).await.map_err(|e| from_ssh(&e))? {
                 // The key is kept only for agent forwarding, if the host has it on.
                 AuthOutcome::Success => Ok(Some(key)),
+                // Accepted, but the server requires another step (`AuthenticationMethods
+                // publickey,password` and the like): not a refused key.
+                AuthOutcome::Failure { remaining_methods, partial_success: true } => {
+                    further_steps(ctx, conn, username, "the key", remaining_methods).await?;
+                    Ok(Some(key))
+                }
                 AuthOutcome::Failure { remaining_methods, .. } => {
                     ctx.entry.log.note(&crate::connlog::remaining_methods_line(&remaining_methods));
                     // Say which key was refused, so the user can install it (or choose another).
@@ -1641,8 +1647,14 @@ async fn authenticate(
             }
         }
         PlanAuth::Password(stored) => {
-            if conn.authenticate_password(username, stored).await.map_err(|e| from_ssh(&e))?.is_success() {
-                return Ok(None);
+            match conn.authenticate_password(username, stored).await.map_err(|e| from_ssh(&e))? {
+                AuthOutcome::Success => return Ok(None),
+                AuthOutcome::Failure { remaining_methods, partial_success: true } => {
+                    return further_steps(ctx, conn, username, "the stored password", remaining_methods)
+                        .await
+                        .map(|()| None);
+                }
+                AuthOutcome::Failure { .. } => {}
             }
             // The stored password was refused: fall through to asking, never silently loop.
             ctx.entry.log.note("the server refused the stored password; asking instead");
@@ -1665,10 +1677,71 @@ async fn ask_password(ctx: &TaskContext, conn: &mut VerifiedConnection, username
     if !offers("password") && offers("keyboard-interactive") {
         return ask_keyboard_interactive(ctx, conn, username).await;
     }
+    match password_step(ctx, conn, username).await? {
+        Step::Done => Ok(()),
+        Step::Also(methods) => further_steps(ctx, conn, username, "the password", methods).await,
+    }
+}
+
+/// How many further sign-in steps a server may ask for after the first one.
+const MAX_FURTHER_STEPS: usize = 3;
+
+/// What a sign-in step that the server accepted leaves to do.
+enum Step {
+    Done,
+    /// Accepted with partial success: the server requires one of these methods next.
+    Also(Vec<String>),
+}
+
+/// After `accepted` was taken with partial success, answers the server's further steps with the
+/// usual prompts: a password, or keyboard-interactive (the server's own questions). A stored
+/// secret is never sent to a step on its own; the user answers each prompt.
+async fn further_steps(
+    ctx: &TaskContext,
+    conn: &mut VerifiedConnection,
+    username: &str,
+    accepted: &str,
+    methods: Vec<String>,
+) -> Result<(), IpcError> {
+    let (mut accepted, mut methods) = (accepted, methods);
+    for _ in 0..MAX_FURTHER_STEPS {
+        let offers = |m: &str| methods.iter().any(|x| x == m);
+        let step = if offers("password") {
+            ctx.entry.log.note(&format!("the server accepted {accepted} and also requires a password"));
+            accepted = "the password";
+            password_step(ctx, conn, username).await?
+        } else if offers("keyboard-interactive") {
+            ctx.entry.log.note(&format!("the server accepted {accepted} and also requires keyboard-interactive"));
+            accepted = "the answers";
+            keyboard_interactive_step(ctx, conn, username).await?
+        } else {
+            ctx.entry.log.note(&format!(
+                "the server accepted {accepted} and requires another step Tyrminal cannot answer ({})",
+                crate::connlog::remaining_methods_line(&methods)
+            ));
+            return Err(err(
+                ErrorCode::AuthFailed,
+                "The server accepted the first sign-in step but requires another one that Tyrminal does not support.",
+            ));
+        };
+        match step {
+            Step::Done => return Ok(()),
+            Step::Also(next) => methods = next,
+        }
+    }
+    Err(auth_failed())
+}
+
+/// Asks for a password, at most `MAX_AUTH_ATTEMPTS` times.
+async fn password_step(ctx: &TaskContext, conn: &mut VerifiedConnection, username: &str) -> Result<Step, IpcError> {
     for attempt in 1..=MAX_AUTH_ATTEMPTS {
         let password = ctx.ask_secret(AuthPromptKind::Password, username, attempt).await.ok_or_else(cancelled)?;
-        if conn.authenticate_password(username, password).await.map_err(|e| from_ssh(&e))?.is_success() {
-            return Ok(());
+        match conn.authenticate_password(username, password).await.map_err(|e| from_ssh(&e))? {
+            AuthOutcome::Success => return Ok(Step::Done),
+            AuthOutcome::Failure { remaining_methods, partial_success: true } => {
+                return Ok(Step::Also(remaining_methods));
+            }
+            AuthOutcome::Failure { .. } => {}
         }
     }
     Err(auth_failed())
@@ -1681,6 +1754,18 @@ async fn ask_keyboard_interactive(
     conn: &mut VerifiedConnection,
     username: &str,
 ) -> Result<(), IpcError> {
+    match keyboard_interactive_step(ctx, conn, username).await? {
+        Step::Done => Ok(()),
+        Step::Also(methods) => further_steps(ctx, conn, username, "the answers", methods).await,
+    }
+}
+
+/// The server's keyboard-interactive questions, at most `MAX_AUTH_ATTEMPTS` rounds.
+async fn keyboard_interactive_step(
+    ctx: &TaskContext,
+    conn: &mut VerifiedConnection,
+    username: &str,
+) -> Result<Step, IpcError> {
     for attempt in 1..=MAX_AUTH_ATTEMPTS {
         let outcome = conn
             .authenticate_keyboard_interactive(username, |round| async move {
@@ -1701,8 +1786,12 @@ async fn ask_keyboard_interactive(
             })
             .await
             .map_err(|e| from_ssh(&e))?;
-        if outcome.is_success() {
-            return Ok(());
+        match outcome {
+            AuthOutcome::Success => return Ok(Step::Done),
+            AuthOutcome::Failure { remaining_methods, partial_success: true } => {
+                return Ok(Step::Also(remaining_methods));
+            }
+            AuthOutcome::Failure { .. } => {}
         }
     }
     Err(auth_failed())
