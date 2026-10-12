@@ -217,6 +217,8 @@ async function dockerUp() {
     createdAt: new Date().toISOString(),
     mode: "docker",
     image: IMAGE,
+    // The operating system the lab servers run (process.platform naming).
+    serverOs: "linux",
     serverVersion: "OpenSSH 10.0p1 (Alpine 3.22, openssh-server=10.0_p1-r10)",
     ...DOCKER_USERS,
     password: material.password,
@@ -495,6 +497,8 @@ async function localUp() {
   const lab = {
     createdAt: new Date().toISOString(),
     mode: "local",
+    // The lab server is this machine (WSL's Linux on Windows CI): process.platform naming.
+    serverOs: process.platform,
     apps,
     appPaths,
     serverPackages: versions,
