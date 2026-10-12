@@ -254,6 +254,26 @@ Timers (`setInterval`), one by one:
 | `SettingsViews` diagnostics 2 s | Kept. Reads an in-memory counter in the renderer (no IPC); there is no event for it. |
 | `TerminalView` 250 ms | Kept. A countdown clock to the next automatic reconnect, not data polling. |
 
+### Large lists
+
+There was no virtualization. `components/ui/useWindowedList.ts` is a small local hook (no new
+dependency, usage in its header comment): above 200 items only the lines near the visible part of
+the scroll container are rendered (8 lines of overscan each way), and the list's top and bottom
+padding (in a table, two `aria-hidden` spacer rows) hold the height of the rest. It measures the
+row pitch and, for card grids, the number of columns from the rendered items; the pitch only grows
+(the tallest row seen), so a window of shorter rows cannot move the window back and forth, and in a
+grid every row is given that height. `scrollToIndex` brings an item into the DOM before the
+keyboard focuses it, scrolling again if rows measured on the way were taller. Below 200 items every
+row renders as before.
+
+- Files (`FileTable`, the Files panel and both SFTP panes): the `<tbody>` is windowed with spacer
+  rows. The grid carries `aria-rowcount` (entries + the header row) and rows `aria-rowindex`
+  (header = 1) when windowed. Arrow keys, Home/End, Shift ranges and type-ahead scroll the cursor
+  row in before focusing it; selection, drag, rename in place and the row menu are unchanged. When
+  the cursor row has scrolled out of the DOM, the first rendered row takes the roving tab stop.
+- `windowing.spec.ts`: a folder of 500 extra files renders fewer than 150 rows, reports its full
+  size, and End/Home/arrows, type-ahead and scrolling reach the last and first rows.
+
 ## Next
 
 Replace the per-session client-side encoding choice with #8's native per-host setting.

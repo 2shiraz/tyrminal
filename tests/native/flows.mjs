@@ -75,7 +75,7 @@ export async function waitUnlocked(s, { describe = "vault open", timeout = 20_00
 }
 
 export function ui(s) {
-  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const NAV_IDS = { Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const api = {
     heading: () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" }),
     nav: async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`)),

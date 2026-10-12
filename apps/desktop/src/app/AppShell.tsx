@@ -1,4 +1,4 @@
-import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
+import type { HostSummary, LayoutTarget, LayoutTemplateSummary, QuickConnectInput, SnippetSummary } from "@tyrminal/contracts";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
@@ -6,7 +6,6 @@ import { StatusBar } from "../components/layout/StatusBar";
 import { TabStrip } from "../components/layout/TabStrip";
 import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
-import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
 // privilege prompts (KEY-18)
 import { InsertPasswordDialog } from "../features/privilege/InsertPasswordDialog";
@@ -57,6 +56,9 @@ import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
+// quick connect
+import { msgQuick } from "../lib/messages-quick";
+import { stashQuick } from "../lib/quickConnect";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
@@ -108,7 +110,6 @@ import {
 } from "./workspace";
 
 export type Destination =
-  | "home"
   | "hosts"
   | "snippets"
   | "keychain"
@@ -141,7 +142,7 @@ function Shell() {
   const reloadRecent = data.recent.reload;
   const notify = useToast();
   useSlowPatternNotice();
-  const [destination, setDestination] = useState<Destination>("home");
+  const [destination, setDestination] = useState<Destination>("hosts");
   // command history: remembers commands from shell-integration marks while history is on.
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
@@ -332,6 +333,17 @@ function Shell() {
     setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
+  // quick connect: an address that is not saved; its input goes to the new pane by a one-time token.
+  const quickConnect = useCallback(
+    (input: QuickConnectInput) => {
+      const token = stashQuick(input);
+      const label = input.address;
+      const identity = input.protocol === "ssh" && input.username ? msg.hosts.destination(input.username, input.address, input.port) : `${input.address}:${input.port}`;
+      open({ kind: "quick", token, protocol: input.protocol }, label, identity);
+    },
+    [open],
+  );
+
   const connect = useCallback(
     (host: HostSummary) => {
       open({ kind: "ssh", hostId: host.id }, host.label, hostIdentity(host));
@@ -494,6 +506,11 @@ function Shell() {
       const t = wsRef.current.tabs.find((x) => x.id === tabId);
       if (!t) return;
       const ids = panesOf(t.layout);
+      // quick connect: an unsaved connection's details stay in this window.
+      if (ids.some((id) => wsRef.current.panes[id]?.target.kind === "quick")) {
+        notify("danger", msgQuick.noDetach);
+        return;
+      }
       const live = ids.map((id) => handles.current.get(id)).filter((h) => h?.connected() && h.sessionId());
       if (live.length !== ids.length) {
         notify("danger", msgC.detach.notConnected);
@@ -956,14 +973,6 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPanel, sidePanel, filesSession, pane, paneStatus, filesOthers, panelSection, connect, zoomFocused, pasteFocused, requestSnippet, closeSidePanel, attachInFocused, openSftpHost, bindings]);
 
-  const openSettingsAt = useCallback(
-    (section: SettingsSection) => {
-      navigate("settings");
-      setSettingsAt((current) => ({ section, n: (current?.n ?? 0) + 1 }));
-    },
-    [navigate],
-  );
-
   return (
     // agent D: snippet runs on several sessions read this window's open SSH sessions.
     <SnippetRunContext.Provider value={snippetRunHost}>
@@ -1014,22 +1023,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "home" && (
-            <HomeView
-              ws={ws}
-              statuses={statuses}
-              onConnect={connect}
-              onConnectSplit={connectSplit}
-              onSftpHost={(host) => openSftpHost(host)}
-              onLocal={openLocal}
-              onSftp={openSftp}
-              onNavigate={navigate}
-              onSelectTab={selectTabById}
-              onOpenSettings={openSettingsAt}
-              shortcuts={bindings}
-            />
-          )}
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

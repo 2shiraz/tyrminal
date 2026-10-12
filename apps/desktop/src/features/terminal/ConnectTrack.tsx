@@ -48,45 +48,53 @@ export function trackStates(input: {
   return STAGES.map((_, index) => (index < current ? "done" : index === current ? at : "pending"));
 }
 
+/** One stop on the track. */
+export interface TrackStop {
+  id: string;
+  label: string;
+  state: StageState;
+}
+
+/** The connection's stops, from `trackStates`. */
+export function connectionStops(states: StageState[]): TrackStop[] {
+  return STAGES.map((stage, index) => ({ id: stage.id, label: msgConnect.track[stage.id], state: states[index] ?? "pending" }));
+}
+
 /**
  * The track from this computer to the shell. It only follows events: a stop lights when its step
  * arrives, so it never runs ahead of the connection and never holds it back. Decorative (the step
  * list below says the same in words), so it is hidden from assistive technology.
  */
-export function ConnectTrack({ states }: { states: StageState[] }) {
-  const current = states.findIndex((s) => s !== "done");
+export function ConnectTrack({ states, stops: given }: { states?: StageState[]; stops?: TrackStop[] }) {
+  const stops = given ?? connectionStops(states ?? []);
+  const current = stops.findIndex((s) => s.state !== "done");
   const settled = current === -1;
-  // Rail points: this computer at 0, the stops at 1..5, the shell at 6.
-  const reached = settled ? STAGES.length + 1 : current + 1;
-  const state = settled ? "done" : states[current];
+  // Rail points: this computer at 0, the stops at 1..n, the shell at n + 1.
+  const points = stops.length + 1;
+  const reached = settled ? points : current + 1;
+  const state = settled ? "done" : (stops[current] as TrackStop).state;
   return (
     <div className="connect-track" data-state={state} aria-hidden="true" data-testid="connect-track">
       <span className="track-end track-from" data-state={state}>
         <IconPlug size={15} />
       </span>
-      <div className="track-rail" style={{ "--reached": reached / (STAGES.length + 1) } as CSSProperties}>
+      <div className="track-rail" style={{ "--reached": reached / points, "--segment": `${100 / points}%` } as CSSProperties}>
         <span className="track-line" />
         <span className="track-fill" />
-        {state === "fail" && <span className="track-failseg" style={{ "--from": (reached - 1) / (STAGES.length + 1) } as CSSProperties} />}
+        {state === "fail" && <span className="track-failseg" style={{ "--from": (reached - 1) / points } as CSSProperties} />}
         {state === "now" && (
           // The segment being travelled, from the last stop reached to the current one.
-          <span className="track-travel" style={{ "--from": (reached - 1) / (STAGES.length + 1) } as CSSProperties}>
+          <span className="track-travel" style={{ "--from": (reached - 1) / points } as CSSProperties}>
             <span />
           </span>
         )}
-        {STAGES.map((stage, index) => (
-          <span
-            key={stage.id}
-            className="track-stop"
-            data-stage={stage.id}
-            data-state={states[index]}
-            style={{ "--at": (index + 1) / (STAGES.length + 1) } as CSSProperties}
-          >
+        {stops.map((stop, index) => (
+          <span key={stop.id} className="track-stop" data-stage={stop.id} data-state={stop.state} style={{ "--at": (index + 1) / points } as CSSProperties}>
             <span className="track-dot">
-              {states[index] === "done" && <IconCheck size={11} />}
-              {states[index] === "fail" && <IconX size={11} />}
+              {stop.state === "done" && <IconCheck size={11} />}
+              {stop.state === "fail" && <IconX size={11} />}
             </span>
-            <span className="track-label">{msgConnect.track[stage.id]}</span>
+            <span className="track-label">{stop.label}</span>
           </span>
         ))}
       </div>

@@ -156,7 +156,7 @@ test("perf: open settings is within budget", async ({ page }) => {
     "open settings",
     () => clickToPaint(page, () => nav(page, /^Settings/).click(), { selector: "main h1", text: "Settings" }),
     async () => {
-      await nav(page, /^Home/).click();
+      await nav(page, /^Hosts/).click();
       await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toHaveCount(0);
     },
   );

@@ -13,6 +13,8 @@ export interface MockOptions {
   scheme?: string;
   renderer?: "auto" | "compatibility";
   trustPromptFor?: string;
+  /** quick connect: identities in the mock vault ({ id, label, username, password, keyId }). */
+  identities?: { id: string; label: string; username: string; password: string | null; keyId: string | null }[];
   /** Ask for a password when connecting to this host (answered with session_auth_answer). */
   passwordPromptFor?: string;
   // agent B: tunnels and history

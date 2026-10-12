@@ -148,7 +148,7 @@ test("open in SFTP: from a host's menu, the palette and Host details, into one S
   expect((await fileSessions(page)).map((s) => s.host)).toEqual(["api-gateway", "db-primary"]);
 
   // Host details: its menu has Open in SFTP too (only SSH hosts offer it).
-  await page.getByRole("tab", { name: /^(Home|Hosts)$/ }).click();
+  await page.getByRole("tab", { name: "Hosts", exact: true }).click();
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await page.getByRole("button", { name: "More actions for build-runner-03" }).first().click();
   await page.getByRole("menuitem", { name: "Edit" }).click();

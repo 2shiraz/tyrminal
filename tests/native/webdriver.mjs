@@ -159,7 +159,7 @@ export class Session {
 
   /**
    * Opens a saved host from the keyboard: focuses the button named `label` inside `container` (a
-   * host name on Hosts, a tile on Home) and presses Enter. Rows, cards and tiles have no Connect
+   * host name on Hosts) and presses Enter. Rows, cards and tiles have no Connect
    * button; Enter and double-click connect.
    */
   async openHost(container, label) {

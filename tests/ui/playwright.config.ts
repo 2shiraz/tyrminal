@@ -3,7 +3,10 @@
 // accessibility behavior and visual regressions. They never count as native verification.
 import { defineConfig } from "@playwright/test";
 
-const port = 4319;
+// TYR_UI_PORT lets parallel runs (several worktrees on one machine) each serve their own build:
+// with a shared port, `reuseExistingServer` would silently test another checkout's frontend.
+const port = Number(process.env.TYR_UI_PORT ?? 4319);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(`TYR_UI_PORT must be a port number from 1024 to 65535, got ${process.env.TYR_UI_PORT}`);
 
 export default defineConfig({
   testDir: ".",

@@ -27,7 +27,7 @@ for (const theme of ["dark", "light"] as const) {
       await audit(page);
     });
 
-    test("home, hosts, snippets, keychain, known hosts and settings", async ({ page }) => {
+    test("hosts (the first page), snippets, keychain, known hosts and settings", async ({ page }) => {
       await openApp(page, base);
       await audit(page);
       for (const name of ["Hosts", "Snippets", "Keychain", "Known hosts", "Settings"]) {

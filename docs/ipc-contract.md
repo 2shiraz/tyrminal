@@ -80,6 +80,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `discovery_status` | — | running, seconds left, found (cleaned, ≤ 64), truncated | This window's browse |
 | `discovery_stop` | — | discovery status | Ends this window's browse; results stay readable |
 | `multiplexer_list` | session id | `MultiplexerList` | Owner window only; SSH sessions only. A fixed command on a separate exec channel; nothing is typed into the shell. Names are untrusted: shown as text, control characters removed; `attachCommand` only for names matching a strict pattern (P-31, ADR 0011) |
+| `os_detection_get` / `os_detection_set` | — / enabled | bool | Whether the server's OS is read once when a connection opens (fixed `uname -s; cat /etc/os-release` on an exec channel, never in the shell; skipped for hosts with an OS chosen by the user or a group). Off forgets every detected OS. The result appears in `host_appearance_list` with `detected: true` |
 | `security_review` | — | `SecurityReview` | Vault unlocked; read-only, on the device, no network. Findings name records (ids, labels, endpoints, fingerprints) and never carry a secret (P-27, ADR 0011) |
 
 ## Events

@@ -1,4 +1,5 @@
 import type {
+  QuickConnectInput,
   BulkHostChange,
   GroupSummary,
   HostOs,
@@ -70,6 +71,10 @@ import { useIsProduction } from "./production";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
 import { EnvironmentDialog } from "./EnvironmentDialog";
+// quick connect
+import { msgQuick } from "../../lib/messages-quick";
+import { parseAddress } from "../../lib/quickConnect";
+import { QuickConnectDialog } from "./QuickConnectDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -142,8 +147,9 @@ const DOUBLE_CLICK_MS = 300;
 const HINT_UNTIL = 3;
 
 /**
- * Connections from Hosts in this run of the app. Kept in memory: the release policy allows no
- * browser storage (scripts/check-release.mjs), so the hint shows again after a restart.
+ * Connections made from Hosts by double-click or Enter in this run of the app. Kept in memory only:
+ * app code never uses browser storage (scripts/check-release.mjs), so the hint shows again for the
+ * first few connections after each start.
  */
 let hintUses = 0;
 
@@ -165,6 +171,7 @@ const toggleKey = (event: { ctrlKey: boolean; metaKey: boolean }) => (isMac ? ev
 function HostsViewImpl({
   ws,
   onConnect,
+  onQuickConnect,
   onConnectMany,
   onConnectSplit,
   onOpenSftp,
@@ -172,6 +179,8 @@ function HostsViewImpl({
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
+  /** Quick connect: an address typed in the search that matches no host (nothing is saved). */
+  onQuickConnect?: (input: QuickConnectInput) => void;
   /** Several hosts at once, one tab each or one split tab; each still asks for trust and sign-in. */
   onConnectMany?: (hosts: HostSummary[], layout: OpenLayout) => void;
   /** Connect in split: beside the focused pane of the terminal tab in front. */
@@ -187,6 +196,8 @@ function HostsViewImpl({
   const notify = useToast();
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
+  // quick connect: the address the sheet is open for.
+  const [quick, setQuick] = useState<{ username: string; address: string; port: number | null } | null>(null);
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   // Layout, sort and group filter live in preferences, so they survive other views and restarts.
   const { prefs, update } = usePreferences();
@@ -346,6 +357,8 @@ function HostsViewImpl({
   }, [hosts.value, query, searched, sort, filter, groupList]);
 
   const total = hosts.value?.length ?? 0;
+  // quick connect: offered once the search for this exact text found no host.
+  const quickTarget = query.trim() && searched?.query === query.trim() && filtered.length === 0 ? parseAddress(query) : null;
   /**
    * A local, reversible edit (move to a group, add or remove a tag) shows at once; the vault call
    * runs behind it. On failure the hosts go back to exactly what they were, the selection comes
@@ -674,6 +687,13 @@ function HostsViewImpl({
                   ref={searchRef}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    // quick connect: Enter on an address that matches no host.
+                    if (event.key === "Enter" && quickTarget && onQuickConnect) {
+                      event.preventDefault();
+                      setQuick(quickTarget);
+                    }
+                  }}
                 />
               </div>
               <span className="spacer" />
@@ -714,7 +734,37 @@ function HostsViewImpl({
             </EmptyState>
           )}
 
-          {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
+          {total > 0 && filtered.length === 0 && (
+            <p className="muted">
+              {msg.hosts.noMatch}
+              {quickTarget && onQuickConnect && (
+                <>
+                  {" "}
+                  <button type="button" className="btn btn-sm" onClick={() => setQuick(quickTarget)}>
+                    {msgQuick.option(query.trim())}
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          {quick && onQuickConnect && (
+            <QuickConnectDialog
+              address={quick.address}
+              initialUser={quick.username}
+              initialPort={quick.port}
+              onConnect={(input) => {
+                setQuick(null);
+                setQuery("");
+                onQuickConnect(input);
+              }}
+              onConnectSaved={(host) => {
+                setQuick(null);
+                setQuery("");
+                onConnect(host);
+              }}
+              onClose={() => setQuick(null)}
+            />
+          )}
 
           {bulkCount > 0 && (
             <div className="bulk-bar box-strip" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">

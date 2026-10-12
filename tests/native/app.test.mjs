@@ -49,7 +49,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
       if (i < lines.length - 1) await s.chord([KEYS.enter]);
     }
   };
-  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const NAV_IDS = { Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const nav = async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`));
   const statusText = async () => s.text(await s.waitFor(".statusbar"));
   /** Host entries on the Hosts page (cards), as the user reads them. */

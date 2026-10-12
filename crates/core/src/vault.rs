@@ -61,6 +61,8 @@ use crate::records::{HistoryRecord, HistorySettingsRecord, KIND_HISTORY, KIND_HI
 use tyrminal_contracts::{HistoryEntry, HistorySettings};
 // server at a glance
 use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
+// OS auto-detection
+use crate::records::{KIND_OS_DETECTION, OsDetectionRecord};
 // agent D: inventory and snippets
 use crate::records::StoredProxy;
 use crate::records::{
@@ -109,6 +111,8 @@ struct Open {
     history_settings: BTreeMap<Id, Stored<HistorySettingsRecord>>,
     // server at a glance
     glance_settings: BTreeMap<Id, Stored<GlanceSettingsRecord>>,
+    // OS auto-detection
+    os_detection: BTreeMap<Id, Stored<OsDetectionRecord>>,
 }
 
 impl Open {
@@ -138,6 +142,7 @@ impl Open {
             history_settings: BTreeMap::new(),
             // server at a glance
             glance_settings: BTreeMap::new(),
+            os_detection: BTreeMap::new(),
         }
     }
 }
@@ -157,7 +162,8 @@ pub(crate) struct StartupItem {
 }
 
 pub(crate) struct ConnectionPlan {
-    pub host_id: String,
+    /// The saved host; `None` for a quick connection to an address that is not saved.
+    pub host_id: Option<String>,
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
@@ -176,6 +182,13 @@ pub(crate) struct ConnectionPlan {
     /// Offer quick forwards for ports the session's output names (P-24).
     pub port_suggestions: bool,
     pub generation: u32,
+}
+
+// quick connect
+/// How a quick connection is made: SSH with a plan, or Telnet to an endpoint.
+pub(crate) enum QuickPlan {
+    Ssh(Box<ConnectionPlan>),
+    Telnet(HostEndpoint),
 }
 
 // agent B: tunnels and history
@@ -622,6 +635,8 @@ impl VaultService {
                 KIND_HISTORY_SETTINGS => load!(HistorySettingsRecord, open.history_settings),
                 // server at a glance
                 KIND_GLANCE_SETTINGS => load!(GlanceSettingsRecord, open.glance_settings),
+                // OS auto-detection
+                KIND_OS_DETECTION => load!(OsDetectionRecord, open.os_detection),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1993,23 +2008,12 @@ impl VaultService {
             .iter()
             .map(|hop| Self::hop_plan(open, hop))
             .collect::<Result<Vec<_>, _>>()?;
-        let known_hosts = open
-            .known_hosts
-            .values()
-            .map(|k| {
-                let known = KnownHost {
-                    host: k.record.host.clone(),
-                    port: k.record.port,
-                    public_key: k.record.public_key.clone(),
-                };
-                (known, k.record.fingerprint.clone())
-            })
-            .collect();
+        let known_hosts = Self::known_host_list(open);
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         let env = Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect();
         Ok(ConnectionPlan {
             env,
-            host_id: validate::id_text(&id),
+            host_id: Some(validate::id_text(&id)),
             endpoint: target.endpoint,
             username: target.username,
             auth: target.auth,
@@ -2021,6 +2025,97 @@ impl VaultService {
             known_hosts,
             generation: self.generation(),
         })
+    }
+
+    /// Trusted keys with their display fingerprints, for host-key verification.
+    fn known_host_list(open: &Open) -> Vec<(KnownHost, String)> {
+        open.known_hosts
+            .values()
+            .map(|k| {
+                let known = KnownHost {
+                    host: k.record.host.clone(),
+                    port: k.record.port,
+                    public_key: k.record.public_key.clone(),
+                };
+                (known, k.record.fingerprint.clone())
+            })
+            .collect()
+    }
+
+    // quick connect
+    /// A connection to an address that is not saved: everything is validated as for a saved host,
+    /// a key or identity is read from the vault, and nothing is written. Host-key trust is the
+    /// normal one (the same trusted keys, the same prompt).
+    pub(crate) async fn quick_plan(&self, input: tyrminal_contracts::QuickConnectInput) -> Result<QuickPlan, IpcError> {
+        use tyrminal_contracts::{QuickAuth, QuickProtocol};
+        let address = validate::address(&input.address)?;
+        let port = validate::port(input.port)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if input.protocol == QuickProtocol::Telnet {
+            return Ok(QuickPlan::Telnet(HostEndpoint {
+                protocol: tyrminal_contracts::HostProtocol::Telnet,
+                terminal: tyrminal_contracts::HostTerminal::default(),
+                forward_agent: false,
+                address,
+                port,
+                generation: self.generation(),
+            }));
+        }
+        let key_plan = |key_id: &str| -> Result<PlanAuth, IpcError> {
+            let key = open
+                .ssh_keys
+                .get(&validate::id(key_id)?)
+                .ok_or_else(|| not_found("That key is no longer in the keychain."))?;
+            Ok(PlanAuth::Key {
+                private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
+                passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                key_id: key_id.to_owned(),
+                label: key.record.label.clone(),
+            })
+        };
+        let mut username = input.username.trim().to_owned();
+        let auth = match input.auth {
+            QuickAuth::Ask => PlanAuth::Ask,
+            QuickAuth::Password { password } => {
+                if password.is_empty() {
+                    PlanAuth::Ask
+                } else {
+                    PlanAuth::Password(Zeroizing::new(password))
+                }
+            }
+            QuickAuth::Key { key_id } => key_plan(&key_id)?,
+            QuickAuth::Identity { identity_id } => {
+                let identity = &open
+                    .identities
+                    .get(&validate::id(&identity_id)?)
+                    .ok_or_else(|| not_found("That identity no longer exists."))?
+                    .record;
+                if username.is_empty() {
+                    username.clone_from(&identity.username);
+                }
+                match (&identity.key_id, &identity.password) {
+                    (Some(key_id), _) => key_plan(key_id)?,
+                    (None, Some(password)) => PlanAuth::Password(Zeroizing::new(password.as_str().to_owned())),
+                    (None, None) => PlanAuth::Ask,
+                }
+            }
+        };
+        let username = validate::username(&username)?;
+        Ok(QuickPlan::Ssh(Box::new(ConnectionPlan {
+            host_id: None,
+            label: address.clone(),
+            endpoint: Endpoint::new(address, port),
+            username,
+            auth,
+            jumps: Vec::new(),
+            proxy: None,
+            key_exchange: tyrminal_ssh::KeyExchangePolicy::PreferPostQuantum,
+            known_hosts: Self::known_host_list(open),
+            env: Vec::new(),
+            port_suggestions: false,
+            generation: self.generation(),
+        })))
     }
 
     /// Where and as whom one host of a chain is reached, with its credentials.
@@ -2818,7 +2913,12 @@ impl VaultService {
         let mut list: Vec<HostAppearance> = open
             .appearances
             .values()
-            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os, inherited: false })
+            .map(|s| HostAppearance {
+                host_id: s.record.host_id.clone(),
+                os: s.record.os,
+                inherited: false,
+                detected: false,
+            })
             .collect();
         // Hosts without their own OS get their nearest group's (HST-05).
         for (id, host) in &open.hosts {
@@ -2830,7 +2930,10 @@ impl VaultService {
                 .into_iter()
                 .find_map(|(group_id, _)| Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.os));
             if let Some(os) = os {
-                list.push(HostAppearance { host_id, os, inherited: true });
+                list.push(HostAppearance { host_id, os, inherited: true, detected: false });
+            } else if let Some(os) = Self::detected_os(open, &host_id) {
+                // Nothing chosen by the user or a group: what the server reported (OS auto-detection).
+                list.push(HostAppearance { host_id, os, inherited: false, detected: true });
             }
         }
         list.sort_by(|a, b| a.host_id.cmp(&b.host_id));
@@ -4368,5 +4471,100 @@ mod privilege_tests {
             v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
             ErrorCode::VaultLocked
         );
+    }
+}
+
+// OS auto-detection
+impl VaultService {
+    fn os_detection_of(open: &Open) -> Option<&Stored<OsDetectionRecord>> {
+        open.os_detection.values().next()
+    }
+
+    fn detected_os(open: &Open, host_id: &str) -> Option<HostOs> {
+        Self::os_detection_of(open)?.record.detected.iter().find(|(h, _)| h == host_id).map(|(_, os)| *os)
+    }
+
+    /// Whether the OS of a host is read when connecting to it (on unless turned off).
+    pub async fn os_detection_enabled(&self) -> Result<bool, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::os_detection_of(open).is_some_and(|s| s.record.off))
+    }
+
+    /// Turns detection on or off. Turning it off also forgets every detected OS.
+    pub async fn set_os_detection_enabled(&self, enabled: bool) -> Result<bool, IpcError> {
+        self.change_os_detection(None, |record| {
+            record.off = !enabled;
+            if !enabled {
+                record.detected.clear();
+            }
+        })
+        .await?;
+        Ok(enabled)
+    }
+
+    /// Whether a session under `generation` should read this host's OS: detection is on and the
+    /// host has no OS chosen by the user or a group (a manual choice always wins, so nothing is
+    /// read for it).
+    pub(crate) async fn wants_os_detection(&self, generation: u32, host_id: &str) -> Result<bool, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if Self::os_detection_of(open).is_some_and(|s| s.record.off) {
+            return Ok(false);
+        }
+        let Some(host) = open.hosts.get(&id) else { return Ok(false) };
+        let host_id = validate::id_text(&id);
+        let chosen = Self::appearance_of(open, &host_id).is_some()
+            || Self::group_chain(open, &host.record).into_iter().any(|(group_id, _)| {
+                Self::workflow_of_group(open, &group_id).is_some_and(|(_, w)| w.record.os.is_some())
+            });
+        Ok(!chosen)
+    }
+
+    /// Records what a host reported, under the session's generation. Nothing is stored while
+    /// detection is off or for a host that no longer exists.
+    pub(crate) async fn record_detected_os(&self, generation: u32, host_id: &str, os: HostOs) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let host_id = validate::id_text(&id);
+        self.change_os_detection(Some(generation), |record| {
+            if record.off {
+                return;
+            }
+            record.detected.retain(|(h, _)| h != &host_id);
+            record.detected.push((host_id.clone(), os));
+        })
+        .await
+    }
+
+    async fn change_os_detection(
+        &self,
+        generation: Option<u32>,
+        change: impl FnOnce(&mut OsDetectionRecord),
+    ) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        if generation.is_some_and(|g| g != self.generation()) {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (record_id, revision, mut record) = match open.os_detection.iter().next() {
+            Some((rid, s)) => (*rid, s.revision + 1, s.record.clone()),
+            None => (random_id().map_err(from_vault)?, 1, OsDetectionRecord::default()),
+        };
+        let before = (record.off, record.detected.clone());
+        change(&mut record);
+        // Deleted hosts drop out, which also bounds the list by the number of hosts.
+        record.detected.retain(|(h, _)| validate::id(h).is_ok_and(|h| open.hosts.contains_key(&h)));
+        if revision > 1 && (record.off, &record.detected) == (before.0, &before.1) {
+            return Ok(());
+        }
+        let len = record.content_len();
+        self.write(open, record_id, KIND_OS_DETECTION, revision, Some((&record, len))).await?;
+        open.os_detection.clear();
+        open.os_detection.insert(record_id, Stored { revision, record });
+        Ok(())
     }
 }

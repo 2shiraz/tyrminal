@@ -39,6 +39,8 @@ const COMMANDS: &[&str] = &[
     "import_hosts",
     // sessions
     "session_open_ssh",
+    // quick connect
+    "session_open_quick",
     "session_open_local",
     "session_open_files",
     "session_open_exec",
@@ -201,6 +203,9 @@ const COMMANDS: &[&str] = &[
     "glance_host_set",
     // tmux and screen session awareness (P-31)
     "multiplexer_list",
+    // OS auto-detection
+    "os_detection_get",
+    "os_detection_set",
 ];
 
 /// Short hash of the commit being built: CI's `GITHUB_SHA`, else the local checkout, else `dev`.
