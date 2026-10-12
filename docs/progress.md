@@ -8,7 +8,7 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 |---|---|---|
 | 00 Repository baseline | Gate met | `docs/reports/phase-00.md` |
 | 01 Feasibility spikes | Gate met on macOS; Linux in this sandbox; Windows via CI in progress | `docs/reports/phase-01.md` |
-| 02 Vault foundation | Backup/restore done (format §10, vectors, native test). Quick unlock, OS lock/suspend hooks, single instance, fault injection still open | `docs/reports/phase-02-03.md` |
+| 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer fault injection: done. Disk-full injection and a screen-lock hook remain | `docs/reports/phase-02-03.md` |
 | 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done; native verification of reconnect pending | `docs/reports/phase-02-03.md` |
 | UX track (§3 of the 2026-10 brief) | UI redesign, first-class terminal, snippets: done and tested on Linux; CI on macOS/Windows in progress | this file |
 | 04–15 | Not started | |
@@ -51,15 +51,15 @@ Windows reaches the lab (host-key ownership fix pushed next).
 
 ## Next tasks, in order
 
-1. Get the three native CI jobs green (Windows lab host keys; then Windows integration/native).
-2. Windows lab limits: tmux/htop/mc and PAM keyboard-interactive are not available with Git Bash
-   behind Win32-OpenSSH, so those tests report BLOCKED there. Options: a WSL1 Ubuntu lab server
-   on the Windows runner, or accept BLOCKED with the release notes saying so.
+1. Get the three native CI jobs green. Linux: green three runs in a row. macOS: App Nap stalls
+   the WebView on the unattended runner (disabled in CI; verify). Windows: lab server in WSL 1
+   (Debian 12; Ubuntu 24.04 binaries do not execute under WSL 1).
+2. Windows lab = Linux OpenSSH in WSL 1, so tmux/htop/mc and PAM keyboard-interactive run there
+   too; the local Win32-OpenSSH mode remains for developers without WSL.
 3. When all three are green: mark matrix rows VERIFIED with `verified_commit`, merge the PR,
    write `docs/releases/v0.1.0-beta.1.md`, run the release workflow (pre-release, unsigned).
-4. Phase 02 remainder: quick unlock (device slot + OS store, "store unavailable" path), OS
-   lock/suspend hooks, single-instance guard, fault injection (termination during header swap
-   and record writes; disk full).
+4. Phase 02 remainder: disk-full fault injection; OS screen-lock hook (needs platform APIs and
+   an ADR for any FFI); verify sleep-lock on a real suspend.
 5. Native test for auto-reconnect (drop a real connection from the lab side).
 6. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
 

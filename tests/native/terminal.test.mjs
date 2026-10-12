@@ -29,6 +29,11 @@ describe("terminal with real applications", { concurrency: false }, () => {
     app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     s = app.session;
     t = ui(s);
+    // Page errors (for example from a render frame) are collected for failure reports.
+    await s.execute(`
+      window.__tyrErrors = [];
+      addEventListener("error", (e) => window.__tyrErrors.push(String(e.message).slice(0, 300)));
+      addEventListener("unhandledrejection", (e) => window.__tyrErrors.push("rejection: " + String(e.reason).slice(0, 300)));`);
     await t.createVault();
     await t.importKey(lab.keys.ed25519);
     await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
@@ -157,7 +162,16 @@ describe("terminal with real applications", { concurrency: false }, () => {
       const e = spans.at(-1); if (!e) return null;
       const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
     assert.ok(box, "the function key bar shows Quit");
-    await s.clickAt(box.x, box.y);
+    try {
+      await s.clickAt(box.x, box.y);
+      await t.waitForText(/^tyr\$\s*$/m, "shell prompt after clicking Quit");
+    } finally {
+      // Never leave htop running for the next test: F10 quits if the click did not.
+      if (/Load average|Tasks:|F10Quit|Environment of process/.test(await t.terminalText())) {
+        await s.chord([KEYS.escape]);
+        await s.chord([KEYS.f10]);
+      }
+    }
     await run("echo after-htop", "after-htop");
   });
 

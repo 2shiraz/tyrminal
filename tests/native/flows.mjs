@@ -26,7 +26,8 @@ export function ui(s) {
           .execute(`const h = document.querySelector(".terminal-pane:not([hidden]) .terminal-host"); return h ? JSON.stringify({ ...h.dataset }) : "no terminal"`)
           .catch(() => "?");
         const status = await api.statusText().catch(() => "?");
-        throw new Error(`${error.message}\n--- terminal (io ${io}; status ${status.replaceAll("\n", " ")}) ---\n${screen}`);
+        const errors = await s.execute("return JSON.stringify(window.__tyrErrors ?? null)").catch(() => "?");
+        throw new Error(`${error.message}\n--- terminal (io ${io}; status ${status.replaceAll("\n", " ")}; page errors ${errors}) ---\n${screen}`);
       }
     },
     async type(text) {

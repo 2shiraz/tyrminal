@@ -69,6 +69,9 @@ jobs:
       # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
       # the Windows loopback interface: the same server, PAM and full-screen applications as on
       # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.
+      - name: Windows node before WSL is installed
+        if: runner.os == 'Windows'
+        run: echo "WIN_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
       # Debian 12: Ubuntu 24.04's binaries fail to execute under WSL 1 (ENOEXEC on node).
       - name: WSL lab server (Debian 12, WSL 1)
         if: runner.os == 'Windows'
@@ -89,6 +92,14 @@ jobs:
         run: |
           "npm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
           "pnpm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
+      - name: Which node runs after WSL is installed (diagnostic)
+        if: runner.os == 'Windows'
+        run: |
+          echo "WIN_NODE=$WIN_NODE"
+          type -a node || true
+          cmd //c "where node" || true
+          node -p "process.execPath + ' ' + process.version" || true
+          echo "PATH=$PATH"
       - name: Keep the WSL instance running for the whole job
         if: runner.os == 'Windows'
         shell: pwsh
