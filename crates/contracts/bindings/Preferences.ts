@@ -26,4 +26,9 @@ diagnostics: boolean,
 /**
  * Off by default; see `PasswordCheckPreferences`.
  */
-passwordCheck: PasswordCheckPreferences, };
+passwordCheck: PasswordCheckPreferences, 
+/**
+ * Do not suggest quick forwards for ports that programs on a server say they listen on
+ * (P-24). Suggestions are on unless this is set.
+ */
+noPortSuggestions: boolean, };

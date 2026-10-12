@@ -45,6 +45,7 @@ import {
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { msgRuns } from "../../lib/messages-runs";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
@@ -129,6 +130,7 @@ export function CommandPalette({
   onContainers,
   onSearchSessions,
   onCommandOutput,
+  onRunAllOpen,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -193,6 +195,8 @@ export function CommandPalette({
   onSearchSessions?: (() => void) | undefined;
   /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
   onCommandOutput?: (() => void) | undefined;
+  /** SNP-07: run a snippet on every open SSH session of this window; present while any is open. */
+  onRunAllOpen?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -275,6 +279,7 @@ export function CommandPalette({
         });
       }
     }
+
     const action = (id: string, label: string, icon: ReactNode, run: () => void, shortcut?: ActionId): Item => ({
       id,
       group: msg.palette.groupActions,
@@ -359,6 +364,7 @@ export function CommandPalette({
       }
     }
     if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions, "searchSessions"));
+    if (onRunAllOpen) list.push(action("run-all-open", msgRuns.paletteRunAllOpen, <IconPlay size={16} />, onRunAllOpen));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -409,7 +415,7 @@ export function CommandPalette({
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;
-  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onRunAllOpen, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items

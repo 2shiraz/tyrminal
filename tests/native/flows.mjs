@@ -45,12 +45,15 @@ export async function chooseKey(s, label) {
   );
 }
 
-/** Saves the Host details panel, waits for the save to land, and closes the panel. */
+/**
+ * Waits until the Host details panel has autosaved every change (the host exists and nothing is
+ * waiting or failed), then closes it.
+ */
 export async function saveAndCloseHostPanel(s) {
-  await s.clickButton("Save", { within: HOST_PANEL });
-  await s.until(async () => (await s.text(await s.waitFor(`${HOST_PANEL} [data-testid="host-panel-status"]`))).trim() === "Saved", {
-    describe: "host saved",
-  });
+  await s.until(
+    () => s.execute(`const p = document.querySelector('${HOST_PANEL}'); return (p?.dataset.created === "true" && p.dataset.autosave === "clean") || null`),
+    { describe: "host saved" },
+  );
   await s.click(await s.waitFor(`${HOST_PANEL} button[aria-label="Close host details"]`));
   await s.waitGone(HOST_PANEL);
 }

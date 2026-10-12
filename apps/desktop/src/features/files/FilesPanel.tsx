@@ -1,87 +1,45 @@
-import type { ConflictChoice, EditStatus, LocalListing, RemoteEntry, RemoteListing, StreamUpload, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { EditStatus, RemoteEntry } from "@tyrminal/contracts";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
-import { Menu, type MenuEntry } from "../../components/ui/Menu";
-import { useToast } from "../../components/ui/Toasts";
-import { ErrorNotice, IconButton, Keys, Notice, TextField } from "../../components/ui/controls";
-import {
-  IconClipboardCopy,
-  IconCopy,
-  IconDownload,
-  IconEye,
-  IconFolderOpen,
-  IconFolderPlus,
-  IconFolderUp,
-  IconHardDrive,
-  IconPencil,
-  IconRefreshCw,
-  IconSlidersHorizontal,
-  IconSquareTerminal,
-  IconTrash2,
-  IconTriangleAlert,
-  IconUpload,
-  IconX,
-} from "../../components/ui/icons";
-import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
+import type { MenuEntry } from "../../components/ui/Menu";
+import { ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
+import { IconCopy, IconFolderOpen, IconHardDrive, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
+import { files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
 import { shellContexts } from "../autocomplete/shellContext";
-import { type Sort, type SortKey, crumbs as crumbsOf, formatSize, visibleEntries, visibleName } from "../sftp/model";
-import { beginUpload, sendUpload } from "./dropUpload";
-import { FileTable, type MenuAt } from "./FileTable";
-import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
+import type { Loc } from "../sftp/model";
+import { visibleName } from "../sftp/model";
+import { droppedFileJob, droppedFiles } from "./dropUpload";
+import { FILE_DRAG, type FileDrag, FilePane, type PaneView, emptyView, localBackend, remoteBackend } from "./FilePane";
+import { copyJob, downloadJob, uploadJob } from "./jobs";
 import { KeyedMemory, useMemory } from "./memory";
 import { msgFiles } from "./messages";
-import { PathBar } from "./PathBar";
-import { NO_SELECTION, type Selection, pruneSelection, selectionSummary, single } from "./selection";
 import { TransferDrawer } from "./TransferDrawer";
-import { type Transfer as BaseTransfer, applyEvent, refused, started as startedTransfer } from "./transfers";
-import "./files.css";
-
-/** After this long, opening a folder shows a progress bar (the row shows it at once). */
-const SLOW_MS = 300;
-
-/** Transfer ids of dropped-file uploads (cancelled in the page, not by the core's transfer id). */
-const DROP_PREFIX = "drop-";
+import { type QueuedTransfer, useTransferQueue } from "./useTransferQueue";
 
 export interface FilesTarget {
   sessionId: string;
   label: string;
 }
 
-/** A transfer and the server folder it touches (listed again when an upload finishes there). */
-type Transfer = BaseTransfer & { dir: string };
-
 type Edit = EditStatus & { saved?: boolean | undefined };
+type LocalRoot = Loc & { kind: "local" };
 
 /** What the panel shows for one session; it stays while the session lives (see `panelMemory`). */
 export interface PanelMemory {
-  listing: RemoteListing | null;
-  /** Selected names (several with Shift or Ctrl/Cmd), anchor and keyboard row. */
-  selection: Selection;
-  showHidden: boolean;
-  sort: Sort;
+  /** The server pane: folder, history, filter, sort, options, selection, scroll. */
+  view: PaneView;
+  /** "Show this computer": a second pane on a folder the user chose here. */
   twoPane: boolean;
-  scrollTop: number;
-  local: LocalListing | null;
-  localSelection: RemoteEntry | null;
-  transfers: Transfer[];
+  localRoot: LocalRoot | null;
+  localView: PaneView;
+  transfers: QueuedTransfer[];
   edits: Edit[];
 }
 
-const emptyMemory = (): PanelMemory => ({
-  listing: null,
-  selection: NO_SELECTION,
-  showHidden: false,
-  sort: { key: "name", ascending: true },
-  twoPane: false,
-  scrollTop: 0,
-  local: null,
-  localSelection: null,
-  transfers: [],
-  edits: [],
-});
+const emptyMemory = (): PanelMemory => ({ view: emptyView(), twoPane: false, localRoot: null, localView: emptyView(), transfers: [], edits: [] });
 
 const NO_SESSION = emptyMemory();
 
@@ -93,18 +51,13 @@ const NO_SESSION = emptyMemory();
 export const panelMemory = new KeyedMemory<PanelMemory>(emptyMemory);
 
 type Prompt =
-  | { kind: "mkdir" }
-  | { kind: "chmod"; entry: RemoteEntry }
-  | { kind: "delete"; entries: RemoteEntry[] }
-  | { kind: "replace"; name: string; remote: boolean; retry: (() => void) | null; keepBoth: () => void }
   | { kind: "editConflict"; edit: EditStatus; overwrite: () => void }
-  | { kind: "copy"; entry: RemoteEntry; others: FilesTarget[]; start: (dst: FilesTarget, dir: string) => void };
-
-type OpenMenu = { kind: "upload" | "view"; anchor: HTMLElement } | { kind: "row"; entries: RemoteEntry[]; at: MenuAt } | { kind: "folder"; at: MenuAt };
+  | { kind: "copy"; entry: RemoteEntry; dir: string; others: FilesTarget[] };
 
 /**
- * Remote file browser for the focused SSH session. Every action is explicit; transfers never
- * replace an existing file without asking, and show their progress until they end.
+ * The Files side panel: one pane of the same file browser as the SFTP tab, bound to the focused
+ * session's own connection (and, on request, a second pane on this computer). Every action is
+ * explicit; transfers never replace an existing file without asking.
  */
 export function FilesPanel({
   target,
@@ -116,94 +69,36 @@ export function FilesPanel({
   others?: FilesTarget[];
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
   const sessionId = target?.sessionId ?? null;
   const [memory, change] = useMemory(panelMemory, sessionId, NO_SESSION);
-  const { listing, selection: picked, showHidden, sort, twoPane, transfers, edits, local, localSelection } = memory;
-  const set = useCallback(
-    <K extends keyof PanelMemory>(key: K, value: PanelMemory[K] | ((previous: PanelMemory[K]) => PanelMemory[K])) =>
-      change((m) => ({ ...m, [key]: typeof value === "function" ? (value as (p: PanelMemory[K]) => PanelMemory[K])(m[key]) : value })),
-    [change],
-  );
-  const setTransfers = (value: (list: Transfer[]) => Transfer[]) => set("transfers", value);
-  const setEdits = (value: (list: Edit[]) => Edit[]) => set("edits", value);
-  const setPicked = (next: Selection) => set("selection", next);
-  /** The folder being opened (its row and the path show that the click registered). */
-  const [opening, setOpening] = useState<string | null>(null);
-  /** Opening has taken long enough to show a progress bar. */
-  const [slow, setSlow] = useState(false);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [editPath, setEditPath] = useState(0);
-  const [menu, setMenu] = useState<OpenMenu | null>(null);
-  const localLocation: LocalLocation | null = local ? { token: local.token, path: local.path } : null;
+  const { view, twoPane, localRoot, localView, transfers, edits } = memory;
+  const setView = useCallback((f: (v: PaneView) => PaneView) => change((m) => ({ ...m, view: f(m.view) })), [change]);
+  const setLocalView = useCallback((f: (v: PaneView) => PaneView) => change((m) => ({ ...m, localView: f(m.localView) })), [change]);
+  const setTransfers = useCallback((f: (l: QueuedTransfer[]) => QueuedTransfer[]) => change((m) => ({ ...m, transfers: f(m.transfers) })), [change]);
+  const setEdits = (f: (l: Edit[]) => Edit[]) => change((m) => ({ ...m, edits: f(m.edits) }));
+  const queue = useTransferQueue(transfers, setTransfers);
+  const [refresh, setRefresh] = useState({ remote: 0, local: 0 });
   const [prompt, setPrompt] = useState<Prompt | null>(null);
-  const [remoteDrop, setRemoteDrop] = useState(false);
-  /** Dropped-file uploads the user cancelled (stopped before their next piece). */
-  const stopped = useRef(new Set<string>());
-  const { pending, error, run, clearError } = useAction();
-  const notify = useToast();
+  const [goShell, setGoShell] = useState<{ loc: Loc; seq: number } | null>(null);
+  const { pending, error, run } = useAction();
 
-  // The shell's current folder, when the shell integration reports it (AUT-06).
+  // The shell's current folder, when the shell integration reports it (AUT-06): the first folder
+  // shown for a session, and a button to go back to it.
   const shellFolder = useSyncExternalStore(shellContexts.subscribe, () => (sessionId ? (shellContexts.get(sessionId)?.cwd ?? null) : null));
+  const start = useMemo<Loc | null>(() => {
+    const cwd = sessionId ? (shellContexts.get(sessionId)?.cwd ?? null) : null;
+    return cwd ? { kind: "remote", path: cwd } : null;
+    // biome-ignore lint/correctness/useExhaustiveDependencies: where a session starts is read once.
+  }, [sessionId]);
 
-  // Refreshing the same folder keeps the selection (while the entry is still there) and the
-  // scroll position; another folder starts at the top.
-  const show = useCallback(
-    (result: RemoteListing, select?: string) =>
-      change((m) => {
-        const same = m.listing?.path === result.path;
-        const names = result.entries.map((e) => e.name);
-        const selection = select && names.includes(select) ? single(select) : same ? pruneSelection(m.selection, names) : NO_SELECTION;
-        return { ...m, listing: result, selection, scrollTop: same ? m.scrollTop : 0 };
-      }),
-    [change],
-  );
-
-  const load = useCallback(
-    async (path: string | null, select?: string) => {
-      if (!sessionId) return;
-      const result = await run(() => filesApi.list(sessionId, path));
-      if (result) show(result, select);
-    },
-    [sessionId, run, show],
-  );
-
-  // A session seen for the first time opens in its shell's folder when the shell integration
-  // reports one, else its login folder (also when the shell's folder cannot be listed). One seen
-  // before shows what it showed then: switching tabs never lists again, only Refresh or moving to
-  // a folder does.
-  useEffect(() => {
-    if (!sessionId || panelMemory.get(sessionId).listing !== null) return;
-    let live = true;
-    const start = shellContexts.get(sessionId)?.cwd ?? null;
-    if (start) {
-      filesApi.list(sessionId, start).then(
-        (result) => live && show(result),
-        () => live && void load(null),
-      );
-    } else void load(null);
-    return () => {
-      live = false;
-    };
-  }, [sessionId, load, show]);
-
-  // The scroll position comes back with the listing.
-  useLayoutEffect(() => {
-    if (bodyRef.current && sessionId) bodyRef.current.scrollTop = panelMemory.get(sessionId).scrollTop;
-  }, [sessionId, listing]);
-
-  // Opening the panel puts the keyboard in the list (once it is there), where type-ahead and the
-  // arrows work.
-  const focused = useRef(false);
-  useEffect(() => {
-    if (focused.current || !listing) return;
-    focused.current = true;
-    window.requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>(".ft-name[tabindex='0']")?.focus());
-  }, [listing]);
+  const backend = useMemo(() => (target ? remoteBackend(target.sessionId, target.label) : null), [target?.sessionId, target?.label]);
+  const local = useMemo(() => (localRoot ? localBackend(localRoot) : null), [localRoot]);
+  const dir = view.folder?.loc.kind === "remote" ? view.folder.loc.path : null;
+  const localAt = localView.folder?.loc.kind === "local" ? localView.folder.loc : null;
 
   // Open edits: their local copies are watched while the panel is open (nothing uploads by itself).
   const editIds = edits.map((e) => e.editId).join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: polls the open edits.
   useEffect(() => {
     if (!editIds) return;
     const timer = window.setInterval(() => {
@@ -217,9 +112,9 @@ export function FilesPanel({
     return () => window.clearInterval(timer);
   }, [editIds]);
 
-  async function editEntry(entry: RemoteEntry) {
-    if (!sessionId || !current) return;
-    const opened = await run(() => filesApi.editOpen(sessionId, current, entry.name));
+  async function editEntry(entry: RemoteEntry, at: string) {
+    if (!sessionId) return;
+    const opened = await run(() => filesApi.editOpen(sessionId, at, entry.name));
     if (opened) setEdits((list) => [...list, opened]);
   }
 
@@ -227,7 +122,7 @@ export function FilesPanel({
     try {
       const status = await filesApi.editSave(edit.editId, overwrite);
       setEdits((list) => list.map((e) => (e.editId === edit.editId ? { ...status, saved: true } : e)));
-      if (current) void load(current);
+      setRefresh((r) => ({ ...r, remote: r.remote + 1 }));
     } catch (caught) {
       const e = toAppError(caught);
       if (e.code === "CONFLICT" && !overwrite) setPrompt({ kind: "editConflict", edit, overwrite: () => void saveEdit(edit, true) });
@@ -241,334 +136,43 @@ export function FilesPanel({
     setEdits((list) => list.filter((e) => e.editId !== edit.editId));
   }
 
-  const entries = useMemo(() => (listing ? visibleEntries(listing.entries, showHidden, "", sort) : []), [listing, showHidden, sort]);
-  const current = listing?.path ?? null;
-  const chosen = entries.filter((e) => picked.names.includes(e.name));
-  /** The one selected entry, for actions that take a single item. */
-  const selection = chosen.length === 1 ? (chosen[0] as RemoteEntry) : null;
-
-  useEffect(() => {
-    if (opening === null) {
-      setSlow(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setSlow(true), SLOW_MS);
-    return () => window.clearTimeout(timer);
-  }, [opening]);
-
-  // ---------- transfers ----------
-
-  function track(started: TransferStarted, dir: string) {
-    setTransfers((list) => [...list, { ...startedTransfer(started), dir }]);
-  }
-
-  function apply(transferId: string, dir: string, upload: boolean, event: TransferEvent) {
-    setTransfers((list) => list.map((t) => (t.id === transferId ? applyEvent(t, event) : t)));
-    // An upload changes the folder it went to; a download changes nothing on the server.
-    if (event.type === "done" && upload && sessionId && panelMemory.get(sessionId).listing?.path === dir) void load(dir);
-  }
-
-  /** Lists the local pane's folder again (a download into it finished). */
-  async function refreshLocal() {
-    const shown = sessionId ? panelMemory.get(sessionId).local : null;
-    if (!shown) return;
-    const result = await filesApi.localList(shown.token, shown.path).catch(() => null);
-    if (result) change((m) => (m.local === shown ? { ...m, local: result } : m));
-  }
-
-  /**
-   * Events can arrive before the call that started the transfer returns its id (a small file
-   * may even finish first); they are held until the transfer is listed, then applied in order.
-   */
-  function listener(dir: string, upload: boolean, intoLocalPane = false) {
-    let bound: string | null = null;
-    const early: TransferEvent[] = [];
-    return {
-      onEvent: (event: TransferEvent) => {
-        if (intoLocalPane && event.type === "done") void refreshLocal();
-        if (bound) apply(bound, dir, upload, event);
-        else early.push(event);
-      },
-      bind: (started: TransferStarted) => {
-        track(started, dir);
-        bound = started.transferId;
-        for (const event of early.splice(0)) apply(started.transferId, dir, upload, event);
-      },
-    };
-  }
-
-  async function startUpload(token: string, name: string, dir: string, choice: ConflictChoice, folder = false, path: string[] | null = null) {
+  /** Lists a pane again once a transfer into the folder it shows has finished. */
+  const relist = (pane: "remote" | "local", shown: string | null) => () => {
     if (!sessionId) return;
-    const events = listener(dir, true);
-    try {
-      events.bind(await filesApi.upload(sessionId, token, dir, choice, events.onEvent, path));
-    } catch (caught) {
-      const e = toAppError(caught);
-      // Folders are never merged into or replace an existing one: they can only keep both.
-      if (e.code === "CONFLICT" && choice === "ask") {
-        setPrompt({
-          kind: "replace",
-          name,
-          remote: true,
-          retry: folder ? null : () => void startUpload(token, name, dir, "replace", false, path),
-          keepBoth: () => void startUpload(token, name, dir, "keep_both", folder, path),
-        });
-      } else {
-        failNow(name, "upload", dir, e);
-      }
-    }
+    const m = panelMemory.get(sessionId);
+    const now = pane === "remote" ? (m.view.folder?.loc.kind === "remote" ? m.view.folder.loc.path : null) : JSON.stringify(m.localView.folder?.loc ?? null);
+    if (now === shown) setRefresh((r) => ({ ...r, [pane]: r[pane] + 1 }));
+  };
+
+  async function chooseLocal() {
+    const pick = await run(() => filesApi.pickFolder());
+    if (pick) change((m) => ({ ...m, localRoot: { kind: "local", token: pick.token, rootName: pick.name, path: [] }, localView: emptyView() }));
   }
 
-  async function startDownload(entry: RemoteEntry, dir: string, token: string, choice: ConflictChoice, path: string[] | null = null) {
-    if (!sessionId) return;
-    const events = listener(dir, false, path !== null);
-    try {
-      events.bind(await filesApi.download(sessionId, dir, entry.name, token, choice, events.onEvent, path));
-    } catch (caught) {
-      const e = toAppError(caught);
-      if (e.code === "CONFLICT" && choice === "ask") {
-        setPrompt({
-          kind: "replace",
-          name: entry.name,
-          remote: false,
-          retry: entry.kind === "dir" ? null : () => void startDownload(entry, dir, token, "replace", path),
-          keepBoth: () => void startDownload(entry, dir, token, "keep_both", path),
-        });
-      } else {
-        failNow(entry.name, "download", dir, e);
-      }
-    }
-  }
+  const toLocal = (entries: RemoteEntry[], at: string) => {
+    if (!sessionId || !localAt) return;
+    for (const entry of entries) queue.run(downloadJob(sessionId, at, entry, localAt.token, localAt.path, relist("local", JSON.stringify(localAt))));
+  };
+  const toServer = (entries: RemoteEntry[], from: LocalRoot) => {
+    if (!sessionId || !dir) return;
+    for (const entry of entries) queue.run(uploadJob(sessionId, from.token, dir, entry.name, entry.kind === "dir", [...from.path, entry.name], relist("remote", dir)));
+  };
 
-  /**
-   * Files dropped from the desktop: the webview gives the page their content but not their
-   * paths, so the page sends it to the core in ordered pieces. Only a complete upload is renamed
-   * into place on the server; anything else removes the partial file.
-   */
-  async function uploadDropped(file: File, dir: string, choice: ConflictChoice) {
-    if (!sessionId) return;
-    let started: StreamUpload;
-    try {
-      started = await beginUpload(sessionId, dir, file, choice);
-    } catch (caught) {
-      const e = toAppError(caught);
-      if (e.code === "CONFLICT" && choice === "ask") {
-        setPrompt({
-          kind: "replace",
-          name: file.name,
-          remote: true,
-          retry: () => void uploadDropped(file, dir, "replace"),
-          keepBoth: () => void uploadDropped(file, dir, "keep_both"),
-        });
-      } else {
-        failNow(file.name, "upload", dir, e);
-      }
-      return;
-    }
-    const id = `${DROP_PREFIX}${started.uploadId}`;
-    track({ transferId: id, name: started.name, direction: "upload", total: file.size }, dir);
-    try {
-      const completed = await sendUpload(started, file, {
-        onProgress: (done) => apply(id, dir, true, { type: "progress", done }),
-        shouldStop: () => stopped.current.delete(id),
-      });
-      apply(id, dir, true, completed ? { type: "done", bytes: file.size, files: 1, skipped: 0 } : { type: "cancelled" });
-    } catch (caught) {
-      const e = toAppError(caught);
-      apply(id, dir, true, { type: "failed", error: { code: e.code, message: e.message } });
-    }
-  }
+  const rowExtras = (entries: RemoteEntry[], loc: Loc): MenuEntry[] => {
+    if (loc.kind !== "remote") return [];
+    const one = entries.length === 1 ? entries[0] : undefined;
+    return [
+      ...(one?.kind === "file" ? [{ label: msgFiles.edit, icon: <IconPencil size={15} />, onSelect: () => void editEntry(one, loc.path) }] : []),
+      ...(one && (one.kind === "file" || one.kind === "dir") && others.length > 0
+        ? [{ label: msgFiles.copyTo, icon: <IconCopy size={15} />, onSelect: () => setPrompt({ kind: "copy", entry: one, dir: loc.path, others }) }]
+        : []),
+    ];
+  };
 
-  function droppedFiles(transfer: DataTransfer) {
-    if (!current) return;
-    const items = Array.from(transfer.items ?? []);
-    const list = Array.from(transfer.files);
-    list.forEach((file, i) => {
-      // A dropped folder arrives as an empty "file"; folders go through Upload folder instead.
-      const entry = items[i]?.webkitGetAsEntry?.();
-      if (entry?.isDirectory) failNow(file.name, "upload", current, new AppError({ code: "INVALID_INPUT", message: msg.files.dropFolder }));
-      else void uploadDropped(file, current, "ask");
-    });
-  }
-
-  /** A transfer refused before it started still shows up in the list, with the reason. */
-  function failNow(name: string, direction: TransferDirection, dir: string, e: AppError) {
-    setTransfers((list) => [...list, { ...refused(name, direction, e.message, list.length), dir }]);
-  }
-
-  async function startCopy(entry: RemoteEntry, dst: FilesTarget, dstDir: string, choice: ConflictChoice) {
-    if (!sessionId || !current) return;
-    const events = listener(dstDir, false);
-    const srcDir = current;
-    try {
-      events.bind(await filesApi.copy(sessionId, srcDir, entry.name, dst.sessionId, dstDir, choice, events.onEvent));
-    } catch (caught) {
-      const e = toAppError(caught);
-      if (e.code === "CONFLICT" && choice === "ask") {
-        setPrompt({
-          kind: "replace",
-          name: entry.name,
-          remote: true,
-          retry: entry.kind === "dir" ? null : () => void startCopy(entry, dst, dstDir, "replace"),
-          keepBoth: () => void startCopy(entry, dst, dstDir, "keep_both"),
-        });
-      } else {
-        failNow(entry.name, "copy", dstDir, e);
-      }
-    }
-  }
-
-  /** Two-pane copy: local selection (or a dropped local name) to the server folder shown. */
-  async function uploadFromLocal(name: string, kind: RemoteEntry["kind"]) {
-    if (!current || !localLocation) return;
-    await startUpload(localLocation.token, name, current, "ask", kind === "dir", [...localLocation.path, name]);
-  }
-
-  /** Two-pane copy: a remote file or folder to the local folder shown. */
-  async function downloadToLocal(entry: RemoteEntry) {
-    if (!current || !localLocation) return;
-    await startDownload(entry, current, localLocation.token, "ask", localLocation.path);
-  }
-
-  async function upload() {
-    if (!current) return;
-    const picks = await run(() => filesApi.pickUpload());
-    for (const pick of picks ?? []) await startUpload(pick.token, pick.name, current, "ask");
-  }
-
-  async function uploadFolder() {
-    if (!current) return;
-    const pick = await run(() => filesApi.pickUploadFolder());
-    if (pick) await startUpload(pick.token, pick.name, current, "ask", true);
-  }
-
-  /** Downloads the folder being shown, with everything in it. */
-  async function downloadFolder() {
-    if (!listing?.parent) return;
-    const name = listing.path.slice(listing.path.lastIndexOf("/") + 1);
-    const folder = await run(() => filesApi.pickFolder());
-    if (folder) {
-      const entry: RemoteEntry = { name, kind: "dir", size: null, permissions: null, modified: null };
-      await startDownload(entry, listing.parent, folder.token, "ask");
-    }
-  }
-
-  /** Downloads the chosen items into one folder picked on this computer. */
-  async function download(items: RemoteEntry[]) {
-    if (!current || items.length === 0) return;
-    const folder = await run(() => filesApi.pickFolder());
-    if (folder) for (const entry of items) await startDownload(entry, current, folder.token, "ask");
-  }
-
-  async function activate(entry: RemoteEntry) {
-    if (!current) return;
-    if (entry.kind === "dir" || entry.kind === "symlink") {
-      const next = `${current.replace(/\/+$/, "")}/${entry.name}`;
-      setOpening(entry.name);
-      try {
-        await load(next);
-      } finally {
-        setOpening(null);
-      }
-    } else {
-      setPicked(single(entry.name));
-    }
-  }
-
-  const up = () => listing?.parent && void load(listing.parent, listing.path.slice(listing.path.lastIndexOf("/") + 1));
-
-  /** Renames in place; a refusal (a name already there) is shown under the field. */
-  async function rename(entry: RemoteEntry, name: string): Promise<string | null> {
-    if (!sessionId || !current) return null;
-    try {
-      await filesApi.rename(sessionId, current, entry.name, name);
-    } catch (caught) {
-      return toAppError(caught).message;
-    }
-    await load(current, name);
-    return null;
-  }
-
-  function copyPath(entry: RemoteEntry | null) {
-    if (!current) return;
-    const path = entry ? `${current.replace(/\/+$/, "")}/${entry.name}` : current;
-    void navigator.clipboard.writeText(path).then(
-      () => notify("success", msgFiles.pathCopied),
-      () => undefined,
-    );
-  }
-
-  function onSort(key: SortKey) {
-    set("sort", (s) => (s.key === key ? { ...s, ascending: !s.ascending } : { key, ascending: true }));
-  }
-
-  // ---------- menus ----------
-
-  function rowItems(items: RemoteEntry[]): MenuEntry[] {
-    const one = items.length === 1 ? (items[0] as RemoteEntry) : null;
-    const movable = items.filter((e) => e.kind === "file" || e.kind === "dir");
-    const list: MenuEntry[] = [];
-    if (one && (one.kind === "dir" || one.kind === "symlink")) list.push({ label: msgFiles.open, icon: <IconFolderOpen size={15} />, onSelect: () => void activate(one) });
-    if (movable.length > 0) list.push({ label: msgFiles.download, icon: <IconDownload size={15} />, onSelect: () => void download(movable) });
-    if (twoPane && localLocation && movable.length > 0)
-      list.push({ label: msgFiles.toLocal, icon: <IconHardDrive size={15} />, onSelect: () => void Promise.all(movable.map((e) => downloadToLocal(e))) });
-    if (one?.kind === "file") list.push({ label: msgFiles.edit, icon: <IconPencil size={15} />, onSelect: () => void editEntry(one) });
-    if (one && (one.kind === "file" || one.kind === "dir") && others.length > 0)
-      list.push({ label: msgFiles.copyTo, icon: <IconCopy size={15} />, onSelect: () => setPrompt({ kind: "copy", entry: one, others, start: (dst, dir) => void startCopy(one, dst, dir, "ask") }) });
-    list.push("separator");
-    if (one) {
-      list.push({ label: msgFiles.rename, icon: <IconPencil size={15} />, shortcut: <Keys caps={["F2"]} />, onSelect: () => setRenaming(one.name) });
-      if (one.kind !== "symlink") list.push({ label: msgFiles.permissions, icon: <IconSlidersHorizontal size={15} />, onSelect: () => setPrompt({ kind: "chmod", entry: one }) });
-      list.push({ label: msgFiles.copyPath, icon: <IconClipboardCopy size={15} />, onSelect: () => copyPath(one) });
-      list.push("separator");
-    }
-    list.push({ label: msgFiles.delete, icon: <IconTrash2 size={15} />, tone: "danger", shortcut: <Keys caps={["Del"]} />, onSelect: () => setPrompt({ kind: "delete", entries: items }) });
-    return list[0] === "separator" ? list.slice(1) : list;
-  }
-
-  const uploadItems: MenuEntry[] = [
-    { label: msgFiles.uploadFiles, icon: <IconUpload size={15} />, disabled: !current, onSelect: () => void upload() },
-    { label: msgFiles.uploadFolder, icon: <IconFolderUp size={15} />, disabled: !current, onSelect: () => void uploadFolder() },
-    "separator",
-    { label: msgFiles.downloadFolder, icon: <IconDownload size={15} />, disabled: !listing?.parent, onSelect: () => void downloadFolder() },
-  ];
-
-  const viewItems: MenuEntry[] = [
-    { label: msgFiles.showHidden, checked: showHidden, onSelect: () => set("showHidden", (v) => !v) },
-    { label: msgFiles.showLocal, checked: twoPane, onSelect: () => set("twoPane", (v) => !v) },
-  ];
-
-  const folderItems: MenuEntry[] = [
-    { label: msgFiles.newFolder, icon: <IconFolderPlus size={15} />, disabled: !current, onSelect: () => setPrompt({ kind: "mkdir" }) },
-    { label: msgFiles.uploadFiles, icon: <IconUpload size={15} />, disabled: !current, onSelect: () => void upload() },
-    { label: msgFiles.uploadFolder, icon: <IconFolderUp size={15} />, disabled: !current, onSelect: () => void uploadFolder() },
-    "separator",
-    { label: msgFiles.refresh, icon: <IconRefreshCw size={15} />, disabled: !current, onSelect: () => current && void load(current) },
-    { label: msgFiles.copyPath, icon: <IconClipboardCopy size={15} />, disabled: !current, onSelect: () => copyPath(null) },
-    { label: msgFiles.showHidden, checked: showHidden, onSelect: () => set("showHidden", (v) => !v) },
-  ];
-
-  const hiddenCount = listing ? listing.entries.filter((e) => e.name.startsWith(".")).length : 0;
-  const empty =
-    listing && listing.entries.length > 0 ? (
-      <div className="ft-state">
-        <IconEye size={22} />
-        <span>{msgFiles.onlyHidden(hiddenCount)}</span>
-        <button type="button" className="btn btn-sm" onClick={() => set("showHidden", true)}>
-          {msgFiles.showHidden}
-        </button>
-      </div>
-    ) : (
-      <div className="ft-state">
-        <IconFolderOpen size={24} />
-        <strong>{msgFiles.emptyTitle}</strong>
-        <span>{msgFiles.emptyBody}</span>
-      </div>
-    );
+  const menuExtras: MenuEntry[] = [{ label: msgFiles.showLocal, checked: twoPane, onSelect: () => change((m) => ({ ...m, twoPane: !m.twoPane })) }];
 
   return (
     <aside
-      ref={ref}
       className={`side-panel side-panel-wide fp${twoPane ? " side-panel-two" : ""}`}
       aria-label={msg.files.panel}
       onKeyDown={(event) => {
@@ -587,176 +191,122 @@ export function FilesPanel({
             </span>
           )}
         </h2>
-        {target && (
-          <>
-            <IconButton size="sm" label={msgFiles.uploadMenu} aria-haspopup="menu" disabled={!current} onClick={(e) => setMenu({ kind: "upload", anchor: e.currentTarget })}>
-              <IconUpload size={15} />
-            </IconButton>
-            <IconButton size="sm" label={msgFiles.newFolder} disabled={!current} onClick={() => setPrompt({ kind: "mkdir" })}>
-              <IconFolderPlus size={15} />
-            </IconButton>
-            <IconButton size="sm" label={msgFiles.viewOptions} aria-haspopup="menu" onClick={(e) => setMenu({ kind: "view", anchor: e.currentTarget })}>
-              <IconSlidersHorizontal size={15} />
-            </IconButton>
-          </>
-        )}
         <IconButton size="sm" data-tooltip-side="bottom-end" label={msg.files.close} onClick={onClose}>
           <IconX size={15} />
         </IconButton>
       </div>
 
-      {!target ? (
+      {!target || !sessionId ? (
         <div className="panel-body">
           <Notice tone="info">{msg.files.noSession}</Notice>
         </div>
       ) : (
         <>
-          <div className="fp-nav">
-            <IconButton size="sm" label={msg.files.up} onClick={up} disabled={!listing?.parent || pending}>
-              <IconFolderUp size={15} />
-            </IconButton>
-            {listing ? (
-              <PathBar
-                crumbs={crumbsOf({ kind: "remote", path: listing.path }).map((c) => ({ label: c.label, onGo: () => c.loc.kind === "remote" && void load(c.loc.path) }))}
-                opening={opening}
-                busy={opening !== null}
-                editable={{ value: listing.path, onSubmit: (path) => void load(path) }}
-                editRequest={editPath}
-              />
-            ) : (
-              <span className="pathbar" />
-            )}
-            {shellFolder && (
-              <IconButton size="sm" label={msg.files.shellFolder(shellFolder)} onClick={() => void load(shellFolder)} disabled={pending || current === shellFolder}>
-                <IconSquareTerminal size={15} />
-              </IconButton>
-            )}
-            <IconButton size="sm" data-tooltip-side="bottom-end" label={msg.files.refresh} onClick={() => current && void load(current)} disabled={!current || pending}>
-              <IconRefreshCw size={14} />
-            </IconButton>
-          </div>
-
+          <ErrorNotice error={error} />
           <div className="files-panes">
             {twoPane && (
-              <div className="files-local-col">
-                <LocalPane
-                  selected={localSelection?.name ?? null}
-                  listing={local}
-                  showHidden={showHidden}
-                  onListing={(next) => change((m) => ({ ...m, local: next, localSelection: null }))}
-                  onSelect={(entry) => set("localSelection", entry)}
-                  onDropRemote={(name) => {
-                    const entry = listing?.entries.find((e) => e.name === name);
-                    if (entry) void downloadToLocal(entry);
-                  }}
-                />
-                {localSelection && localLocation && current && (localSelection.kind === "file" || localSelection.kind === "dir") && (
-                  <div className="fp-local-actions">
-                    <button type="button" className="btn btn-sm btn-primary" onClick={() => void uploadFromLocal(localSelection.name, localSelection.kind)}>
-                      <IconUpload size={14} /> {msg.files.toServer}
+              <FilePane
+                id="local"
+                label={msg.files.local}
+                backend={local}
+                view={localView}
+                setView={setLocalView}
+                start={localRoot}
+                compact
+                refreshKey={refresh.local}
+                placeholder={
+                  <div className="ft-state">
+                    <IconHardDrive size={24} />
+                    <strong>{msg.files.localNone}</strong>
+                    <span>{msgFiles.localBody}</span>
+                    <button type="button" className="btn btn-sm" onClick={() => void chooseLocal()} disabled={pending}>
+                      <IconFolderOpen size={14} /> {msg.files.localChoose}
                     </button>
                   </div>
-                )}
-              </div>
+                }
+                menuExtras={[{ label: msg.files.localChange, icon: <IconFolderOpen size={15} />, onSelect: () => void chooseLocal() }]}
+                copyOther={dir && localAt ? { label: msgFiles.copyToOther(target.label), run: (entries) => toServer(entries, localAt) } : null}
+                drop={{
+                  accepts: (types) => types.includes(FILE_DRAG),
+                  onDrop: (data, loc) => {
+                    const dragged = JSON.parse(data.getData(FILE_DRAG) || "null") as FileDrag | null;
+                    if (dragged?.pane === "remote" && dir && loc.kind === "local") toLocal(dragged.entries, dir);
+                  },
+                  hint: msgFiles.dropInto(msg.files.local),
+                }}
+              />
             )}
-            <div
-              ref={bodyRef}
-              className="fp-body files-body"
-              onScroll={(event) => {
-                // Kept without re-rendering; read back when the panel shows this session again.
-                if (sessionId && panelMemory.has(sessionId)) panelMemory.get(sessionId).scrollTop = event.currentTarget.scrollTop;
-              }}
-              data-drop={remoteDrop || undefined}
-              onDragOver={(event) => {
-                const types = event.dataTransfer.types;
-                if ((twoPane && types.includes(DRAG_TYPE)) || (listing && types.includes("Files"))) {
-                  event.preventDefault();
-                  setRemoteDrop(true);
-                }
-              }}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setRemoteDrop(false);
-              }}
-              onDrop={(event) => {
-                setRemoteDrop(false);
-                if (event.dataTransfer.files.length > 0 && !event.dataTransfer.types.includes(DRAG_TYPE)) {
-                  event.preventDefault();
-                  droppedFiles(event.dataTransfer);
-                  return;
-                }
-                const raw = event.dataTransfer.getData(DRAG_TYPE);
-                if (!raw) return;
-                event.preventDefault();
-                const data = JSON.parse(raw) as { side: string; name: string };
-                const dropped = data.side === "local" ? (localSelection?.name === data.name ? localSelection : null) : null;
-                if (data.side === "local") void uploadFromLocal(data.name, dropped?.kind ?? "file");
-              }}
-            >
-              {slow && <div className="list-progress" role="progressbar" aria-label={msg.files.loadingFolder} />}
-              {listing && <ErrorNotice error={error} />}
-              {listing?.truncated && <Notice tone="warning">{msg.files.truncated(listing.entries.length)}</Notice>}
-              {!listing && error && (
-                <div className="ft-state" role="alert">
-                  <IconTriangleAlert size={22} />
-                  <strong>{msgFiles.loadFailed}</strong>
-                  <span>{error.message}</span>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      clearError();
-                      void load(null);
-                    }}
+            <FilePane
+              id="remote"
+              label={msgFiles.serverPane(target.label)}
+              backend={backend}
+              view={view}
+              setView={setView}
+              start={start}
+              compact={!twoPane}
+              autoFocus
+              refreshKey={refresh.remote}
+              goRequest={goShell}
+              tools={
+                shellFolder ? (
+                  <IconButton
+                    size="sm"
+                    label={msg.files.shellFolder(shellFolder)}
+                    disabled={dir === shellFolder}
+                    onClick={() => setGoShell((g) => ({ loc: { kind: "remote", path: shellFolder }, seq: (g?.seq ?? 0) + 1 }))}
                   >
-                    <IconRefreshCw size={14} /> {msgFiles.retry}
-                  </button>
-                </div>
-              )}
-              {!listing && !error && (
-                <div className="ft-skeleton" aria-busy="true" aria-label={msg.files.loadingFolder}>
-                  {Array.from({ length: 6 }, (_, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: still placeholders.
-                    <span key={i} />
-                  ))}
-                </div>
-              )}
-              {listing && (
-                <FileTable
-                  label={msg.files.listLabel(listing.path)}
-                  entries={entries}
-                  columns={["name", "modified", "size", "mode"]}
-                  modeStyle="octal"
-                  sort={sort}
-                  onSort={onSort}
-                  selection={picked}
-                  onSelection={setPicked}
-                  opening={opening}
-                  busy={opening !== null}
-                  renaming={renaming}
-                  onRename={rename}
-                  onRenameEnd={() => setRenaming(null)}
-                  onActivate={(entry) => void activate(entry)}
-                  onMenu={(items, at) => setMenu({ kind: "row", entries: items, at })}
-                  onBackgroundMenu={(at) => setMenu({ kind: "folder", at })}
-                  onKey={(key) => {
-                    if (key === "up") up();
-                    else if (key === "rename" && selection) setRenaming(selection.name);
-                    else if (key === "delete" && chosen.length > 0) setPrompt({ kind: "delete", entries: chosen });
-                    else if (key === "editPath") setEditPath((n) => n + 1);
-                  }}
-                  canDrag={(entry) => twoPane && (entry.kind === "file" || entry.kind === "dir")}
-                  onDragStart={(event, entry) => event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ side: "remote", name: entry.name }))}
-                  empty={empty}
-                />
-              )}
-            </div>
+                    <IconSquareTerminal size={15} />
+                  </IconButton>
+                ) : null
+              }
+              menuExtras={menuExtras}
+              rowExtras={rowExtras}
+              onDownload={async (entries, loc) => {
+                if (loc.kind !== "remote") return;
+                const folder = await run(() => filesApi.pickFolder());
+                if (folder) for (const entry of entries) queue.run(downloadJob(sessionId, loc.path, entry, folder.token, null));
+              }}
+              onUpload={async (loc) => {
+                if (loc.kind !== "remote") return;
+                const picks = await run(() => filesApi.pickUpload());
+                for (const pick of picks ?? []) queue.run(uploadJob(sessionId, pick.token, loc.path, pick.name, false, null, relist("remote", loc.path)));
+              }}
+              onUploadFolder={async (loc) => {
+                if (loc.kind !== "remote") return;
+                const pick = await run(() => filesApi.pickUploadFolder());
+                if (pick) queue.run(uploadJob(sessionId, pick.token, loc.path, pick.name, true, null, relist("remote", loc.path)));
+              }}
+              onDownloadFolder={async (folder) => {
+                const loc = folder.loc;
+                if (loc.kind !== "remote" || loc.path === "/") return;
+                const parent = loc.path.slice(0, loc.path.lastIndexOf("/")) || "/";
+                const name = loc.path.slice(loc.path.lastIndexOf("/") + 1);
+                const pick = await run(() => filesApi.pickFolder());
+                if (pick) queue.run(downloadJob(sessionId, parent, { name, kind: "dir", size: null, permissions: null, modified: null }, pick.token, null));
+              }}
+              onDuplicate={(entries, loc) => {
+                if (loc.kind !== "remote") return;
+                for (const entry of entries) queue.run(copyJob(sessionId, loc.path, entry, sessionId, loc.path, relist("remote", loc.path)));
+              }}
+              copyOther={twoPane && localAt && dir ? { label: msgFiles.copyToOther(msg.files.local), run: (entries) => toLocal(entries, dir) } : null}
+              drop={{
+                accepts: (types) => types.includes(FILE_DRAG) || types.includes("Files"),
+                onDrop: (data, loc) => {
+                  if (loc.kind !== "remote") return;
+                  const raw = data.getData(FILE_DRAG);
+                  if (raw) {
+                    const dragged = JSON.parse(raw) as FileDrag;
+                    if (dragged.pane === "local" && localAt) toServer(dragged.entries, localAt);
+                    return;
+                  }
+                  const { files, folders } = droppedFiles(data);
+                  for (const name of folders) queue.refuse(name, "upload", msg.files.dropFolder);
+                  for (const file of files) queue.run(droppedFileJob(sessionId, loc.path, file, relist("remote", loc.path)));
+                },
+                hint: msgFiles.dropInto(target.label),
+              }}
+            />
           </div>
-
-          {listing && (
-            <div className="fp-footer" role="status" aria-label={msg.files.selectionStatus}>
-              {selectionSummary(entries, picked.names, (n) => formatSize(n))}
-            </div>
-          )}
 
           {edits.length > 0 && (
             <section className="xfer fp-edits" aria-label={msg.files.editing} data-open>
@@ -789,204 +339,44 @@ export function FilesPanel({
             </section>
           )}
 
-          <TransferDrawer
-            transfers={transfers}
-            onCancel={(t) => {
-              if (t.id.startsWith(DROP_PREFIX)) stopped.current.add(t.id);
-              else void filesApi.cancel(t.id).catch(() => undefined);
-            }}
-            onClear={() => setTransfers((list) => list.filter((t) => t.state === "running"))}
-          />
+          <TransferDrawer transfers={transfers} onCancel={queue.cancel} onRetry={queue.retry} onClear={queue.clear} />
+          {queue.dialog}
         </>
       )}
 
-      {menu?.kind === "upload" && <Menu anchor={menu.anchor} items={uploadItems} label={msgFiles.uploadMenu} onClose={() => setMenu(null)} />}
-      {menu?.kind === "view" && <Menu anchor={menu.anchor} items={viewItems} label={msgFiles.viewOptions} onClose={() => setMenu(null)} />}
-      {menu?.kind === "row" && (
-        <Menu
-          anchor={menu.at instanceof HTMLElement ? menu.at : undefined}
-          point={menu.at instanceof HTMLElement ? undefined : menu.at}
-          items={rowItems(menu.entries)}
-          label={menu.entries.length === 1 ? msgFiles.rowMenu((menu.entries[0] as RemoteEntry).name) : msg.files.selectionStatus}
-          onClose={() => setMenu(null)}
-        />
+      {prompt?.kind === "editConflict" && (
+        <Dialog title={msg.files.editConflictTitle(prompt.edit.name)} role="alertdialog" tone="danger" icon={<IconTriangleAlert size={18} />} onDismiss={() => setPrompt(null)}>
+          <div className="stack">
+            <p>{msg.files.editConflictBody}</p>
+            <div className="dialog-actions">
+              <button type="button" className="btn" onClick={() => setPrompt(null)} data-autofocus>
+                {msg.common.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger-solid"
+                onClick={() => {
+                  prompt.overwrite();
+                  setPrompt(null);
+                }}
+              >
+                {msg.files.editOverwrite}
+              </button>
+            </div>
+          </div>
+        </Dialog>
       )}
-      {menu?.kind === "folder" && (
-        <Menu
-          anchor={menu.at instanceof HTMLElement ? menu.at : undefined}
-          point={menu.at instanceof HTMLElement ? undefined : menu.at}
-          items={folderItems}
-          label={msgFiles.folderMenu}
-          onClose={() => setMenu(null)}
-        />
-      )}
-
-      {prompt && target && current && (
-        <FilesPrompt
-          prompt={prompt}
-          sessionId={target.sessionId}
-          dir={current}
-          onDone={(changed) => {
-            setPrompt(null);
-            if (changed) void load(current);
+      {prompt?.kind === "copy" && sessionId && (
+        <CopyDialog
+          prompt={{
+            entry: prompt.entry,
+            others: prompt.others,
+            start: (dst, dstDir) => queue.run(copyJob(sessionId, prompt.dir, prompt.entry, dst.sessionId, dstDir)),
           }}
+          onDone={() => setPrompt(null)}
         />
       )}
     </aside>
-  );
-}
-
-function FilesPrompt({
-  prompt,
-  sessionId,
-  dir,
-  onDone,
-}: {
-  prompt: Prompt;
-  sessionId: string;
-  dir: string;
-  onDone: (changed: boolean) => void;
-}) {
-  const initial = prompt.kind === "chmod" && prompt.entry.permissions != null ? prompt.entry.permissions.toString(8).padStart(3, "0") : "";
-  const [text, setText] = useState(initial);
-  const { pending, error, run } = useAction();
-  const [invalid, setInvalid] = useState<string | null>(null);
-  /** Something was deleted before a later item failed: the folder needs listing again. */
-  const deleted = useRef(false);
-
-  async function submit() {
-    setInvalid(null);
-    let ok: unknown;
-    switch (prompt.kind) {
-      case "mkdir":
-        ok = await run(() => filesApi.mkdir(sessionId, dir, text.trim()).then(() => true));
-        break;
-      case "chmod": {
-        if (!/^[0-7]{3,4}$/.test(text.trim())) {
-          setInvalid(msg.files.modeInvalid);
-          return;
-        }
-        const mode = Number.parseInt(text.trim(), 8);
-        ok = await run(() => filesApi.chmod(sessionId, dir, prompt.entry.name, mode).then(() => true));
-        break;
-      }
-      case "delete": {
-        // One after another; a failure stops there and says which item it was.
-        const entries = prompt.entries;
-        ok = await run(async () => {
-          for (const entry of entries) {
-            try {
-              await filesApi.remove(sessionId, dir, entry.name);
-            } catch (caught) {
-              const e = toAppError(caught);
-              throw entries.length > 1 ? new AppError({ code: e.code, message: `${visibleName(entry.name)}: ${e.message}` }) : e;
-            }
-            deleted.current = true;
-          }
-          return true;
-        });
-        break;
-      }
-      case "replace":
-        prompt.retry?.();
-        onDone(false);
-        return;
-      case "editConflict":
-        prompt.overwrite();
-        onDone(false);
-        return;
-      case "copy":
-        return;
-    }
-    if (ok) onDone(true);
-  }
-
-  if (prompt.kind === "copy") {
-    return <CopyDialog prompt={prompt} onDone={() => onDone(false)} />;
-  }
-
-  if (prompt.kind === "delete" || prompt.kind === "replace" || prompt.kind === "editConflict") {
-    const only = prompt.kind === "delete" && prompt.entries.length === 1 ? prompt.entries[0] : undefined;
-    const title =
-      prompt.kind === "delete"
-        ? only
-          ? msg.files.deleteTitle(only.name)
-          : msgFiles.deleteMany(prompt.entries.length)
-        : prompt.kind === "replace"
-          ? msg.files.replaceTitle(prompt.name)
-          : msg.files.editConflictTitle(prompt.edit.name);
-    const body =
-      prompt.kind === "delete"
-        ? msg.files.deleteBody
-        : prompt.kind === "editConflict"
-          ? msg.files.editConflictBody
-          : !prompt.retry
-            ? msg.files.folderExists
-            : prompt.remote
-              ? msg.files.replaceRemote
-              : msg.files.replaceLocal;
-    return (
-      <Dialog title={title} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => onDone(deleted.current)}>
-        <div className="stack">
-          <p>{body}</p>
-          <ErrorNotice error={error} />
-          <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => onDone(deleted.current)} data-autofocus>
-              {msg.common.cancel}
-            </button>
-            {prompt.kind === "replace" && (
-              <button
-                type="button"
-                className={prompt.retry ? "btn" : "btn btn-primary"}
-                onClick={() => {
-                  prompt.keepBoth();
-                  onDone(false);
-                }}
-              >
-                {msg.files.keepBoth}
-              </button>
-            )}
-            {(prompt.kind !== "replace" || prompt.retry) && (
-              <button type="button" className="btn btn-danger-solid" onClick={() => void submit()} disabled={pending}>
-                {prompt.kind === "delete" ? msg.files.delete : prompt.kind === "editConflict" ? msg.files.editOverwrite : msg.files.replace}
-              </button>
-            )}
-          </div>
-        </div>
-      </Dialog>
-    );
-  }
-
-  const title = prompt.kind === "mkdir" ? msg.files.newFolderTitle : msg.files.permissionsTitle(prompt.entry.name);
-  return (
-    <Dialog title={title} icon={prompt.kind === "chmod" ? <IconSlidersHorizontal size={18} /> : <IconFolderPlus size={18} />} onDismiss={() => onDone(false)}>
-      <form
-        className="stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <TextField
-          label={prompt.kind === "chmod" ? msg.files.mode : msg.files.name}
-          hint={prompt.kind === "chmod" ? msg.files.modeHint : msg.files.nameHint}
-          value={text}
-          onChange={setText}
-          error={invalid ?? undefined}
-          autoFocus
-          className="mono"
-        />
-        <ErrorNotice error={error} />
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={() => onDone(false)}>
-            {msg.common.cancel}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={pending || text.trim() === ""}>
-            {prompt.kind === "mkdir" ? msg.files.create : msg.files.save}
-          </button>
-        </div>
-      </form>
-    </Dialog>
   );
 }
 

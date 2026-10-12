@@ -1,42 +1,59 @@
 import type { EffectiveEnvVar, EnvVar, SettingsTarget } from "@tyrminal/contracts";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
 import { IconPlus, IconSlidersHorizontal, IconX } from "../../components/ui/icons";
-import { environment } from "../../lib/ipc";
-import { msg } from "../../lib/messages";
+import { AutosaveStatus, type SaveResult, handleUndoKey, useAutosave } from "../../lib/autosave";
+import { environment, toAppError } from "../../lib/ipc";
+import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
-import { msgEnv } from "../../lib/messages-env";
 import { useAction } from "../../lib/useAsync";
+import { validEnvName, validEnvValue } from "./fieldRules";
 import { StartupSection, useStartup } from "./StartupSection";
+
+/** The rows to store, or `null` while any row is invalid (the list is saved as one unit). */
+export function envDraft(rows: EnvVar[]): EnvVar[] | null {
+  const vars = rows.filter((r) => r.name.trim() || r.value).map((r) => ({ name: r.name.trim(), value: r.value }));
+  const names = new Set(vars.map((v) => v.name));
+  const valid = vars.length <= 64 && names.size === vars.length && vars.every((v) => validEnvName(v.name) && validEnvValue(v.value));
+  return valid ? vars : null;
+}
 
 /**
  * Environment variables of a host or group (SNP-11/12). For a host, the variables it inherits
  * are listed with their group, and marked when the host overrides them. Startup snippets
- * (SNP-08) are set here too and saved with their own command.
+ * (SNP-08) are set here too and saved with their own command. Both save as you go (400 ms after
+ * the last change, or on blur), each list once all of it is valid, and each write can be undone.
  */
 export function EnvironmentDialog({
   target,
   name,
   onClose,
-  onDone,
 }: {
   target: SettingsTarget;
   name: string;
   onClose: () => void;
-  onDone: () => void;
 }) {
   const [rows, setRows] = useState<EnvVar[] | null>(null);
   const [inherited, setInherited] = useState<EffectiveEnvVar[]>([]);
   const load = useAction();
-  const save = useAction();
   const startupState = useStartup(target);
+  const stored = useRef<EnvVar[] | null>(null);
+  const latest = useRef({ rows, startupState });
+  latest.current = { rows, startupState };
+  // The startup list as last written: a write queued behind another can run before React
+  // re-renders, while the list still looks changed; this keeps it from being written twice.
+  const startupWritten = useRef<string | null>(null);
+  const [, setVersion] = useState(0);
 
   useEffect(() => {
     let live = true;
     void load.run(() => environment.get(target)).then((vars) => {
-      if (live && vars) setRows(vars);
+      if (live && vars) {
+        stored.current = vars;
+        setRows(vars);
+      }
     });
     if (target.kind === "host") {
       void environment
@@ -54,21 +71,61 @@ export function EnvironmentDialog({
   const update = (index: number, change: Partial<EnvVar>) =>
     setRows((current) => (current ?? []).map((row, i) => (i === index ? { ...row, ...change } : row)));
 
-  async function submit(event: FormEvent) {
+  function plan() {
+    const { rows: current, startupState: st } = latest.current;
+    const vars = current === null || stored.current === null ? null : envDraft(current);
+    const varsChanged = vars !== null && JSON.stringify(vars) !== JSON.stringify(envDraft(stored.current ?? []));
+    const startupChanged = st.changed && st.valid && JSON.stringify(st.value) !== startupWritten.current;
+    return { vars, varsChanged, startupChanged, startup: st.value };
+  }
+
+  async function write(): Promise<SaveResult> {
+    const p = plan();
+    if (!p.varsChanged && !p.startupChanged) return undefined;
+    const prevVars = stored.current ?? [];
+    const prevStartup = latest.current.startupState.loaded;
+    if (p.varsChanged && p.vars) stored.current = await environment.set(target, p.vars);
+    if (p.startupChanged) {
+      await latest.current.startupState.save();
+      startupWritten.current = JSON.stringify(p.startup);
+    }
+    setVersion((v) => v + 1);
+    return () => {
+      if (p.varsChanged) setRows(prevVars);
+      if (p.startupChanged) latest.current.startupState.restore(prevStartup);
+    };
+  }
+
+  const p = plan();
+  const pending = p.varsChanged || p.startupChanged ? JSON.stringify([p.varsChanged ? p.vars : null, p.startupChanged ? p.startup : null]) : null;
+  const autosave = useAutosave({ pending, save: write });
+  const invalid = rows !== null && envDraft(rows) === null;
+
+  async function close() {
+    if (await autosave.flush()) onClose();
+  }
+
+  function submit(event: FormEvent) {
     event.preventDefault();
-    const vars = (rows ?? []).filter((r) => r.name.trim() || r.value);
-    const saved = await save.run(async () => {
-      const result = await environment.set(target, vars);
-      await startupState.save();
-      return result;
-    });
-    if (saved) onDone();
+    void autosave.flush();
   }
 
   const own = new Set((rows ?? []).map((r) => r.name.trim()));
   return (
-    <Dialog title={msgD.env.title(name)} icon={<IconSlidersHorizontal size={18} />} wide onDismiss={onClose}>
-      <form className="stack" onSubmit={submit}>
+    <Dialog
+      title={msgD.env.title(name)}
+      icon={<IconSlidersHorizontal size={18} />}
+      wide
+      onDismiss={() => void close()}
+      aside={<AutosaveStatus autosave={autosave} testId="env-status" />}
+    >
+      <form
+        className="stack"
+        onSubmit={submit}
+        onBlur={() => void autosave.flush()}
+        onKeyDown={(event: KeyboardEvent) => handleUndoKey(event, autosave, pending !== null)}
+        noValidate
+      >
         <p className="muted">{msgD.env.body}</p>
         <p className="hint">{msgD.env.sensitive}</p>
         <ErrorNotice error={load.error} />
@@ -99,6 +156,7 @@ export function EnvironmentDialog({
                   placeholder={msgD.env.name}
                   value={row.name}
                   maxLength={64}
+                  aria-invalid={row.name.trim() !== "" && !validEnvName(row.name) ? true : undefined}
                   spellCheck={false}
                   autoComplete="off"
                   onChange={(e) => update(index, { name: e.target.value })}
@@ -126,14 +184,16 @@ export function EnvironmentDialog({
             {msgD.env.add}
           </button>
         </div>
+        {invalid && (
+          <p className="field-error" role="alert">
+            {msgAutosave.envName} {msgAutosave.envHeld}
+          </p>
+        )}
         <StartupSection target={target} state={startupState} />
-        <ErrorNotice error={save.error} />
+        <ErrorNotice error={autosave.state === "error" && autosave.error ? toAppError(autosave.error) : null} />
         <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose} data-autofocus>
-            {msg.common.cancel}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={save.pending || rows === null || !startupState.valid}>
-            {save.pending ? msg.common.working : msgEnv.save}
+          <button type="button" className="btn btn-primary" onClick={() => void close()} data-autofocus>
+            {msgAutosave.done}
           </button>
         </div>
       </form>

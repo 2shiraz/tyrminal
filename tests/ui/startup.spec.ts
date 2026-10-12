@@ -33,7 +33,7 @@ test("a group's startup snippets run, in order, in its hosts' new shells", async
   // Reorder: Top memory users first.
   await list.getByRole("button", { name: "Move Top memory users earlier" }).click();
   await expect(list.getByRole("listitem").first()).toContainText("Top memory users");
-  await group.getByRole("button", { name: "Save", exact: true }).click();
+  await group.getByRole("button", { name: "Done" }).click();
   await expect(group).toHaveCount(0);
   const saved = await calls(page, "startup_set");
   expect(saved.at(-1)!.args).toMatchObject({ target: { kind: "group" }, snippetIds: [expect.any(String), expect.any(String)] });
@@ -43,7 +43,7 @@ test("a group's startup snippets run, in order, in its hosts' new shells", async
   await page.getByRole("menuitem", { name: "Environment…" }).click();
   const host = page.getByRole("dialog", { name: "Environment for api-gateway" });
   await expect(host.getByTestId("startup-section")).toContainText("Currently the list from Production");
-  await host.getByRole("button", { name: "Cancel" }).click();
+  await host.getByRole("button", { name: "Done" }).click();
 
   // Connecting types both, in order, once the shell is open.
   await connect(page, "api-gateway");
@@ -80,7 +80,7 @@ test("snippets: variables a snippet uses are listed with how the session set the
     await host.getByLabel(`Name ${i + 1}`).fill(name!);
     await host.getByLabel(`Value ${i + 1}`).fill(value!);
   }
-  await host.getByRole("button", { name: "Save", exact: true }).click();
+  await host.getByRole("button", { name: "Done" }).click();
   await expect(host).toHaveCount(0);
 
   await nav(page, "Snippets");

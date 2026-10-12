@@ -49,7 +49,10 @@ test("nothing is sent before Start; results are text; adding one only prefills t
   await expect(panel.getByLabel("Address")).toHaveValue("192.0.2.30");
   await expect(panel.getByLabel("Port")).toHaveValue("22");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await panel.getByRole("button", { name: "Cancel" }).click();
+  // Announced values are only a proposal: closing without an edit creates nothing.
+  await page.waitForTimeout(600);
+  expect(await callsOf(page, "host_save")).toHaveLength(0);
+  await panel.getByRole("button", { name: "Close host details" }).click();
   await expect(panel).toBeHidden();
   expect(await callsOf(page, "host_save")).toHaveLength(0);
 });

@@ -10,4 +10,4 @@ export type HostConnectionInput = { jumpHostId: string | null, proxy: ProxyInput
  * Use the nearest group's route instead (`jump_host_id` and `proxy` are then ignored and the
  * host's own proxy, including its password, is dropped).
  */
-inherit: boolean, keyExchange: KeyExchangeMode, };
+inherit: boolean, keyExchange: KeyExchangeMode, noPortSuggestions: boolean, };
