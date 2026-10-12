@@ -51,6 +51,15 @@ export function useLoaded<T>(load: () => Promise<T>) {
     }
   }, []);
 
+  /**
+   * Changes the loaded value locally, at once (an optimistic update). A load still in flight is
+   * dropped, so it cannot bring back what was there before; reload afterwards for the real state.
+   */
+  const mutate = useCallback((change: (current: T) => T) => {
+    sequence.current += 1;
+    setValue((current) => (current === null ? current : change(current)));
+  }, []);
+
   useEffect(() => {
     void reload();
     return () => {
@@ -58,5 +67,5 @@ export function useLoaded<T>(load: () => Promise<T>) {
     };
   }, [reload]);
 
-  return { value, error, reload };
+  return { value, error, reload, mutate };
 }

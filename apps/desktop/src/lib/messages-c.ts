@@ -221,4 +221,10 @@ export const msgC = {
   newTab: {
     recent: "Recent",
   },
+  // Optimistic vault edits (docs/design/interaction-polish.md, section 1).
+  optimistic: {
+    reverted: (n: number) =>
+      n === 1 ? "That change to 1 host was not saved, so the host is back as it was." : `That change to ${n} hosts was not saved, so they are back as they were.`,
+    saving: "Saving…",
+  },
 };

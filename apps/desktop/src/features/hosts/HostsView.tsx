@@ -44,7 +44,8 @@ import {
   IconX,
 } from "../../components/ui/icons";
 import { msgSftp } from "../sftp/messages";
-import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
+import { type AppError, appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi, toAppError } from "../../lib/ipc";
+import { msgC } from "../../lib/messages-c";
 import { msg } from "../../lib/messages";
 import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
@@ -112,6 +113,13 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 
 /** How Hosts is shown until the user changes it; the choice is kept in preferences. */
 const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "all" } };
+
+/** What an optimistic bulk change looks like before the vault answers (the reload brings the exact result). */
+function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { kind: "delete" }>): HostSummary {
+  if (change.kind === "move_to_group") return { ...host, groupId: change.groupId };
+  if (change.kind === "add_tag") return { ...host, tags: [...new Set([...host.tags, change.tag])].sort() };
+  return { ...host, tags: host.tags.filter((t) => t.toLowerCase() !== change.tag.toLowerCase()) };
+}
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
 function rangeBetween(order: string[], from: string, to: string): string[] {
@@ -181,6 +189,9 @@ export function HostsView({
   const version = useRef(0);
   const remove = useAction();
   const action = useAction();
+  // Optimistic edits: hosts whose change is still being saved, and the error of one that failed.
+  const [pendingIds, setPending] = useState<ReadonlySet<string>>(new Set());
+  const [editError, setEditError] = useState<AppError | null>(null);
   const keyList = keys.value ?? [];
   const groupList = groups.value ?? [];
   // A remembered group that no longer exists shows every host.
@@ -289,6 +300,36 @@ export function HostsView({
   }, [hosts.value, query, searched, sort, filter, groupList]);
 
   const total = hosts.value?.length ?? 0;
+  /**
+   * A local, reversible edit (move to a group, add or remove a tag) shows at once; the vault call
+   * runs behind it. On failure the hosts go back to exactly what they were, the selection comes
+   * back for a retry, and an inline error says so. Never used for deletes, connecting, trust or
+   * secrets.
+   */
+  async function applyOptimistic(ids: string[], change: Exclude<BulkHostChange, { kind: "delete" }>) {
+    const chosen = new Set(ids);
+    const before = new Map((hosts.value ?? []).filter((h) => chosen.has(h.id)).map((h) => [h.id, h]));
+    setEditError(null);
+    hosts.mutate((list) => list.map((h) => (chosen.has(h.id) ? applyBulkChange(h, change) : h)));
+    setPending((current) => new Set([...current, ...ids]));
+    setSelected(new Set());
+    try {
+      const changed = await hostsApi.bulk(ids, change);
+      notify("success", msg.hosts.bulkDone(changed));
+      reload();
+    } catch (error) {
+      hosts.mutate((list) => list.map((h) => before.get(h.id) ?? h));
+      setSelected(new Set(ids));
+      setEditError({ ...toAppError(error), message: `${msgC.optimistic.reverted(ids.length)} ${toAppError(error).message}` });
+    } finally {
+      setPending((current) => {
+        const next = new Set(current);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+    }
+  }
+
   const reload = () => {
     void hosts.reload();
     void recent.reload();
@@ -536,6 +577,7 @@ export function HostsView({
           )}
 
           <ErrorNotice error={hosts.error ?? remove.error ?? action.error} />
+          <ErrorNotice error={editError} />
 
           {hosts.value === null && !hosts.error && <SkeletonRows count={4} height={64} />}
 
@@ -560,6 +602,7 @@ export function HostsView({
                       className="host-card"
                       data-connected={isConnected}
                       data-active={panelHostId === host.id}
+                      data-pending={pendingIds.has(host.id) || undefined}
                       aria-label={host.label}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
@@ -649,7 +692,7 @@ export function HostsView({
           ) : (
             <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
               {filtered.map((host) => (
-                <li key={host.id} data-flip-key={host.id} data-active={panelHostId === host.id}>
+                <li key={host.id} data-flip-key={host.id} data-active={panelHostId === host.id} data-pending={pendingIds.has(host.id) || undefined}>
                   <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onClick={(event) => toggle(host.id, event)} readOnly />
                   {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                   <div className="row-main">
@@ -856,6 +899,12 @@ export function HostsView({
           groups={groupList}
           onClose={() => setBulk(null)}
           onApply={async (change) => {
+            if (change.kind !== "delete") {
+              setBulk(null);
+              await applyOptimistic(selectedIds, change);
+              return;
+            }
+            // Deleting is never optimistic: the hosts stay until the vault confirms.
             const changed = await action.run(() => hostsApi.bulk(selectedIds, change));
             setBulk(null);
             if (changed !== undefined && changed !== null) {
