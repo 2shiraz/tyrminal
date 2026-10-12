@@ -134,126 +134,130 @@ export function TabStrip({
   };
 
   return (
-    <div className="tabstrip" role="tablist" aria-label={msg.nav.sessions}>
-      <div
-        ref={(el) => {
-          if (el) tabRefs.current.set(-1, el);
-        }}
-        role="tab"
-        tabIndex={ws.active === null ? 0 : -1}
-        className="tab tab-page"
-        aria-selected={ws.active === null}
-        onClick={() => onSelect(null)}
-        onKeyDown={(event) => onTabKey(event, -1, null)}
-      >
-        <PageIcon size={15} />
-        <span className="tab-label">{msg.nav[destination]}</span>
-      </div>
+    <div className="tabstrip">
+      {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
+      <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions}>
+        <div
+          ref={(el) => {
+            if (el) tabRefs.current.set(-1, el);
+          }}
+          role="tab"
+          tabIndex={ws.active === null ? 0 : -1}
+          className="tab tab-page"
+          aria-selected={ws.active === null}
+          onClick={() => onSelect(null)}
+          onKeyDown={(event) => onTabKey(event, -1, null)}
+        >
+          <PageIcon size={15} />
+          <span className="tab-label">{msg.nav[destination]}</span>
+        </div>
 
-      {ws.tabs.map((tab, index) => {
-        const pane = ws.panes[tab.focused];
-        const title = tabTitle(ws, tab);
-        const selected = ws.active === tab.id;
-        const paneCount = panesOf(tab.layout).length;
-        const status = tabStatus(ws, tab);
-        return (
-          <div
-            key={tab.id}
-            ref={(el) => {
-              if (el) tabRefs.current.set(tab.id, el);
-              else tabRefs.current.delete(tab.id);
-            }}
-            role="tab"
-            tabIndex={selected ? 0 : -1}
-            className="tab"
-            aria-selected={selected}
-            draggable={renaming !== tab.id}
-            data-dragging={drag?.from === index}
-            data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
-            data-status={status.indicator}
-            data-unread={status.unread || undefined}
-            onClick={() => onSelect(tab.id)}
-            onDoubleClick={() => onRenaming(tab.id)}
-            onAuxClick={(event) => {
-              if (event.button === 1) onClose(tab.id);
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setMenu({ id: tab.id, point: { x: event.clientX, y: event.clientY } });
-            }}
-            onKeyDown={(event) => onTabKey(event, index, tab.id)}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", "");
-              setDrag({ from: index, over: null, side: "before" });
-            }}
-            onDragOver={(event) => {
-              if (!drag) return;
-              event.preventDefault();
-              const rect = event.currentTarget.getBoundingClientRect();
-              const side = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
-              if (drag.over !== index || drag.side !== side) setDrag({ ...drag, over: index, side });
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              if (drag && drag.over !== null) {
-                let to = drag.side === "before" ? drag.over : drag.over + 1;
-                if (drag.from < to) to -= 1;
-                onMove(drag.from, to);
-              }
-              setDrag(null);
-            }}
-            onDragEnd={() => setDrag(null)}
-          >
-            <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
-            {renaming === tab.id ? (
-              <input
-                className="tab-rename"
-                aria-label={msg.nav.renameTab}
-                defaultValue={title}
-                maxLength={80}
-                autoFocus
-                onFocus={(event) => event.currentTarget.select()}
-                onClick={(event) => event.stopPropagation()}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === "Enter") {
+        {ws.tabs.map((tab, index) => {
+          const pane = ws.panes[tab.focused];
+          const title = tabTitle(ws, tab);
+          const selected = ws.active === tab.id;
+          const paneCount = panesOf(tab.layout).length;
+          const status = tabStatus(ws, tab);
+          return (
+            <div
+              key={tab.id}
+              ref={(el) => {
+                if (el) tabRefs.current.set(tab.id, el);
+                else tabRefs.current.delete(tab.id);
+              }}
+              role="tab"
+              tabIndex={selected ? 0 : -1}
+              className="tab"
+              aria-selected={selected}
+              draggable={renaming !== tab.id}
+              data-dragging={drag?.from === index}
+              data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
+              data-status={status.indicator}
+              data-unread={status.unread || undefined}
+              onClick={() => onSelect(tab.id)}
+              onDoubleClick={() => onRenaming(tab.id)}
+              onAuxClick={(event) => {
+                if (event.button === 1) onClose(tab.id);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ id: tab.id, point: { x: event.clientX, y: event.clientY } });
+              }}
+              onKeyDown={(event) => onTabKey(event, index, tab.id)}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", "");
+                setDrag({ from: index, over: null, side: "before" });
+              }}
+              onDragOver={(event) => {
+                if (!drag) return;
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const side = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+                if (drag.over !== index || drag.side !== side) setDrag({ ...drag, over: index, side });
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (drag && drag.over !== null) {
+                  let to = drag.side === "before" ? drag.over : drag.over + 1;
+                  if (drag.from < to) to -= 1;
+                  onMove(drag.from, to);
+                }
+                setDrag(null);
+              }}
+              onDragEnd={() => setDrag(null)}
+            >
+              <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
+              {renaming === tab.id ? (
+                <input
+                  className="tab-rename"
+                  aria-label={msg.nav.renameTab}
+                  defaultValue={title}
+                  maxLength={80}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Enter") {
+                      onRename(tab.id, event.currentTarget.value);
+                      onRenaming(null);
+                      tabRefs.current.get(tab.id)?.focus();
+                    } else if (event.key === "Escape") {
+                      onRenaming(null);
+                      tabRefs.current.get(tab.id)?.focus();
+                    }
+                  }}
+                  onBlur={(event) => {
                     onRename(tab.id, event.currentTarget.value);
                     onRenaming(null);
-                    tabRefs.current.get(tab.id)?.focus();
-                  } else if (event.key === "Escape") {
-                    onRenaming(null);
-                    tabRefs.current.get(tab.id)?.focus();
-                  }
+                  }}
+                />
+              ) : (
+                <span className="tab-label" title={pane ? `${title} — ${pane.identity}` : title}>
+                  {title}
+                  {pane?.remoteTitle && !tab.customTitle && <span className="tab-title"> · {pane.remoteTitle}</span>}
+                  {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
+                </span>
+              )}
+              <span className="visually-hidden">{msgC.status.describe(status)}</span>
+              {/* A pointer target only: a focusable control may not sit inside a tab. From the
+                  keyboard a tab closes with Delete or from its menu (Shift+F10). */}
+              <span
+                className="tab-close"
+                aria-hidden="true"
+                title={msg.nav.closeTab(title)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClose(tab.id);
                 }}
-                onBlur={(event) => {
-                  onRename(tab.id, event.currentTarget.value);
-                  onRenaming(null);
-                }}
-              />
-            ) : (
-              <span className="tab-label" title={pane ? `${title} — ${pane.identity}` : title}>
-                {title}
-                {pane?.remoteTitle && !tab.customTitle && <span className="tab-title"> · {pane.remoteTitle}</span>}
-                {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
+              >
+                <IconX size={14} />
               </span>
-            )}
-            <span className="visually-hidden">{msgC.status.describe(status)}</span>
-            <button
-              type="button"
-              className="tab-close"
-              tabIndex={-1}
-              aria-label={msg.nav.closeTab(title)}
-              onClick={(event) => {
-                event.stopPropagation();
-                onClose(tab.id);
-              }}
-            >
-              <IconX size={14} />
-            </button>
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
+      </div>
 
       <IconButton
         className="tab-new"

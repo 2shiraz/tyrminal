@@ -84,6 +84,11 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
    Native tests use the palette and real buttons instead.
 3. A pane split repeatedly halves to zero width; WebDriver cannot click its header. The native
    test tiles the panes (grid) before using a header button.
+7. Open: one local `pnpm test:native` run (right after `pnpm build:e2e`) failed 3 tests of the
+   "terminal with real applications" suite in 119 s (normally ~30 s); the runner kept only the
+   passing tail, so the errors were not captured. Not reproduced in 4 reruns. Watching CI for it.
+8. CI: on macOS the palette is Cmd+K (native tests used Ctrl+Shift+K); Windows' local shell does
+   not expand `$((…))`. Native tests now use the platform chord and a literal token.
 5. WHATWG `TextDecoder("iso-8859-1")` is Windows-1252; offered as one choice.
 6. xterm drops an invalid UTF-8 byte rather than showing U+FFFD.
 4. The broadcast UI test typed while the focused terminal was still answering a cursor-position

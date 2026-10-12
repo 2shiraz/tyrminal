@@ -3326,3 +3326,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   opacity: 0.8;
   pointer-events: none;
 }
+
+.tabstrip-tabs {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 2px;
+  align-self: stretch;
+}

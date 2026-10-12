@@ -194,3 +194,8 @@ Never merge these by hand; regenerate them after resolving the sources:
   one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
   shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
   Files without the field load as before.
+- **C → A (done):** the two axe findings in `TabStrip.tsx`: the tablist now holds only tabs (new-tab
+  and layout buttons sit beside it), and the close control is a non-focusable pointer target
+  (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in
+  `tests/ui/accessibility.spec.ts` when your PR lands; `tests/ui/workspaces.spec.ts` checks the
+  same structure meanwhile.

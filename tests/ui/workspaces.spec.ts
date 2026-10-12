@@ -333,7 +333,7 @@ test("templates: restore opens every pane disconnected; only Connect opens a ses
   await page.getByRole("dialog").getByLabel("Layout name").fill("Ops");
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("button", { name: /^Layout: Ops$/ })).toBeVisible();
-  await page.getByRole("button", { name: "Close prod" }).click();
+  await page.getByRole("tab", { name: /prod/ }).locator(".tab-close").click();
   await expect(terminalTabs(page)).toHaveCount(0);
   await expect.poll(async () => (await calls(page, "session_close")).length).toBe(2);
   const opened = (await calls(page, "session_open_ssh")).length;
@@ -535,4 +535,24 @@ test("character encoding: a legacy encoding decodes output and encodes input; wh
   await page.keyboard.type("日");
   await expect(page.getByText("Not sent: 日 cannot be written in Western (Windows-1252 / ISO-8859-1).")).toBeVisible();
   expect(await calls(page, "session_write")).toHaveLength(before);
+});
+
+test("tab strip structure: the tablist holds only tabs, and no tab contains a focusable control", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+T");
+  const report = await page.evaluate(() => {
+    const list = document.querySelector('[role="tablist"]')!;
+    const children = [...list.children].map((c) => c.getAttribute("role"));
+    const focusable = [...list.querySelectorAll('[role="tab"]')].flatMap((tab) =>
+      [...tab.querySelectorAll("button, a[href], input, select, textarea, [tabindex]")].map((e) => e.outerHTML.slice(0, 60)),
+    );
+    return { children, focusable };
+  });
+  expect(new Set(report.children)).toEqual(new Set(["tab"]));
+  expect(report.focusable).toEqual([]);
+  // Closing stays possible without a pointer: Delete on the focused tab.
+  await page.getByRole("tab", { name: /Local terminal/ }).focus();
+  await page.keyboard.press("Delete");
+  await expect(terminalTabs(page)).toHaveCount(1);
 });
