@@ -8,8 +8,8 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 |---|---|---|
 | 00 Repository baseline | Gate met | `docs/reports/phase-00.md` |
 | 01 Feasibility spikes | Gate met on macOS; Linux in this sandbox; Windows via CI in progress | `docs/reports/phase-01.md` |
-| 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer fault injection: done. Disk-full injection and a screen-lock hook remain | `docs/reports/phase-02-03.md` |
-| 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done; native verification of reconnect pending | `docs/reports/phase-02-03.md` |
+| 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer and disk-full fault injection: done. An OS screen-lock hook remains | `docs/reports/phase-02-03.md` |
+| 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done (native test kills the server process; passes on Linux) | `docs/reports/phase-02-03.md` |
 | UX track (§3 of the 2026-10 brief) | UI redesign, first-class terminal, snippets: done and tested on Linux; CI on macOS/Windows in progress | this file |
 | 04–15 | Not started | |
 
@@ -48,6 +48,9 @@ Windows reaches the lab (host-key ownership fix pushed next).
 11. Visual baselines are only stable in one pinned image (fonts); record them with
     `pnpm test:ui:update:container`.
 12. A session state change must not steal focus from a field the user moved to (tab rename).
+13. russh ends a channel stream with `ChannelMsg::Close` when the server closes it and with
+    nothing when the connection is gone; only the second is a lost link (auto-reconnect).
+14. Debian's packaged node does not execute under WSL 1; CI uses the official build there.
 
 ## Next tasks, in order
 
@@ -58,10 +61,9 @@ Windows reaches the lab (host-key ownership fix pushed next).
    too; the local Win32-OpenSSH mode remains for developers without WSL.
 3. When all three are green: mark matrix rows VERIFIED with `verified_commit`, merge the PR,
    write `docs/releases/v0.1.0-beta.1.md`, run the release workflow (pre-release, unsigned).
-4. Phase 02 remainder: disk-full fault injection; OS screen-lock hook (needs platform APIs and
-   an ADR for any FFI); verify sleep-lock on a real suspend.
-5. Native test for auto-reconnect (drop a real connection from the lab side).
-6. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
+4. Phase 02 remainder: OS screen-lock hook (needs platform APIs and an ADR for any FFI);
+   verify sleep-lock on a real suspend.
+5. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
 
 ## Questions for the owner (none block current work)
 
