@@ -7,11 +7,14 @@ import { IconPlus, IconSlidersHorizontal, IconX } from "../../components/ui/icon
 import { environment } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgEnv } from "../../lib/messages-env";
 import { useAction } from "../../lib/useAsync";
+import { StartupSection, useStartup } from "./StartupSection";
 
 /**
  * Environment variables of a host or group (SNP-11/12). For a host, the variables it inherits
- * are listed with their group, and marked when the host overrides them.
+ * are listed with their group, and marked when the host overrides them. Startup snippets
+ * (SNP-08) are set here too and saved with their own command.
  */
 export function EnvironmentDialog({
   target,
@@ -28,6 +31,7 @@ export function EnvironmentDialog({
   const [inherited, setInherited] = useState<EffectiveEnvVar[]>([]);
   const load = useAction();
   const save = useAction();
+  const startupState = useStartup(target);
 
   useEffect(() => {
     let live = true;
@@ -53,7 +57,11 @@ export function EnvironmentDialog({
   async function submit(event: FormEvent) {
     event.preventDefault();
     const vars = (rows ?? []).filter((r) => r.name.trim() || r.value);
-    const saved = await save.run(() => environment.set(target, vars));
+    const saved = await save.run(async () => {
+      const result = await environment.set(target, vars);
+      await startupState.save();
+      return result;
+    });
     if (saved) onDone();
   }
 
@@ -118,13 +126,14 @@ export function EnvironmentDialog({
             {msgD.env.add}
           </button>
         </div>
+        <StartupSection target={target} state={startupState} />
         <ErrorNotice error={save.error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose} data-autofocus>
             {msg.common.cancel}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={save.pending || rows === null}>
-            {save.pending ? msg.common.working : msgD.env.save}
+          <button type="submit" className="btn btn-primary" disabled={save.pending || rows === null || !startupState.valid}>
+            {save.pending ? msg.common.working : msgEnv.save}
           </button>
         </div>
       </form>

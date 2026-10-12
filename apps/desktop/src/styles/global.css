@@ -3289,3 +3289,38 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .env-inherited li.env-overridden .mono {
   text-decoration: line-through;
 }
+
+/* ===================================================================== startup snippets */
+
+.startup-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) + 1.2em);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: var(--text-sm);
+}
+
+.startup-list li > * {
+  vertical-align: middle;
+}
+
+.startup-list li > span {
+  margin-right: var(--space-2);
+}
+
+.var-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+
+.var-refs li[data-state="refused"] {
+  color: var(--warning);
+}

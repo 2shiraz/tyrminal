@@ -2233,3 +2233,118 @@ async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_promp
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
 }
+
+/// SNP-08 with SNP-13: a host's startup snippets (inherited from its group) are typed once the
+/// shell is open, with the host's variables already set, and the connection log names the
+/// variables, the refusal and each snippet, never a value. Nothing of this happens before the
+/// host key is trusted: a cancelled trust prompt ends the session with no environment request,
+/// no startup snippet and no log line about either.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by_name() {
+    use tyrminal_core::contracts::{EnvVar, GroupInput, HostProtocol, SettingsTarget, SnippetInput};
+    let f = fixture().await;
+    let v = &f.core.vault;
+    let key_id = f.import("ed25519", None, false).await;
+    let group = v
+        .save_group(GroupInput {
+            id: None,
+            name: "Lab".into(),
+            parent_id: None,
+            username: None,
+            port: None,
+            key_id: None,
+        })
+        .await
+        .unwrap();
+    let host_id = v
+        .save_host(HostInput {
+            id: None,
+            label: "startup".into(),
+            address: "127.0.0.1".into(),
+            port: Some(f.lab.port("a")),
+            username: f.lab.str("/user"),
+            auth: HostAuthInput::Key { key_id },
+            group_id: Some(group.id.clone()),
+            tags: Vec::new(),
+            protocol: HostProtocol::Ssh,
+            terminal: Default::default(),
+            forward_agent: false,
+        })
+        .await
+        .unwrap()
+        .id;
+    let save =
+        |name: &str, text: &str| SnippetInput { id: None, name: name.into(), folder: String::new(), text: text.into() };
+    let first = v.save_snippet(save("Announce", "echo startup-$((6*7))-$TYR_APP")).await.unwrap();
+    let second = v.save_snippet(save("Second", "echo second-$((7*7))")).await.unwrap();
+    let gone = v.save_snippet(save("Gone", "echo never-$((1+1))")).await.unwrap();
+    let group_target = SettingsTarget::Group { group_id: group.id.clone() };
+    v.set_startup_snippets(group_target, Some(vec![first.id.clone(), gone.id.clone(), second.id.clone()]))
+        .await
+        .unwrap();
+    v.delete_snippet(&gone.id).await.unwrap();
+    let secret_value = "orders-value-never-logged";
+    v.set_env_vars(
+        SettingsTarget::Host { host_id: host_id.clone() },
+        vec![
+            EnvVar { name: "TYR_APP".into(), value: secret_value.into() },
+            EnvVar { name: "NOT_ACCEPTED_BY_LAB".into(), value: "x".into() },
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Cancelled trust: no environment, no startup, and the log says nothing about either.
+    let mut refused = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = refused.until_not_state().await;
+    refused.trust(&trust_prompt_id(&prompt), TrustDecision::Cancel);
+    loop {
+        match refused.event().await {
+            SessionEvent::Closed { error, .. } => {
+                assert_eq!(error.map(|e| e.code), Some(ErrorCode::Cancelled));
+                break;
+            }
+            event @ SessionEvent::Environment { .. } => panic!("sent before trust: {event:?}"),
+            _ => {}
+        }
+    }
+    let log = f.core.sessions.diagnostics(WINDOW, &refused.session).unwrap().join("\n");
+    assert!(!log.contains("environment") && !log.contains("startup"), "{log}");
+    assert!(!refused.text.contains("startup-42"), "{:?}", refused.text);
+
+    // Trusted: variables first (one refused), then the startup snippets in order.
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, event) = client.until_not_state().await;
+    assert_eq!(
+        event,
+        SessionEvent::Environment {
+            sent: vec!["TYR_APP".into(), "NOT_ACCEPTED_BY_LAB".into()],
+            rejected: vec!["NOT_ACCEPTED_BY_LAB".into()],
+        }
+    );
+    client.until_connected().await;
+    client.output_until(&format!("startup-42-{secret_value}")).await;
+    client.output_until("second-49").await;
+    assert!(!client.text.contains("never-2"), "a deleted startup snippet must not run");
+    let first_at = client.text.find("startup-42").unwrap();
+    assert!(first_at < client.text.find("second-49").unwrap(), "startup snippets run in order");
+
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    for line in [
+        "environment: 1 of 2 set (TYR_APP); refused by the server (AcceptEnv): NOT_ACCEPTED_BY_LAB",
+        "startup snippet \"Announce\" typed",
+        "startup snippet skipped: it was deleted",
+        "startup snippet \"Second\" typed",
+    ] {
+        assert!(log.contains(line), "missing {line:?} in:\n{log}");
+    }
+    assert!(!log.contains(secret_value) && !log.contains("echo "), "values and snippet text are never logged:\n{log}");
+    let shell_at = log.find("shell opened").unwrap();
+    assert!(log.find("startup snippet \"Announce\"").unwrap() > shell_at, "startup runs after the shell opens");
+    assert!(log.find("host key").unwrap() < log.find("environment:").unwrap(), "environment after trust");
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
