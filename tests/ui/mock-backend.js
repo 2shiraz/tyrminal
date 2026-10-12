@@ -194,6 +194,8 @@ export function installMockBackend(options) {
     const text = new TextDecoder().decode(bytes);
     // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
     window.__mockReceived = (window.__mockReceived ?? "") + text;
+    // terminal input: the same per session, in order (IME, broadcast exclusion tests).
+    (window.__mockInputBySession ??= {})[sessionId] = (window.__mockInputBySession[sessionId] ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -840,6 +842,14 @@ export function installMockBackend(options) {
     state.sessions.delete(last.id);
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
+  };
+  // terminal input: drop the n-th open session (creation order), not only the newest.
+  window.__mockDropAt = (index) => {
+    const s = [...state.sessions.values()][index];
+    if (!s) return;
+    state.sessions.delete(s.id);
+    channelSend(s.events, { type: "state", state: "failed" });
+    channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
   window.__mockCalls = calls;
   window.__mockOpenedLinks = [];

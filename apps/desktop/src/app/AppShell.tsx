@@ -1,5 +1,5 @@
 import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
@@ -24,6 +24,7 @@ import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
+import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
 import { msgC } from "../lib/messages-c";
@@ -120,9 +121,12 @@ function Shell() {
   const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
-  // Tabs in broadcast mode. Kept in memory only: never saved, and switched off as soon as any
-  // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
-  const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
+  // Tabs in broadcast mode with the panes the user confirmed. Kept in memory only: never saved,
+  // and switched off as soon as a confirmed pane stops being connected (a reconnect never
+  // resumes broadcasting silently). Panes left out in the review neither send nor receive.
+  const [members, setMembers] = useState<BroadcastMembers>(new Map());
+  const broadcasting = useMemo<ReadonlySet<number>>(() => new Set(members.keys()), [members]);
+  const stopBroadcast = useCallback((tabId: number) => setMembers((current) => withoutTab(current, tabId)), []);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -148,19 +152,17 @@ function Shell() {
   const tabCanBroadcast = tab ? panesOf(tab.layout).length > 1 && broadcastPanes(tab.id).length === panesOf(tab.layout).length : false;
 
   useEffect(() => {
-    // Off when a broadcasting tab is gone, has one pane, or any pane is not connected.
-    setBroadcasting((current) => {
-      let next: Set<number> | null = null;
-      for (const id of current) {
-        const t = ws.tabs.find((x) => x.id === id);
-        const panes = t ? panesOf(t.layout) : [];
-        if (!t || panes.length < 2 || panes.some((p) => statuses[p]?.state !== "connected")) {
-          next ??= new Set(current);
-          next.delete(id);
-        }
-      }
-      return next ?? current;
-    });
+    // Off when a broadcasting tab is gone, or a confirmed pane left it, dropped or reconnected.
+    setMembers((current) =>
+      pruneMembers(
+        current,
+        (tabId) => {
+          const t = ws.tabs.find((x) => x.id === tabId);
+          return t ? panesOf(t.layout) : null;
+        },
+        (paneId) => (statuses[paneId]?.state === "connected" ? (handles.current.get(paneId)?.sessionId() ?? null) : null),
+      ),
+    );
   }, [ws, statuses]);
 
   /** The panes (and their current sessions) that broadcast in `tabId` would send to. */
@@ -176,12 +178,13 @@ function Shell() {
 
   const relayInput = useCallback(
     (tabId: number, from: number, bytes: Uint8Array) => {
-      if (!broadcasting.has(tabId)) return;
-      for (const id of broadcastPanes(tabId)) {
-        if (id !== from) handles.current.get(id)?.receiveBroadcast(bytes);
-      }
+      const live = (paneId: number) => {
+        const h = handles.current.get(paneId);
+        return statuses[paneId]?.state === "connected" && h?.broadcastable() === true ? (h.sessionId() ?? null) : null;
+      };
+      for (const id of relayTargets(members, tabId, from, live)) handles.current.get(id)?.receiveBroadcast(bytes);
     },
-    [broadcasting, broadcastPanes],
+    [members, statuses],
   );
 
   const navigate = useCallback((next: Destination) => {
@@ -314,7 +317,7 @@ function Shell() {
       for (const h of live) h?.release(true);
       try {
         await detachApi.open(input);
-        setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
+        stopBroadcast(tabId);
         setWs((current) => closeTab(current, tabId));
         notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
       } catch (error) {
@@ -626,6 +629,7 @@ function Shell() {
                   else handles.current.delete(paneId);
                 }}
                 broadcasting={broadcasting}
+                broadcastPaneIds={memberPanes(members)}
                 onUserInput={relayInput}
               />
             )}
@@ -641,11 +645,10 @@ function Shell() {
           onToggleFiles={terminalVisible ? () => togglePanel("files") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
-          broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
+          broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
           onStopBroadcast={() => {
             if (!tab) return;
-            const id = tab.id;
-            setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+            stopBroadcast(tab.id);
           }}
         />
       </div>
@@ -729,7 +732,7 @@ function Shell() {
               ? () => {
                   const id = tab.id;
                   if (broadcasting.has(id)) {
-                    setBroadcasting((current) => new Set([...current].filter((x) => x !== id)));
+                    stopBroadcast(id);
                     return;
                   }
                   setReviewing({ tabId: id, targets: broadcastTargets(id) });
@@ -770,7 +773,7 @@ function Shell() {
             setReviewing(null);
             focusedHandle()?.focus();
           }}
-          onConfirm={() => {
+          onConfirm={(chosen) => {
             const { tabId, targets } = reviewing;
             setReviewing(null);
             const t = wsRef.current.tabs.find((x) => x.id === tabId);
@@ -783,7 +786,8 @@ function Shell() {
             if (!same) {
               notify("danger", msgC.broadcast.changed);
             } else {
-              setBroadcasting((current) => new Set([...current, tabId]));
+              const confirmed = new Map(targets.filter((x) => chosen.has(x.paneId)).map((x) => [x.paneId, x.sessionId] as const));
+              if (confirmed.size >= 2) setMembers((current) => withTab(current, tabId, confirmed));
             }
             focusedHandle()?.focus();
           }}

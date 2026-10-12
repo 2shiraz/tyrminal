@@ -254,3 +254,14 @@ Never merge these by hand; regenerate them after resolving the sources:
   capability too and lets the test-only `e2e-automation` capability reach `detached-*` windows;
   `tests/native/webdriver.mjs` gains `windowHandles`/`windowHandle`/`switchToWindow` in a marked
   block; `tests/ui/mock-backend.js` takes `options.windowLabel` for a page playing a detached window.
+
+**From the terminal-input branch (additive edits in files other sessions own; please keep them):**
+
+- `components/layout/PaneGrid.tsx`: optional prop `broadcastPaneIds`; `data-broadcast` is
+  `"excluded"` for a pane left out of a broadcasting tab, and its header says so (one line).
+- `app/AppShell.tsx`: broadcast state is `members` (confirmed panes and their sessions, from
+  `features/broadcast/members.ts`); `broadcasting` is derived from it, so other uses are unchanged.
+- `features/layouts/BroadcastReview.tsx`: per-pane checkboxes; `onConfirm` receives the chosen panes.
+- `features/terminal/TerminalController.ts`: `onKey` leaves IME-processed keys to xterm (3 lines).
+- `tests/ui/mock-backend.js`: per-session input log (`__mockInputBySession`) and `__mockDropAt(i)`.
+- `tests/ui/tunnels.spec.ts`: closes the tab through `.tab-close` (no nested button since PR #7).

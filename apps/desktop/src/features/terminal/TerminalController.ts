@@ -428,6 +428,9 @@ export class TerminalController {
   /** Returns false for keys the terminal must not process. */
   private onKey(event: KeyboardEvent): boolean {
     if (event.type !== "keydown") return true;
+    // Keys an input method is processing (CJK composition) belong to it: no shortcut, copy or
+    // paste handling here, so xterm's composition helper sees every one of them.
+    if (event.isComposing || event.keyCode === 229) return true;
     // Application shortcuts are handled by the shell before the terminal sees them.
     if (actionFor(event) || tabIndexFor(event) !== null) return false;
     if (matches(event, bindings.copy)) {

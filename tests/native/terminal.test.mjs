@@ -109,6 +109,34 @@ describe("terminal with real applications", { concurrency: false }, () => {
     assert.ok(Math.abs(xs[4] - xs[5]) <= 1, `combining mark: ${xs[4]} vs ${xs[5]}`);
   });
 
+  test("text composed through an input method reaches the shell once, as UTF-8 (TRM-11)", async () => {
+    // WebDriver cannot drive the platform IME, so the composition is played as the WebView
+    // delivers it to the page: compositionstart, preedit updates in the input element, then
+    // compositionend. Everything after that (xterm's composition handling, the encoder, IPC,
+    // the core and the real shell) is the production path.
+    await t.type("printf %s ");
+    const composed = await s.execute(`
+      const ta = document.querySelector(".pane[data-focused=true] .xterm-helper-textarea");
+      ta.focus();
+      const at = ta.value.length;
+      ta.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      for (const preedit of ["に", "にほん", "にほんご"]) {
+        ta.value = ta.value.slice(0, at) + preedit;
+        ta.dispatchEvent(new CompositionEvent("compositionupdate", { data: preedit }));
+      }
+      const preview = document.querySelector(".pane[data-focused=true] .composition-view");
+      const shown = preview?.classList.contains("active") ? preview.textContent : null;
+      ta.value = ta.value.slice(0, at) + "日本語";
+      ta.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語" }));
+      return shown;`);
+    assert.equal(composed, "にほんご", "the preedit text is shown while composing");
+    // The committed characters arrive once: od prints exactly the nine UTF-8 bytes of 日本語.
+    await t.type(" | od -An -tx1; echo IME-DONE\n");
+    const text = await t.waitForText(/^IME-DONE$/m, "od output");
+    assert.match(text, /e6 97 a5 e6 9c ac e8 aa 9e\s*\n/);
+    assert.doesNotMatch(text, /e6 97 a5 e6 9c ac e8 aa 9e e6/, "composed text sent once");
+  });
+
   test("every terminal row is inside the visible terminal area", async () => {
     // A row pitch larger than the one the size was fitted with pushes the last rows under the
     // status bar, where a full-screen application's bottom line (htop's F10 Quit) is hidden.
