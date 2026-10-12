@@ -72,3 +72,9 @@ The release-policy check separately asserts no HTTP client in the desktop featur
 - A Rust SSH server as the lab on macOS/Windows: rejected; the spec requires real OpenSSH.
 - Docker on macOS runners: not available on Apple Silicon hosted runners.
 - WSL on Windows runners: would test a Linux sshd, not the Windows behavior we need.
+
+## Addendum (2026-10-12)
+
+| Item | Version | License | Reason |
+|---|---|---|---|
+| `@axe-core/playwright` (pulls `axe-core` 4.13.x), UI tests only | =4.13.0 | MPL-2.0 | Automated WCAG 2.2 A/AA audit of the main screens (`tests/ui/accessibility.spec.ts`); never shipped |

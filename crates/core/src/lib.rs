@@ -14,6 +14,7 @@ mod import;
 mod inventory;
 mod preferences;
 mod records;
+mod remote_copy;
 mod sessions;
 mod validate;
 mod vault;
@@ -25,7 +26,11 @@ pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
-pub use tyrminal_platform::{MemorySecretStore, OsSecretStore, SecretStore, UnavailableSecretStore, restrict_to_owner};
+pub use tyrminal_platform::{
+    MemorySecretStore, OsSecretStore, ScreenLockSupport, SecretStore, UnavailableSecretStore, restrict_to_owner,
+    watch_screen_lock,
+};
+pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
 // agent D: inventory and snippets
 pub use importers::key_text_is_encrypted;

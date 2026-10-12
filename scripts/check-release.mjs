@@ -17,6 +17,21 @@ const check = (ok, message) => {
   if (!ok) problems.push(message);
 };
 
+// ---- first-party unsafe (ADR 0007) ----
+// Every crate inherits `unsafe_code = "forbid"` from the workspace; only crates/os-hooks may relax it.
+const rootToml = readFileSync(join(root, "Cargo.toml"), "utf8");
+check(/unsafe_code\s*=\s*"forbid"/.test(rootToml), "the workspace no longer forbids unsafe code");
+for (const base of [join(root, "crates"), join(root, "apps", "desktop")]) {
+  for (const name of readdirSync(base)) {
+    const manifest = join(base, name, name === "src-tauri" ? "" : "", "Cargo.toml");
+    if (!existsSync(manifest)) continue;
+    const text = readFileSync(manifest, "utf8");
+    const own = /\[lints\.rust\]/.test(text) || !/\[lints\]\s*\n\s*workspace\s*=\s*true/.test(text);
+    if (name === "os-hooks") check(/unsafe_code\s*=\s*"deny"/.test(text), "crates/os-hooks must deny unsafe outside its FFI modules");
+    else check(!own, `${manifest.slice(root.length + 1)} does not inherit the workspace lints (unsafe must stay forbidden)`);
+  }
+}
+
 // ---- configuration ----
 const config = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8"));
 const csp = config.app?.security?.csp ?? {};

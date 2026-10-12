@@ -48,7 +48,9 @@ pub async fn session_open_local(
     events: Channel<SessionEvent>,
 ) -> Result<SessionOpened, IpcError> {
     let sink = Arc::new(ChannelSink { output, events });
-    state.core()?.sessions.open_local(window.label(), cols, rows, sink).await
+    let core = state.core()?;
+    let shell = core.preferences.get().local_shell;
+    core.sessions.open_local_with(window.label(), cols, rows, shell, sink).await
 }
 
 /// Terminal input. The body is the raw bytes (no JSON array of numbers); the session id travels

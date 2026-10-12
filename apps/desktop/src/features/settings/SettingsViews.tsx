@@ -17,7 +17,7 @@ import {
   relativeTime,
 } from "../../components/ui/controls";
 import { IconFingerprint, IconMonitor, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
-import { knownHosts as knownHostsApi, vault } from "../../lib/ipc";
+import { knownHosts as knownHostsApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
@@ -122,6 +122,13 @@ export function SettingsView() {
   const [quickKey, setQuickKey] = useState(0);
   const setTerminal = (patch: Partial<TerminalPreferences>) => update((p: Preferences) => ({ ...p, terminal: { ...p.terminal, ...patch } }));
   const t = prefs.terminal;
+  const [shells, setShells] = useState<string[] | null>(null);
+  useEffect(() => {
+    preferencesApi
+      .shells()
+      .then(setShells)
+      .catch(() => setShells([]));
+  }, []);
 
   const sections: { id: Section; label: string }[] = [
     { id: "appearance", label: msg.settings.appearance },
@@ -187,9 +194,12 @@ export function SettingsView() {
                 <h2 id="settings-terminal-title">{msg.settings.terminal}</h2>
                 <p>{msg.settings.terminalBody}</p>
               </header>
-              <Suspense fallback={<div className="terminal-preview skeleton" />}>
-                <TerminalPreview prefs={t} />
-              </Suspense>
+              {/* A picture of the settings, not a terminal: nothing inside can take focus. */}
+              <div inert>
+                <Suspense fallback={<div className="terminal-preview skeleton" />}>
+                  <TerminalPreview prefs={t} />
+                </Suspense>
+              </div>
 
               <div className="stack-sm">
                 <span className="label" id="scheme-label">
@@ -230,6 +240,28 @@ export function SettingsView() {
                 </div>
               </div>
 
+              <SettingRow label={msg.settings.localShell} hint={msg.settings.localShellHint}>
+                <select
+                  className="select"
+                  aria-label={msg.settings.localShell}
+                  value={prefs.localShell ?? ""}
+                  onChange={(event) => update((p) => ({ ...p, localShell: event.target.value === "" ? null : event.target.value }))}
+                >
+                  <option value="">{msg.settings.localShellDefault}</option>
+                  {(shells ?? []).map((shell) => (
+                    <option key={shell} value={shell}>
+                      {shell}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
+              <SettingRow label={msg.settings.editors} hint={msg.settings.editorsHint}>
+                <EditorChoices
+                  apps={prefs.editorApps ?? []}
+                  onRemove={(ext) => update((p) => ({ ...p, editorApps: (p.editorApps ?? []).filter((e) => e.extension !== ext) }))}
+                  onAdded={(next) => update(() => next)}
+                />
+              </SettingRow>
               <SettingRow label={msg.settings.font}>
                 <select
                   className="select"
@@ -572,5 +604,58 @@ function RotateRecoveryDialog({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function EditorChoices({
+  apps,
+  onRemove,
+  onAdded,
+}: {
+  apps: { extension: string; app: string }[];
+  onRemove: (extension: string) => void;
+  onAdded: (prefs: Preferences) => void;
+}) {
+  const [ext, setExt] = useState("");
+  const { pending, error, run } = useAction();
+  const valid = /^\.?[A-Za-z0-9]{1,16}$/.test(ext.trim());
+  return (
+    <div className="stack-sm">
+      {apps.length === 0 ? (
+        <span className="muted">{msg.settings.editorNone}</span>
+      ) : (
+        <ul className="editor-choices" aria-label={msg.settings.editors}>
+          {apps.map((e) => (
+            <li key={e.extension}>
+              <span className="mono">.{e.extension}</span>
+              <span className="muted" title={e.app}>
+                {e.app.split(/[\\/]/).pop()}
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" aria-label={msg.settings.editorRemove(e.extension)} onClick={() => onRemove(e.extension)}>
+                <IconTrash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="editor-add">
+        <input className="input mono" aria-label={msg.settings.editorExtension} placeholder="conf" value={ext} onChange={(event) => setExt(event.target.value)} />
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={!valid || pending}
+          onClick={async () => {
+            const next = await run(() => preferencesApi.pickEditor(ext.trim()));
+            if (next) {
+              onAdded(next);
+              setExt("");
+            }
+          }}
+        >
+          {msg.settings.editorAdd}
+        </button>
+      </div>
+      <ErrorNotice error={error} />
+    </div>
   );
 }
