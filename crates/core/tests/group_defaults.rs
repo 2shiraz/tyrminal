@@ -112,11 +112,23 @@ async fn hosts_use_their_nearest_groups_route_and_icon_unless_they_set_their_own
     assert_eq!(icon(&bastion.id), None);
 
     // A host's own route wins; asking to inherit again restores the group's.
-    let direct = HostConnectionInput { jump_host_id: None, proxy: None, inherit: false };
+    let direct = HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     v.set_host_connection(&app.id, direct).await.unwrap();
     assert!(v.host_connection(&app.id).await.unwrap().own);
     assert_eq!(chain(&core, &app.id).await, ["app"], "set here: connect directly");
-    let inherit = HostConnectionInput { jump_host_id: None, proxy: None, inherit: true };
+    let inherit = HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        inherit: true,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     assert_eq!(
         v.set_host_connection(&app.id, inherit).await.unwrap().into_iter().map(|h| h.label).collect::<Vec<_>>(),
         ["bastion", "app"]
@@ -160,7 +172,13 @@ async fn group_defaults_that_would_loop_or_point_nowhere_are_refused_and_nothing
     assert_eq!(chain(&core, &a.id).await, ["b", "a"]);
 
     // A host's own setting cannot loop through an inherited route either.
-    let looped = HostConnectionInput { jump_host_id: Some(a.id.clone()), proxy: None, inherit: false };
+    let looped = HostConnectionInput {
+        jump_host_id: Some(a.id.clone()),
+        proxy: None,
+        inherit: false,
+        key_exchange: Default::default(),
+        no_port_suggestions: false,
+    };
     assert_eq!(code(v.set_host_connection(&b.id, looped).await), ErrorCode::InvalidInput);
 
     // Unknown jump host, unknown group, bad id, bad proxy, locked.

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-quick-forward-open"
+description = "Enables the quick_forward_open command without any pre-configured scope."
+commands.allow = ["quick_forward_open"]
+
+[[permission]]
+identifier = "deny-quick-forward-open"
+description = "Denies the quick_forward_open command without any pre-configured scope."
+commands.deny = ["quick_forward_open"]

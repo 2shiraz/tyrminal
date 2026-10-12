@@ -8,7 +8,7 @@ import type { SessionState } from "./SessionState";
  * Events for one session, delivered only on that session's own channel (never broadcast).
  * Text fields that originate from the server are untrusted: render as plain text.
  */
-export type SessionEvent = { "type": "state", state: SessionState, 
+export type SessionEvent = { "type": "port_suggestion", port: number, } | { "type": "state", state: SessionState, 
 /**
  * During a jump-host chain: which hop this step belongs to (`None` for a direct
  * connection and for session-level states such as `Connected`).
@@ -39,4 +39,4 @@ mac: string, strictKex: boolean,
  * During a jump-host chain: the hop whose key exchange this is. Sent for every hop as
  * soon as its key exchange finishes, before its host key is verified.
  */
-hop: ChainPosition | null, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "notice", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
+hop: ChainPosition | null, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "notice", text: string, } | { "type": "key_rejected", keyId: string, label: string, hop: ChainPosition | null, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };

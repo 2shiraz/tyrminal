@@ -12,7 +12,7 @@
 
 import "@xterm/xterm/css/xterm.css";
 
-import type { SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { ContainerEngine, SessionEvent, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -32,12 +32,17 @@ import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
-import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { type PasteCheck, type PasteChecks, checkPaste, hasBracketEnd } from "./pasteSafety";
+import { decodeOsc52, ligatureRanges, parseOsc7, sanitizeTitle } from "./terminalPolicy";
 import { CommandOutputs } from "./commandOutput";
 import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
 
-export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
+export type TerminalTarget =
+  | { kind: "ssh"; hostId: string }
+  | { kind: "local" }
+  /** P-33: a shell in a container, on the connection of the SSH session `sessionId`. */
+  | { kind: "container"; sessionId: string; engine: ContainerEngine; containerId: string };
 
 export type RendererKind = "webgl" | "dom";
 
@@ -48,8 +53,8 @@ export interface TerminalCallbacks {
   onLink(url: string): void;
   /** The server asked to write `text` to the clipboard (OSC 52). */
   onClipboardWrite(text: string): void;
-  /** A paste needs review before it is sent; call `confirm` to send it. */
-  onPasteReview(text: string, bracketed: boolean, confirm: () => void): void;
+  /** A paste needs review before it is sent; `send` sends the reviewed (or cleaned) text. */
+  onPasteReview(text: string, check: PasteCheck, bracketed: boolean, send: (text: string) => void): void;
   onRenderer(kind: RendererKind, fellBack: boolean): void;
   onResize(cols: number, rows: number): void;
   onSearchResults(index: number, total: number): void;
@@ -195,6 +200,8 @@ export class TerminalController {
   private lastSize = { cols: 0, rows: 0 };
   private zoom = 0;
   private prefs: TerminalPreferences;
+  /** Paste checks for this session's host (P-25); every check is on unless the host lowers it. */
+  pasteChecks: PasteChecks = { multiline: true, trailingNewline: true };
   private readonly cleanups: (() => void)[] = [];
   /** Serializes input writes so chunks of one paste arrive in order. */
   private inputChain: Promise<void> = Promise.resolve();
@@ -382,7 +389,9 @@ export class TerminalController {
         ? { sessionId: await detach.attach(attachToken, onOutput, onEvent) }
         : target.kind === "ssh"
           ? await sessions.openSsh(target.hostId, cols, rows, onOutput, onEvent)
-          : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
+          : target.kind === "container"
+            ? await sessions.openContainer(target.sessionId, target.engine, target.containerId, cols, rows, onOutput, onEvent)
+            : await sessions.openLocal(cols, rows, onOutput, onEvent, startIn);
       if (this.disposed) {
         // Closed while opening: do not leave an orphan session behind.
         void sessions.close(opened.sessionId).catch(() => undefined);
@@ -520,12 +529,29 @@ export class TerminalController {
   /** Sends text as a paste (bracketed when the remote enabled it), after review if needed. */
   pasteText(text: string): void {
     if (!text || this.disposed) return;
-    const send = () => this.term.paste(text);
-    if (this.prefs.confirmMultilinePaste && needsPasteReview(text)) {
-      this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, send);
-    } else {
-      send();
-    }
+    const check = checkPaste(text, {
+      multiline: this.prefs.confirmMultilinePaste && this.pasteChecks.multiline,
+      trailingNewline: this.pasteChecks.trailingNewline,
+    });
+    // The bracketed-paste end marker is never sent, whatever path the text took to get here.
+    const send = (final: string) => {
+      if (this.disposed || hasBracketEnd(final)) return;
+      this.term.paste(final);
+    };
+    if (check.review) this.callbacks.onPasteReview(text, check, this.term.modes.bracketedPasteMode, send);
+    else send(text);
+  }
+
+  /** Offers text for pasting, always through the paste review (a note's code block, P-30). */
+  reviewPaste(text: string): void {
+    if (!text || this.disposed) return;
+    // Always reviewed, with the same hidden-character and end-marker checks as any paste (P-25).
+    const check = { ...checkPaste(text, { multiline: true, trailingNewline: true }), review: true };
+    const send = (final: string) => {
+      if (this.disposed || hasBracketEnd(final)) return;
+      this.term.paste(final);
+    };
+    this.callbacks.onPasteReview(text, check, this.term.modes.bracketedPasteMode, send);
   }
 
   /** Scrolls to the previous or next command (shell integration marks); false without one. */

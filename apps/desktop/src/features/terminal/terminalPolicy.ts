@@ -56,11 +56,6 @@ export function lineCount(text: string): number {
   return text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").length;
 }
 
-/** A paste is reviewed when it spans several lines or is large. */
-export function needsPasteReview(text: string): boolean {
-  return lineCount(text) > 1 || text.length > PASTE_REVIEW_BYTES;
-}
-
 export interface LinkCheck {
   ok: boolean;
   /** The scheme and host exactly as the browser would see them, for the confirmation dialog. */
@@ -138,7 +133,8 @@ export function reconnectDelayMs(attempt: number, random: () => number = Math.ra
  * own. Authentication failures, a changed or rejected host key, cancellation, a locked vault,
  * and a normal exit are never retried automatically.
  */
-export function shouldAutoReconnect(kind: "ssh" | "local", wasConnected: boolean, code: string | null): boolean {
+// A container shell (P-33) is never reconnected on its own: the SSH session it ran in may be gone.
+export function shouldAutoReconnect(kind: "ssh" | "local" | "container", wasConnected: boolean, code: string | null): boolean {
   return kind === "ssh" && wasConnected && code !== null && ["DISCONNECTED", "TIMEOUT", "UNREACHABLE"].includes(code);
 }
 

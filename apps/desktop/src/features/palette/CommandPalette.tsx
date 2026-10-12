@@ -32,6 +32,7 @@ import {
   IconSearch,
   IconServer,
   IconSettings,
+  IconShieldCheck,
   IconSidebar,
   IconSquareTerminal,
   IconSun,
@@ -39,15 +40,19 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
+  IconHistory,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
+import { msgRuns } from "../../lib/messages-runs";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
 // privilege prompts (KEY-18)
 import { msgP } from "../../lib/messages-privilege";
+// security review (P-27)
+import { msgSR } from "../../lib/messages-security-review";
 import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
 
@@ -120,9 +125,12 @@ export function CommandPalette({
   extra,
   onShellIntegration,
   onInsertPassword,
+  onSecurityReview,
   onConnectionLog,
+  onContainers,
   onSearchSessions,
   onCommandOutput,
+  onRunAllOpen,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -176,12 +184,19 @@ export function CommandPalette({
   // privilege prompts (KEY-18)
   /** Present only when the focused pane is a connected SSH session. */
   onInsertPassword?: (() => void) | undefined;
+  // security review (P-27)
+  /** Opens Settings at the security review. */
+  onSecurityReview?: (() => void) | undefined;
   /** The focused SSH pane's connection log; present when it has a session. */
   onConnectionLog?: (() => void) | undefined;
+  /** P-33: containers on the focused connected SSH pane's host. */
+  onContainers?: (() => void) | undefined;
   /** P-28: search every open terminal's scrollback; present while any terminal is open. */
   onSearchSessions?: (() => void) | undefined;
   /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
   onCommandOutput?: (() => void) | undefined;
+  /** SNP-07: run a snippet on every open SSH session of this window; present while any is open. */
+  onRunAllOpen?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -264,6 +279,7 @@ export function CommandPalette({
         });
       }
     }
+
     const action = (id: string, label: string, icon: ReactNode, run: () => void, shortcut?: ActionId): Item => ({
       id,
       group: msg.palette.groupActions,
@@ -288,6 +304,7 @@ export function CommandPalette({
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
       if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
+      if (onContainers) list.push(action("containers", msgD.containers.palette, <IconSquareTerminal size={16} />, onContainers));
       if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
     // agent C: workspaces
@@ -347,6 +364,7 @@ export function CommandPalette({
       }
     }
     if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions));
+    if (onRunAllOpen) list.push(action("run-all-open", msgRuns.paletteRunAllOpen, <IconPlay size={16} />, onRunAllOpen));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -382,10 +400,22 @@ export function CommandPalette({
     });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
+    // security review (P-27)
+    if (onSecurityReview) {
+      list.push({
+        id: "nav-security-review",
+        group: msg.palette.groupNavigate,
+        label: msgSR.title,
+        keywords: "audit weak keys passwords certificates known hosts",
+        icon: <IconShieldCheck size={16} />,
+        run: onSecurityReview,
+      });
+    }
+    list.push(nav("recordings", <IconHistory size={16} />));
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
+  }, [onSecurityReview, hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onRunAllOpen, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items

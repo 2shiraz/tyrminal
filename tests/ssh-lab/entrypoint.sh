@@ -5,6 +5,7 @@ set -eu
 install -m 0600 -o root -g root /lab-in/hostkeys/ssh_host_ed25519_key /etc/ssh/lab/ssh_host_ed25519_key
 install -m 0600 -o root -g root /lab-in/hostkeys/ssh_host_rsa_key /etc/ssh/lab/ssh_host_rsa_key
 install -m 0644 -o root -g root /lab-in/authorized_keys /etc/ssh/lab/authorized_keys
+install -m 0644 -o root -g root /lab-in/trusted_user_ca /etc/ssh/lab/trusted_user_ca
 
 # The password comes from a file so it never appears in argv, the image or the container environment.
 password="$(cat /lab-in/password)"

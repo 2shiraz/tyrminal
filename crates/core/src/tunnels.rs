@@ -28,6 +28,9 @@ use zeroize::Zeroizing;
 use crate::error::{err, invalid, not_found};
 use crate::records::{StoredProxy, TunnelRecord};
 use crate::sessions::{Sessions, random_token};
+
+/// Tunnel ids of quick forwards (P-24) start with this; they are not saved rules.
+const QUICK_PREFIX: &str = "port:";
 use crate::validate;
 
 // ---------- rules ----------
@@ -297,6 +300,13 @@ impl TunnelRuns {
 
     /// Stops every forward of a session that ended and waits until their listeners are closed.
     /// Called by the session supervisor on every way a session can end.
+    /// Gives a session's forwards, running or ended, to the window it moved to.
+    pub(crate) fn reassign(&self, session_id: &str, owner: &str) {
+        for run in self.runs().values_mut().filter(|r| r.session_id == session_id) {
+            owner.clone_into(&mut run.owner);
+        }
+    }
+
     pub(crate) async fn session_ended(&self, session_id: &str) {
         let handles: Vec<(String, ForwardHandle)> = {
             let mut runs = self.runs();
@@ -443,15 +453,62 @@ impl Sessions {
         let view = run.view(&run_id);
         {
             let mut runs = self.tunnel_runs.runs();
+            // The session may have moved to another window while the forward was starting.
+            let mut run = run;
+            if let Some(current) = self.session_owner(session_id) {
+                run.owner = current;
+            }
             runs.insert(run_id, run);
             TunnelRuns::prune(&mut runs, self.vault().generation());
         }
         // The session may have ended while the forward was starting; its cleanup has run, so
         // stop this one too rather than leave a listener without a session.
-        if self.connection(owner, session_id).is_err() {
+        if self.session_owner(session_id).is_none() {
             self.tunnel_runs.session_ended(session_id).await;
         }
         Ok(view)
+    }
+
+    /// Forwards a port the session's output named (P-24), after the user accepted the
+    /// suggestion. Only a port suggested for this session is accepted. The destination is always
+    /// the server's loopback at that port; the listener binds to 127.0.0.1 on the same port when
+    /// it is free, otherwise on a free port. It runs as any forward does and ends with the session.
+    pub async fn quick_forward(&self, owner: &str, session_id: &str, port: u16) -> Result<ActiveTunnel, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        if !self.suggested.contains(session_id, port) {
+            return Err(invalid("That port was not offered for this session."));
+        }
+        let record = |bind_port| TunnelRecord {
+            name: format!("Port {port}"),
+            host_id: entry.host_id.clone().unwrap_or_default(),
+            kind: TunnelKind::Local,
+            bind_host: "127.0.0.1".to_owned(),
+            bind_port,
+            dest_host: "127.0.0.1".to_owned(),
+            dest_port: port,
+            allow_external: false,
+            auto_start: false,
+            updated_at: 0,
+        };
+        let tunnel_id = format!("{QUICK_PREFIX}{port}");
+        match self.start_run(owner, session_id, entry.generation, tunnel_id.clone(), record(port), &conn).await {
+            Err(e) if e.code == ErrorCode::InUse => {
+                self.start_run(owner, session_id, entry.generation, tunnel_id, record(0), &conn).await
+            }
+            other => other,
+        }
+    }
+
+    /// The address to open in a browser for a running quick forward: built here from the bound
+    /// port, never taken from output.
+    pub fn quick_forward_url(&self, owner: &str, run_id: &str) -> Result<String, IpcError> {
+        let mut runs = self.tunnel_runs.runs();
+        let run = runs.get_mut(run_id).filter(|r| r.owner == owner).ok_or_else(run_denied)?;
+        run.settle();
+        if !run.tunnel_id.starts_with(QUICK_PREFIX) || run.handle.is_none() {
+            return Err(run_denied());
+        }
+        Ok(format!("http://127.0.0.1:{}/", run.bound_port))
     }
 
     /// Starts the host's auto-start rules on a session that just connected. A rule that fails
@@ -470,12 +527,13 @@ impl Sessions {
                 self.start_run(owner, session_id, generation, tunnel_id.clone(), rule.clone(), conn).await
             {
                 let Ok(run_id) = random_token() else { return };
+                let owner = self.session_owner(session_id).unwrap_or_else(|| owner.to_owned());
                 let mut runs = self.tunnel_runs.runs();
                 let seq = self.tunnel_runs.next_seq();
                 runs.insert(
                     run_id,
                     Run {
-                        owner: owner.to_owned(),
+                        owner,
                         session_id: session_id.to_owned(),
                         generation,
                         tunnel_id,

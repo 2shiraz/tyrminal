@@ -19,6 +19,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aead-stream"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a901e5bcd15b4a9555a8f17a608d28ef92cf77bc4aa3b4a0c1a3fce1a9cc0bac"
+dependencies = [
+ "aead",
+]
+
+[[package]]
 name = "aes"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6156,6 +6165,7 @@ dependencies = [
 name = "tyrminal-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "encoding_rs",
  "getrandom 0.4.3",
  "if-addrs",
@@ -6173,6 +6183,7 @@ dependencies = [
  "tyrminal-contracts",
  "tyrminal-platform",
  "tyrminal-pty",
+ "tyrminal-session-log",
  "tyrminal-ssh",
  "tyrminal-storage",
  "tyrminal-vault",
@@ -6227,6 +6238,20 @@ dependencies = [
  "portable-pty",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "tyrminal-session-log"
+version = "0.1.0"
+dependencies = [
+ "aead-stream",
+ "chacha20poly1305",
+ "getrandom 0.4.3",
+ "hkdf",
+ "proptest",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]

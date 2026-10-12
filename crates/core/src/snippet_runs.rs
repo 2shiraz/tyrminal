@@ -17,8 +17,8 @@ use tyrminal_ssh::{ShellEvent, VerifiedConnection};
 
 use crate::error::{err, from_ssh};
 
-/// Output kept per stream.
-pub(crate) const MAX_KEPT: usize = 64 * 1024;
+/// Output kept per stream (1 MiB per host for standard output and error together).
+pub(crate) const MAX_KEPT: usize = 512 * 1024;
 /// Output read in total before a run is stopped (a command that never stops talking).
 const MAX_READ: usize = 64 * 1024 * 1024;
 /// Longest a run may take.

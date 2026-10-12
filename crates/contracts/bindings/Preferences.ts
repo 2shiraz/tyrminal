@@ -25,12 +25,15 @@ editorApps: Array<EditorApp>, workspace?: WorkspacePreferences,
  */
 diagnostics: boolean, 
 /**
-<<<<<<< HEAD
  * A desktop notification when a long command finishes in a tab the user is not looking at.
  */
-commandNotifications: CommandNotifications, };
-=======
+commandNotifications: CommandNotifications, 
+/**
  * Off by default; see `PasswordCheckPreferences`.
  */
-passwordCheck: PasswordCheckPreferences, };
->>>>>>> origin/main
+passwordCheck: PasswordCheckPreferences, 
+/**
+ * Do not suggest quick forwards for ports that programs on a server say they listen on
+ * (P-24). Suggestions are on unless this is set.
+ */
+noPortSuggestions: boolean, };

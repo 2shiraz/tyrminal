@@ -325,15 +325,15 @@ async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation
     let no_tty = core.sessions.exec_snippet(WINDOW, &a, &tty.id, "run-tty").await.unwrap();
     assert_ne!(no_tty.exit_status, Some(0));
 
-    // Output beyond 64 KiB per stream is cut and flagged; control characters never reach the UI.
+    // Output beyond 512 KiB per stream is cut and flagged; control characters never reach the UI.
     let loud = v
-        .save_snippet(snippet("loud", "printf '\\033[31mred\\n'; head -c 200000 /dev/zero | tr '\\0' x"))
+        .save_snippet(snippet("loud", "printf '\\033[31mred\\n'; head -c 600000 /dev/zero | tr '\\0' x"))
         .await
         .unwrap();
     let cut = core.sessions.exec_snippet(WINDOW, &a, &loud.id, "run-loud").await.unwrap();
     assert!(cut.truncated);
     assert!(cut.stdout.starts_with("[31mred\n"), "{:?}", &cut.stdout[..20]);
-    assert!(cut.stdout.len() <= 64 * 1024);
+    assert!(cut.stdout.len() <= 512 * 1024);
 
     // After a lock nothing runs.
     v.lock().await;
@@ -859,6 +859,8 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
             proxy: None,
             jump_host_id: Some(bastion.id.clone()),
             inherit: false,
+            key_exchange: Default::default(),
+            no_port_suggestions: false,
         },
     )
     .await
@@ -886,4 +888,288 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
     // The events never carry a secret: only labels, positions and algorithm names.
     let text = format!("{trail:?}");
     assert!(!text.contains("PRIVATE KEY"));
+}
+
+/// A Keychain key the server does not accept is named, with what to do, and installing it by
+/// signing in once with the password makes it the key that signs in. The lab's sshd reads the
+/// user's own `~/.ssh/authorized_keys` too, so the line the app writes is the one that is used.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn a_refused_key_is_named_and_installing_it_with_a_password_lets_it_sign_in() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let label = format!("fresh key {}", std::process::id());
+    // Made here, so the test knows the private key and can show it never reaches the log.
+    let private = tyrminal_ssh::ClientKey::generate_ed25519().unwrap().to_openssh().unwrap();
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: label.clone(),
+            private_key: private.as_str().to_owned(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: key.id.clone() },
+            ..host("lab a", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let s = &core.sessions;
+
+    // Signing in with a key the server does not have: the key is named, nothing else is tried.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = s.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let mut rejected = None;
+    let closed = loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                s.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Always).unwrap();
+            }
+            SessionEvent::AuthPrompt { .. } => panic!("a refused key must not turn into a password prompt"),
+            SessionEvent::KeyRejected { key_id, label, hop } => rejected = Some((key_id, label, hop)),
+            SessionEvent::Closed { error, .. } => break error.expect("an error"),
+            _ => {}
+        }
+    };
+    assert_eq!(rejected, Some((key.id.clone(), label.clone(), None)));
+    assert_eq!(closed.code, ErrorCode::AuthFailed);
+    assert_eq!(
+        closed.message,
+        format!("The server did not accept the key \"{label}\". Its public key may not be installed on this server.")
+    );
+    let log = s.diagnostics(WINDOW, &opened.session_id).unwrap().join("\n");
+    assert!(log.contains(&format!("did not accept the key \"{label}\"")), "{log}");
+    // Which key was offered (public facts only) and what the server would still take.
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{label}\" (ssh-ed25519, {}), signing with ssh-ed25519",
+            key.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("server still allows: ") && log.contains("password"), "{log}");
+    assert!(!log.contains("PRIVATE KEY") && !closed.message.contains("PRIVATE KEY"));
+    for line in private.lines().filter(|l| !l.starts_with("-----") && l.len() > 16) {
+        assert!(!log.contains(line) && !closed.message.contains(line), "no private key material in the log");
+    }
+
+    // An RSA key is offered with a SHA-2 signature, never SHA-1.
+    let rsa_label = format!("fresh rsa {}", std::process::id());
+    let rsa = core.vault.generate_key_of(&rsa_label, tyrminal_core::contracts::KeyKind::Rsa3072).await.unwrap();
+    let rsa_host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: rsa.id.clone() },
+            ..crate::host("lab a rsa", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let rsa_session = s.open_ssh(WINDOW, &rsa_host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                s.answer_trust(WINDOW, &rsa_session.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::Closed { .. } => break,
+            _ => {}
+        }
+    }
+    let log = s.diagnostics(WINDOW, &rsa_session.session_id).unwrap().join("\n");
+    assert!(
+        log.contains(&format!(
+            "offering the key \"{rsa_label}\" (ssh-rsa, {}), signing with rsa-sha2-",
+            rsa.fingerprint
+        )),
+        "{log}"
+    );
+    assert!(log.contains("signing with rsa-sha2-512") || log.contains("signing with rsa-sha2-256"), "{log}");
+
+    // Install it: sign in once with the password (the normal prompt), preview, install.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let setup = s.open_for_key_install(WINDOW, &host.id, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { .. } => panic!("the host is already trusted"),
+            SessionEvent::AuthPrompt { prompt_id, .. } => {
+                s.answer_auth(WINDOW, &setup.session_id, &prompt_id, Some(lab.str("/password"))).unwrap();
+            }
+            SessionEvent::State { state: SessionState::Connected, .. } => break,
+            SessionEvent::Closed { error, .. } => panic!("install connection ended: {error:?}"),
+            _ => {}
+        }
+    }
+    // A files-only connection has no terminal.
+    assert!(s.write(WINDOW, &setup.session_id, b"x".to_vec()).await.is_err());
+    let preview = s.deploy_key_preview(WINDOW, &setup.session_id, &key.id).await.unwrap();
+    assert!(!preview.already_present, "{preview:?}");
+    assert_eq!(preview.line.trim(), key.public_key.trim());
+    let installed = s.deploy_key(WINDOW, &setup.session_id, &key.id).await.unwrap();
+    assert!(installed.already_present, "{installed:?}");
+    s.close(WINDOW, &setup.session_id).unwrap();
+
+    // Now the key signs in, with no prompt at all.
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = s.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { .. } | SessionEvent::AuthPrompt { .. } => panic!("no prompt expected"),
+            SessionEvent::KeyRejected { .. } => panic!("the installed key was refused"),
+            SessionEvent::State { state: SessionState::Connected, .. } => break,
+            SessionEvent::Closed { error, .. } => panic!("ended: {error:?}"),
+            _ => {}
+        }
+    }
+    // Leave the lab account as it was.
+    let body = key.public_key.split_whitespace().nth(1).unwrap().to_owned();
+    let cleanup = core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "cleanup".into(),
+            folder: String::new(),
+            text: format!(
+                "grep -vF '{body}' ~/.ssh/authorized_keys > ~/.ssh/ak.tmp; mv ~/.ssh/ak.tmp ~/.ssh/authorized_keys"
+            ),
+        })
+        .await
+        .unwrap();
+    let out = s.exec_snippet(WINDOW, &opened.session_id, &cleanup.id, "cleanup").await.unwrap();
+    assert_eq!(out.exit_status, Some(0), "{}", out.stderr);
+    s.close(WINDOW, &opened.session_id).unwrap();
+}
+
+/// Everything a session sends: terminal output and events.
+struct Captured {
+    output: mpsc::UnboundedSender<Vec<u8>>,
+    events: mpsc::UnboundedSender<SessionEvent>,
+}
+
+impl SessionSink for Captured {
+    fn output(&self, data: Vec<u8>) -> bool {
+        self.output.send(data).is_ok()
+    }
+    fn event(&self, event: SessionEvent) -> bool {
+        self.events.send(event).is_ok()
+    }
+}
+
+/// P-33 against the real lab, whatever engine its machine has: listing runs the fixed command
+/// on a real exec channel and reports what it found (no engine; an engine that refused, with its
+/// own error as it is; or containers, each with a container ID). An ID that is not a container ID
+/// is refused before any session or channel exists. A container shell for a container that does
+/// not exist opens a real PTY channel on the session's connection, and the failure is the remote
+/// side's own message and exit status, never retried another way. Shells in a running container,
+/// and that they stop with their session or the lock, are in `containers_lab.rs`.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn container_listing_and_shells_use_the_sessions_connection_and_refuse_bad_ids() {
+    use tyrminal_core::contracts::ContainerEngine;
+
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let session = connected_session(&core, &lab, "a", &key.id).await;
+    let s = &core.sessions;
+
+    let list = s.list_containers(WINDOW, &session).await.unwrap();
+    let log = s.diagnostics(WINDOW, &session).unwrap().join("\n");
+    match (list.engine, &list.problem) {
+        (None, problem) => {
+            assert_eq!((list.containers.len(), problem), (0, &None));
+            assert!(log.contains("neither Docker nor Podman"), "{log}");
+        }
+        (Some(_), Some(problem)) => {
+            // For example the lab user may not use the engine: its error, as it is.
+            assert!(list.containers.is_empty() && !problem.is_empty(), "{list:?}");
+            assert!(log.contains("reported an error"), "{log}");
+        }
+        (Some(_), None) => assert!(list.containers.iter().all(|c| tyrminal_core::containers::valid_id(&c.id))),
+    }
+    // Another window learns nothing.
+    assert_eq!(s.list_containers("other", &session).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let (output, _) = mpsc::unbounded_channel();
+    let (events, _) = mpsc::unbounded_channel();
+    let sink = Arc::new(Captured { output, events });
+    let before = s.count();
+    for bad in ["my-container", "4f1c2b3a9d8e; id", "4F1C2B3A9D8E", "4f1c2b3a9d8e$(id)", "--privileged", "4f1c2b3a9d8"]
+    {
+        let refused = s
+            .open_container_shell(WINDOW, &session, ContainerEngine::Docker, bad, 80, 24, sink.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput, "{bad:?}");
+    }
+    assert_eq!(s.count(), before, "no session was registered for a refused ID");
+
+    for engine in [ContainerEngine::Docker, ContainerEngine::Podman] {
+        let (output, mut out_rx) = mpsc::unbounded_channel();
+        let (events, mut ev_rx) = mpsc::unbounded_channel();
+        let opened = s
+            .open_container_shell(
+                WINDOW,
+                &session,
+                engine,
+                "4f1c2b3a9d8e",
+                80,
+                24,
+                Arc::new(Captured { output, events }),
+            )
+            .await
+            .unwrap();
+        let (mut states, mut closed) = (Vec::new(), None);
+        while closed.is_none() {
+            match tokio::time::timeout(WAIT, ev_rx.recv()).await.expect("timed out").expect("events ended") {
+                SessionEvent::State { state, hop } => {
+                    assert_eq!(hop, None);
+                    states.push(state);
+                }
+                SessionEvent::Closed { error, exit_status } => closed = Some((error, exit_status)),
+                _ => {}
+            }
+        }
+        let mut text = Vec::new();
+        while let Ok(chunk) = out_rx.try_recv() {
+            text.extend(chunk);
+        }
+        let text = String::from_utf8_lossy(&text);
+        assert_eq!(states[..2], [SessionState::OpeningChannel, SessionState::Connected], "{engine:?}");
+        // No such engine (127, from the remote shell), or the engine's own refusal: no such
+        // container, or no permission. Either way the session ends with that status.
+        let (error, status) = closed.unwrap();
+        assert_eq!(error, None, "{engine:?}: {text}");
+        assert!(matches!(status, Some(code) if code != 0), "{engine:?}: {status:?} {text}");
+        if status == Some(127) {
+            assert!(text.contains("not found"), "{engine:?}: {text}");
+        } else {
+            assert!(
+                ["No such container", "no such container", "permission denied"].iter().any(|m| text.contains(m)),
+                "{engine:?}: the engine's own message: {text}"
+            );
+        }
+        assert!(!text.contains("sudo"));
+        let log = s.diagnostics(WINDOW, &opened.session_id).unwrap().join("\n");
+        assert!(log.contains("container 4f1c2b3a9d8e"), "{log}");
+    }
+    // The SSH session the shells ran over is still up.
+    assert!(s.list_containers(WINDOW, &session).await.is_ok());
 }

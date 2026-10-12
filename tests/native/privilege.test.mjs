@@ -64,7 +64,7 @@ describe("privilege-prompt assistance in the real application", { concurrency: f
     await s.waitGone("dialog");
 
     // The host has no credential of its own; the identity assigned from its menu signs it in.
-    await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+    await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user, key: null });
     await s.click(await s.waitFor('button[aria-label="More actions for Lab"]'));
     await s.clickButton("Identity…");
     await s.waitFor("dialog select");

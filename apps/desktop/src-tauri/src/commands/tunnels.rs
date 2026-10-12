@@ -77,3 +77,44 @@ pub async fn host_connection_set(
 pub async fn host_chain(state: State<'_, AppState>, host_id: String) -> Result<Vec<ChainHop>, IpcError> {
     state.core()?.vault.host_chain(&host_id).await
 }
+
+// Quick port forwards (P-24)
+
+/// Forwards a port this session's output named, after the user accepted the suggestion. The
+/// destination is the server's loopback at that port; the listener is on 127.0.0.1.
+#[tauri::command]
+pub async fn quick_forward_start(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    port: u16,
+) -> Result<ActiveTunnel, IpcError> {
+    state.core()?.sessions.quick_forward(window.label(), &session_id, port).await
+}
+
+/// Opens `http://127.0.0.1:<local port>/` of a running quick forward in the OS browser. The address
+/// is built natively from the bound port; the UI sends only the forward's handle. Returns it.
+#[tauri::command]
+pub async fn quick_forward_open(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<String, IpcError> {
+    let url = state.core()?.sessions.quick_forward_url(window.label(), &run_id)?;
+    // Test builds never launch a browser.
+    #[cfg(not(feature = "e2e"))]
+    open::that_detached(&url).map_err(|_| {
+        IpcError::new(tyrminal_core::contracts::ErrorCode::IoError, "The address could not be handed to your browser.")
+    })?;
+    Ok(url)
+}
+
+/// Turns quick forward suggestions on or off for one host.
+#[tauri::command]
+pub async fn host_port_suggestions_set(
+    state: State<'_, AppState>,
+    host_id: String,
+    enabled: bool,
+) -> Result<(), IpcError> {
+    state.core()?.vault.set_port_suggestions(&host_id, enabled).await
+}
