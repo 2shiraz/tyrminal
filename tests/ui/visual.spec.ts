@@ -3,6 +3,7 @@
 import { expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
+import { MOTD_LINES } from "./motd-fixture";
 
 // Park the pointer so hover states and tooltips never leak into a baseline.
 const shot = async (page: import("@playwright/test").Page, name: string) => {
@@ -62,6 +63,17 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.getByRole("complementary", { name: "Snippets" })).toBeVisible();
       await page.waitForTimeout(300);
       await shot(page, `${theme}-09-terminal-snippets.png`);
+    });
+
+    test(`terminal with a highlighted login message (${theme})`, async ({ page }) => {
+      await openApp(page, { theme });
+      await page.getByRole("button", { name: "Connect to api-gateway" }).first().click();
+      await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
+      await page.evaluate((text) => (window as unknown as { __mockOutput: (t: string) => void }).__mockOutput(text), `\u001b[2J\u001b[H${MOTD_LINES.join("\r\n")}\r\n`);
+      // Every address on screen is decorated (eleven, the last on the final line).
+      await expect(page.locator('.pane:not([hidden]) .term-highlight[data-tone="address"]')).toHaveCount(11);
+      await page.waitForTimeout(300);
+      await shot(page, `${theme}-20-terminal-highlight.png`);
     });
 
     test(`split panes and command palette (${theme})`, async ({ page }) => {

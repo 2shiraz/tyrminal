@@ -501,3 +501,52 @@ test("Show more holds the terminal settings and, for a key sign-in, agent forwar
   await details(page).getByRole("radio", { name: /Ask for the password each time/ }).check();
   await expect(details(page).getByRole("switch", { name: /agent forwarding/ })).toHaveCount(0);
 });
+
+test("leaving with note changes asks about the note, not a password; with both it names both", async ({ page }) => {
+  await openHosts(page);
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await details(page).getByRole("button", { name: "Add note" }).click();
+  await details(page).getByRole("textbox", { name: "Note" }).fill("Reboot window: Sundays");
+
+  await page.keyboard.press("Escape");
+  const note = page.getByRole("alertdialog", { name: "Discard your note changes?" });
+  await expect(note).toContainText("Your changes to the note have not been saved.");
+  await expect(note).not.toContainText("password");
+  await expect(note.getByRole("button", { name: "Keep editing" })).toBeFocused();
+  await note.getByRole("button", { name: "Keep editing" }).click();
+  await expect(details(page).getByRole("textbox", { name: "Note" })).toHaveValue("Reboot window: Sundays");
+
+  // A typed password as well: the prompt names both.
+  await details(page).getByRole("radio", { name: /Store a password in the vault/ }).check();
+  await details(page).getByLabel("Password", { exact: true }).fill("canary-unset-both");
+  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  const both = page.getByRole("alertdialog", { name: "Discard the password and note changes?" });
+  await both.getByRole("button", { name: "Discard both" }).click();
+  await expect(details(page).getByLabel("Address")).toHaveValue("203.0.113.24");
+  expect(await calls(page, "note_set")).toHaveLength(0);
+  expect(JSON.stringify(await allCalls(page))).not.toContain("canary-unset-both");
+});
+
+test("the port suggestions switch autosaves, even while the route is incomplete, and undo restores it", async ({ page }) => {
+  await openHosts(page);
+  const off = () => page.evaluate(() => [...(window as unknown as { __mockPortSuggestionsOff: Set<string> }).__mockPortSuggestionsOff]);
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await details(page).getByText("Show more").click();
+  const suggestions = details(page).getByRole("switch", { name: "Forwarding suggestions for this host" });
+  await expect(suggestions).toBeChecked();
+
+  // A proxy without its host: the route waits, the switch still saves (with the route as stored).
+  await details(page).getByRole("combobox", { name: "Proxy" }).selectOption("socks5");
+  await suggestions.click();
+  await expect.poll(async () => (await off()).length).toBe(1);
+  await settled(page);
+  const [set] = await calls(page, "host_connection_set");
+  expect(set?.args).toMatchObject({ connection: { noPortSuggestions: true, proxy: null, jumpHostId: null } });
+
+  // Undo puts the switch back on and stores it.
+  await details(page).getByRole("heading", { name: "Host details" }).focus();
+  await page.keyboard.press(undoKey);
+  await expect.poll(async () => (await off()).length).toBe(0);
+  await settled(page);
+  await expect(suggestions).toBeChecked();
+});

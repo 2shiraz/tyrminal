@@ -79,6 +79,8 @@ pub fn run() {
 
     // Native file dialogs for backups, used from Rust only (no renderer permission).
     let builder = builder.plugin(tauri_plugin_dialog::init());
+    // Command-finished notifications (P-23), used from Rust only (no renderer permission).
+    let builder = builder.plugin(tauri_plugin_notification::init());
 
     let app = builder
         .setup(|app| {
@@ -297,6 +299,8 @@ pub fn run() {
             commands::inventory::startup_effective,
             commands::inventory::group_defaults_get,
             commands::inventory::group_defaults_set,
+            // terminal notifications (P-23)
+            commands::notify::notify_command_finished,
             commands::inventory::note_get,
             commands::inventory::note_set,
             commands::inventory::note_for_host,
@@ -312,6 +316,8 @@ pub fn run() {
             commands::server_glance::glance_get,
             commands::server_glance::glance_host_get,
             commands::server_glance::glance_host_set,
+            // tmux and screen session awareness (P-31)
+            commands::multiplexers::multiplexer_list,
         ])
         .build(tauri::generate_context!());
 

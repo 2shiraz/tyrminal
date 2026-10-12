@@ -8,7 +8,6 @@ import { msg } from "../../lib/messages";
 import { msgConnect } from "../../lib/messages-connect";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
-import { msgI } from "../../lib/messages-input";
 import { HopNotice } from "../tunnels/HopNotice";
 import { RECONNECT_MAX_ATTEMPTS, groupFingerprint } from "./terminalPolicy";
 
@@ -243,8 +242,6 @@ export function ConnectionSheet(props: {
   onCloseTab: () => void;
   onOpenKnownHosts: () => void;
   onOpenLog: (() => void) | null;
-  /** Connection details (algorithms, addresses), offered on a failed SSH connection. */
-  onOpenDetails: (() => void) | null;
   /** Offered when the server refused the host's key: install it on the server. */
   onInstallKey: (() => void) | null;
   /** False in a detached window: reconnecting happens from the main window. */
@@ -377,13 +374,6 @@ export function ConnectionSheet(props: {
         <p className="connect-hint">
           {msg.terminal.safe} <span className="mono selectable">{msg.app.diagnostic(closed.error.code)}</span>
         </p>
-        {props.onOpenDetails && (
-          <div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={props.onOpenDetails}>
-              {msgI.details.link}
-            </button>
-          </div>
-        )}
       </>
     );
     actions = (

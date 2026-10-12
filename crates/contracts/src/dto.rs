@@ -126,6 +126,20 @@ pub struct HostSummary {
     pub protocol: HostProtocol,
     pub terminal: HostTerminal,
     pub forward_agent: bool,
+    /// Why the host is a production host (P-26), from its own flag or a group above it; `None`
+    /// when neither sets it. The production tag (a preference) is applied by the interface.
+    pub production: Option<ProductionSource>,
+}
+
+/// Where a host's production flag comes from (P-26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProductionSource {
+    /// The host's own flag.
+    Host,
+    /// The flag of its group or a group above it.
+    Group,
 }
 
 /// A host group. Groups nest (no cycles) and give their hosts default connection settings;
@@ -140,6 +154,8 @@ pub struct GroupSummary {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    /// Hosts in this group and its subgroups are production hosts (P-26).
+    pub production: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -153,6 +169,9 @@ pub struct GroupInput {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub key_id: Option<String>,
+    /// Hosts in this group and its subgroups are production hosts (P-26).
+    #[serde(default)]
+    pub production: bool,
 }
 
 /// One change applied to several hosts at once, in a single transaction.
@@ -288,6 +307,9 @@ pub struct HostInput {
     /// Let the server use this host's sign-in key while the session is open (agent forwarding).
     #[serde(default)]
     pub forward_agent: bool,
+    /// Mark the host as a production host (P-26); groups above it can also set it.
+    #[serde(default)]
+    pub production: bool,
 }
 
 /// The protocol a host is reached with (HST-01). Telnet is unencrypted; a serial host is a
@@ -500,7 +522,7 @@ impl Default for TerminalPreferences {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Preferences {
@@ -519,12 +541,115 @@ pub struct Preferences {
     /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
     /// separate from session recording and command history.
     pub diagnostics: bool,
+    // terminal notifications (P-23)
+    /// A desktop notification when a long command finishes in a tab the user is not looking at.
+    pub command_notifications: CommandNotifications,
     // compromised-password check (SEC-11)
     /// Off by default; see `PasswordCheckPreferences`.
     pub password_check: crate::PasswordCheckPreferences,
+    /// Hosts carrying this tag are production hosts (P-26), like hosts with the production flag.
+    /// Empty: no tag marks production hosts.
+    pub production_tag: String,
     /// Do not suggest quick forwards for ports that programs on a server say they listen on
     /// (P-24). Suggestions are on unless this is set.
     pub no_port_suggestions: bool,
+    /// How Hosts is shown (layout, sort, group filter), kept across views and restarts. Absent
+    /// in files written before it existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hosts_view: Option<HostsViewPreferences>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct HostsViewPreferences {
+    pub layout: HostsLayout,
+    pub sort: HostsSort,
+    pub filter: HostsFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HostsLayout {
+    Grid,
+    #[default]
+    List,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HostsSort {
+    #[default]
+    Name,
+    Recent,
+    Address,
+    Group,
+}
+
+/// Which hosts Hosts shows: all, those in no group, or one group with its subgroups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+#[ts(export)]
+pub enum HostsFilter {
+    #[default]
+    All,
+    None,
+    Group {
+        id: String,
+    },
+}
+
+/// The default production tag (P-26).
+pub const DEFAULT_PRODUCTION_TAG: &str = "prod";
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::default(),
+            reduce_motion: false,
+            terminal: TerminalPreferences::default(),
+            local_shell: None,
+            editor_apps: Vec::new(),
+            diagnostics: false,
+            workspace: None,
+            command_notifications: CommandNotifications::default(),
+            password_check: crate::PasswordCheckPreferences::default(),
+            production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
+            hosts_view: None,
+            no_port_suggestions: false,
+        }
+    }
+}
+
+/// Command-finished notifications (P-23). The finish is known only from shell-integration
+/// marks; a notification carries the tab title, exit status and duration, never command text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct CommandNotifications {
+    pub enabled: bool,
+    /// Commands that ran at least this long, in seconds, notify when they finish.
+    pub min_seconds: u32,
+}
+
+impl Default for CommandNotifications {
+    fn default() -> Self {
+        Self { enabled: true, min_seconds: 10 }
+    }
+}
+
+/// What a command-finished notification said (built natively from validated fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommandNotice {
+    pub title: String,
+    pub body: String,
+    /// False when it was not shown (too soon after the previous one, or a test build).
+    pub shown: bool,
 }
 
 /// Static facts about this build and the computer it runs on, for Settings → About and bug

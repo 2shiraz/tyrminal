@@ -1,6 +1,19 @@
-import type { BulkHostChange, GroupSummary, HostOs, HostSummary, IdentityAssignment, KeySummary, SettingsTarget } from "@tyrminal/contracts";
+import type {
+  BulkHostChange,
+  GroupSummary,
+  HostOs,
+  HostSummary,
+  HostsFilter,
+  HostsLayout,
+  HostsSort,
+  HostsViewPreferences,
+  IdentityAssignment,
+  KeySummary,
+  SettingsTarget,
+} from "@tyrminal/contracts";
 import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
 import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
@@ -8,6 +21,7 @@ import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
 import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
 import {
+  IconArrowLeftRight,
   IconCopy,
   IconEllipsis,
   IconFolder,
@@ -29,11 +43,13 @@ import {
   IconUser,
   IconX,
 } from "../../components/ui/icons";
+import { msgSftp } from "../sftp/messages";
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { msgAutosave } from "../../lib/messages-autosave";
+import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -42,6 +58,7 @@ import { groupPath } from "./hostForm";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+import { useIsProduction } from "./production";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
 import { EnvironmentDialog } from "./EnvironmentDialog";
@@ -81,8 +98,6 @@ function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number
   return out;
 }
 
-type GroupFilter = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
-
 function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
   const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
@@ -94,8 +109,8 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   );
 }
 
-type Layout = "grid" | "list";
-type Sort = "name" | "recent" | "address" | "group";
+/** How Hosts is shown until the user changes it; the choice is kept in preferences. */
+const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "all" } };
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
 function rangeBetween(order: string[], from: string, to: string): string[] {
@@ -105,20 +120,38 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
 
-export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
+export function HostsView({
+  ws,
+  onConnect,
+  onOpenSftp,
+}: {
+  ws: Workspace;
+  onConnect: (host: HostSummary) => void;
+  /** Open in SFTP: the host in an SFTP tab (SSH hosts). */
+  onOpenSftp?: (host: HostSummary) => void;
+}) {
   const { hosts, keys, recent, groups } = useVaultData();
   const notify = useToast();
+  const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
-  const [layout, setLayout] = useState<Layout>("grid");
-  const [sort, setSort] = useState<Sort>("name");
-  const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
+  // Layout, sort and group filter live in preferences, so they survive other views and restarts.
+  const { prefs, update } = usePreferences();
+  const view = prefs.hostsView ?? DEFAULT_VIEW;
+  const { layout, sort } = view;
+  const setView = useCallback(
+    (change: Partial<HostsViewPreferences>) => update((p) => ({ ...p, hostsView: { ...(p.hostsView ?? DEFAULT_VIEW), ...change } })),
+    [update],
+  );
+  const setLayout = (next: HostsLayout) => setView({ layout: next });
+  const setSort = (next: HostsSort) => setView({ sort: next });
+  const setFilter = (next: HostsFilter) => setView({ filter: next });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
-  // state (a password typed but not set).
+  // state (what is not autosaved: a password typed but not set, note edits).
   const [panel, setPanel] = useState<{ target: PanelTarget; version: number } | null>(null);
-  const [discarding, setDiscarding] = useState<(() => void) | null>(null);
-  const panelSecret = useRef(false);
+  const [discarding, setDiscarding] = useState<{ then: () => void; wording: NonNullable<ReturnType<typeof discardWording>> } | null>(null);
+  const panelUnsaved = useRef<Unsaved>({ password: false, note: false });
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -147,6 +180,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const action = useAction();
   const keyList = keys.value ?? [];
   const groupList = groups.value ?? [];
+  // A remembered group that no longer exists shows every host.
+  const savedFilter = view.filter;
+  const filter: HostsFilter =
+    savedFilter.kind === "group" && groups.value && !groups.value.some((g) => g.id === savedFilter.id) ? { kind: "all" } : savedFilter;
   const tree = useMemo(() => groupTree(groupList), [groupList]);
 
   // Hosts with an open session, from the user's own tabs (no probing of servers).
@@ -308,14 +345,15 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     return () => observer.disconnect();
   }, []);
 
-  /** Runs `then` now, or after the user agrees to discard a password typed in the panel but not set. */
+  /** Runs `then` now, or after the user agrees to discard what the panel has not saved (a typed password, note edits). */
   const guard = (then: () => void) => {
-    if (panel && panelSecret.current) setDiscarding(() => then);
+    const wording = panel ? discardWording(panelUnsaved.current) : null;
+    if (wording) setDiscarding({ then, wording });
     else then();
   };
   const show = (target: PanelTarget) => {
     version.current += 1;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel({ target, version: version.current });
   };
   const openPanel = (target: PanelTarget) => {
@@ -329,7 +367,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const closePanel = useCallback(() => {
     const back = opener.current;
     opener.current = null;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
@@ -471,7 +509,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                 />
               </div>
               <span className="spacer" />
-              <Segmented<Sort>
+              <Segmented<HostsSort>
                 label={msg.hosts.sort}
                 value={sort}
                 onChange={setSort}
@@ -482,7 +520,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                   { value: "group", label: msgD.inventory.sortGroup },
                 ]}
               />
-              <Segmented<Layout>
+              <Segmented<HostsLayout>
                 label={msg.hosts.view}
                 value={layout}
                 onChange={setLayout}
@@ -570,6 +608,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       </div>
                       <div className="host-card-meta">
                         <div className="host-card-badges">
+                        {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                         {identityOf(host.id) ? (
                           <span className="badge">
                             <IconUser size={12} />
@@ -625,6 +664,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                     </span>
                   </div>
+                  {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
                   {connected.has(host.id) && (
                     <span className="badge badge-success">
                       <span className="status-dot" data-tone="ok" aria-hidden="true" />
@@ -657,7 +697,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           defaultGroupId={currentGroupId}
           os={panelHostId ? (osOf.get(panelHostId) ?? null) : null}
           identity={identityList ? { list: identityList, current: panelHostId ? (assignments.get(`host:${panelHostId}`)?.identityId ?? null) : null } : undefined}
-          secretRef={panelSecret}
+          unsavedRef={panelUnsaved}
           onRequestClose={() => guard(closePanel)}
           onSaved={(saved) => {
             // Only the panel that saved: a write that finishes after switching hosts updates the list only.
@@ -666,6 +706,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             reload();
           }}
           onConnect={(host) => guard(() => onConnect(host))}
+          onOpenSftp={onOpenSftp}
           onDuplicate={(host) => void duplicate(host)}
           onCopyAddress={(host) => {
             // A user-initiated copy of non-secret data.
@@ -686,6 +727,9 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           onClose={() => setMenu(null)}
           items={[
             { label: msg.hosts.connect, icon: <IconPlay size={15} />, onSelect: () => onConnect(menu.host) },
+            ...(onOpenSftp && menu.host.protocol.type === "ssh"
+              ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(menu.host) }]
+              : []),
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => openPanel({ kind: "edit", host: menu.host }) },
             {
               label: msg.hosts.duplicate,
@@ -938,14 +982,14 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
 
       {discarding && (
         <Dialog
-          title={msgAutosave.discardSecretTitle}
+          title={discarding.wording.title}
           role="alertdialog"
           icon={<IconTrash2 size={18} />}
           tone="warning"
           onDismiss={() => setDiscarding(null)}
         >
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msgAutosave.discardSecretBody}
+            {discarding.wording.body}
           </p>
           <div className="dialog-actions">
             <button type="button" className="btn" onClick={() => setDiscarding(null)} autoFocus data-autofocus>
@@ -955,13 +999,13 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               type="button"
               className="btn btn-danger-solid"
               onClick={() => {
-                const then = discarding;
+                const { then } = discarding;
                 setDiscarding(null);
-                panelSecret.current = false;
+                panelUnsaved.current = { password: false, note: false };
                 then();
               }}
             >
-              {msgAutosave.discardSecret}
+              {discarding.wording.action}
             </button>
           </div>
         </Dialog>

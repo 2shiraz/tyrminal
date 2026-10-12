@@ -37,6 +37,7 @@ fn group(name: &str, parent: Option<&str>, key_id: Option<&str>) -> GroupInput {
         username: None,
         port: None,
         key_id: key_id.map(Into::into),
+        production: false,
     }
 }
 
@@ -53,6 +54,7 @@ fn host(label: &str, auth: HostAuthInput, group_id: Option<&str>) -> HostInput {
         protocol: tyrminal_core::contracts::HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
+        production: false,
     }
 }
 

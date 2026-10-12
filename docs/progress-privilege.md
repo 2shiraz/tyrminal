@@ -1,4 +1,4 @@
-# Progress — privilege-prompt assistance (KEY-18), password checks (SEC-11) and security review (P-27)
+# Progress — privilege-prompt assistance (KEY-18), password checks (SEC-11) security review (P-27) and tmux/screen awareness (P-31)
 
 Branch `claude/importers`, on top of `claude/agent-d-inventory-snippets` (PR base). Assigned by
 the coordinating session on 2026-10-12. Identities (KEY-15..17) are agent D's (`ad5f7bc`); an
@@ -16,6 +16,8 @@ earlier parallel identities implementation on this branch was reverted (commits 
 | SEC-11 local part: SHA-1 prefix only to a pluggable range source, padding-aware strict parser, opt-in (off by default), https-only configurable endpoint, settings UI stating what is sent | `core:password_check::tests` 3/3; `crates/core/tests/password_check.rs` 3/3 against a stub range server on loopback (requests carry only `/range/<5 hex>` and `Add-Padding`; duplicates looked up once; garbled, 500 and unreachable answers fail the check; locked vault sends nothing); `tests/ui/password-check.spec.ts` 2/2 (mock) | SEC-11 (BLOCKED: transport) |
 
 | P-27 security review: on the device, read-only, no network; findings name records and never carry secrets; each opens the existing fix (generate key, edit host, keychain, remove known host) ([ADR 0011](decisions/0011-owner-feature-additions.md)) | `core:security_review` unit tests 6/6; `crates/core/tests/security_review.rs` 2/2 (real vault, keys and certificates from `ssh-keygen` at test time: group key, identity password, Telnet host, certificate 10 and 40 days on, no secret in the result, nothing changed, locked vault refused; DSA and 1024-bit RSA high); `tests/ui/security-review.spec.ts` 5/5 (mock); `tests/native/security-review.test.mjs` (real app, 2/2 runs) | P-27 |
+
+| P-31 tmux and screen session awareness: fixed listing command on a separate exec channel; plain-text names; attach command built by the core only for strict names, typed only on a click; reattach offered after a reconnect ([ADR 0011](decisions/0011-owner-feature-additions.md)) | `core:multiplexers` unit tests 6/6 (recorded output, hostile names, bounds, malformed answers); `sessions_lab::multiplexer_sessions_are_listed_and_only_strict_names_are_attachable` against the local OpenSSH lab (real tmux 3.4 and screen 4.09; the built command attaches when typed); `tests/ui/multiplexers.spec.ts` 4/4 (mock) | P-31 |
 
 ## Blocked
 

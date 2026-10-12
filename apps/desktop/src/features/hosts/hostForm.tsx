@@ -5,12 +5,14 @@
 import type { GroupSummary, HostAuthInput, HostOs, HostSummary, HostTerminal, IdentitySummary, KeySummary, SerialSettings } from "@tyrminal/contracts";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
-import { SecretField, TextField } from "../../components/ui/controls";
+import { usePreferences } from "../../app/preferences";
+import { SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconKeyRound, IconPlus, IconServer, IconX } from "../../components/ui/icons";
 import { hosts as hostsApi, identities as identitiesApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
+import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { identityEvents } from "../credentials/IdentitiesSection";
 import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
@@ -19,6 +21,7 @@ import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 import { validAddress, validLabel, validTags, validUsername } from "./fieldRules";
 import { DropSecretNotice, type LiveProxySecret, LiveSecretField } from "./LiveSecret";
 import { OsIcon } from "./OsIcon";
+import { productionReason } from "./production";
 import {
   AgentForwarding,
   DEFAULT_SERIAL,
@@ -99,6 +102,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
       serial: host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL,
       terminal: host?.terminal ?? DEFAULT_TERMINAL,
       forwardAgent: host?.forwardAgent ?? false,
+      production: host?.production === "host",
     };
   });
   const [groupId, setGroupId] = useState<string | null>(start.groupId);
@@ -117,6 +121,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
   const [serial, setSerial] = useState(start.serial);
   const [terminal, setTerminal] = useState(start.terminal);
   const [forwardAgent, setForwardAgent] = useState(start.forwardAgent);
+  const [production, setProduction] = useState(start.production);
   const [certified, setCertified] = useState<Set<string>>(new Set());
   const { pending, error, run } = useAction();
 
@@ -182,6 +187,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
     setSerial(to.serial);
     setTerminal(to.terminal);
     setForwardAgent(to.forwardAgent);
+    setProduction(to.production);
   }
 
   /** Saves the host; resolves to the saved host, or `undefined` when the core refused it. */
@@ -214,6 +220,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
           protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
           terminal,
           forwardAgent: false,
+          production,
         });
       }
       // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
@@ -230,6 +237,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
         protocol: { type: "ssh" },
         terminal,
         forwardAgent: forwardAgent && authKind === "key",
+        production,
       });
       await advanced.saveAfter(result.id);
       if (identity && identityId !== start.identityId) {
@@ -249,7 +257,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
     identity,
     advanced,
     start: start as HostFields,
-    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId, protocol, serial, terminal, forwardAgent },
+    fields: { groupId, label, address, port, username, tags, authKind, password, keyId, identityId, protocol, serial, terminal, forwardAgent, production },
     errors,
     restore,
     set: {
@@ -267,6 +275,7 @@ export function useHostForm({ host: hostProp, initial, keys, groups = [], defaul
       setSerial,
       setTerminal,
       setForwardAgent,
+      setProduction,
     },
     certified,
     inherited,
@@ -302,6 +311,7 @@ export interface HostFields {
   serial: SerialSettings;
   terminal: HostTerminal;
   forwardAgent: boolean;
+  production: boolean;
 }
 
 /** What an autosaving owner adds to the cards: explicit secret actions and held removals. */
@@ -345,9 +355,10 @@ function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | nul
         label={msg.hosts.address}
         value={form.fields.address}
         onChange={form.set.setAddress}
-        // A new host in the panel: says it is saved once the address is valid (in the field's own
-        // hint, so the panel does not shift when the host is created).
-        hint={form.live?.isNew ? msgAutosave.newHostHint : msg.hosts.addressHint}
+        // A panel opened for a new host says it is saved once the address is valid. The hint stays
+        // for the panel's life (form.host is the host it opened with), so nothing below it moves
+        // under the pointer when autosave creates the host.
+        hint={form.live && form.host === null ? msgAutosave.newHostHint : msg.hosts.addressHint}
         error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
         maxLength={253}
         autoFocus={autoFocus}
@@ -391,6 +402,7 @@ function GeneralCard({ form }: { form: HostForm }) {
         </label>
       )}
       <TextField label={msg.hosts.tags} value={fields.tags} onChange={set.setTags} hint={msg.hosts.tagsHint} error={form.errors.tags} maxLength={600} />
+      <ProductionSwitch form={form} />
     </Card>
   );
 }
@@ -659,6 +671,29 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
         {form.fields.protocol === "ssh" && extra}
       </div>
     </details>
+  );
+}
+
+/** The host's own production flag, with a note when it is a production host anyway (P-26). */
+function ProductionSwitch({ form }: { form: HostForm }) {
+  const { prefs } = usePreferences();
+  const { fields, set, groups } = form;
+  // What the host would be without its own flag, from the values in the form.
+  let id: string | null = fields.groupId;
+  let fromGroup = false;
+  for (let depth = 0; id && depth < 16; depth += 1) {
+    const g = groups.find((x) => x.id === id);
+    if (!g) break;
+    if (g.production) fromGroup = true;
+    id = g.parentId;
+  }
+  const reason = fromGroup ? "group" : productionReason({ production: null, tags: fields.tags.split(",").map((t) => t.trim()) }, prefs.productionTag);
+  return (
+    <div className="stack-xs">
+      <Switch label={msgProduction.hostSwitch} hint={msgProduction.hostHint} checked={fields.production} onChange={set.setProduction} />
+      {!fields.production && reason === "group" && <p className="hint">{msgProduction.inheritedGroup}</p>}
+      {!fields.production && reason === "tag" && <p className="hint">{msgProduction.inheritedTag(prefs.productionTag)}</p>}
+    </div>
   );
 }
 

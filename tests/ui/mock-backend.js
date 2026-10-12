@@ -22,8 +22,11 @@ export function installMockBackend(options) {
       reduceMotion: true,
       localShell: null,
       editorApps: [],
+      commandNotifications: { enabled: true, minSeconds: 10 },
       // compromised-password check (SEC-11)
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
+      productionTag: options.productionTag ?? "prod",
+      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -69,11 +72,12 @@ export function installMockBackend(options) {
       protocol: { type: "ssh" },
       terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
       forwardAgent: false,
+      production: null,
     });
     state.groups = [
-      { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
-      { id: id(501), name: "Databases", parentId: id(500), username: "postgres", port: null, keyId: null },
-      { id: id(502), name: "Lab", parentId: null, username: null, port: null, keyId: null },
+      { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1), production: false },
+      { id: id(501), name: "Databases", parentId: id(500), username: "postgres", port: null, keyId: null, production: false },
+      { id: id(502), name: "Lab", parentId: null, username: null, port: null, keyId: null, production: false },
     ];
     state.hosts = [
       host(1, "api-gateway", "10.20.0.11", "deploy", 22, { kind: "key", keyId: id(1) }, now - 600, id(500), ["prod", "web"]),
@@ -317,6 +321,18 @@ export function installMockBackend(options) {
     }
     return out;
   }
+  /** A host as the core reports it: its own production flag, else any group above it (P-26). */
+  function hostView(h) {
+    let fromGroup = false;
+    let g = state.groups.find((x) => x.id === h.groupId);
+    for (let d = 0; g && d < 16; d += 1) {
+      if (g.production) fromGroup = true;
+      g = state.groups.find((x) => x.id === g.parentId);
+    }
+    const production = state.ownProduction?.has(h.id) ? "host" : fromGroup ? "group" : null;
+    return { ...structuredClone(h), production };
+  }
+
   function groupPathOf(groupId) {
     const names = [];
     let current = state.groups.find((g) => g.id === groupId);
@@ -404,6 +420,29 @@ export function installMockBackend(options) {
             throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
           if (offHosts.has(host.id)) return { kind: "off" };
           return window.__mockGlance ?? sample;
+        },
+        // tmux and screen session awareness (P-31): what the core would return for the lab-like
+        // server (names already cleaned; attach commands only for strict names).
+        multiplexer_list: (a) => {
+          const s = state.sessions.get(a.sessionId);
+          if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          const host = state.hosts.find((h) => h.label === s.host);
+          if (!host || host.protocol?.type === "telnet" || host.protocol?.type === "serial")
+            throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
+          (window.__mockMultiplexerCalls ??= []).push(a.sessionId);
+          return (
+            window.__mockMultiplexers ?? {
+              state: "listed",
+              tmuxInstalled: true,
+              screenInstalled: true,
+              sessions: [
+                { kind: "tmux", name: "work", attached: false, windows: 3, createdAt: 1760000000, attachCommand: "tmux attach-session -t '=work'" },
+                { kind: "tmux", name: "<img src=x onerror=alert(1)>; rm -rf ~", attached: true, windows: 1, createdAt: 1760000100, attachCommand: null },
+                { kind: "screen", name: "4242.build", attached: false, windows: null, createdAt: null, attachCommand: "screen -r '4242.build'" },
+              ],
+              truncated: false,
+            }
+          );
         },
         glance_host_get: (a) => !offHosts.has(a.hostId),
         glance_host_set: (a) => {
@@ -1060,9 +1099,27 @@ export function installMockBackend(options) {
       setTimeout(() => emit("vault-status", state.vault), 10);
       return { createdAt: 1760140800, hosts: state.hosts.length, keys: 2, knownHosts: 3, snippets: 5 };
     },
-    prefs_get: () => structuredClone(state.prefs),
+    // terminal notifications (P-23): mirrors the native text; records what was asked.
+    notify_command_finished: (a) => {
+      (window.__mockNotices ??= []).push(structuredClone(a));
+      const s = Math.floor(a.durationMs / 1000);
+      const took = s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+      const body = a.exitStatus === 0 ? `Command finished successfully after ${took}.` : a.exitStatus === null ? `Command finished after ${took}.` : `Command failed with exit status ${a.exitStatus} after ${took}.`;
+      return { title: a.tabTitle.trim() || "Tyrminal", body, shown: true };
+    },
+    prefs_get: () => {
+      // Like the preferences file, what was saved survives a reload of the page.
+      try {
+        const saved = sessionStorage.getItem("tyrminal-mock-prefs");
+        if (saved) state.prefs = JSON.parse(saved);
+      } catch {}
+      return structuredClone(state.prefs);
+    },
     prefs_set: (a) => {
       state.prefs = structuredClone(a.prefs);
+      try {
+        sessionStorage.setItem("tyrminal-mock-prefs", JSON.stringify(state.prefs));
+      } catch {}
       return structuredClone(state.prefs);
     },
     vault_status: () =>
@@ -1102,8 +1159,8 @@ export function installMockBackend(options) {
       emit("vault-status", state.vault);
       return null;
     },
-    host_list: () => structuredClone(state.hosts),
-    host_recent: () => structuredClone(state.hosts.filter((h) => h.lastConnectedAt).sort((a, b) => b.lastConnectedAt - a.lastConnectedAt)),
+    host_list: () => state.hosts.map(hostView),
+    host_recent: () => state.hosts.filter((h) => h.lastConnectedAt).sort((a, b) => b.lastConnectedAt - a.lastConnectedAt).map(hostView),
     host_save: (a) => {
       const existing = state.hosts.find((h) => h.id === a.host.id);
       const defaults = groupDefaults(a.host.groupId);
@@ -1127,11 +1184,16 @@ export function installMockBackend(options) {
         protocol: a.host.protocol ?? { type: "ssh" },
         terminal: a.host.terminal ?? { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: a.host.forwardAgent ?? false,
+        // The host's own flag is kept in ownProduction; the record carries what summaries show.
+        production: null,
         // Serial hosts have no port; Telnet defaults to 23.
         ...(a.host.protocol?.type === "telnet" && a.host.port === null ? { port: 23 } : {}),
       };
       state.hosts = existing ? state.hosts.map((h) => (h.id === saved.id ? saved : h)) : [...state.hosts, saved];
-      return saved;
+      state.ownProduction ??= new Set();
+      if (a.host.production) state.ownProduction.add(saved.id);
+      else state.ownProduction.delete(saved.id);
+      return hostView(saved);
     },
     host_delete: (a) => {
       state.hosts = state.hosts.filter((h) => h.id !== a.id);
@@ -1182,7 +1244,7 @@ export function installMockBackend(options) {
     group_list: () => structuredClone(state.groups),
     group_save: (a) => {
       const existing = state.groups.find((g) => g.id === a.group.id);
-      const saved = { ...a.group, id: existing?.id ?? id(600 + state.groups.length) };
+      const saved = { ...a.group, production: a.group.production ?? false, id: existing?.id ?? id(600 + state.groups.length) };
       state.groups = existing ? state.groups.map((g) => (g.id === saved.id ? saved : g)) : [...state.groups, saved];
       return saved;
     },
@@ -1880,6 +1942,11 @@ export function installMockBackend(options) {
       loginShell: target.kind === "session" ? "sh" : null,
     };
   }
+  // terminal notifications: output to the n-th open session (creation order).
+  window.__mockOutputAt = (index, text) => {
+    const s = [...state.sessions.values()][index];
+    if (s) channelSend(s.output, new TextEncoder().encode(text).buffer);
+  };
   window.__mockCalls = calls;
   window.__mockFileSessions = window.__mockFileSessions ?? [];
   window.__mockOpenedLinks = [];

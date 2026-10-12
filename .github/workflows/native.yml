@@ -146,6 +146,14 @@ jobs:
       - name: Start SSH lab
         if: steps.changed.outputs.code == 'true'
         run: pnpm run lab:up
+      # P-33's real-engine test: the Linux lab user may use the runner's Docker (disposable runner;
+      # the group is read at each SSH login, so the running lab picks it up).
+      - name: Container engine for the lab user (Linux)
+        if: steps.changed.outputs.code == 'true' && runner.os == 'Linux'
+        run: |
+          sudo usermod -aG docker tyrlab
+          docker pull -q alpine:3.22
+          echo "TYRMINAL_LAB_CONTAINERS=1" >> "$GITHUB_ENV"
 
       - name: Integration suite
         if: steps.changed.outputs.code == 'true'

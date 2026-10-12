@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
+import { msgN } from "../../lib/messages-notify";
 import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
+import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
 import {
@@ -57,8 +59,10 @@ export function TabStrip({
   onNewLocal,
   onNewSftp,
   onOpenPalette,
+  finished,
   layout,
   recent,
+  production,
 }: {
   ws: Workspace;
   destination: Destination;
@@ -76,10 +80,14 @@ export function TabStrip({
   /** Opens a new SFTP tab. */
   onNewSftp?: () => void;
   onOpenPalette: () => void;
+  /** Tabs whose long command finished while out of view, with its exit status (P-23). */
+  finished?: ReadonlyMap<number, number | null> | undefined;
   /** The layout template the open tabs follow, and whether they changed since it was saved. */
   layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
   /** Recently connected hosts, reopened from the new-tab menu (UX-04). */
   recent?: { id: string; label: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Panes connected to a production host (P-26); their tabs show a "Production" label. */
+  production?: ReadonlyMap<number, string> | undefined;
 }) {
   const [layoutMenu, setLayoutMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
@@ -176,6 +184,7 @@ export function TabStrip({
           const selected = ws.active === tab.id;
           const paneCount = panesOf(tab.layout).length;
           const status = tabStatus(ws, tab);
+          const isProduction = production ? panesOf(tab.layout).some((id) => production.has(id)) : false;
           return (
             <div
               key={tab.id}
@@ -191,6 +200,7 @@ export function TabStrip({
               data-dragging={drag?.from === index}
               data-drop={drag && drag.over === index && drag.from !== index ? drag.side : undefined}
               data-status={status.indicator}
+              data-production={isProduction || undefined}
               data-unread={status.unread || undefined}
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}
@@ -258,7 +268,9 @@ export function TabStrip({
                   {paneCount > 1 && <span className="tab-title"> ({paneCount})</span>}
                 </span>
               )}
+              {isProduction && <span className="badge badge-production tab-production">{msgProduction.label}</span>}
               <span className="visually-hidden">{msgC.status.describe(status)}</span>
+              {finished?.has(tab.id) && <FinishedBadge exit={finished.get(tab.id) ?? null} />}
               {/* A pointer target only: a focusable control may not sit inside a tab. From the
                   keyboard a tab closes with Delete or from its menu (Shift+F10). */}
               <span
@@ -337,5 +349,16 @@ export function TabStrip({
         />
       )}
     </div>
+  );
+}
+
+/** A finished command in a background tab (P-23): a check or a cross, with text, not color alone. */
+function FinishedBadge({ exit }: { exit: number | null }) {
+  const failed = exit !== null && exit !== 0;
+  return (
+    <span className="tab-finished" data-failed={failed || undefined}>
+      <span aria-hidden="true">{failed ? "✕" : "✓"}</span>
+      <span className="visually-hidden"> ({failed ? msgN.badgeFailed(exit) : msgN.badgeOk})</span>
+    </span>
   );
 }

@@ -68,11 +68,11 @@
 }
 
 /* Room for the swap button on the divider between the two headers. */
-.sftp-pane:has(+ .sftp-divider) .sftp-head {
+.sftp-pane:has(+ .sftp-divider) .sftp-locations {
   padding-right: 20px;
 }
 
-.sftp-divider + .sftp-pane .sftp-head {
+.sftp-divider + .sftp-pane .sftp-locations {
   padding-left: 20px;
 }
 
@@ -309,3 +309,138 @@
   flex: 1;
 }
 
+
+/* ---------- location tabs ---------- */
+
+.sftp-locations {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  height: 44px;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sftp-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sftp-tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 64px;
+  max-width: 200px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+}
+
+.sftp-tab:hover {
+  background: var(--bg-hover);
+}
+
+.sftp-tab[data-selected] {
+  border-color: var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.sftp-tab-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.sftp-tab[data-selected] .sftp-tab-main {
+  font-weight: var(--weight-medium);
+}
+
+.sftp-tab-main:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-control);
+}
+
+.sftp-tab-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent-text);
+}
+
+.sftp-tab-icon[data-kind="local"] {
+  color: var(--success);
+}
+
+.sftp-tab-icon[data-kind="none"] {
+  color: var(--text-faint);
+}
+
+.sftp-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sftp-tab .status-dot {
+  flex: none;
+}
+
+/* Close shows on the selected and hovered tab, always reachable by keyboard. */
+.sftp-tab-close {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sftp-tab:hover .sftp-tab-close,
+.sftp-tab[data-selected] .sftp-tab-close {
+  opacity: 1;
+}
+
+.sftp-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.sftp-tab-add {
+  flex: none;
+}
+
+.sftp-location-panel,
+.sftp-location {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sftp-location-panel[hidden],
+.sftp-location[hidden] {
+  display: none;
+}

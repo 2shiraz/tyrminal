@@ -74,11 +74,10 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Every application action has a palette entry where it can act (next/previous/rename/close tab,
   close other tabs, focus and move pane in four directions, copy, paste), running the same code
   as its shortcut (`features/commands/extraActions.tsx`, contributed through a new `extra` prop).
-- "Connection details…" (palette, for the focused SSH pane) and "Show connection details" (on the
-  connection-failed notice) open a dialog listing the core's lines for that session with Copy.
-  Lines are shown as text; control characters are replaced. IPC `connectionDetails.lines` →
-  `session_diagnostics` (the core command arrives with PR #8; until then the native call fails
-  and the dialog shows the error). UI tests use a mock handler; no native test until the command exists.
+- CON-15 view: superseded by the connection log dialog from #27 ("Show connection log" in the
+  palette, "Connection log" on the failure notice). This branch's duplicate "Connection details"
+  dialog was removed; `tests/ui/palette-actions.spec.ts` keeps its copy-as-text and refused-request
+  checks against that dialog.
 
 ## Slice 6: connection side panel (TRM-14)
 

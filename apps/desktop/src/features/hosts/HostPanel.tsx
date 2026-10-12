@@ -7,10 +7,12 @@ import { type FormEvent, type KeyboardEvent, type MutableRefObject, useEffect, u
 
 import { Menu } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton } from "../../components/ui/controls";
-import { IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHorizontal, IconTrash2 } from "../../components/ui/icons";
 import { AutosaveStatus, handleUndoKey } from "../../lib/autosave";
 import { toAppError } from "../../lib/ipc";
+import { msgSftp } from "../sftp/messages";
 import { msg } from "../../lib/messages";
+import type { Unsaved } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { useHostAutosave } from "./hostAutosave";
 import { NoteCard } from "../notes/NoteCard";
@@ -25,10 +27,11 @@ export function HostPanel({
   defaultGroupId,
   os,
   identity,
-  secretRef,
+  unsavedRef,
   onRequestClose,
   onSaved,
   onConnect,
+  onOpenSftp,
   onDuplicate,
   onCopyAddress,
   onDelete,
@@ -40,13 +43,15 @@ export function HostPanel({
   defaultGroupId: string | null;
   os: HostOs | null;
   identity: { list: IdentitySummary[]; current: string | null } | undefined;
-  /** Mirrors whether a password was typed but not set, for the owner's guard. */
-  secretRef: MutableRefObject<boolean>;
+  /** Mirrors what is not autosaved (a typed, unset password; note edits), for the owner's guard. */
+  unsavedRef: MutableRefObject<Unsaved>;
   /** Escape or the collapse button: the owner asks before discarding a typed password. */
   onRequestClose: () => void;
   /** After every write of the host itself (the first one creates it). */
   onSaved: (saved: HostSummary) => void;
   onConnect: (host: HostSummary) => void;
+  /** Open in SFTP (SSH hosts). */
+  onOpenSftp?: ((host: HostSummary) => void) | undefined;
   onDuplicate: (host: HostSummary) => void;
   onCopyAddress: (host: HostSummary) => void;
   onDelete: (host: HostSummary) => void;
@@ -62,7 +67,7 @@ export function HostPanel({
   const [connecting, setConnecting] = useState(false);
   // An unsaved note counts too: closing asks first instead of dropping it.
   const [noteDirty, setNoteDirty] = useState(false);
-  secretRef.current = typedSecret || noteDirty;
+  unsavedRef.current = { password: typedSecret, note: noteDirty };
 
   // A serial host has no address field to start in: focus goes to the panel's heading so it stays
   // inside the panel.
@@ -173,6 +178,7 @@ export function HostPanel({
           anchor={menu}
           onClose={() => setMenu(null)}
           items={[
+            ...(onOpenSftp && host.protocol.type === "ssh" ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(host) }] : []),
             { label: msg.hosts.duplicate, icon: <IconCopy size={15} />, onSelect: () => onDuplicate(host) },
             { label: msgD.hostPanel.copyAddress, icon: <IconCopy size={15} />, onSelect: () => onCopyAddress(host) },
             "separator",

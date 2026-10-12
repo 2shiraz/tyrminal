@@ -99,6 +99,8 @@ a tab, and installing a public key on the connected server.
 **Hosts** lists your saved servers as a grid or a list. Each host has an address, port, user name
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
+Hosts opens as a list. It remembers the layout (list or cards), the sort order and the group you picked, also after
+you visit another view or restart Tyrminal.
 
 A **group** can also give its hosts defaults: a user name, port and key, and, under
 **Defaults for hosts in this group**, a route (a jump host and/or a proxy) and an icon. Hosts
@@ -137,6 +139,25 @@ imported without a jump host, and the preview says why. An OpenSSH `known_hosts`
 imported too: after a review, its keys become trusted server identities, and a key that differs
 from one you already trust is never replaced.
 
+### Production hosts
+
+Mark a host as a **production host** with the switch in its editor, mark a whole group (every
+host in it and its subgroups) in the group editor, or give hosts the production tag (Settings →
+Security → **Production tag**, `prod` unless you change it; leave it empty to use only the
+switches). The host editor says when a host is a production host through its group or tag.
+
+Production hosts show a red **Production** badge in Hosts. Their sessions have a red edge on the
+tab and around the pane, together with the word **Production**. Tyrminal asks before:
+
+- **broadcasting** to a tab that has a production pane (and asks again each time you turn
+  broadcasting on);
+- **running a snippet on several hosts** when some of them are production hosts;
+- **connecting every host of a group** (or a selection) that includes production hosts.
+
+Each question names the production hosts and starts on **Cancel**, so Enter or Escape never
+confirms by accident. The production marking only adds these questions; it never turns any
+other check off.
+
 ## Connecting and host keys
 
 The first time you connect to a server, Tyrminal shows its host-key fingerprint and asks whether
@@ -158,9 +179,9 @@ the session is open, that server (and anyone with administrator rights on it) ca
 host's key**, and only that key, to sign in to other servers as you. It is never forwarded to
 jump hosts, and the server cannot add or remove keys or see any other key.
 
-To see what happened while connecting, choose **Connection details…** in the command palette,
-or **Show connection details** on a failed connection. **Copy** puts the lines on the clipboard;
-they never contain passwords, passphrases or keys.
+To see what happened while connecting, choose **Show connection log** in the command palette,
+or **Connection log** on a failed connection. **Copy** puts the lines on the clipboard; they
+never contain passwords, passphrases or keys.
 
 ## Keys
 
@@ -201,6 +222,12 @@ Each tab holds one or more panes (split right or down). A pane is an SSH session
 terminal (Ctrl+Shift+T, ⌘T on macOS). Settings → Terminal sets the color scheme, font, size,
 cursor and scrollback, and the shell for local terminals (only shells installed on this computer
 are offered).
+
+**Long commands.** With shell integration on, Tyrminal shows a desktop notification when a command
+that ran for at least 10 seconds finishes in a tab you are not looking at, and marks that tab
+(✓, or ✕ when it failed) until you open it. The notification names the tab, the exit status and
+how long it took; it never contains the command or its output. Change the time or turn it off in
+Settings → Terminal.
 
 Safety features:
 
@@ -283,6 +310,14 @@ with a fixed command on a separate channel of the same connection, so nothing is
 shell. It reads them every 5 s, and only while the panel is open. A value the server did not
 report in the expected form shows as "Unavailable" instead of a guess. Turn off "Show for this
 host" in the panel to stop it for one host.
+
+**tmux and screen.** The same panel lists the server's tmux and screen sessions when it opens
+(and on **Refresh sessions**), again over a separate channel without typing anything. Session
+names come from the server and are shown as text. **Attach** types the attach command into the
+terminal, and only when you click it. A session whose name contains characters such as spaces,
+quotes or `;` is listed without **Attach**; attach to it yourself. If the connection drops and
+Tyrminal reconnects, the pane offers to reattach the session you attached from the panel; it
+never reattaches by itself.
 
 ## Files (SFTP)
 

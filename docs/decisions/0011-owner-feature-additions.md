@@ -27,6 +27,18 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
 - Any notification plugin is a new dependency. Record its version, licence and reason here before
   merging.
 
+  **Recorded (P-23 implementation):** `tauri-plugin-notification` `=2.6.0` (Apache-2.0 OR MIT), the
+  Tauri project's own desktop notification plugin, so notifications go through the platform APIs
+  (D-Bus on Linux, the notification center on macOS, toast notifications on Windows). It brings
+  `notify-rust` 4.18.2 (MIT OR Apache-2.0), `mac-notification-sys` 0.6.15 (MIT),
+  `tauri-winrt-notification` 0.8.1 (MIT OR Apache-2.0), `rand` 0.9.x with `rand_chacha`/`rand_core`/
+  `ppv-lite86` (MIT OR Apache-2.0) and `zerocopy` 0.8.x (BSD-2-Clause OR Apache-2.0 OR MIT). It is
+  used from Rust only: the renderer gets no notification permission and supplies no text. The
+  `notify_command_finished` command takes the tab title, exit status and duration, the core builds
+  the text (`crates/core/src/notify.rs`), and a window gets at most one notification every 3 s.
+  No npm package is added. Desktop notifications cannot report a click to the app, so returning
+  to the window within two minutes of a notification shows that tab.
+
 ### P-24: quick port forward from a detected listening port
 
 - Session output is untrusted. Detection, for example `listening on http://localhost:3000`, may
@@ -63,6 +75,16 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
   production pane, a multi-host snippet run, and connecting to a group that includes production
   hosts. Cancel has focus by default.
 - The guardrails only add confirmations. They never relax any other check.
+- Implementation (2026-10-12):
+  - The vault stores the flag on host and group records. A host summary reports `production` as
+    `host` or `group` (the nearest flag up the chain), or `null`.
+  - The production tag is a preference (`productionTag`, default `prod`, empty to turn the tag
+    rule off), validated like a host tag, and applied by the interface in one helper
+    (`features/hosts/production.ts`).
+  - Broadcast input reaches a production pane only after the confirmation for that tab. The
+    consent is dropped whenever broadcasting stops, so turning it on again asks again.
+  - The marking is red (apart from broadcast's amber) and always comes with the word
+    "Production".
 
 ### P-27: security review
 

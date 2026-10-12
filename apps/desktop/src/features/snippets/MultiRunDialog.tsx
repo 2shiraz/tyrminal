@@ -9,7 +9,10 @@ import { IconPlay, IconSave, IconSearch, IconTrash2 } from "../../components/ui/
 import { type AppError, sessions as sessionsApi, snippetsD, terminalOutput, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgProduction } from "../../lib/messages-production";
 import { msgRuns } from "../../lib/messages-runs";
+import { ProductionConfirm } from "../hosts/ProductionConfirm";
+import { useIsProduction } from "../hosts/production";
 import { useSnippetRunHost } from "./runContext";
 import { groupSelection, hostsOfGroup, resolveTarget, selectionAsTarget } from "./runTargets";
 
@@ -95,6 +98,8 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
   const [skipInput, setSkipInput] = useState(false);
   const [rows, setRows] = useState<Map<string, Row>>(new Map());
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const isProduction = useIsProduction();
   const [, refresh] = useState(0);
   const cancelled = useRef(false);
   /** Run ids of runs on open sessions, and the run-only connections this dialog opened. */
@@ -260,7 +265,8 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
    * anything runs (the production question of P-26) goes here, with the exact plan in `chosen`.
    */
   function confirmThenRun() {
-    void run();
+    if (chosen.some(isProduction)) setConfirming(true);
+    else void run();
   }
 
   function cancelAll() {
@@ -379,6 +385,7 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
                   <span className="row-title">{h.label}</span>
                   <span className="row-sub">{msg.hosts.destination(h.username, h.address, h.port)}</span>
                 </div>
+                {isProduction(h) && <span className="badge badge-production">{msgProduction.label}</span>}
                 <span className={`badge ${sessionOf.has(h.id) ? "badge-success" : ""}`}>{sessionOf.has(h.id) ? msgD.runs.sessionOpen : msgD.runs.noSession}</span>
               </li>
             ))}
@@ -423,6 +430,20 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
             </button>
           </div>
         </div>
+      )}
+
+      {confirming && (
+        <ProductionConfirm
+          title={msgProduction.runTitle}
+          body={msgProduction.runBody}
+          confirmLabel={msgProduction.runConfirm}
+          hosts={chosen.filter(isProduction).map((h) => h.label)}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            void run();
+          }}
+        />
       )}
 
       {step === "run" && (
@@ -470,6 +491,7 @@ function HostChooser({
   onHosts: (ids: string[], on: boolean) => void;
   onGroup: (groupId: string, on: boolean) => void;
 }) {
+  const isProduction = useIsProduction();
   const needle = filter.trim().toLowerCase();
   const sorted = useMemo(() => [...hosts].sort((a, b) => a.label.localeCompare(b.label)), [hosts]);
   const hostRow = (h: HostSummary, depth: number) => (
@@ -479,6 +501,7 @@ function HostChooser({
         <span className="row-title">{h.label}</span>
         <span className="row-sub">{msg.hosts.destination(h.username, h.address, h.port)}</span>
       </div>
+      {isProduction(h) && <span className="badge badge-production">{msgProduction.label}</span>}
       <span className={`badge ${sessionOf.has(h.id) ? "badge-success" : ""}`}>{sessionOf.has(h.id) ? msgD.runs.sessionOpen : msgD.runs.noSession}</span>
     </li>
   );

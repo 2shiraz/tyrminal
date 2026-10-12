@@ -94,13 +94,16 @@ const SUITES = {
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // privilege prompts (KEY-18)
     { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    // P-33: shells in a real container. The lab images have no engine, so this runs only where the
-    // lab user can use Docker or Podman and says so; otherwise it is BLOCKED (never a silent pass).
-    {
-      name: "container shells in a running container (lab with an engine)",
-      cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
-      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
-    },
+    // P-33: shells in a real container, on Linux only: the macOS and WSL labs have no container
+    // engine (B-10). Native CI gives the Linux lab user Docker and sets TYRMINAL_LAB_CONTAINERS;
+    // elsewhere on Linux it is BLOCKED until the lab user can use Docker or Podman (never a silent pass).
+    ...(process.platform === "linux"
+      ? [{
+          name: "container shells in a running container (lab with an engine)",
+          cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
+          blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
+        }]
+      : []),
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
