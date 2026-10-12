@@ -18,6 +18,8 @@ mod remote_copy;
 mod sessions;
 mod validate;
 mod vault;
+// agent B: tunnels and history
+mod tunnels;
 // agent D: inventory and snippets
 mod importers;
 pub mod shell_integration;

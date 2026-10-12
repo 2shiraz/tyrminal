@@ -547,6 +547,10 @@ pub enum SessionEvent {
         resolved_address: Option<String>,
         algorithm: String,
         fingerprint: String,
+        // agent B: tunnels and history
+        /// For a jump-host chain: which hop is asking.
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
     },
     /// The endpoint presented a different key than the trusted one. The connection is already
     /// closed and no credential was sent.
@@ -557,6 +561,9 @@ pub enum SessionEvent {
         algorithm: String,
         presented_fingerprint: String,
         trusted_fingerprints: Vec<String>,
+        // agent B: tunnels and history
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
     },
     #[serde(rename_all = "camelCase")]
     AuthPrompt {
@@ -571,6 +578,9 @@ pub enum SessionEvent {
         message: Option<String>,
         /// Keyboard-interactive only: the server allows the answer to be shown while typed.
         echo: bool,
+        // agent B: tunnels and history
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
     },
     /// The algorithms the connection uses, after key exchange. Values come from the client's
     /// own offer list, never from server text.
@@ -636,6 +646,7 @@ mod tests {
             resolved_address: None,
             algorithm: "ssh-ed25519".into(),
             fingerprint: "SHA256:x".into(),
+            hop: None,
         };
         // Field names are part of the contract with the generated TypeScript.
         let json = format!("{:?}", serde_json_like(&event));

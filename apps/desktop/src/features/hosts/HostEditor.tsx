@@ -7,6 +7,8 @@ import { IconServer } from "../../components/ui/icons";
 import { hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+// agent B: tunnels and history
+import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -56,6 +58,8 @@ export function HostEditor({
   onSaved: (saved: HostSummary) => void;
 }) {
   const source = host ?? initial;
+  // agent B: tunnels and history
+  const advanced = useHostAdvanced(host?.id ?? null);
   const [groupId, setGroupId] = useState<string | null>(host ? host.groupId : defaultGroupId);
   const [label, setLabel] = useState(host?.label ?? initial?.label ?? initial?.address ?? "");
   const [address, setAddress] = useState(source?.address ?? "");
@@ -104,9 +108,13 @@ export function HostEditor({
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t !== "");
-    const saved = await run(() =>
-      hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList }),
-    );
+    const saved = await run(async () => {
+      // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
+      await advanced.saveBefore();
+      const result = await hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList });
+      await advanced.saveAfter(result.id);
+      return result;
+    });
     setPassword("");
     if (saved) onSaved(saved);
   }
@@ -224,6 +232,9 @@ export function HostEditor({
             />
           )}
         </fieldset>
+
+        {/* agent B: tunnels and history */}
+        <HostAdvancedSection host={host} state={advanced} />
 
         {ready && (
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>

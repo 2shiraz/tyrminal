@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tunnel-list"
+description = "Enables the tunnel_list command without any pre-configured scope."
+commands.allow = ["tunnel_list"]
+
+[[permission]]
+identifier = "deny-tunnel-list"
+description = "Denies the tunnel_list command without any pre-configured scope."
+commands.deny = ["tunnel_list"]

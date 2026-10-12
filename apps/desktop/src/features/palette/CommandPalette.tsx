@@ -25,6 +25,8 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
+  // agent B: tunnels and history
+  IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
@@ -191,6 +193,8 @@ export function CommandPalette({
     list.push(nav("keychain", <IconKeyRound size={16} />));
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
+    // agent B: tunnels and history
+    list.push(nav("tunnels", <IconRoute size={16} />));
     return list;
   }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
 

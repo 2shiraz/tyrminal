@@ -149,9 +149,9 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | Waiting for agent B's merge (identities, environment variables, startup scripts, certificate sign-in, per-host PQ switch, IMP-02, HST-05) |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization |
-| Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh); certificate sign-in and per-host PQ switch wait for B's connection path |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | — | Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18; certificate sign-in, IMP-02, HST-05 and SEC-08/10 moved to the tunnels owner |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization; suggestions (AUT-02/03/04/12, P-14); known_hosts import (IMP-01); shell integration (AUT-06/07) |
+| Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh) |
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
@@ -181,3 +181,38 @@ Never merge these by hand; regenerate them after resolving the sources:
   plus its import. It registers OSC 7 and OSC 133 handlers (bounded, validated, display and
   suggestions only; nothing runs). `CommandPalette.tsx` gets an optional `onShellIntegration` prop
   and one entry; `AppShell.tsx` opens `IntegrationDialog` from it. Please keep them when merging.
+
+**From agent B (notices of small additive edits in agent A's files, each in a block marked
+`agent B: tunnels and history`; please keep them when you touch these files):**
+
+1. `crates/ssh/src/client.rs`: `VerifiedConnection` fields `handle` and `request_timeout` are
+   `pub(crate)` and it gains a `routes` field; the handler refuses server-opened channels except
+   `forwarded-tcpip` for requested ports (ADR 0004 §3). No behaviour change for shells/SFTP.
+2. `crates/core/src/vault.rs`: an `Open.tunnels` map, one `load!` line for `KIND_TUNNEL`, and one
+   `impl VaultService` block (tunnel CRUD) placed just before the first test module.
+   `crates/core/src/records.rs`: `KIND_TUNNEL = 100` and `TunnelRecord`. B's kinds start at 100.
+3. `crates/core/src/sessions.rs` outside `run_ssh`: `Entry` gains `host_id`, `register` takes it,
+   `connection()` is `pub(crate)`, `supervise` calls `tunnel_runs.session_ended(..)`, and
+   `TaskContext` carries the session id and `Sessions`.
+4. `apps/desktop/src/lib/messages.ts`: `nav.tunnels`; `apps/desktop/src/components/layout/TabStrip.tsx`:
+   `tunnels` in `PAGE_ICONS` (both needed because `Destination` gained `"tunnels"`).
+5. `crates/core/src/vault.rs` host paths: `HostRecord` gained `connection` (jump host);
+   `save_host` keeps the stored value, `copy_host` copies it, CSV/OpenSSH import sets the default.
+   `connection_plan` now builds a hop chain through a new `hop_plan` helper (same per-host rules).
+6. **Done by B (A delegated it):** `SessionEvent::TrustPrompt`, `HostKeyChanged` and `AuthPrompt` gained
+   `hop: Option<ChainPosition>` (`dto.rs`, marked block), and `TerminalView.tsx` renders it with
+   one marked `<HopNotice>` line per dialog. Original request: add an optional hop description to `SessionEvent::TrustPrompt` / `HostKeyChanged`
+   (for example `via: Option<String>`, the saved label of the hop) and show it in the trust dialog,
+   so the prompt names the specific jump-chain hop (BUILD_SPEC §4.5). B will fill it in
+   `run_ssh`. Until then the prompt shows the hop's own address and port.
+7. **Observation (A's tests):** `sessions_lab::deploying_a_public_key_appends_one_line_and_keeps_the_others`
+   passes only on a fresh lab account: it ends with `authorized_keys` at mode 600 and its next run
+   writes the file with `printf >`, which keeps that mode, so the `-rw-r--r--` assertion fails.
+   Setting the mode explicitly (`chmod 644`) after the `printf` would make it re-runnable. Also,
+   `behavior.spec.ts` "broadcast: typed input reaches every pane…" failed once in 3 full UI runs
+   on this branch (passed in isolation 3/3 and in the other two full runs); no log was kept.
+8. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
+   `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`),
+   `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
+   `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
+   loopback-only without explicit approval; unrequested server channels refused (ADR 0004).

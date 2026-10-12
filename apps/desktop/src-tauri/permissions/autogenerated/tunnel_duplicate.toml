@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tunnel-duplicate"
+description = "Enables the tunnel_duplicate command without any pre-configured scope."
+commands.allow = ["tunnel_duplicate"]
+
+[[permission]]
+identifier = "deny-tunnel-duplicate"
+description = "Denies the tunnel_duplicate command without any pre-configured scope."
+commands.deny = ["tunnel_duplicate"]

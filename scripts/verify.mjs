@@ -60,6 +60,10 @@ const SUITES = {
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
     { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
+    // agent B: tunnels and history
+    { name: "port forwarding against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "SSH through HTTP/SOCKS5 proxies (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "proxy_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
   ],
@@ -70,6 +74,9 @@ const SUITES = {
     { name: "host trust and credentials ordering (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored", "host_key", "credentials"), blockedBy: needsLab },
     { name: "session ownership, lock invalidation, output ceiling (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored", "--skip", "two_gib"), blockedBy: needsLab },
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
+    // agent B: tunnels and history
+    { name: "listener exposure, denied forwarding, link-loss cleanup (lab)", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "forward_lab", "--quiet", "--", "--ignored", "never_bind", "denies", "lost_link", "limit"), blockedBy: needsLab },
+    { name: "changed bastion key, proxy auth rejection, impostor proxy (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored", "bastion", "proxy", "scoped"), blockedBy: needsLab },
   ],
   native: [
     { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },

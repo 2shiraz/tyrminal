@@ -6,7 +6,7 @@ Agent A's `docs/progress.md` stays the project-wide checkpoint; this file covers
 
 ## Checkpoint
 
-Updated: 2026-10-12.
+Updated: 2026-10-12 (main 99d8d89 merged).
 
 | Slice | State |
 |---|---|
@@ -93,7 +93,7 @@ Updated: 2026-10-12.
   from disk).
 - `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion, PQ check, snippet runs, shell integration on the server's real Bash.
 - `cargo test -p tyrminal-core --test shell_integration`: local install in a temporary home; real Bash 5.2 and Zsh processes report folder, prompt and command marks.
-- `pnpm build:e2e` then `node --test tests/native/keys.test.mjs tests/native/snippets.test.mjs` under xvfb: 4/4.
+- `pnpm build:e2e` then `node --test tests/native/keys.test.mjs tests/native/snippets.test.mjs tests/native/integration.test.mjs` under xvfb: all pass (after merging main 99d8d89).
 - `node scripts/ui-container.mjs` — full suite green, including `inventory-presentation.spec.ts`.
 - `pnpm verify:fast` 7/7; `cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib` 20/20 against the local lab (OpenSSH 9.6p1).
 - `cargo test -p tyrminal-ssh --test lab -- --ignored`: 16/17; `ipv6_loopback_endpoint_…` cannot bind `[::1]` in this sandbox (EAFNOSUPPORT, no IPv6 in the container), unrelated to these changes.
