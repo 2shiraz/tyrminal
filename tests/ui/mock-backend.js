@@ -130,11 +130,13 @@ export function installMockBackend(options) {
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
     // "files": a files-only connection (SFTP tab): SSH trust and sign-in, no terminal output.
-    const files = kind === "files";
+    // "exec": a run-only connection for snippet runs (SNP-05): the same, with exec channels only.
+    const exec = kind === "exec";
+    const files = kind === "files" || exec;
     if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
-    if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
+    const s = { id: sessionId, hostId: host?.id ?? null, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files, exec };
+    if (files && !exec) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
     if (host?.protocol?.type === "telnet")
@@ -216,6 +218,19 @@ export function installMockBackend(options) {
           }),
         30,
       );
+      return { sessionId };
+    }
+    if (passwordPrompt && exec && args.interactive === false) {
+      // Like the core: nothing is asked; the host is skipped as needing sign-in.
+      setTimeout(() => {
+        state.sessions.delete(sessionId);
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "NEEDS_SIGN_IN", message: "This host needs a sign-in answer (no saved password or key), so it was skipped." },
+          exitStatus: null,
+        });
+      }, 30);
       return { sessionId };
     }
     if (passwordPrompt) {
@@ -1069,6 +1084,7 @@ export function installMockBackend(options) {
       }, 20);
       return { sessionId };
     },
+    session_open_exec: (a) => openSession(a, "exec"),
     session_auth_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
       if (!s) return;
@@ -1092,6 +1108,8 @@ export function installMockBackend(options) {
     session_ack: () => null,
     session_close: (a) => {
       state.sessions.delete(a.sessionId);
+      // Runs on a closed connection stop, as in the core.
+      for (const [runId, run] of state.runs ?? []) if (run.sessionId === a.sessionId) run.stop("The session was closed, so the run stopped.");
     },
     session_trust_answer: (a) => {
       const s = state.sessions.get(a.sessionId);
@@ -1267,7 +1285,13 @@ export function installMockBackend(options) {
           if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false, envRejected: ["LEGACY_MODE"] });
           else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false, envRejected: [] });
         };
-        if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
+        if (session.host === "build-runner-03") {
+          const stop = (message = "The run was cancelled.") => {
+            state.runs.delete(a.runId);
+            reject({ code: "CANCELLED", message });
+          };
+          state.runs.set(a.runId, Object.assign(stop, { sessionId: a.sessionId, stop }));
+        }
         else setTimeout(finish, 50);
       }),
     snippet_exec_cancel: (a) => {
@@ -1277,7 +1301,7 @@ export function installMockBackend(options) {
     execution_target_list: () => structuredClone(state.targets ?? []),
     execution_target_save: (a) => {
       state.targets ??= [];
-      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], missing: 0 };
+      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], groupIds: [...new Set(a.target.groupIds ?? [])], missing: 0 };
       state.targets.push(saved);
       return saved;
     },
