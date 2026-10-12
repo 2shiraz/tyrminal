@@ -24,9 +24,12 @@ xvfb): `verify:fast` 7/7; ssh lab 16/17 (IPv6 loopback absent in this sandbox on
 14/14; native app 9/9, terminal 12/12, snippets 3/3, backup 3/3; browser UI 38/38 in the
 pinned Playwright image. Measurements: `docs/reports/performance/2026-10-12-linux-x64-sandbox.json`.
 
-CI (PR https://github.com/2shiraz/tyrminal/pull/1): fast, UI, cargo-deny/npm audit, secret
-scan and fuzz smoke are green. Native jobs: Linux and macOS reach the integration suites;
-Windows reaches the lab (host-key ownership fix pushed next).
+CI (PR https://github.com/2shiraz/tyrminal/pull/1), native workflow run 38205380325 on commit
+03d906f: **macOS arm64 (macos-15) and Linux x64 (ubuntu-24.04) fully green**: fast 7/7,
+integration 3/3, security 6/6, native 4/4 suites (app, terminal with vim/nano/tmux/htop/mc,
+snippets, backup), 0 blocked; unsigned release build and the release policy check against the
+built binary pass on both. Linux has been green on four runs in a row. Windows x64: fast
+checks pass; the WSL lab server is being brought up (Node inside WSL fixed in 0723e73).
 
 ## Findings worth keeping
 
@@ -51,12 +54,15 @@ Windows reaches the lab (host-key ownership fix pushed next).
 13. russh ends a channel stream with `ChannelMsg::Close` when the server closes it and with
     nothing when the connection is gone; only the second is a lost link (auto-reconnect).
 14. Debian's packaged node does not execute under WSL 1; CI uses the official build there.
+    Git Bash rewrites POSIX-looking environment values into Windows paths, so paths for the
+    WSL side are chosen inside WSL, and `wsl.exe -e` avoids a login shell re-parsing arguments.
+15. macOS: text typed through WebDriver must be ASCII (CJK and emoji never reached the shell);
+    after an interrupt zsh continues a `;` list where bash abandons it.
 
 ## Next tasks, in order
 
-1. Get the three native CI jobs green. Linux: green three runs in a row. macOS: App Nap stalls
-   the WebView on the unattended runner (disabled in CI; verify). Windows: lab server in WSL 1
-   (Debian 12; Ubuntu 24.04 binaries do not execute under WSL 1).
+1. Windows native job green (lab server in WSL 1, Debian 12, official Node 20 inside WSL).
+   macOS and Linux are green (see Evidence).
 2. Windows lab = Linux OpenSSH in WSL 1, so tmux/htop/mc and PAM keyboard-interactive run there
    too; the local Win32-OpenSSH mode remains for developers without WSL.
 3. When all three are green: mark matrix rows VERIFIED with `verified_commit`, merge the PR,
