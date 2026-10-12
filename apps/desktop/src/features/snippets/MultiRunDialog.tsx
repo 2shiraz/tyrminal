@@ -255,6 +255,14 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
     await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   }
 
+  /**
+   * The one gate between the review and the run: every confirmation that must name hosts before
+   * anything runs (the production question of P-26) goes here, with the exact plan in `chosen`.
+   */
+  function confirmThenRun() {
+    void run();
+  }
+
   function cancelAll() {
     cancelled.current = true;
     for (const id of openRuns.current) void snippetsD.cancel(id).catch(() => undefined);
@@ -409,7 +417,7 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
                 {msgD.runs.back}
               </button>
             )}
-            <button type="button" className="btn btn-primary" disabled={chosen.length === 0} onClick={() => void run()}>
+            <button type="button" className="btn btn-primary" disabled={chosen.length === 0} onClick={() => confirmThenRun()}>
               <IconPlay size={14} />
               {msgD.runs.run(chosen.length)}
             </button>
