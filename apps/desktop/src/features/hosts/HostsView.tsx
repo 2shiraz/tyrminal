@@ -11,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type KeyboardEvent, type MouseEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -172,7 +172,7 @@ function useDoubleClickHint() {
 /** Ctrl on Windows and Linux, Cmd on macOS: the "add to the selection" modifier. */
 const toggleKey = (event: { ctrlKey: boolean; metaKey: boolean }) => (isMac ? event.metaKey : event.ctrlKey);
 
-export function HostsView({
+function HostsViewImpl({
   ws,
   onConnect,
   onConnectMany,
@@ -1283,6 +1283,9 @@ export function HostsView({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const HostsView = memo(HostsViewImpl);
 
 /** Below this width the list and the Host details panel do not fit side by side. */
 const NARROW_WIDTH = 760;

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, memo } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { msgN } from "../../lib/messages-notify";
@@ -44,7 +44,7 @@ const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
   recordings: IconHistory,
 };
 
-export function TabStrip({
+function TabStripImpl({
   ws,
   destination,
   renaming,
@@ -89,6 +89,8 @@ export function TabStrip({
   recent?: { id: string; label: string; detail: string; onSelect: () => void }[] | undefined;
   /** Panes connected to a production host (P-26); their tabs show a "Production" label. */
   production?: ReadonlyMap<number, string> | undefined;
+  /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
+  shortcuts?: unknown;
 }) {
   const [layoutMenu, setLayoutMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
@@ -359,6 +361,9 @@ export function TabStrip({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const TabStrip = memo(TabStripImpl);
 
 /** A finished command in a background tab (P-23): a check or a cross, with text, not color alone. */
 function FinishedBadge({ exit }: { exit: number | null }) {

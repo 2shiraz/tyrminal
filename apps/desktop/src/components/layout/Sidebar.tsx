@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, memo } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
@@ -56,7 +56,7 @@ const VAULT: { id: Destination; icon: ReactNode }[] = [
   { id: "knownHosts", icon: <IconFingerprint size={17} /> },
 ];
 
-export function Sidebar({
+function SidebarImpl({
   destination,
   collapsed,
   ws,
@@ -85,6 +85,8 @@ export function Sidebar({
   onOpenAbout: () => void;
   hostCount: number;
   snippetCount: number;
+  /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
+  shortcuts?: unknown;
 }) {
   const counts: Partial<Record<Destination, number>> = { hosts: hostCount, snippets: snippetCount };
 
@@ -185,3 +187,6 @@ export function Sidebar({
     </nav>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const Sidebar = memo(SidebarImpl);
