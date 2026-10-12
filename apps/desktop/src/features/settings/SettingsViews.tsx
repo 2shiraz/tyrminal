@@ -17,6 +17,7 @@ import {
   relativeTime,
 } from "../../components/ui/controls";
 import { IconFingerprint, IconMonitor, IconPlus, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
+import { msgB } from "../../lib/messages-b";
 import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
@@ -428,6 +429,13 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
                 <p>{msg.settings.privacyBody}</p>
               </header>
               <DiagnosticsSetting enabled={prefs.diagnostics} onChange={(diagnostics) => update((p) => ({ ...p, diagnostics }))} />
+              {/* Quick port forwards (P-24) */}
+              <Switch
+                label={msgB.quick.setting}
+                hint={msgB.quick.settingHint}
+                checked={!prefs.noPortSuggestions}
+                onChange={(on) => update((p) => ({ ...p, noPortSuggestions: !on }))}
+              />
               <div className="settings-row">
                 <div>
                   <h3>{msg.settings.updates}</h3>

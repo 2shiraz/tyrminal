@@ -139,6 +139,8 @@ pub struct Sessions {
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
     pub(crate) recordings: crate::recording::Recordings,
+    /// Ports suggested for a quick forward, per session (P-24).
+    pub(crate) suggested: Arc<crate::port_suggest::Suggested>,
     // agent D: inventory and snippets
     /// Snippet runs on exec channels, with their cancel switches.
     snippet_runs: crate::snippet_runs::Runs,
@@ -180,6 +182,7 @@ impl Sessions {
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
             recordings: crate::recording::Recordings::new(logs_dir),
+            suggested: Arc::default(),
             // agent D: inventory and snippets
             snippet_runs: crate::snippet_runs::Runs::default(),
         })
@@ -287,6 +290,8 @@ impl Sessions {
         let sink = (self.recordings)
             .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
             .await;
+        // Quick port forwards (P-24): ports the output names are offered, never forwarded on their own.
+        let sink = if plan.port_suggestions { crate::port_suggest::wrap(sink, &id, &self.suggested) } else { sink };
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -547,6 +552,7 @@ impl Sessions {
             crate::records::LogEnd::Locked
         };
         self.recordings.session_ended(&self.vault, session_id, reason).await;
+        self.suggested.session_ended(session_id);
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.

@@ -34,6 +34,7 @@ import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import { QuickForwardBar } from "../tunnels/QuickForward";
 import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
@@ -172,6 +173,8 @@ export function TerminalView(props: TerminalViewProps) {
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  // Quick port forwards (P-24): ports the output named, waiting for the user.
+  const [portOffers, setPortOffers] = useState<number[]>([]);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   // The Keychain key the destination refused in this attempt, to offer installing it.
@@ -222,6 +225,7 @@ export function TerminalView(props: TerminalViewProps) {
     setAuth(null);
     setChanged(null);
     setBanner(null);
+    setPortOffers([]);
     setClosed(null);
     setRejectedKey(null);
     environment.current = null;
@@ -286,6 +290,9 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "banner":
             setBanner(event.text);
+            break;
+          case "port_suggestion":
+            setPortOffers((list) => (list.includes(event.port) ? list : [...list, event.port]));
             break;
           // Environment variables the server refused are always reported (SNP-13).
           case "environment":
@@ -522,6 +529,15 @@ export function TerminalView(props: TerminalViewProps) {
           </button>
         </div>
       )}
+
+      {/* Quick port forwards (P-24) */}
+      <QuickForwardBar
+        sessionId={controllerRef.current?.id ?? null}
+        hostId={target.kind === "ssh" ? target.hostId : null}
+        ports={portOffers}
+        connected={state === "connected" && !closed}
+        onDone={(port) => setPortOffers((list) => (port === "all" ? [] : list.filter((p) => p !== port)))}
+      />
 
       {findOpen && (
         <FindBar

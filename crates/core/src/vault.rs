@@ -169,6 +169,8 @@ pub(crate) struct ConnectionPlan {
     pub known_hosts: Vec<(KnownHost, String)>,
     /// Environment variables to request for the shell (the host's own, with inherited ones).
     pub env: Vec<(String, Zeroizing<String>)>,
+    /// Offer quick forwards for ports the session's output names (P-24).
+    pub port_suggestions: bool,
     pub generation: u32,
 }
 
@@ -1896,6 +1898,20 @@ impl VaultService {
         Ok(())
     }
 
+    /// Turns quick forward suggestions on or off for one host (P-24); nothing else changes.
+    pub async fn set_port_suggestions(&self, host_id: &str, enabled: bool) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
+        let mut record = copy_host(&current.record);
+        record.connection.no_port_suggestions = !enabled;
+        let revision = current.revision + 1;
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
     // ---------- sessions ----------
 
     /// Snapshot of what a session needs, taken under the mutex at one generation. Later edits to
@@ -1933,6 +1949,7 @@ impl VaultService {
             proxy: target.proxy,
             label: target.label,
             key_exchange: target.key_exchange,
+            port_suggestions: !host.connection.no_port_suggestions,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -2046,6 +2063,7 @@ impl VaultService {
             own: Self::own_route(host),
             inherited: Self::inherited_route(open, &id, host),
             key_exchange: host.connection.key_exchange,
+            no_port_suggestions: host.connection.no_port_suggestions,
         })
     }
 
@@ -2077,6 +2095,7 @@ impl VaultService {
         record.connection.proxy = proxy;
         record.connection.own = !input.inherit;
         record.connection.key_exchange = input.key_exchange;
+        record.connection.no_port_suggestions = input.no_port_suggestions;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = if input.inherit {

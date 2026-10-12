@@ -117,6 +117,9 @@ const COMMANDS: &[&str] = &[
     "session_log_delete",
     "session_log_delete_all",
     "session_log_open",
+    "quick_forward_start",
+    "quick_forward_open",
+    "host_port_suggestions_set",
     // agent C: workspaces
     "layout_list",
     "layout_save",
