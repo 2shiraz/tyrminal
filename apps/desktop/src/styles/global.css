@@ -1466,34 +1466,79 @@ kbd,
 
 /* ---------- tab strip ---------- */
 
+/* Browser-style tabs (the one deliberate exception to the boxy look): the active tab is a raised
+   shape in the content's colour that merges into the page below it, with rounded top corners and
+   inverted "feet" at its foot; inactive tabs have no fill and a thin separator between them. The
+   active tab is wider and shows its full title; inactive tabs shrink evenly to a minimum that keeps
+   the status dot, a few letters and the close button, and then the strip scrolls sideways. */
 .tabstrip {
+  --tab-h: calc(var(--tabstrip-height) - 6px);
+  --tab-radius: 8px;
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: stretch;
   min-width: 0;
-  padding: 0 var(--space-2);
+  padding: 0;
   background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border-subtle);
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* Painted under the tabs, so the active tab covers it where it meets the page. */
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
+  overflow: hidden;
 }
 
-.tabstrip::-webkit-scrollbar {
+.tabstrip-scroll {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Keeps a tab scrolled into view clear of the pinned "+". */
+  scroll-padding-inline-end: calc(var(--control-height-sm) + 8px);
+}
+
+.tabstrip-scroll::-webkit-scrollbar {
   display: none;
 }
 
+/* Fades on the sides that have more tabs; never over the pinned "+". */
+.tabstrip-scroll[data-overflow="start"] {
+  mask-image: linear-gradient(to right, transparent 0, #000 24px);
+}
+
+.tabstrip-scroll[data-overflow="end"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 68px), transparent calc(100% - 40px), #000 calc(100% - 40px));
+}
+
+.tabstrip-scroll[data-overflow="both"] {
+  mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 68px), transparent calc(100% - 40px), #000 calc(100% - 40px));
+}
+
+.tabstrip-tabs {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-end;
+  align-self: stretch;
+  gap: 0;
+}
+
 .tab {
+  --tab-fill: var(--bg-surface);
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex: 0 1 220px;
-  min-width: 120px;
-  height: 34px;
-  padding: 0 4px 0 var(--space-3);
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  /* A width rather than a flex basis: the tab list is sized from it, so a short title never
+     leaves the tab hanging past the list (under the pinned "+"). */
+  flex: 0 1 auto;
+  width: var(--tab-w, 180px);
+  min-width: var(--tab-min, 84px);
+  height: var(--tab-h);
+  padding: 0 6px 0 10px;
+  border: 0;
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+  background: transparent;
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -1502,52 +1547,96 @@ kbd,
     color var(--duration-press) var(--ease-out);
 }
 
-.tab:hover {
+.tab:not([aria-selected="true"]):hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
 .tab[aria-selected="true"] {
-  background: var(--bg-surface);
-  border-color: var(--border-subtle);
+  --tab-w: 240px;
+  --tab-min: 140px;
+  z-index: 1;
+  flex-shrink: 0.3;
+  background: var(--tab-fill);
   color: var(--text);
 }
 
+/* Width changes glide only after a pointer choice; a keyboard switch is instant. Reduced motion
+   sets every duration to 0. */
+.tabstrip[data-input="pointer"] .tab,
+.tabstrip[data-input="pointer"] .tab:hover {
+  transition:
+    width var(--duration-glide) var(--ease-in-out),
+    min-width var(--duration-glide) var(--ease-in-out),
+    background var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The inverted feet that join the active tab to the page. The first tab sits flush with the
+   strip's left edge, so it has no left foot. */
+.tab[aria-selected="true"]::before,
 .tab[aria-selected="true"]::after {
   content: "";
   position: absolute;
-  left: 0;
+  bottom: 0;
+  width: var(--tab-radius);
+  height: var(--tab-radius);
+  pointer-events: none;
+}
+
+.tab[aria-selected="true"]::before {
+  left: calc(-1 * var(--tab-radius));
+  background: radial-gradient(circle at 0 0, transparent var(--tab-radius), var(--tab-fill) calc(var(--tab-radius) + 0.5px));
+}
+
+.tab[aria-selected="true"]::after {
+  right: calc(-1 * var(--tab-radius));
+  background: radial-gradient(circle at 100% 0, transparent var(--tab-radius), var(--tab-fill) calc(var(--tab-radius) + 0.5px));
+}
+
+.tabstrip-tabs > .tab:first-child::before {
+  display: none;
+}
+
+/* A thin separator between inactive tabs, hidden beside the active or hovered tab. */
+.tab:not([aria-selected="true"])::after {
+  content: "";
+  position: absolute;
+  top: 9px;
   right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: var(--bg-surface);
+  bottom: 9px;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.tab:not([aria-selected="true"]):hover::after,
+.tab:has(+ .tab:hover)::after,
+.tab:has(+ .tab[aria-selected="true"])::after,
+.tabstrip-tabs > .tab:last-child::after {
+  opacity: 0;
 }
 
 .tab[data-dragging="true"] {
   opacity: 0.5;
 }
 
-.tab[data-drop="before"]::before,
-.tab[data-drop="after"]::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
+/* Where a dragged tab will land. */
+.tab[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.tab[data-drop="before"]::before {
-  left: -2px;
-}
-
-.tab[data-drop="after"]::before {
-  right: -2px;
+.tab[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
 }
 
 .tab-page {
   flex: none;
+  width: auto;
   min-width: 0;
   padding-right: var(--space-3);
   font-weight: var(--weight-medium);
@@ -1580,10 +1669,10 @@ kbd,
   display: grid;
   place-items: center;
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: 50%;
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
@@ -1593,6 +1682,7 @@ kbd,
     background var(--duration-press) var(--ease-out);
 }
 
+/* The close button shows on the active tab and on hover. */
 .tab:hover .tab-close,
 .tab[aria-selected="true"] .tab-close,
 .tab-close:focus-visible {
@@ -1604,10 +1694,15 @@ kbd,
   color: var(--text);
 }
 
+/* Right after the last tab, centred on the tabs; pinned at the end while the tabs overflow. */
 .tab-new {
+  position: sticky;
+  right: 0;
+  z-index: 2;
   flex: none;
-  align-self: center;
-  margin-left: 2px;
+  align-self: flex-end;
+  margin: 0 4px calc((var(--tab-h) - var(--control-height-sm)) / 2) 4px;
+  background-color: var(--bg-sidebar);
 }
 
 .tab-spacer {
@@ -2294,9 +2389,8 @@ mark {
   color: var(--scheme-fg);
 }
 
-.tab:not(.tab-page)[aria-selected="true"],
-.tab:not(.tab-page)[aria-selected="true"]::after {
-  background: var(--scheme-bg);
+.tab:not(.tab-page)[aria-selected="true"] {
+  --tab-fill: var(--scheme-bg);
 }
 
 .main:has(.workspace:not([hidden])) .statusbar {
@@ -3386,14 +3480,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   pointer-events: none;
 }
 
-.tabstrip-tabs {
-  position: relative;
-  display: flex;
-  flex: none;
-  align-items: flex-end;
-  gap: 2px;
-  align-self: stretch;
-}
 
 
 /* A row that was just saved: one 400 ms tint (lib/motion.ts flashSaved). */
