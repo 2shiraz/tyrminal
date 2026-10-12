@@ -56,7 +56,7 @@ test("quick forward: suggestions can be turned off for a host and everywhere", a
 
   // Turned off everywhere in Settings: a new suggestion is not shown.
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Settings/ }).click();
-  await page.getByRole("switch", { name: /Suggest forwarding ports/ }).uncheck();
+  await page.getByRole("switch", { name: /Forwarding suggestions/ }).uncheck();
   await page.getByRole("tab").first().click();
   await suggest(page, 9000);
   await page.waitForTimeout(300);

@@ -69,9 +69,9 @@ export const msgB = {
     opened: (url: string) => `Opened ${url}`,
     stop: "Stop",
     failed: "The port could not be forwarded.",
-    setting: "Suggest forwarding ports",
+    setting: "Forwarding suggestions",
     settingHint: "When a program on a server says it is listening on a port, offer to forward it. Nothing is forwarded until you choose to.",
-    hostSetting: "Suggest forwarding ports for this host",
+    hostSetting: "Forwarding suggestions for this host",
   },
   tunnels: {
     title: "Tunnels",
