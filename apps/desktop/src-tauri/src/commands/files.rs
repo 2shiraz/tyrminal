@@ -12,7 +12,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, State, WebviewWindow};
 use tyrminal_core::TransferSink;
 use tyrminal_core::contracts::{
-    EditStatus, ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted,
+    ConflictChoice, EditStatus, ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted,
 };
 
 use crate::state::{AppState, Grant, GrantKind};
@@ -202,13 +202,13 @@ pub async fn files_upload(
     session_id: String,
     token: String,
     dir: String,
-    overwrite: bool,
+    choice: ConflictChoice,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
     let path = state.grant(window.label(), &token, &[GrantKind::File, GrantKind::UploadFolder])?;
     let name = file_name(&path);
     let sink = Arc::new(ChannelTransferSink(events));
-    state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, overwrite, sink).await
+    state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, choice, sink).await
 }
 
 /// Downloads the remote file or folder `dir/name` into a chosen local folder.
@@ -221,12 +221,12 @@ pub async fn files_download(
     dir: String,
     name: String,
     token: String,
-    overwrite: bool,
+    choice: ConflictChoice,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
     let folder = state.grant(window.label(), &token, &[GrantKind::Folder])?;
     let sink = Arc::new(ChannelTransferSink(events));
-    state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, overwrite, sink).await
+    state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, choice, sink).await
 }
 
 #[tauri::command]

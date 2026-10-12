@@ -17,8 +17,8 @@ use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    AuthPromptKind, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, TransferEvent,
-    TrustDecision, VaultState,
+    AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState,
+    TransferEvent, TrustDecision, VaultState,
 };
 use tyrminal_core::{Core, SessionSink, TransferSink};
 
@@ -1194,7 +1194,8 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     std::fs::write(local.path().join(strange), b"strange\n").unwrap();
     for name in ["big.bin", strange] {
         let (sink, mut rx) = transfer_sink();
-        let started = s.upload(WINDOW, id, local.path().join(name), &dir, name, false, sink).await.unwrap();
+        let started =
+            s.upload(WINDOW, id, local.path().join(name), &dir, name, ConflictChoice::Ask, sink).await.unwrap();
         assert_eq!(started.name, name);
         let end = transfer_end(&mut rx).await;
         let expected = std::fs::metadata(local.path().join(name)).unwrap().len();
@@ -1209,35 +1210,41 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
 
     // Same name again: a conflict unless replacing was chosen.
     let (sink, _rx) = transfer_sink();
-    let conflict = s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", false, sink).await.unwrap_err();
+    let conflict = s
+        .upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap_err();
     assert_eq!(conflict.code, ErrorCode::Conflict);
     std::fs::write(local.path().join("big.bin"), pattern(1000, 9)).unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
+    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", ConflictChoice::Replace, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, done(1000));
     std::fs::write(local.path().join("big.bin"), &big).unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", true, sink).await.unwrap();
+    s.upload(WINDOW, id, local.path().join("big.bin"), &dir, "big.bin", ConflictChoice::Replace, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
 
     // Download into another folder: byte for byte.
     let down = TempDir::new().unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), false, sink).await.unwrap();
+    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
     assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big, "downloaded bytes differ");
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, id, &dir, strange, down.path().to_path_buf(), false, sink).await.unwrap();
+    s.download(WINDOW, id, &dir, strange, down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, done(8));
     assert_eq!(std::fs::read(down.path().join(strange)).unwrap(), b"strange\n");
     // An existing local file is a conflict; replacing it is explicit.
     std::fs::write(down.path().join("big.bin"), b"local edit").unwrap();
     let (sink, _rx) = transfer_sink();
-    let err = s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), false, sink).await.unwrap_err();
+    let err = s
+        .download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert_eq!(std::fs::read(down.path().join("big.bin")).unwrap(), b"local edit");
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), true, sink).await.unwrap();
+    s.download(WINDOW, id, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Replace, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
     assert!(std::fs::read(down.path().join("big.bin")).unwrap() == big);
     let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
@@ -1246,7 +1253,7 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     // A remote name that is legal on the server but unusable locally is refused, not altered.
     s.make_dir(WINDOW, id, &dir, "back\\slash").await.unwrap();
     let (sink, _rx) = transfer_sink();
-    let err = s.download(WINDOW, id, &dir, "back\\slash", down.path().to_path_buf(), false, sink).await;
+    let err = s.download(WINDOW, id, &dir, "back\\slash", down.path().to_path_buf(), ConflictChoice::Ask, sink).await;
     assert_eq!(err.unwrap_err().code, ErrorCode::InvalidInput);
     s.remove_file(WINDOW, id, &dir, "back\\slash").await.unwrap();
 
@@ -1254,7 +1261,8 @@ async fn sftp_browse_change_and_transfer_files_byte_for_byte() {
     let huge = pattern(96 * 1024 * 1024, 3);
     std::fs::write(local.path().join("huge.bin"), &huge).unwrap();
     let (sink, mut rx) = transfer_sink();
-    let started = s.upload(WINDOW, id, local.path().join("huge.bin"), &dir, "huge.bin", false, sink).await.unwrap();
+    let started =
+        s.upload(WINDOW, id, local.path().join("huge.bin"), &dir, "huge.bin", ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(s.cancel_transfer("other-window", &started.transfer_id).unwrap_err().code, ErrorCode::AccessDenied);
     s.cancel_transfer(WINDOW, &started.transfer_id).unwrap();
     assert_eq!(transfer_end(&mut rx).await, TransferEvent::Cancelled);
@@ -1326,7 +1334,7 @@ async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folder
     let expected_bytes = big.len() as u64 + 7 + 13;
 
     let (sink, mut rx) = transfer_sink();
-    let started = s.upload(WINDOW, id, src.clone(), &base, "project", false, sink).await.unwrap();
+    let started = s.upload(WINDOW, id, src.clone(), &base, "project", ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(started.total, Some(expected_bytes));
     let skipped = u32::from(cfg!(unix));
     assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: expected_bytes, files: 3, skipped });
@@ -1340,13 +1348,13 @@ async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folder
 
     // The same folder again: never merged into the existing one.
     let (sink, _rx) = transfer_sink();
-    let err = s.upload(WINDOW, id, src.clone(), &base, "project", true, sink).await.unwrap_err();
+    let err = s.upload(WINDOW, id, src.clone(), &base, "project", ConflictChoice::Replace, sink).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
 
     // Download the tree back: byte for byte, same shape.
     let down = TempDir::new().unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, id, &base, "project", down.path().to_path_buf(), false, sink).await.unwrap();
+    s.download(WINDOW, id, &base, "project", down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: expected_bytes, files: 3, skipped: 0 });
     let back = down.path().join("project");
     assert!(std::fs::read(back.join("src/deep/er/data.bin")).unwrap() == big);
@@ -1356,14 +1364,18 @@ async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folder
     assert_eq!(leftovers, [std::ffi::OsString::from("project")]);
     // An existing local folder is a conflict too.
     let (sink, _rx) = transfer_sink();
-    let err = s.download(WINDOW, id, &base, "project", down.path().to_path_buf(), true, sink).await.unwrap_err();
+    let err = s
+        .download(WINDOW, id, &base, "project", down.path().to_path_buf(), ConflictChoice::Replace, sink)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
 
     // A name inside the tree that cannot exist locally stops the download before anything is written.
     client.send(&format!("mkdir -p '{base}/odd' && touch '{base}/odd/back\\slash' && echo ODD-$((40+2))\n")).await;
     client.output_until("ODD-42").await;
     let (sink, _rx) = transfer_sink();
-    let err = s.download(WINDOW, id, &base, "odd", down.path().to_path_buf(), false, sink).await.unwrap_err();
+    let err =
+        s.download(WINDOW, id, &base, "odd", down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidInput);
     assert!(!down.path().join("odd").exists());
 
@@ -1374,7 +1386,7 @@ async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folder
         std::fs::write(heavy.join(format!("a/part{i}.bin")), pattern(32 * 1024 * 1024, i)).unwrap();
     }
     let (sink, mut rx) = transfer_sink();
-    let started = s.upload(WINDOW, id, heavy, &base, "heavy", false, sink).await.unwrap();
+    let started = s.upload(WINDOW, id, heavy, &base, "heavy", ConflictChoice::Ask, sink).await.unwrap();
     s.cancel_transfer(WINDOW, &started.transfer_id).unwrap();
     assert_eq!(transfer_end(&mut rx).await, TransferEvent::Cancelled);
     let mut top: Vec<_> =
@@ -1404,7 +1416,7 @@ async fn a_link_lost_mid_transfer_fails_promptly_and_leaves_no_partial_file() {
 
     let down = TempDir::new().unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), false, sink).await.unwrap();
+    s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
     // Wait until bytes are flowing, then kill this connection's server process.
     match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
         Some(TransferEvent::Progress { .. }) => {}
@@ -1485,11 +1497,11 @@ async fn two_gib_round_trip_is_byte_for_byte_with_bounded_memory() {
     let before = peak_rss_kib();
 
     let (sink, mut rx) = transfer_sink();
-    s.upload(WINDOW, &id, source.clone(), &dir, "big.bin", false, sink).await.unwrap();
+    s.upload(WINDOW, &id, source.clone(), &dir, "big.bin", ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(wait_long(&mut rx).await, done(size));
     let back = TempDir::new().unwrap();
     let (sink, mut rx) = transfer_sink();
-    s.download(WINDOW, &id, &dir, "big.bin", back.path().to_path_buf(), false, sink).await.unwrap();
+    s.download(WINDOW, &id, &dir, "big.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
     assert_eq!(wait_long(&mut rx).await, done(size));
     assert_eq!(sha256_file(&source), sha256_file(&back.path().join("big.bin")), "round trip changed bytes");
 
@@ -1595,4 +1607,58 @@ async fn editing_a_remote_file_saves_explicitly_and_refuses_to_overwrite_server_
     client.send(&format!("rm -f ~/{name}; exit\n")).await;
     client.until_closed().await;
     assert!(!local.parent().unwrap().exists(), "the session's edit copies are gone");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn keep_both_uses_the_next_free_name_and_never_touches_the_existing_file() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let dir_name = format!("tyr-keep-{}", std::process::id());
+    s.make_dir(WINDOW, &id, &home, &dir_name).await.unwrap();
+    let dir = format!("{}/{dir_name}", home.trim_end_matches('/'));
+    let local = TempDir::new().unwrap();
+    std::fs::write(local.path().join("notes.txt"), b"first\n").unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, local.path().join("notes.txt"), &dir, "notes.txt", ConflictChoice::Ask, sink).await.unwrap();
+    transfer_end(&mut rx).await;
+
+    std::fs::write(local.path().join("notes.txt"), b"second\n").unwrap();
+    for expected in ["notes (1).txt", "notes (2).txt"] {
+        let (sink, mut rx) = transfer_sink();
+        let started = s
+            .upload(WINDOW, &id, local.path().join("notes.txt"), &dir, "notes.txt", ConflictChoice::KeepBoth, sink)
+            .await
+            .unwrap();
+        assert_eq!(started.name, expected);
+        assert_eq!(transfer_end(&mut rx).await, done(7));
+    }
+    let names: Vec<_> =
+        s.list_files(WINDOW, &id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["notes (1).txt", "notes (2).txt", "notes.txt"]);
+
+    // Downloading next to an existing local file keeps both as well.
+    let down = TempDir::new().unwrap();
+    std::fs::write(down.path().join("notes.txt"), b"local\n").unwrap();
+    let (sink, mut rx) = transfer_sink();
+    let started = s
+        .download(WINDOW, &id, &dir, "notes.txt", down.path().to_path_buf(), ConflictChoice::KeepBoth, sink)
+        .await
+        .unwrap();
+    assert_eq!(started.name, "notes (1).txt");
+    assert_eq!(transfer_end(&mut rx).await, done(6));
+    assert_eq!(std::fs::read(down.path().join("notes.txt")).unwrap(), b"local\n");
+    assert_eq!(std::fs::read(down.path().join("notes (1).txt")).unwrap(), b"first\n");
+
+    for name in ["notes.txt", "notes (1).txt", "notes (2).txt"] {
+        s.remove_file(WINDOW, &id, &dir, name).await.unwrap();
+    }
+    s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
 }

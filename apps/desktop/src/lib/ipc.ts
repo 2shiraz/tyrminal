@@ -11,6 +11,7 @@ import type {
   BackupFile,
   BackupPreview,
   BulkHostChange,
+  ConflictChoice,
   EditStatus,
   ErrorCode,
   GroupInput,
@@ -207,10 +208,10 @@ export const files = {
   pickFolder: () => call<LocalPick | null>("files_pick_folder"),
   /** Native folder picker for a folder to upload; null if cancelled. */
   pickUploadFolder: () => call<LocalPick | null>("files_pick_upload_folder"),
-  upload: (sessionId: string, token: string, dir: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
-    call<TransferStarted>("files_upload", { sessionId, token, dir, overwrite, events: transferChannel(onEvent) }),
-  download: (sessionId: string, dir: string, name: string, token: string, overwrite: boolean, onEvent: (event: TransferEvent) => void) =>
-    call<TransferStarted>("files_download", { sessionId, dir, name, token, overwrite, events: transferChannel(onEvent) }),
+  upload: (sessionId: string, token: string, dir: string, choice: ConflictChoice, onEvent: (event: TransferEvent) => void) =>
+    call<TransferStarted>("files_upload", { sessionId, token, dir, choice, events: transferChannel(onEvent) }),
+  download: (sessionId: string, dir: string, name: string, token: string, choice: ConflictChoice, onEvent: (event: TransferEvent) => void) =>
+    call<TransferStarted>("files_download", { sessionId, dir, name, token, choice, events: transferChannel(onEvent) }),
   cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
   /** Opens a remote file in the default local application; nothing is uploaded until save. */
   editOpen: (sessionId: string, dir: string, name: string) => call<EditStatus>("files_edit_open", { sessionId, dir, name }),

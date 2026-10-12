@@ -346,8 +346,15 @@ export function installMockBackend(options) {
     files_upload: (a) => {
       const pick = localPicks.get(a.token);
       if (!pick) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
-      const target = childPath(a.dir, pick.name);
-      if (fs.has(target) && (!a.overwrite || pick.folder)) fsErr("CONFLICT", "Something with that name is already there.");
+      let finalName = pick.name;
+      if (a.choice === "keep_both") {
+        for (let n = 1; fs.has(childPath(a.dir, finalName)); n += 1) {
+          const dot = pick.name.lastIndexOf(".");
+          finalName = dot > 0 ? `${pick.name.slice(0, dot)} (${n})${pick.name.slice(dot)}` : `${pick.name} (${n})`;
+        }
+      }
+      const target = childPath(a.dir, finalName);
+      if (fs.has(target) && (a.choice !== "replace" || pick.folder)) fsErr("CONFLICT", "Something with that name is already there.");
       const transferId = id(9000 + nextTransfer++);
       const total = pick.folder ? pick.folder.bytes : pick.size;
       channelSend(a.events, { type: "progress", done: Math.floor(total / 2) });
@@ -359,14 +366,15 @@ export function installMockBackend(options) {
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
       });
-      return { transferId, name: pick.name, direction: "upload", total };
+      return { transferId, name: finalName, direction: "upload", total };
     },
     files_download: (a) => {
       if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
       const path = childPath(a.dir, a.name);
       const node = fs.get(path);
       const isDir = node.kind === "dir";
-      if (window.__mockLocalFiles.has(a.name) && (!a.overwrite || isDir)) fsErr("CONFLICT", "Something with that name is already there.");
+      if (window.__mockLocalFiles.has(a.name) && a.choice !== "keep_both" && (a.choice !== "replace" || isDir))
+        fsErr("CONFLICT", "Something with that name is already there.");
       const inside = isDir ? [...fs.keys()].filter((p) => p.startsWith(`${path}/`) && fs.get(p).kind === "file") : [];
       const size = isDir ? inside.reduce((n, p) => n + fs.get(p).size, 0) : node.size;
       const transferId = id(9000 + nextTransfer++);

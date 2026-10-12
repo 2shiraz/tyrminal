@@ -140,6 +140,45 @@ pub(crate) fn local_name_ok(name: &str) -> bool {
     true
 }
 
+/// `name (n).ext` for the n-th alternative name (a leading dot is not an extension).
+pub(crate) fn numbered(name: &str, n: u32) -> String {
+    match name.rfind('.') {
+        Some(dot) if dot > 0 => format!("{} ({n}){}", &name[..dot], &name[dot..]),
+        _ => format!("{name} ({n})"),
+    }
+}
+
+/// Alternative names tried for "keep both".
+pub(crate) const MAX_ALTERNATIVES: u32 = 999;
+
+fn no_free_name() -> IpcError {
+    err(ErrorCode::Conflict, "No free name was found next to the existing one.")
+}
+
+/// The first of `name`, `name (1)`, … that does not exist in a local folder.
+pub(crate) async fn free_local_name(dir: &Path, name: &str) -> Result<String, IpcError> {
+    for n in 0..=MAX_ALTERNATIVES {
+        let candidate = if n == 0 { name.to_owned() } else { numbered(name, n) };
+        match tokio::fs::symlink_metadata(dir.join(&candidate)).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(candidate),
+            Err(e) => return Err(local_io(&e)),
+            Ok(_) => {}
+        }
+    }
+    Err(no_free_name())
+}
+
+/// The first of `name`, `name (1)`, … that does not exist in a remote folder.
+pub(crate) async fn free_remote_name(sftp: &Sftp, dir: &str, name: &str) -> Result<String, IpcError> {
+    for n in 0..=MAX_ALTERNATIVES {
+        let candidate = if n == 0 { name.to_owned() } else { numbered(name, n) };
+        if !sftp.exists(&join(dir, &candidate)?).await.map_err(from_file)? {
+            return Ok(candidate);
+        }
+    }
+    Err(no_free_name())
+}
+
 pub(crate) fn temp_name(name: &str, token: &str) -> String {
     // Keeps the temporary name within the usual 255-byte limit whatever the target name is.
     let short: String = name.chars().take(64).collect();
@@ -466,6 +505,14 @@ mod tests {
         assert!(remote_name("..hidden").is_ok());
         assert!(remote_name("-rf").is_ok());
         assert!(remote_name("name with spaces;$(x)").is_ok());
+    }
+
+    #[test]
+    fn alternative_names_keep_the_extension() {
+        assert_eq!(numbered("report.pdf", 1), "report (1).pdf");
+        assert_eq!(numbered("archive.tar.gz", 2), "archive.tar (2).gz");
+        assert_eq!(numbered(".bashrc", 1), ".bashrc (1)");
+        assert_eq!(numbered("Makefile", 3), "Makefile (3)");
     }
 
     #[test]

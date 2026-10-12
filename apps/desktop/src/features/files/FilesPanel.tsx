@@ -1,4 +1,4 @@
-import type { EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
+import type { ConflictChoice, EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
@@ -49,7 +49,7 @@ type Prompt =
   | { kind: "rename"; entry: RemoteEntry }
   | { kind: "chmod"; entry: RemoteEntry }
   | { kind: "delete"; entry: RemoteEntry }
-  | { kind: "replace"; name: string; remote: boolean; retry: () => void }
+  | { kind: "replace"; name: string; remote: boolean; retry: (() => void) | null; keepBoth: () => void }
   | { kind: "editConflict"; edit: EditStatus; overwrite: () => void };
 
 export function formatSize(bytes: number | null | undefined): string {
@@ -218,31 +218,43 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
     };
   }
 
-  async function startUpload(token: string, name: string, dir: string, overwrite: boolean, folder = false) {
+  async function startUpload(token: string, name: string, dir: string, choice: ConflictChoice, folder = false) {
     if (!sessionId) return;
     const events = listener(dir, true);
     try {
-      events.bind(await filesApi.upload(sessionId, token, dir, overwrite, events.onEvent));
+      events.bind(await filesApi.upload(sessionId, token, dir, choice, events.onEvent));
     } catch (caught) {
       const e = toAppError(caught);
-      // Folders are never merged into an existing one, so a folder conflict is just reported.
-      if (e.code === "CONFLICT" && !overwrite && !folder) {
-        setPrompt({ kind: "replace", name, remote: true, retry: () => void startUpload(token, name, dir, true) });
+      // Folders are never merged into or replace an existing one: they can only keep both.
+      if (e.code === "CONFLICT" && choice === "ask") {
+        setPrompt({
+          kind: "replace",
+          name,
+          remote: true,
+          retry: folder ? null : () => void startUpload(token, name, dir, "replace"),
+          keepBoth: () => void startUpload(token, name, dir, "keep_both", folder),
+        });
       } else {
         failNow(name, "upload", dir, e);
       }
     }
   }
 
-  async function startDownload(entry: RemoteEntry, dir: string, token: string, overwrite: boolean) {
+  async function startDownload(entry: RemoteEntry, dir: string, token: string, choice: ConflictChoice) {
     if (!sessionId) return;
     const events = listener(dir, false);
     try {
-      events.bind(await filesApi.download(sessionId, dir, entry.name, token, overwrite, events.onEvent));
+      events.bind(await filesApi.download(sessionId, dir, entry.name, token, choice, events.onEvent));
     } catch (caught) {
       const e = toAppError(caught);
-      if (e.code === "CONFLICT" && !overwrite && entry.kind !== "dir") {
-        setPrompt({ kind: "replace", name: entry.name, remote: false, retry: () => void startDownload(entry, dir, token, true) });
+      if (e.code === "CONFLICT" && choice === "ask") {
+        setPrompt({
+          kind: "replace",
+          name: entry.name,
+          remote: false,
+          retry: entry.kind === "dir" ? null : () => void startDownload(entry, dir, token, "replace"),
+          keepBoth: () => void startDownload(entry, dir, token, "keep_both"),
+        });
       } else {
         failNow(entry.name, "download", dir, e);
       }
@@ -260,13 +272,13 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
   async function upload() {
     if (!current) return;
     const picks = await run(() => filesApi.pickUpload());
-    for (const pick of picks ?? []) await startUpload(pick.token, pick.name, current, false);
+    for (const pick of picks ?? []) await startUpload(pick.token, pick.name, current, "ask");
   }
 
   async function uploadFolder() {
     if (!current) return;
     const pick = await run(() => filesApi.pickUploadFolder());
-    if (pick) await startUpload(pick.token, pick.name, current, false, true);
+    if (pick) await startUpload(pick.token, pick.name, current, "ask", true);
   }
 
   /** Downloads the folder being shown, with everything in it. */
@@ -276,14 +288,14 @@ export function FilesPanel({ target, onClose }: { target: FilesTarget | null; on
     const folder = await run(() => filesApi.pickFolder());
     if (folder) {
       const entry: RemoteEntry = { name, kind: "dir", size: null, permissions: null, modified: null };
-      await startDownload(entry, listing.parent, folder.token, false);
+      await startDownload(entry, listing.parent, folder.token, "ask");
     }
   }
 
   async function download() {
     if (!current || !selection) return;
     const folder = await run(() => filesApi.pickFolder());
-    if (folder) await startDownload(selection, current, folder.token, false);
+    if (folder) await startDownload(selection, current, folder.token, "ask");
   }
 
   function activate(entry: RemoteEntry) {
@@ -556,7 +568,7 @@ function FilesPrompt({
         ok = await run(() => filesApi.remove(sessionId, dir, prompt.entry.name).then(() => true));
         break;
       case "replace":
-        prompt.retry();
+        prompt.retry?.();
         onDone(false);
         return;
       case "editConflict":
@@ -579,9 +591,11 @@ function FilesPrompt({
         ? msg.files.deleteBody
         : prompt.kind === "editConflict"
           ? msg.files.editConflictBody
-          : prompt.remote
-            ? msg.files.replaceRemote
-            : msg.files.replaceLocal;
+          : !prompt.retry
+            ? msg.files.folderExists
+            : prompt.remote
+              ? msg.files.replaceRemote
+              : msg.files.replaceLocal;
     return (
       <Dialog title={title} role="alertdialog" tone="danger" icon={<IconTrash2 size={18} />} onDismiss={() => onDone(false)}>
         <div className="stack">
@@ -591,9 +605,23 @@ function FilesPrompt({
             <button type="button" className="btn" onClick={() => onDone(false)} data-autofocus>
               {msg.common.cancel}
             </button>
-            <button type="button" className="btn btn-danger-solid" onClick={() => void submit()} disabled={pending}>
-              {prompt.kind === "delete" ? msg.files.delete : prompt.kind === "editConflict" ? msg.files.editOverwrite : msg.files.replace}
-            </button>
+            {prompt.kind === "replace" && (
+              <button
+                type="button"
+                className={prompt.retry ? "btn" : "btn btn-primary"}
+                onClick={() => {
+                  prompt.keepBoth();
+                  onDone(false);
+                }}
+              >
+                {msg.files.keepBoth}
+              </button>
+            )}
+            {(prompt.kind !== "replace" || prompt.retry) && (
+              <button type="button" className="btn btn-danger-solid" onClick={() => void submit()} disabled={pending}>
+                {prompt.kind === "delete" ? msg.files.delete : prompt.kind === "editConflict" ? msg.files.editOverwrite : msg.files.replace}
+              </button>
+            )}
           </div>
         </div>
       </Dialog>

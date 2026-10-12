@@ -4,6 +4,7 @@ export type { BackupCredentialKind } from "./BackupCredentialKind";
 export type { BackupFile } from "./BackupFile";
 export type { BackupPreview } from "./BackupPreview";
 export type { BulkHostChange } from "./BulkHostChange";
+export type { ConflictChoice } from "./ConflictChoice";
 export type { CursorStyle } from "./CursorStyle";
 export type { EditStatus } from "./EditStatus";
 export type { ErrorCode } from "./ErrorCode";

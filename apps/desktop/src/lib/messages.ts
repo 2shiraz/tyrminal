@@ -411,6 +411,8 @@ export const msg = {
     replaceRemote: "A file with this name is already in this folder on the server. Replacing it overwrites it.",
     replaceLocal: "A file with this name is already in the folder you chose. Replacing it overwrites it.",
     replace: "Replace",
+    keepBoth: "Keep both",
+    folderExists: "A folder with this name is already there. Folders are never merged or replaced; keep both to copy it under the next free name.",
     transfers: "Transfers",
     clearDone: "Clear finished",
     cancelTransfer: (name: string) => `Cancel ${name}`,
