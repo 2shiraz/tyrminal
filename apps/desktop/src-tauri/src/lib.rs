@@ -257,6 +257,11 @@ pub fn run() {
             // compromised-password check (SEC-11)
             commands::password_check::password_check_status,
             commands::password_check::password_check_run,
+            commands::inventory::startup_get,
+            commands::inventory::startup_set,
+            commands::inventory::startup_effective,
+            commands::inventory::group_defaults_get,
+            commands::inventory::group_defaults_set,
         ])
         .build(tauri::generate_context!());
 

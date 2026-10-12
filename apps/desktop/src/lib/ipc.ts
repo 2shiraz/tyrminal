@@ -196,8 +196,9 @@ function channels(onOutput: OutputHandler, onEvent: EventHandler) {
 export const sessions = {
   openSsh: (hostId: string, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
-  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
-    call<SessionOpened>("session_open_local", { cols, rows, ...channels(onOutput, onEvent) }),
+  /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
+  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
+    call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -338,6 +339,13 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** Group defaults for route and appearance (HST-05). */
+export const groupDefaults = {
+  get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
+  set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
+    call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
 export const tunnels = {
   list: () => call<TunnelSummaryDto[]>("tunnel_list"),
   save: (tunnel: TunnelInputDto) => call<TunnelSummaryDto>("tunnel_save", { tunnel }),
@@ -457,4 +465,12 @@ export const passwordCheck = {
   status: () => call<import("@tyrminal/contracts").PasswordCheckStatus>("password_check_status"),
   /** Sends one 5-character hash prefix per distinct stored password; refused while off. */
   run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
+};
+
+/** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
+export const startup = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
+    call<string[] | null>("startup_set", { target, snippetIds }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };

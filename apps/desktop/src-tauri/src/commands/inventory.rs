@@ -409,3 +409,48 @@ pub async fn env_effective(
 ) -> Result<Vec<tyrminal_core::contracts::EffectiveEnvVar>, IpcError> {
     state.core()?.vault.effective_env_vars(&host_id).await
 }
+
+/// The startup snippets a host or group sets itself (`null`: inherit the group's list).
+#[tauri::command]
+pub async fn startup_get(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+) -> Result<Option<Vec<String>>, IpcError> {
+    state.core()?.vault.startup_snippets(target).await
+}
+
+#[tauri::command]
+pub async fn startup_set(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+    snippet_ids: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, IpcError> {
+    state.core()?.vault.set_startup_snippets(target, snippet_ids).await
+}
+
+/// What a host runs at startup, after group inheritance.
+#[tauri::command]
+pub async fn startup_effective(
+    state: State<'_, AppState>,
+    host_id: String,
+) -> Result<tyrminal_core::contracts::EffectiveStartup, IpcError> {
+    state.core()?.vault.effective_startup_snippets(&host_id).await
+}
+
+/// A group's route and appearance defaults for its hosts (HST-05).
+#[tauri::command]
+pub async fn group_defaults_get(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<tyrminal_core::contracts::GroupDefaults, IpcError> {
+    state.core()?.vault.group_defaults(&group_id).await
+}
+
+#[tauri::command]
+pub async fn group_defaults_set(
+    state: State<'_, AppState>,
+    group_id: String,
+    defaults: tyrminal_core::contracts::GroupDefaultsInput,
+) -> Result<tyrminal_core::contracts::GroupDefaults, IpcError> {
+    state.core()?.vault.set_group_defaults(&group_id, defaults).await
+}

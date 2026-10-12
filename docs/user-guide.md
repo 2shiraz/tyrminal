@@ -100,9 +100,14 @@ a tab, and installing a public key on the connected server.
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
 
-A group can give its hosts default values (**Defaults for hosts in this group**: user name, port
-and a default key). A host uses its own value when it has one, otherwise the nearest group's.
-Choose **Use the group's key** as a host's sign-in method to follow the group.
+A **group** can also give its hosts defaults: a user name, port and key, and, under
+**Defaults for hosts in this group**, a route (a jump host and/or a proxy) and an icon. Hosts
+and subgroups use the nearest group's value unless they set their own, and the host editor
+names the group a value comes from. Choose **Use the group's key** as a host's sign-in method
+to follow the group. In a host's **Advanced** section, choose between the group's route and one
+for this host only (which can be "connect directly"). A group's jump host is never used for
+that jump host itself, and a change that would make hosts connect through each other in a loop
+is refused.
 
 **Character encoding** and **Terminal type** are set per host, right under **Protocol**. Most
 servers need neither changed: the defaults are UTF-8 and `xterm-256color`. Pick another encoding
@@ -124,9 +129,13 @@ A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
 `MobaXterm.ini` or a `.mxtsessions` export, or a SecureCRT XML export or session `.ini`. It shows
 a preview first and never runs anything from the file (`ProxyCommand`, `LocalCommand` and
 similar are reported, not executed). Saved passwords are never imported; key files and tunnels
-are listed per host so you can set them up. An OpenSSH `known_hosts` file can be imported too:
-after a review, its keys become trusted server identities, and a key that differs from one you
-already trust is never replaced.
+are listed per host so you can set them up. In an OpenSSH `config` file, `ProxyJump` becomes a
+jump host: a hop that names another host of the file is that host, and any other hop
+(`user@host:port`) is imported as a host of its own. A chain that cannot be represented (a
+loop, more than seven jump hosts, or a host that two chains would route differently) is
+imported without a jump host, and the preview says why. An OpenSSH `known_hosts` file can be
+imported too: after a review, its keys become trusted server identities, and a key that differs
+from one you already trust is never replaced.
 
 ## Connecting and host keys
 
@@ -196,6 +205,13 @@ Safety features:
   answered.
 - Pasting several lines, or a lot of text, shows the text first.
 
+**Duplicate tab** (tab menu) opens the same destination again. When the shell integration
+(Suggestions → shell integration) reports the shell's current folder, the copy starts there:
+
+- A local terminal starts directly in that folder (if it still exists).
+- An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only
+  when that prompt carries the integration's mark, and not if you start typing first.
+
 ## Files (SFTP)
 
 Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH session. You can:
@@ -206,6 +222,9 @@ Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH ses
 - drop files from your desktop onto the panel to upload them into the folder shown;
 - **Copy to another server** between two connected sessions, without saving anything on this
   computer.
+
+A session opens in its shell's current folder when the shell integration reports one, otherwise
+in the login folder. The terminal-folder button returns to the shell's folder.
 
 The panel remembers each session's place: switch to another tab and back and you find the same
 folder, selection, scroll position, toggles and transfers, without the folder being listed
@@ -226,7 +245,22 @@ overwrite. The local copy is deleted when you close the edit, the session or Tyr
 **Snippets** (Ctrl+Shift+S, ⌘⇧S on macOS) are saved commands, kept encrypted in the vault and
 organized in folders. **Paste** inserts the text (as a bracketed paste when the terminal
 supports it); **Run** inserts it and presses Enter. The panel always shows which session it
-sends to, and nothing runs automatically.
+sends to. Nothing runs automatically except the startup snippets you choose for a host or group
+(below). A snippet with several lines, or one that uses a variable the server refused, is shown
+for review before it is sent.
+
+**Environment variables.** In the Hosts view, choose **Environment…** from a host's or group's
+menu. Hosts get their groups' variables (the nearest group wins) and can set their own. Each
+variable is requested from the server when a session opens. The server applies only names its
+configuration allows (OpenSSH: `AcceptEnv` in `sshd_config`). Any name it refuses is reported
+when you connect and is not set. Values are stored encrypted, but they are not a secret store:
+the remote shell can print them. Snippets can use them as `$NAME`; the run review lists each
+variable a snippet uses and whether this session set it.
+
+**Startup snippets.** The same dialog chooses snippets to run when a session to the host opens:
+the group's list, nothing, or a list of your own, in order. They are typed into the shell only
+after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
+deleted later is skipped.
 
 **Broadcast** sends what you type to several sessions at once. The sessions that receive input
 are marked while broadcast is on.

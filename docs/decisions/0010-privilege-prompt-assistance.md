@@ -1,4 +1,4 @@
-# ADR 0008: User-invoked identity password insertion (KEY-18) and identity deletion safety
+# ADR 0010: User-invoked identity password insertion (KEY-18) and identity deletion safety
 
 Status: accepted, 2026-10-12
 

@@ -43,6 +43,7 @@ use crate::validate;
 use crate::records::{KIND_TUNNEL, TunnelRecord};
 use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
 // agent D: inventory and snippets
+use crate::records::StoredProxy;
 use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
     KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
@@ -52,6 +53,7 @@ use tyrminal_contracts::{
     IdentityInput, IdentitySummary, KeyCertificate, KeyKind, KnownHostImportEntry, KnownHostImportPreview,
     KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
+use tyrminal_contracts::{EffectiveStartup, GroupDefaults, GroupDefaultsInput, InheritedRoute, StartupSnippet};
 
 struct Stored<T> {
     revision: u64,
@@ -106,6 +108,12 @@ struct Inner {
 }
 
 /// What a session needs to connect, copied out of the vault at one generation.
+/// A startup snippet as a session runs it: its text, or `None` when it was deleted.
+pub(crate) struct StartupItem {
+    pub name: String,
+    pub text: Option<Zeroizing<String>>,
+}
+
 pub(crate) struct ConnectionPlan {
     pub host_id: String,
     pub endpoint: Endpoint,
@@ -1322,9 +1330,28 @@ impl VaultService {
             }
         }
 
+        // Jump hosts (IMP-02) name another host of this import by label.
+        let mut ids: HashMap<String, Id> = HashMap::with_capacity(hosts.len());
+        for host in &hosts {
+            ids.entry(host.label.to_lowercase()).or_insert(random_id().map_err(from_vault)?);
+        }
         let mut new_hosts: Vec<(Id, HostRecord)> = Vec::with_capacity(hosts.len());
+        let mut used: std::collections::HashSet<Id> = std::collections::HashSet::new();
         for host in hosts {
             let group = resolved.get(&host.group).cloned().flatten();
+            let jump_host = match &host.jump_via {
+                Some(label) => Some(validate::id_text(ids.get(&label.to_lowercase()).ok_or_else(|| {
+                    invalid(
+                        "An imported host goes through a jump host that is not in this import. Preview the file again.",
+                    )
+                })?)),
+                None => None,
+            };
+            // Labels are unique in a preview; a repeated one gets its own id.
+            let id = match ids.get(&host.label.to_lowercase()) {
+                Some(id) if used.insert(*id) => *id,
+                _ => random_id().map_err(from_vault)?,
+            };
             let record = HostRecord {
                 label: host.label,
                 address: host.address,
@@ -1338,9 +1365,19 @@ impl VaultService {
                 terminal: tyrminal_contracts::HostTerminal::default(),
                 forward_agent: false,
                 // agent B: tunnels and history
-                connection: Default::default(),
+                connection: crate::records::StoredConnection { jump_host, proxy: None, own: false },
             };
-            new_hosts.push((random_id().map_err(from_vault)?, record));
+            new_hosts.push((id, record));
+        }
+        // No loops or over-long chains (only hosts of this import can point at each other).
+        {
+            let batch: HashMap<Id, Option<Id>> = new_hosts
+                .iter()
+                .map(|(id, r)| Ok((*id, r.connection.jump_host.as_deref().map(validate::id).transpose()?)))
+                .collect::<Result<_, IpcError>>()?;
+            for id in batch.keys() {
+                crate::tunnels::chain(id, |hop| Ok(batch.get(hop).copied().flatten()))?;
+            }
         }
         let mut rows = Vec::with_capacity(new_groups.len() + new_hosts.len());
         for (id, record) in &new_groups {
@@ -1831,7 +1868,8 @@ impl VaultService {
             username,
             auth,
             // agent B: tunnels and history
-            proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_spec),
+            // A host without its own route uses its nearest group's (HST-05).
+            proxy: Self::effective_route(open, id, host).1.map(|p| crate::tunnels::proxy_spec(&p)),
         })
     }
 
@@ -1878,6 +1916,8 @@ impl VaultService {
         Ok(HostConnection {
             jump_host_id: host.connection.jump_host.clone(),
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_summary),
+            own: Self::own_route(host),
+            inherited: Self::inherited_route(open, &id, host),
         })
     }
 
@@ -1903,11 +1943,22 @@ impl VaultService {
             None => None,
         };
         let mut record = copy_host(&current.record);
+        // HST-05: inheriting drops the host's own route (and its proxy password).
+        let (jump, proxy) = if input.inherit { (None, None) } else { (jump, proxy) };
         record.connection.jump_host = jump.map(|j| validate::id_text(&j));
         record.connection.proxy = proxy;
+        record.connection.own = !input.inherit;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
-        let proposed = jump;
+        let proposed = if input.inherit {
+            Self::inherited_route(open, &id, &record)
+                .and_then(|r| r.jump_host_id)
+                .map(|j| validate::id(&j))
+                .transpose()?
+                .filter(|j| *j != id)
+        } else {
+            jump
+        };
         crate::tunnels::chain(&id, |hop| if *hop == id { Ok(proposed) } else { Self::jump_of(open, hop) })?;
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
         open.hosts.insert(id, Stored { revision, record });
@@ -1922,11 +1973,9 @@ impl VaultService {
         Self::chain_view(open, &id)
     }
 
-    /// The jump host recorded on `id`.
+    /// The jump host `id` connects through: its own, else its nearest group's (HST-05).
     fn jump_of(open: &Open, id: &Id) -> Result<Option<Id>, IpcError> {
-        let host =
-            &open.hosts.get(id).ok_or_else(|| not_found("A host in this connection chain no longer exists."))?.record;
-        host.connection.jump_host.as_deref().map(validate::id).transpose()
+        Self::jump_with(open, id, None)
     }
 
     fn chain_view(open: &Open, id: &Id) -> Result<Vec<ChainHop>, IpcError> {
@@ -2119,6 +2168,7 @@ impl VaultService {
                 group: String::new(),
                 tags: Vec::new(),
                 notes: vec![format!("Trusted {} key {}", record.algorithm, record.fingerprint)],
+                jump_via: None,
             };
             match import::checked(candidate) {
                 Ok(host) => {
@@ -2537,8 +2587,21 @@ impl VaultService {
         let mut list: Vec<HostAppearance> = open
             .appearances
             .values()
-            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os })
+            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os, inherited: false })
             .collect();
+        // Hosts without their own OS get their nearest group's (HST-05).
+        for (id, host) in &open.hosts {
+            let host_id = validate::id_text(id);
+            if list.iter().any(|a| a.host_id == host_id) {
+                continue;
+            }
+            let os = Self::group_chain(open, &host.record)
+                .into_iter()
+                .find_map(|(group_id, _)| Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.os));
+            if let Some(os) = os {
+                list.push(HostAppearance { host_id, os, inherited: true });
+            }
+        }
         list.sort_by(|a, b| a.host_id.cmp(&b.host_id));
         Ok(list)
     }
@@ -2748,6 +2811,96 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    // ---------- startup snippets (SNP-08) ----------
+
+    /// A host's startup list: its own, else the nearest group's that sets one.
+    fn effective_startup(open: &Open, id: &Id, host: &HostRecord) -> (Vec<String>, Option<SettingOrigin>) {
+        if let Some(list) =
+            Self::workflow_of_host(open, &validate::id_text(id)).and_then(|(_, w)| w.record.startup.clone())
+        {
+            return (list, Some(SettingOrigin::Host));
+        }
+        for (group_id, group) in Self::group_chain(open, host) {
+            if let Some(list) = Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.startup.clone()) {
+                return (list, Some(SettingOrigin::Group { group_id, name: group.name.clone() }));
+            }
+        }
+        (Vec::new(), None)
+    }
+
+    /// The startup list a host or group sets itself (`None`: inherit).
+    pub async fn startup_snippets(&self, target: SettingsTarget) -> Result<Option<Vec<String>>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::workflow_of(open, &target).and_then(|(_, w)| w.record.startup.clone()))
+    }
+
+    /// Replaces the startup list a host or group sets itself. Every snippet must exist now.
+    pub async fn set_startup_snippets(
+        &self,
+        target: SettingsTarget,
+        ids: Option<Vec<String>>,
+    ) -> Result<Option<Vec<String>>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let ids = ids.as_deref().map(validate::startup_snippet_ids).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        for id in ids.iter().flatten() {
+            if !open.snippets.contains_key(&validate::id(id)?) {
+                return Err(not_found("A startup snippet no longer exists. Choose the snippets again."));
+            }
+        }
+        let startup = ids.clone();
+        self.update_workflow(open, &target, |w| WorkflowRecord { startup, ..w }).await?;
+        Ok(ids)
+    }
+
+    /// What a host runs at startup, with where the list comes from.
+    pub async fn effective_startup_snippets(&self, host_id: &str) -> Result<EffectiveStartup, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let (ids, origin) = Self::effective_startup(open, &id, host);
+        let snippets = ids
+            .into_iter()
+            .map(|snippet_id| {
+                let name = validate::id(&snippet_id)
+                    .ok()
+                    .and_then(|sid| open.snippets.get(&sid))
+                    .map(|s| s.record.name.clone());
+                StartupSnippet { snippet_id, name }
+            })
+            .collect();
+        Ok(EffectiveStartup { snippets, origin })
+    }
+
+    /// The startup snippets of a session to `host_id`, read under `generation`: after a lock
+    /// nothing is returned. A deleted snippet has no text.
+    pub(crate) async fn session_startup(&self, generation: u32, host_id: &str) -> Result<Vec<StartupItem>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let (ids, _) = Self::effective_startup(open, &id, host);
+        Ok(ids
+            .into_iter()
+            .map(|snippet_id| {
+                let found = validate::id(&snippet_id).ok().and_then(|sid| open.snippets.get(&sid));
+                StartupItem {
+                    name: found.map(|s| s.record.name.clone()).unwrap_or_default(),
+                    text: found.map(|s| Zeroizing::new(s.record.text.clone())),
+                }
+            })
+            .collect())
     }
 
     fn workflow_of_host<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<WorkflowRecord>)> {
@@ -3202,6 +3355,159 @@ impl VaultService {
             }
         }
         Ok(out)
+    }
+}
+
+// Group defaults for route and appearance (HST-05).
+impl VaultService {
+    /// Whether a host sets its own route: a jump host, a proxy, or explicitly none.
+    fn own_route(host: &HostRecord) -> bool {
+        host.connection.own || host.connection.jump_host.is_some() || host.connection.proxy.is_some()
+    }
+
+    /// A group's route, if it sets one: (jump host id, proxy).
+    fn group_route<'a>(open: &'a Open, group_id: &str) -> Option<(Option<&'a str>, Option<&'a StoredProxy>)> {
+        let (_, w) = Self::workflow_of_group(open, group_id)?;
+        (w.record.jump_host.is_some() || w.record.proxy.is_some())
+            .then_some((w.record.jump_host.as_deref(), w.record.proxy.as_ref()))
+    }
+
+    /// The route of the nearest group of `host` that sets one, as the host would inherit it. A
+    /// group jump host that is the host itself does not apply to it (it connects directly).
+    fn inherited_route(open: &Open, id: &Id, host: &HostRecord) -> Option<InheritedRoute> {
+        let own_id = validate::id_text(id);
+        Self::group_chain(open, host).into_iter().find_map(|(group_id, group)| {
+            let (jump, proxy) = Self::group_route(open, &group_id)?;
+            Some(InheritedRoute {
+                jump_host_id: jump.filter(|j| *j != own_id).map(str::to_owned),
+                proxy: proxy.map(crate::tunnels::proxy_summary),
+                origin: SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() },
+            })
+        })
+    }
+
+    /// The route a host uses: (jump host id, proxy).
+    fn effective_route(open: &Open, id: &Id, host: &HostRecord) -> (Option<String>, Option<StoredProxy>) {
+        if Self::own_route(host) {
+            return (host.connection.jump_host.clone(), host.connection.proxy.clone());
+        }
+        let own_id = validate::id_text(id);
+        for (group_id, _) in Self::group_chain(open, host) {
+            if let Some((jump, proxy)) = Self::group_route(open, &group_id) {
+                return (jump.filter(|j| *j != own_id).map(str::to_owned), proxy.cloned());
+            }
+        }
+        (None, None)
+    }
+
+    /// `jump_of`, optionally as if group `over.0` set the route (jump `over.1`, proxy present
+    /// `over.2`): used to check a group change before it is written.
+    fn jump_with(open: &Open, id: &Id, over: Option<(&str, Option<&str>, bool)>) -> Result<Option<Id>, IpcError> {
+        let host =
+            &open.hosts.get(id).ok_or_else(|| not_found("A host in this connection chain no longer exists."))?.record;
+        let jump = if Self::own_route(host) {
+            host.connection.jump_host.clone()
+        } else {
+            let own_id = validate::id_text(id);
+            let mut found = None;
+            for (group_id, _) in Self::group_chain(open, host) {
+                let route = match over {
+                    Some((g, jump, has_proxy)) if g == group_id => (jump.is_some() || has_proxy).then_some(jump),
+                    _ => Self::group_route(open, &group_id).map(|(jump, _)| jump),
+                };
+                if let Some(jump) = route {
+                    found = jump.filter(|j| *j != own_id).map(str::to_owned);
+                    break;
+                }
+            }
+            found
+        };
+        jump.as_deref().map(validate::id).transpose()
+    }
+
+    /// A group's own defaults, and what it gets from its parents.
+    pub async fn group_defaults(&self, group_id: &str) -> Result<GroupDefaults, IpcError> {
+        let gid = validate::id(group_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let group = &open.groups.get(&gid).ok_or_else(|| not_found("That group no longer exists."))?.record;
+        let own = Self::workflow_of_group(open, &validate::id_text(&gid)).map(|(_, w)| &w.record);
+        // The parents' defaults, nearest first.
+        let groups = group_index(open);
+        let parents = inventory::chain(&groups, group.parent.as_deref());
+        let mut inherited_route = None;
+        let mut inherited_os = None;
+        let mut next = group.parent.clone();
+        for parent in parents {
+            let Some(parent_id) = next.take() else { break };
+            let origin = SettingOrigin::Group { group_id: parent_id.clone(), name: parent.name.clone() };
+            if inherited_route.is_none()
+                && let Some((jump, proxy)) = Self::group_route(open, &parent_id)
+            {
+                inherited_route = Some(InheritedRoute {
+                    jump_host_id: jump.map(str::to_owned),
+                    proxy: proxy.map(crate::tunnels::proxy_summary),
+                    origin: origin.clone(),
+                });
+            }
+            if inherited_os.is_none()
+                && let Some(os) = Self::workflow_of_group(open, &parent_id).and_then(|(_, w)| w.record.os)
+            {
+                inherited_os = Some((os, origin));
+            }
+            next = parent.parent.clone();
+        }
+        Ok(GroupDefaults {
+            jump_host_id: own.and_then(|w| w.jump_host.clone()),
+            proxy: own.and_then(|w| w.proxy.as_ref()).map(crate::tunnels::proxy_summary),
+            os: own.and_then(|w| w.os),
+            inherited_route,
+            inherited_os,
+        })
+    }
+
+    /// Replaces a group's route and appearance defaults. The jump host must exist, and no host
+    /// may end up in a loop or an over-long chain; nothing is written otherwise.
+    pub async fn set_group_defaults(
+        &self,
+        group_id: &str,
+        input: GroupDefaultsInput,
+    ) -> Result<GroupDefaults, IpcError> {
+        let gid = validate::id(group_id)?;
+        let gtext = validate::id_text(&gid);
+        let jump = input.jump_host_id.as_deref().map(validate::id).transpose()?.map(|j| validate::id_text(&j));
+        {
+            let mut inner = self.inner.lock().await;
+            let open = inner.open.as_mut().ok_or_else(locked)?;
+            if !open.groups.contains_key(&gid) {
+                return Err(not_found("That group no longer exists."));
+            }
+            if let Some(jump) = &jump
+                && !open.hosts.contains_key(&validate::id(jump)?)
+            {
+                return Err(not_found("That jump host no longer exists. Choose another."));
+            }
+            let current = Self::workflow_of_group(open, &gtext).and_then(|(_, w)| w.record.proxy.clone());
+            let proxy = match &input.proxy {
+                Some(p) => Some(crate::tunnels::normalize_proxy(p, current.as_ref())?),
+                None => None,
+            };
+            // Every host must still reach its destination through a finite chain.
+            let over = Some((gtext.as_str(), jump.as_deref(), proxy.is_some()));
+            for id in open.hosts.keys() {
+                match crate::tunnels::chain(id, |hop| Self::jump_with(open, hop, over)) {
+                    // A host whose own jump host was deleted fails when it connects, as before;
+                    // it does not block an unrelated group change.
+                    Err(e) if e.code == ErrorCode::NotFound => {}
+                    Err(e) => return Err(e),
+                    Ok(_) => {}
+                }
+            }
+            let target = SettingsTarget::Group { group_id: gtext.clone() };
+            let os = input.os;
+            self.update_workflow(open, &target, |w| WorkflowRecord { jump_host: jump, proxy, os, ..w }).await?;
+        }
+        self.group_defaults(&gtext).await
     }
 }
 

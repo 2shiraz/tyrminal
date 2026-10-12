@@ -317,9 +317,50 @@ async fn imports_preview_first_then_create_hosts_and_groups_in_one_transaction()
         group: String::new(),
         tags: Vec::new(),
         notes: Vec::new(),
+        jump_via: None,
     }];
     assert_eq!(code(v.import_hosts(one, Some("0".repeat(32))).await), ErrorCode::NotFound);
     assert_eq!(v.list_hosts().await.unwrap().len(), 4);
+}
+
+/// IMP-02: ProxyJump chains from an OpenSSH config become saved jump hosts, written in the same
+/// transaction; a preview that names a missing jump host or forms a loop changes nothing.
+#[tokio::test]
+async fn proxy_jump_chains_are_imported_as_jump_hosts_and_bad_ones_change_nothing() {
+    use tyrminal_core::contracts::{ImportFormat, ImportHost};
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let config = "Host bastion\n  HostName bastion.example\nHost inner\n  HostName 10.0.0.9\n  ProxyJump bastion\n\
+                  Host deep\n  HostName 10.0.0.10\n  ProxyJump bastion,inner\nHost edge-only\n  ProxyJump ops@edge.example:2222\n";
+    let preview = v.import_preview(ImportFormat::OpensshConfig, config).await.unwrap();
+    assert_eq!(v.import_hosts(preview.hosts.clone(), None).await.unwrap(), 5);
+    let hosts = v.list_hosts().await.unwrap();
+    let id = |label: &str| hosts.iter().find(|h| h.label == label).unwrap().id.clone();
+    let chain: Vec<String> = v.host_chain(&id("deep")).await.unwrap().into_iter().map(|h| h.label).collect();
+    assert_eq!(chain, ["bastion", "inner", "deep"]);
+    let chain: Vec<String> = v.host_chain(&id("edge-only")).await.unwrap().into_iter().map(|h| h.label).collect();
+    assert_eq!(chain, ["ops@edge.example:2222", "edge-only"]);
+    assert_eq!(v.host_connection(&id("bastion")).await.unwrap().jump_host_id, None);
+
+    // Crafted previews: a jump host outside the import, and a loop. Nothing is written.
+    let host = |label: &str, via: Option<&str>| ImportHost {
+        label: label.into(),
+        address: format!("{label}.example"),
+        port: 22,
+        username: String::new(),
+        group: String::new(),
+        tags: Vec::new(),
+        notes: Vec::new(),
+        jump_via: via.map(Into::into),
+    };
+    let outside = vec![host("x", Some("bastion"))];
+    assert_eq!(code(v.import_hosts(outside, None).await), ErrorCode::InvalidInput);
+    let looped = vec![host("a", Some("b")), host("b", Some("a"))];
+    assert_eq!(code(v.import_hosts(looped, None).await), ErrorCode::InvalidInput);
+    let control = vec![host("c", Some("bad\u{1b}[2J"))];
+    assert_eq!(code(v.import_hosts(control, None).await), ErrorCode::InvalidInput);
+    assert_eq!(v.list_hosts().await.unwrap().len(), 5);
 }
 
 // agent D: inventory and snippets

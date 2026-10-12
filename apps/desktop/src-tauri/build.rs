@@ -139,6 +139,11 @@ const COMMANDS: &[&str] = &[
     // compromised-password check (SEC-11)
     "password_check_status",
     "password_check_run",
+    "startup_get",
+    "startup_set",
+    "startup_effective",
+    "group_defaults_get",
+    "group_defaults_set",
 ];
 
 fn main() {
