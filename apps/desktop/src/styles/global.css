@@ -1466,7 +1466,6 @@ kbd,
 /* ---------- tab strip ---------- */
 
 .tabstrip {
-  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 2px;
@@ -3547,20 +3546,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   align-self: stretch;
 }
 
-/* The active tab's indicator: one bar that slides between tabs (TabStrip sets its transform). */
-.tab-indicator {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  z-index: 2;
-  width: 100px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-  transform-origin: left center;
-  transition: transform var(--duration-move) var(--ease-out);
-  pointer-events: none;
-}
 
 /* A row that was just saved: one 400 ms tint (lib/motion.ts flashSaved). */
 [data-saved-flash] {
