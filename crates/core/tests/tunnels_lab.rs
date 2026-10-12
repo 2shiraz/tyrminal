@@ -767,3 +767,64 @@ async fn a_host_behind_an_authenticated_proxy_connects_and_a_wrong_password_is_r
     f.core.vault.set_host_connection(&host, other_user).await.unwrap();
     assert!(!f.core.vault.host_connection(&host).await.unwrap().proxy.unwrap().password_stored);
 }
+
+// ---------- session recording over SSH (LOG-01) ----------
+
+/// Output of a recording so far, as text.
+async fn recorded_text(f: &Fixture, log_id: &str) -> String {
+    use base64::Engine;
+    let playback = f.core.sessions.open_session_log(log_id).await.unwrap();
+    playback
+        .frames
+        .iter()
+        .filter_map(|frame| match frame {
+            tyrminal_core::contracts::PlaybackFrame::Output { data, .. } => Some(
+                String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(data).unwrap()).into_owned(),
+            ),
+            tyrminal_core::contracts::PlaybackFrame::Resize { .. } => None,
+        })
+        .collect()
+}
+
+async fn recorded_until(f: &Fixture, log_id: &str, needle: &str) -> String {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let text = recorded_text(f, log_id).await;
+        if text.contains(needle) {
+            return text;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{needle:?} not recorded; got {text:?}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn an_ssh_session_is_recorded_under_its_host_without_the_answer_to_a_hidden_prompt() {
+    let f = fixture().await;
+    let settings = tyrminal_core::contracts::RecordingSettings { enabled: true, keep_per_host: 5, max_log_mib: 64 };
+    f.core.sessions.set_recording_settings(settings).await.unwrap();
+    let host = f.host_at(&f.lab.str("/user"), "recorded lab host", f.lab.port()).await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let logs = f.core.sessions.list_session_logs().await.unwrap();
+    assert_eq!(logs.len(), 1);
+    let log = &logs[0];
+    assert_eq!((log.title.as_str(), log.host_id.as_deref()), ("recorded lab host", Some(host.as_str())));
+    assert_eq!(log.kind, tyrminal_core::contracts::SessionLogKind::Ssh);
+    assert_eq!(log.state, tyrminal_core::contracts::SessionLogState::Recording);
+
+    let write = |text: &str| f.core.sessions.write(WINDOW, &session.id, text.as_bytes().to_vec());
+    write("stty -echo; printf '%s%s: ' Pass word; read answer; stty echo; echo; echo remote-done-$((8*8))\r")
+        .await
+        .unwrap();
+    recorded_until(&f, &log.id, "Password: ").await;
+    write("lab-hidden-answer-canary\r").await.unwrap();
+    let text = recorded_until(&f, &log.id, "remote-done-64").await;
+    assert!(!text.contains("lab-hidden-answer-canary"), "typed input must never be recorded: {text:?}");
+
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    assert_eq!(session.closed().await, None);
+    let done = f.core.sessions.list_session_logs().await.unwrap().remove(0);
+    assert_eq!(done.state, tyrminal_core::contracts::SessionLogState::Complete);
+    assert!(!recorded_text(&f, &done.id).await.contains("lab-hidden-answer-canary"));
+}

@@ -178,6 +178,50 @@ pub(crate) struct TunnelRecord {
     pub updated_at: u64,
 }
 
+// Session recordings
+pub(crate) const KIND_SESSION_LOG: u16 = 101;
+pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;
+
+/// What the vault knows about one session recording. The recording itself is a separate encrypted
+/// file named by this record's id (docs/crypto-format.md §11); everything identifying is here.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct SessionLogRecord {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    pub kind: tyrminal_contracts::SessionLogKind,
+    /// Unix milliseconds.
+    pub started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<u64>,
+    #[serde(default)]
+    pub size_bytes: u64,
+    /// How it ended, once it has (`None` while recording, or if the application stopped first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<LogEnd>,
+    #[serde(default)]
+    pub bookmarked: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LogEnd {
+    Closed,
+    SizeLimit,
+    Locked,
+    Stopped,
+}
+
+/// The vault's recording settings (one record).
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub(crate) struct RecordingSettingsRecord {
+    pub enabled: bool,
+    pub keep_per_host: u32,
+    pub max_log_mib: u32,
+}
+
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does
 /// not leave partial copies behind in freed heap blocks.
 struct FixedWriter {

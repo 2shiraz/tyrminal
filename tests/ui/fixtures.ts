@@ -11,6 +11,8 @@ export interface MockOptions {
   // agent B: tunnels and history
   /** Name the jump-chain hop in that trust prompt. */
   trustPromptHop?: { index: number; total: number; label: string };
+  /** Seed sample session recordings. */
+  recordings?: boolean;
   hostKeyChangedFor?: string;
   /** Simulate a WebView without WebGL (the GPU renderer must fall back). */
   noWebgl?: boolean;

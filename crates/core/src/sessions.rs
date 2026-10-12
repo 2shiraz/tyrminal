@@ -96,6 +96,7 @@ pub struct Sessions {
     edits: edits::Edits,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
+    pub(crate) recordings: crate::recording::Recordings,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -121,7 +122,7 @@ fn closed_event(error: Option<IpcError>, exit_status: Option<u32>) -> SessionEve
 }
 
 impl Sessions {
-    pub(crate) fn new(vault: Arc<VaultService>) -> Arc<Self> {
+    pub(crate) fn new(vault: Arc<VaultService>, logs_dir: std::path::PathBuf) -> Arc<Self> {
         Arc::new(Self {
             vault,
             entries: Mutex::new(HashMap::new()),
@@ -130,6 +131,7 @@ impl Sessions {
             edits: edits::Edits::default(),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
+            recordings: crate::recording::Recordings::new(logs_dir),
         })
     }
 
@@ -195,6 +197,10 @@ impl Sessions {
     ) -> Result<SessionOpened, IpcError> {
         let plan = self.vault.connection_plan(host_id).await?;
         let (id, entry, input_rx) = self.register(owner, plan.generation, Some(plan.host_id.clone()))?;
+        // Session recording
+        let sink = (self.recordings)
+            .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, sink)
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -231,6 +237,10 @@ impl Sessions {
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
         let (id, entry, input_rx) = self.register(owner, generation, None)?;
+        // Session recording
+        let sink = (self.recordings)
+            .wrap(&self.vault, generation, &id, "Local terminal".to_owned(), None, cols, rows, sink)
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -263,6 +273,12 @@ impl Sessions {
         self.entries().remove(session_id);
         // agent B: tunnels and history
         self.tunnel_runs.session_ended(session_id).await;
+        let reason = if self.vault.generation() == generation {
+            crate::records::LogEnd::Closed
+        } else {
+            crate::records::LogEnd::Locked
+        };
+        self.recordings.session_ended(&self.vault, session_id, reason).await;
         *entry.prompts() = Prompts::default();
         // Local copies of files opened for editing in this session are removed with it.
         for folder in self.edits.take_session(session_id) {
@@ -750,7 +766,10 @@ impl Sessions {
             return Err(invalid("The terminal size is out of range."));
         }
         let entry = self.authorize(owner, session_id)?;
-        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())
+        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())?;
+        // Session recording
+        self.recordings.resize(session_id, cols, rows);
+        Ok(())
     }
 
     /// The renderer reports that its terminal has processed `bytes` of output.

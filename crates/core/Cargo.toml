@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+base64 = "0.22.1"
 getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -20,6 +21,7 @@ tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "fs", "i
 tyrminal-contracts = { path = "../contracts" }
 tyrminal-platform = { path = "../platform" }
 tyrminal-pty = { path = "../pty" }
+tyrminal-session-log = { path = "../session-log" }
 tyrminal-ssh = { path = "../ssh" }
 tyrminal-storage = { path = "../storage" }
 tyrminal-vault = { path = "../vault" }

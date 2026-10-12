@@ -406,6 +406,107 @@ export function installMockBackend(options) {
         },
       };
     })(),
+    // Session recordings
+    ...(() => {
+      // Synthetic recordings. Nothing is encrypted here: the format and its verification are
+      // tested natively (crates/session-log, crates/core/tests/history.rs).
+      const b64 = (text) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+      const fail = (code, message) => {
+        throw { code, message };
+      };
+      let settings = { enabled: false, keepPerHost: 5, maxLogMib: 64 };
+      const base = Date.parse("2026-10-11T09:00:00Z");
+      const hostId = (label) => state.hosts.find((h) => h.label === label)?.id ?? null;
+      const hostile =
+        "deploy@staging-web:~$ cat notes\r\n" +
+        "\u001b]8;;https://attacker.example/\u0007open the runbook\u001b]8;;\u0007\r\n" +
+        "\u001b]52;c;cHduZWQ=\u0007\u001b]0;not your title\u0007" +
+        "rollout finished: 12 pods ready\r\ndeploy@staging-web:~$ ";
+      const logs = options.recordings
+        ? [
+            {
+              id: "a1".repeat(16),
+              title: "staging-web",
+              hostId: hostId("staging-web"),
+              kind: "ssh",
+              startedAt: base + 2 * 3600_000,
+              endedAt: base + 2 * 3600_000 + 754_000,
+              sizeBytes: 18_432,
+              state: "complete",
+              bookmarked: true,
+              comment: "Rollout of 2.4 — pods restarted twice",
+              frames: [
+                { type: "output", atMs: 0, data: b64("Welcome to Ubuntu 24.04.1 LTS\r\n") },
+                { type: "resize", atMs: 300, cols: 100, rows: 30 },
+                { type: "output", atMs: 900, data: b64(hostile) },
+              ],
+            },
+            {
+              id: "b2".repeat(16),
+              title: "api-gateway",
+              hostId: hostId("api-gateway"),
+              kind: "ssh",
+              startedAt: base + 3600_000,
+              endedAt: null,
+              sizeBytes: 4_096,
+              state: "incomplete",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("deploy@api-gateway:~$ uptime\r\n 09:12 up 41 days\r\n") }],
+            },
+            {
+              id: "c3".repeat(16),
+              title: "Local terminal",
+              hostId: null,
+              kind: "local",
+              startedAt: base,
+              endedAt: base + 61_000,
+              sizeBytes: 2_048,
+              state: "damaged",
+              bookmarked: false,
+              comment: "",
+              frames: [{ type: "output", atMs: 0, data: b64("~ % make test\r\nok\r\n") }],
+            },
+          ]
+        : [];
+      window.__mockRecordings = logs;
+      const summary = ({ frames, ...log }) => ({ ...log });
+      const find = (id) => logs.find((l) => l.id === id) ?? fail("NOT_FOUND", "That recording no longer exists.");
+      return {
+        recording_settings_get: () => ({ ...settings }),
+        recording_settings_set: (a) => {
+          const next = a.settings;
+          if (!(next.keepPerHost >= 1 && next.keepPerHost <= 100)) fail("INVALID_INPUT", "Keep between 1 and 100 recordings per host.");
+          if (!(next.maxLogMib >= 1 && next.maxLogMib <= 512)) fail("INVALID_INPUT", "A recording's size limit must be between 1 and 512 MiB.");
+          settings = { ...next };
+          return { ...settings };
+        },
+        session_log_list: () => [...logs].sort((x, y) => y.startedAt - x.startedAt).map(summary),
+        session_log_storage: () => ({ count: logs.length, totalBytes: logs.reduce((n, l) => n + l.sizeBytes, 0) }),
+        session_log_bookmark: (a) => {
+          const log = find(a.id);
+          const comment = a.comment.trim();
+          if (comment.length > 2000) fail("INVALID_INPUT", "A comment can be at most 2,000 characters.");
+          Object.assign(log, { bookmarked: a.bookmarked, comment });
+          return summary(log);
+        },
+        session_log_delete: (a) => {
+          const log = find(a.id);
+          if (log.state === "recording") fail("INVALID_INPUT", "This session is still being recorded. Close it first.");
+          logs.splice(logs.indexOf(log), 1);
+        },
+        session_log_delete_all: () => {
+          const gone = logs.filter((l) => l.state !== "recording");
+          for (const log of gone) logs.splice(logs.indexOf(log), 1);
+          return gone.length;
+        },
+        session_log_open: (a) => {
+          const log = find(a.id);
+          if (log.state === "unreadable") fail("NOT_FOUND", "This recording's file is missing or cannot be read.");
+          return { log: summary(log), cols: 80, rows: 24, frames: log.frames, truncated: false };
+        },
+      };
+    })(),
     files_copy: (a) => {
       if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
       const node = fs.get(childPath(a.srcDir, a.name));

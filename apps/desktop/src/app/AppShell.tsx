@@ -17,6 +17,7 @@ import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { RecordingsView } from "../features/history/RecordingsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
@@ -56,7 +57,8 @@ export type Destination =
   | "knownHosts"
   | "settings"
   // agent B: tunnels and history
-  | "tunnels";
+  | "tunnels"
+  | "recordings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -381,6 +383,7 @@ function Shell() {
               onConnect={connect}
             />
           )}
+          {!terminalVisible && destination === "recordings" && <RecordingsView />}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>

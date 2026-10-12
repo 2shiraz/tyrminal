@@ -26,6 +26,7 @@ import {
   IconZoomIn,
   IconZoomOut,
   // agent B: tunnels and history
+  IconHistory,
   IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
@@ -188,6 +189,7 @@ export function CommandPalette({
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
+    list.push(nav("recordings", <IconHistory size={16} />));
     return list;
   }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
 

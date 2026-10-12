@@ -88,6 +88,14 @@
     "allow-tunnel-clear-ended",
     "allow-host-connection-get",
     "allow-host-connection-set",
-    "allow-host-chain"
+    "allow-host-chain",
+    "allow-recording-settings-get",
+    "allow-recording-settings-set",
+    "allow-session-log-list",
+    "allow-session-log-storage",
+    "allow-session-log-bookmark",
+    "allow-session-log-delete",
+    "allow-session-log-delete-all",
+    "allow-session-log-open"
   ]
 }

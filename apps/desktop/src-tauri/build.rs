@@ -92,6 +92,14 @@ const COMMANDS: &[&str] = &[
     "host_connection_get",
     "host_connection_set",
     "host_chain",
+    "recording_settings_get",
+    "recording_settings_set",
+    "session_log_list",
+    "session_log_storage",
+    "session_log_bookmark",
+    "session_log_delete",
+    "session_log_delete_all",
+    "session_log_open",
 ];
 
 fn main() {

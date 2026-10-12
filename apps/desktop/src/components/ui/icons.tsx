@@ -133,3 +133,5 @@ export const IconLink = svg(["path|d=M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07
 export const IconSave = svg(["path|d=M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "path|d=M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7", "path|d=M7 3v4a1 1 0 0 0 1 1h7"]);
 export const IconLayoutTemplate = svg(["rect|width=18|height=7|x=3|y=3|rx=1", "rect|width=9|height=7|x=3|y=14|rx=1", "rect|width=5|height=7|x=16|y=14|rx=1"]);
 export const IconFolderUp = svg(["path|d=M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z", "path|d=M12 10v6", "path|d=m9 13 3-3 3 3"]);
+export const IconBookmark = svg(["path|d=M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"]);
+export const IconBookmarkCheck = svg(["path|d=M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z", "path|d=m9 10 2 2 4-4"]);
