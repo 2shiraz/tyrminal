@@ -8,6 +8,7 @@ apps/desktop/src-tauri/gen/schemas/
 
 # Test/lab runtime state (generated keys, sockets, logs). Never commit.
 tests/ssh-lab/.run/
+tests/ssh-lab/.run-*/
 .lab/
 *.log
 coverage/
