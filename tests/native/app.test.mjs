@@ -150,8 +150,10 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
 
     await s.until(async () => /Connected/.test(await statusText()), { describe: "connected status" });
     await typeInTerminal("echo native-$((40+2)) && id -un\n");
-    await s.until(async () => /native-42/.test(await terminalText()), { describe: "fixture command output" });
-    assert.match(await terminalText(), new RegExp(`\\n${lab.user}\\b`));
+    // Both lines of output: the arithmetic result and then the remote user name.
+    await s.until(async () => /native-42/.test(await terminalText()) && new RegExp(`\\n${lab.user}\\b`).test(await terminalText()), {
+      describe: "fixture command output",
+    });
     await app.screenshot("07-terminal");
   });
 
