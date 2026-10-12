@@ -56,6 +56,8 @@ import {
   closePane,
   closeTab,
   connectPanes,
+  cyclePane,
+  reopenClosedTab,
   detachInput,
   cycleTab,
   duplicateTab,
@@ -354,7 +356,7 @@ function Shell() {
       try {
         await detachApi.open(input);
         setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
-        setWs((current) => closeTab(current, tabId));
+        setWs((current) => closeTab(current, tabId, { remember: false }));
         notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
       } catch (error) {
         for (const h of live) h?.release(false);
@@ -520,11 +522,53 @@ function Shell() {
         case "movePaneDown":
           moveFocused("down");
           break;
+        case "nextPane":
+          setWs((current) => cyclePane(current, 1));
+          break;
+        case "prevPane":
+          setWs((current) => cyclePane(current, -1));
+          break;
+        case "goToTab1":
+        case "goToTab2":
+        case "goToTab3":
+        case "goToTab4":
+        case "goToTab5":
+        case "goToTab6":
+        case "goToTab7":
+        case "goToTab8":
+        case "goToLastTab": {
+          const tabs = wsRef.current.tabs;
+          const target = action === "goToLastTab" ? tabs.at(-1) : tabs[Number(action.slice(-1)) - 1];
+          if (target) setWs((current) => selectTab(current, target.id));
+          break;
+        }
+        case "reopenClosedTab": {
+          const current = wsRef.current;
+          const last = current.closedTabs?.at(-1);
+          if (!last) {
+            notify("info", msgC.tabs.nothingClosed);
+            break;
+          }
+          const next = reopenClosedTab(current, seedFor);
+          if (next === current) notify("danger", msgC.layouts.full(last.panes.length));
+          else setWs(next);
+          break;
+        }
+        case "focusTerminal":
+          focusedHandle()?.focus();
+          break;
+        case "focusSidebar":
+          setCollapsed(false);
+          // After the sidebar has expanded.
+          window.requestAnimationFrame(() =>
+            document.querySelector<HTMLElement>(".sidebar [aria-current='page'], .sidebar button")?.focus(),
+          );
+          break;
         default:
           break;
       }
     },
-    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate],
+    [openLocal, closeFocused, split, focusedHandle, moveFocus, moveFocused, navigate, notify, seedFor],
   );
 
   // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys

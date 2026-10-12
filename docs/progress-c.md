@@ -128,9 +128,27 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
     a query split across chunks went unanswered. It now counts over all output received
     (8962011; windows-x64 green). The handoff relay was not involved.
 
+## Navigation shortcuts (follow-up to #7, owner request)
+
+New rebindable actions in the Keyboard shortcuts section, under the same terminal-key, reserved-chord
+and conflict rules:
+
+- Next / previous pane (Ctrl+Shift+] / [, Cmd+] / [ on macOS): focus cycles through the panes of the
+  tab in front, in layout order, wrapping.
+- Go to tab 1–8 and Go to last tab: no shortcut by default, because Cmd/Alt+1–9 already switch tabs
+  and stay reserved.
+- Reopen closed tab (Alt+Shift+T, Cmd+Shift+T on macOS): the last ten closed tabs are kept in
+  memory as template tabs (destinations, arrangement, names; no session or output). A reopened tab
+  opens every pane disconnected, as a restored layout does; nothing connects until Connect. SFTP
+  tabs and tabs moved to another window are not remembered.
+- Focus terminal, Focus sidebar: no shortcut by default.
+
+Not added: next/previous layout. Opening a layout adds its tabs after the open ones rather than
+switching the workspace, so there is no current layout to cycle from; saved layouts are opened
+from the palette.
+
+UI test: `workspaces.spec.ts` "navigation shortcuts".
+
 ## Next
 
-Slice 4: detach a tab into its own window. Sessions are bound to the window label in the core,
-so a detached window needs an explicit handoff of each session (old label → new label, accepted
-only by the new window), a capability file granting only what a terminal window needs, and tests
-for cross-window stream access denial and detach/close races.
+Replace the per-session client-side encoding choice with #8's native per-host setting.
