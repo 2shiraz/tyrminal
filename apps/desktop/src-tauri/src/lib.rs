@@ -50,13 +50,17 @@ fn lock_instance(data_dir: &Path) -> Result<std::fs::File, IpcError> {
     }
 }
 
-fn open_core(app: &tauri::App) -> Result<(Core, std::fs::File), IpcError> {
+fn data_dir(app: &tauri::App) -> Result<PathBuf, IpcError> {
     // `TYRMINAL_DATA_DIR` lets tests and second-instance profiles use an isolated directory. It
     // names a location only; it never carries a secret.
-    let data_dir = match std::env::var_os("TYRMINAL_DATA_DIR") {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => app.path().app_data_dir().map_err(|_| storage_error())?,
-    };
+    match std::env::var_os("TYRMINAL_DATA_DIR") {
+        Some(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
+        _ => app.path().app_data_dir().map_err(|_| storage_error()),
+    }
+}
+
+fn open_core(app: &tauri::App) -> Result<(Core, std::fs::File), IpcError> {
+    let data_dir = data_dir(app)?;
     let path = vault_path(&data_dir)?;
     let lock = lock_instance(&data_dir)?;
     // Quick-unlock material lives in the OS secret store under this application's own service
@@ -96,7 +100,13 @@ pub fn run() {
                 // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
                 tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }
-            app.manage(AppState::new(core, instance_lock));
+            // Local copies of remote files being edited never outlive the process that made them:
+            // anything left by an earlier run (a crash) is removed before the window opens.
+            let edit_root = data_dir(app).map(|d| d.join("edits")).unwrap_or_default();
+            if instance_lock.is_some() && !edit_root.as_os_str().is_empty() {
+                let _ = std::fs::remove_dir_all(&edit_root);
+            }
+            app.manage(AppState::new(core, instance_lock, edit_root));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -127,8 +137,18 @@ pub fn run() {
             commands::inventory::key_import,
             commands::inventory::key_generate,
             commands::inventory::key_delete,
+            commands::inventory::key_deploy_preview,
+            commands::inventory::key_deploy,
             commands::inventory::known_host_list,
             commands::inventory::known_host_remove,
+            commands::inventory::group_list,
+            commands::inventory::group_save,
+            commands::inventory::group_delete,
+            commands::inventory::host_search,
+            commands::inventory::host_duplicate,
+            commands::inventory::host_bulk,
+            commands::inventory::import_preview,
+            commands::inventory::import_hosts,
             commands::sessions::session_open_ssh,
             commands::sessions::session_open_local,
             commands::sessions::session_write,
@@ -137,6 +157,22 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_trust_answer,
             commands::sessions::session_auth_answer,
+            commands::files::files_pick_upload,
+            commands::files::files_pick_folder,
+            commands::files::files_pick_upload_folder,
+            commands::files::files_list,
+            commands::files::files_mkdir,
+            commands::files::files_rename,
+            commands::files::files_remove,
+            commands::files::files_chmod,
+            commands::files::files_upload,
+            commands::files::files_download,
+            commands::files::files_cancel,
+            commands::files::files_local_list,
+            commands::files::files_edit_open,
+            commands::files::files_edit_status,
+            commands::files::files_edit_save,
+            commands::files::files_edit_close,
             commands::snippets::snippet_list,
             commands::snippets::snippet_save,
             commands::snippets::snippet_delete,

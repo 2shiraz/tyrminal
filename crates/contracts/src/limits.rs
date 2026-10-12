@@ -48,3 +48,29 @@ pub const MAX_LINK_LEN: usize = 2048;
 pub const MAX_SCROLLBACK_LINES: u32 = 100_000;
 /// Hosts kept in the recent-connections list on the home view.
 pub const MAX_RECENT_HOSTS: usize = 12;
+
+/// Group nesting depth (a group and its ancestors).
+pub const MAX_GROUP_DEPTH: usize = 16;
+/// Tags on one host, and the length of one tag in bytes.
+pub const MAX_TAGS_PER_HOST: usize = 16;
+pub const MAX_TAG_LEN: usize = 32;
+/// Hosts changed by one bulk action.
+pub const MAX_BULK_HOSTS: usize = 10_000;
+/// An import source (OpenSSH config or CSV), in bytes, and one line of it.
+pub const MAX_IMPORT_LEN: usize = 1024 * 1024;
+pub const MAX_IMPORT_LINE_LEN: usize = 4096;
+/// Hosts created by one import.
+pub const MAX_IMPORT_HOSTS: usize = 10_000;
+/// Search query, in bytes.
+pub const MAX_SEARCH_LEN: usize = 256;
+
+/// A remote path, and one name in it, in bytes.
+pub const MAX_REMOTE_PATH_LEN: usize = 4096;
+pub const MAX_FILE_NAME_LEN: usize = 255;
+/// Entries returned for one remote folder; the listing says when there were more.
+pub const MAX_DIR_ENTRIES: usize = 20_000;
+/// File transfers running at once.
+pub const MAX_TRANSFERS: usize = 8;
+/// Entries (files and folders) and nesting depth of one folder transfer.
+pub const MAX_TREE_ENTRIES: usize = 100_000;
+pub const MAX_TREE_DEPTH: usize = 32;

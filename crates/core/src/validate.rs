@@ -4,7 +4,7 @@
 use tyrminal_contracts::IpcError;
 use tyrminal_contracts::limits::{
     MAX_ADDRESS_LEN, MAX_FOLDER_LEN, MAX_LABEL_LEN, MAX_LINK_LEN, MAX_REASON_LEN, MAX_SECRET_LEN, MAX_SNIPPET_LEN,
-    MAX_USERNAME_LEN,
+    MAX_TAG_LEN, MAX_TAGS_PER_HOST, MAX_USERNAME_LEN,
 };
 use tyrminal_vault::Id;
 
@@ -114,6 +114,32 @@ pub(crate) fn folder(value: &str) -> Result<String, IpcError> {
         segments.push(segment);
     }
     Ok(segments.join("/"))
+}
+
+/// Host tags: trimmed, case-insensitively de-duplicated (first spelling kept), sorted, bounded.
+/// Commas separate tags in the UI, so a tag cannot contain one.
+pub(crate) fn tags(values: &[String]) -> Result<Vec<String>, IpcError> {
+    let mut out: Vec<String> = Vec::new();
+    for value in values {
+        let tag = value.trim();
+        if tag.is_empty() {
+            continue;
+        }
+        if tag.len() > MAX_TAG_LEN {
+            return Err(invalid("A tag is too long (32 bytes at most)."));
+        }
+        if tag.chars().any(|c| is_deceptive(c) || c == ',') {
+            return Err(invalid("Tags cannot contain commas or control characters."));
+        }
+        if !out.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+            out.push(tag.to_owned());
+        }
+    }
+    if out.len() > MAX_TAGS_PER_HOST {
+        return Err(invalid("A host can have 16 tags at most."));
+    }
+    out.sort_by_key(|t| t.to_lowercase());
+    Ok(out)
 }
 
 /// Snippet command text. Multi-line is allowed (tabs and newlines); other control characters,

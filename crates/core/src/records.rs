@@ -25,6 +25,7 @@ pub(crate) const KIND_KNOWN_HOST: u16 = 3;
 /// Append-only notes about trust decisions (why a known host was removed).
 pub(crate) const KIND_TRUST_EVENT: u16 = 4;
 pub(crate) const KIND_SNIPPET: u16 = 5;
+pub(crate) const KIND_GROUP: u16 = 6;
 
 const MARKER_TOMBSTONE: u8 = 0x00;
 const MARKER_LIVE_V1: u8 = 0x01;
@@ -32,21 +33,46 @@ const MARKER_LIVE_V1: u8 = 0x01;
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum StoredAuth {
+    /// Use the nearest group's key, else ask.
+    Inherit,
     AskPassword,
-    Password { password: Zeroizing<String> },
-    Key { key_id: String },
+    Password {
+        password: Zeroizing<String>,
+    },
+    Key {
+        key_id: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct HostRecord {
     pub label: String,
     pub address: String,
+    /// 0: inherit from the group chain (default 22).
     pub port: u16,
+    /// Empty: inherit from the group chain.
     pub username: String,
     pub auth: StoredAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     /// Unix seconds of the last connection that reached the shell. Absent in older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected_at: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct GroupRecord {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -154,6 +180,8 @@ mod tests {
             port: 2222,
             username: "deploy".into(),
             auth: StoredAuth::Password { password: Zeroizing::new("p\u{0}ss\nword\\".into()) },
+            group: None,
+            tags: Vec::new(),
             last_connected_at: None,
         };
         let bytes = encode(&host, 64).unwrap();

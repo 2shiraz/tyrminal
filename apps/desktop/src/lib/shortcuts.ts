@@ -22,6 +22,7 @@ export type ActionId =
   | "focusUp"
   | "focusDown"
   | "toggleSnippets"
+  | "toggleFiles"
   | "toggleSidebar"
   | "settings"
   | "lock"
@@ -54,6 +55,7 @@ const mac: Record<ActionId, Binding> = {
   focusUp: { key: "ArrowUp", mod: true, alt: true },
   focusDown: { key: "ArrowDown", mod: true, alt: true },
   toggleSnippets: { key: "s", mod: true, shift: true },
+  toggleFiles: { key: "o", mod: true, shift: true },
   toggleSidebar: { key: "b", mod: true },
   settings: { key: ",", mod: true },
   lock: { key: "l", mod: true, shift: true },
@@ -79,6 +81,7 @@ const other: Record<ActionId, Binding> = {
   focusUp: { key: "ArrowUp", alt: true },
   focusDown: { key: "ArrowDown", alt: true },
   toggleSnippets: { key: "s", ctrl: true, shift: true },
+  toggleFiles: { key: "o", ctrl: true, shift: true },
   toggleSidebar: { key: "b", ctrl: true, shift: true },
   settings: { key: ",", ctrl: true },
   lock: { key: "l", ctrl: true, shift: true },

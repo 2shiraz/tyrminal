@@ -2,7 +2,7 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconLock, IconMoon, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconShieldCheck, IconSun } from "../ui/icons";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 export function StatusBar({
@@ -12,6 +12,10 @@ export function StatusBar({
   onTogglePanel,
   theme,
   onToggleTheme,
+  broadcast,
+  onStopBroadcast,
+  filesOpen,
+  onToggleFiles,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -19,6 +23,11 @@ export function StatusBar({
   onTogglePanel: (() => void) | undefined;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  /** Panes receiving this tab's typed input, when broadcasting. */
+  broadcast?: number | undefined;
+  onStopBroadcast?: (() => void) | undefined;
+  filesOpen?: boolean | undefined;
+  onToggleFiles?: (() => void) | undefined;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -65,6 +74,15 @@ export function StatusBar({
               </span>
             </>
           )}
+          {broadcast !== undefined && (
+            <>
+              <span className="status-sep" aria-hidden="true" />
+              <button type="button" className="status-item status-broadcast" data-testid="broadcast" onClick={onStopBroadcast} title={msg.status.broadcastStop}>
+                <IconRadio size={13} />
+                {msg.status.broadcast(broadcast)}
+              </button>
+            </>
+          )}
           {status?.clipboardAllowed && (
             <span className="status-item" style={{ color: "var(--warning)" }}>
               <IconClipboardCopy size={13} />
@@ -79,11 +97,26 @@ export function StatusBar({
         </span>
       )}
       <span className="spacer" />
+      {onToggleFiles && (
+        <button
+          type="button"
+          className="status-button"
+          aria-pressed={filesOpen ?? false}
+          data-panel="files"
+          onClick={onToggleFiles}
+          data-tooltip={`${msg.palette.toggleFiles} (${shortcutText("toggleFiles")})`}
+          data-tooltip-side="top"
+        >
+          <IconHardDrive size={13} />
+          {msg.status.files}
+        </button>
+      )}
       {onTogglePanel && (
         <button
           type="button"
           className="status-button"
           aria-pressed={panelOpen}
+          data-panel="snippets"
           onClick={onTogglePanel}
           data-tooltip={`${msg.palette.toggleSnippets} (${shortcutText("toggleSnippets")})`}
           data-tooltip-side="top"

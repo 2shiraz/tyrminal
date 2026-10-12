@@ -10,20 +10,34 @@ import type {
   BackupCredentialKind,
   BackupFile,
   BackupPreview,
+  BulkHostChange,
+  ConflictChoice,
+  EditStatus,
   ErrorCode,
+  GroupInput,
+  GroupSummary,
   HostInput,
   HostSummary,
+  ImportFormat,
+  ImportHost,
+  ImportPreview,
   IpcError,
+  KeyDeployPreview,
   KeyImportInput,
   KeySummary,
   KnownHostSummary,
+  LocalListing,
+  LocalPick,
   Preferences,
   RecoveryKeyIssued,
+  RemoteListing,
   SessionEvent,
   SessionOpened,
   SnippetInput,
   SnippetSendMode,
   SnippetSummary,
+  TransferEvent,
+  TransferStarted,
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
@@ -101,6 +115,24 @@ export const hosts = {
   recent: () => call<HostSummary[]>("host_recent"),
   save: (host: HostInput) => call<HostSummary>("host_save", { host }),
   remove: (id: string) => call<void>("host_delete", { id }),
+  /** Every term must match: words, `tag:name`, `group:path`. */
+  search: (query: string) => call<HostSummary[]>("host_search", { query }),
+  /** A full copy (credentials included), never connected. */
+  duplicate: (id: string) => call<HostSummary>("host_duplicate", { id }),
+  /** One change to many hosts, all or nothing; resolves to how many changed. */
+  bulk: (ids: string[], change: BulkHostChange) => call<number>("host_bulk", { ids, change }),
+};
+
+export const groups = {
+  list: () => call<GroupSummary[]>("group_list"),
+  save: (group: GroupInput) => call<GroupSummary>("group_save", { group }),
+  remove: (id: string) => call<void>("group_delete", { id }),
+};
+
+export const importer = {
+  /** `text` is the content of a file the user chose; nothing is written. */
+  preview: (format: ImportFormat, text: string) => call<ImportPreview>("import_preview", { format, text }),
+  run: (hosts: ImportHost[], intoGroup: string | null) => call<number>("import_hosts", { hosts, intoGroup }),
 };
 
 export const keys = {
@@ -108,6 +140,10 @@ export const keys = {
   import: (key: KeyImportInput) => call<KeySummary>("key_import", { key }),
   generate: (label: string) => call<KeySummary>("key_generate", { label }),
   remove: (id: string) => call<void>("key_delete", { id }),
+  /** Over a connected SSH session this window owns; nothing is written. */
+  deployPreview: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy_preview", { sessionId, keyId }),
+  /** Appends the key to the server's authorized keys (an explicit user action). */
+  deploy: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy", { sessionId, keyId }),
 };
 
 export const knownHosts = {
@@ -149,6 +185,52 @@ export const sessions = {
   /** `secret: null` dismisses the prompt. */
   answerAuth: (sessionId: string, promptId: string, secret: string | null) =>
     call<void>("session_auth_answer", { sessionId, promptId, secret }),
+};
+
+function transferChannel(onEvent: (event: TransferEvent) => void) {
+  const events = new Channel<TransferEvent>();
+  events.onmessage = onEvent;
+  return events;
+}
+
+/**
+ * Remote files over SFTP on a connected session. Local files and folders are chosen in native
+ * dialogs and referred to by token; the page never sees or supplies a local path.
+ */
+export const files = {
+  list: (sessionId: string, path: string | null) => call<RemoteListing>("files_list", { sessionId, path }),
+  mkdir: (sessionId: string, dir: string, name: string) => call<void>("files_mkdir", { sessionId, dir, name }),
+  rename: (sessionId: string, dir: string, from: string, to: string) => call<void>("files_rename", { sessionId, dir, from, to }),
+  remove: (sessionId: string, dir: string, name: string) => call<void>("files_remove", { sessionId, dir, name }),
+  chmod: (sessionId: string, dir: string, name: string, mode: number) => call<void>("files_chmod", { sessionId, dir, name, mode }),
+  /** Native file picker; empty if cancelled. */
+  pickUpload: () => call<LocalPick[]>("files_pick_upload"),
+  /** Native folder picker for a download destination; null if cancelled. */
+  pickFolder: () => call<LocalPick | null>("files_pick_folder"),
+  /** Native folder picker for a folder to upload; null if cancelled. */
+  pickUploadFolder: () => call<LocalPick | null>("files_pick_upload_folder"),
+  /** `path`: an item inside a chosen folder (two-pane view); null for the chosen item itself. */
+  upload: (sessionId: string, token: string, dir: string, choice: ConflictChoice, onEvent: (event: TransferEvent) => void, path: string[] | null = null) =>
+    call<TransferStarted>("files_upload", { sessionId, token, dir, choice, path, events: transferChannel(onEvent) }),
+  /** `path`: a folder inside the chosen one to download into (two-pane view). */
+  download: (
+    sessionId: string,
+    dir: string,
+    name: string,
+    token: string,
+    choice: ConflictChoice,
+    onEvent: (event: TransferEvent) => void,
+    path: string[] | null = null,
+  ) => call<TransferStarted>("files_download", { sessionId, dir, name, token, choice, path, events: transferChannel(onEvent) }),
+  /** Lists a folder inside a local folder the user chose. */
+  localList: (token: string, path: string[]) => call<LocalListing>("files_local_list", { token, path }),
+  cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
+  /** Opens a remote file in the default local application; nothing is uploaded until save. */
+  editOpen: (sessionId: string, dir: string, name: string) => call<EditStatus>("files_edit_open", { sessionId, dir, name }),
+  editStatus: (editId: string) => call<EditStatus>("files_edit_status", { editId }),
+  /** Uploads the local copy; refused with CONFLICT if the server's copy changed, unless overwrite. */
+  editSave: (editId: string, overwrite: boolean) => call<EditStatus>("files_edit_save", { editId, overwrite }),
+  editClose: (editId: string) => call<void>("files_edit_close", { editId }),
 };
 
 export const snippets = {

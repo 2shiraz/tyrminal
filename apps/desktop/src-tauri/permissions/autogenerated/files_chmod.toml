@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-files-chmod"
+description = "Enables the files_chmod command without any pre-configured scope."
+commands.allow = ["files_chmod"]
+
+[[permission]]
+identifier = "deny-files-chmod"
+description = "Denies the files_chmod command without any pre-configured scope."
+commands.deny = ["files_chmod"]

@@ -232,14 +232,14 @@ describe("terminal with real applications", { concurrency: false }, () => {
       return { rows: Number(rows), cols: Number(cols) };
     };
     const before = await size("SIZE-A");
-    await s.click(await s.waitFor('.statusbar button[aria-pressed]'));
+    await s.click(await s.waitFor('.statusbar button[data-panel="snippets"]'));
     await s.waitFor(".side-panel");
     await new Promise((r) => setTimeout(r, 400));
     await s.click(await s.waitFor(".terminal-pane:not([hidden]) .xterm-helper-textarea"));
     const narrow = await size("SIZE-B");
     assert.ok(narrow.cols < before.cols - 20, `columns shrank with the panel open: ${before.cols} → ${narrow.cols}`);
     assert.equal(narrow.rows, before.rows);
-    await s.click(await s.waitFor('.statusbar button[aria-pressed="true"]'));
+    await s.click(await s.waitFor('.statusbar button[data-panel="snippets"][aria-pressed="true"]'));
     await s.waitGone(".side-panel");
     await new Promise((r) => setTimeout(r, 400));
     await s.click(await s.waitFor(".terminal-pane:not([hidden]) .xterm-helper-textarea"));

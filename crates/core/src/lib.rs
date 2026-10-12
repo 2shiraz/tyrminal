@@ -5,13 +5,20 @@
 //! ownership, trust and authentication prompts). It has no dependency on Tauri or the UI; the
 //! adapter crate supplies a [`SessionSink`] and calls these services.
 
+mod deploy;
+mod edits;
 mod error;
+mod files;
+mod folders;
+mod import;
+mod inventory;
 mod preferences;
 mod records;
 mod sessions;
 mod validate;
 mod vault;
 
+pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;

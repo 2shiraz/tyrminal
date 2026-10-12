@@ -119,3 +119,17 @@ export const IconSidebar = svg(["rect|width=18|height=18|x=3|y=3|rx=2", "path|d=
 export const IconTextCursorInput = svg(["path|d=M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6", "path|d=M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7", "path|d=M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1", "path|d=M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1", "path|d=M9 6v12"]);
 export const IconDownload = svg(["path|d=M12 15V3", "path|d=M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "path|d=m7 10 5 5 5-5"]);
 export const IconUpload = svg(["path|d=M12 3v12", "path|d=m17 8-5-5-5 5", "path|d=M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"]);
+export const IconRadio = svg(["path|d=M16.247 7.761a6 6 0 0 1 0 8.478", "path|d=M19.075 4.933a10 10 0 0 1 0 14.134", "path|d=M4.925 19.067a10 10 0 0 1 0-14.134", "path|d=M7.753 16.239a6 6 0 0 1 0-8.478", "circle|cx=12|cy=12|r=2"]);
+export const IconTag = svg(["path|d=M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z", "circle|cx=7.5|cy=7.5|r=.5|fill=currentColor"]);
+export const IconArrowUpDown = svg(["path|d=m21 16-4 4-4-4", "path|d=M17 20V4", "path|d=m3 8 4-4 4 4", "path|d=M7 4v16"]);
+export const IconFile = svg(["path|d=M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z", "path|d=M14 2v5a1 1 0 0 0 1 1h5"]);
+export const IconFolderInput = svg(["path|d=M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1", "path|d=M2 13h10", "path|d=m9 16 3-3-3-3"]);
+export const IconNetwork = svg(["rect|x=16|y=16|width=6|height=6|rx=1", "rect|x=2|y=16|width=6|height=6|rx=1", "rect|x=9|y=2|width=6|height=6|rx=1", "path|d=M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3", "path|d=M12 12V8"]);
+export const IconRoute = svg(["circle|cx=6|cy=19|r=3", "path|d=M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15", "circle|cx=18|cy=5|r=3"]);
+export const IconHardDrive = svg(["path|d=M10 16h.01", "path|d=M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z", "path|d=M21.946 12.013H2.054", "path|d=M6 16h.01"]);
+export const IconRefreshCcw = svg(["path|d=M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "path|d=M3 3v5h5", "path|d=M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "path|d=M16 16h5v5"]);
+export const IconArrowLeftRight = svg(["path|d=M8 3 4 7l4 4", "path|d=M4 7h16", "path|d=m16 21 4-4-4-4", "path|d=M20 17H4"]);
+export const IconLink = svg(["path|d=M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", "path|d=M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"]);
+export const IconSave = svg(["path|d=M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "path|d=M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7", "path|d=M7 3v4a1 1 0 0 0 1 1h7"]);
+export const IconLayoutTemplate = svg(["rect|width=18|height=7|x=3|y=3|rx=1", "rect|width=9|height=7|x=3|y=14|rx=1", "rect|width=5|height=7|x=16|y=14|rx=1"]);
+export const IconFolderUp = svg(["path|d=M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z", "path|d=M12 10v6", "path|d=m9 13 3-3 3 3"]);

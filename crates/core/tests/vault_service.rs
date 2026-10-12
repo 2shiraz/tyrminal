@@ -30,9 +30,11 @@ fn host(label: &str, auth: HostAuthInput) -> HostInput {
         id: None,
         label: label.into(),
         address: "host.example".into(),
-        port: 22,
+        port: Some(22),
         username: "deploy".into(),
         auth,
+        group_id: None,
+        tags: Vec::new(),
     }
 }
 
@@ -111,9 +113,11 @@ async fn no_plaintext_canary_reaches_any_file_on_disk() {
             id: None,
             label: canaries[0].into(),
             address: canaries[1].into(),
-            port: 2222,
+            port: Some(2222),
             username: canaries[2].into(),
             auth: HostAuthInput::StoredPassword { password: Some(canaries[3].into()) },
+            group_id: None,
+            tags: Vec::new(),
         })
         .await
         .unwrap();
@@ -439,9 +443,11 @@ async fn hosts_keys_and_references_keep_their_integrity() {
             id: None,
             label: label.into(),
             address: address.into(),
-            port,
+            port: Some(port),
             username: username.into(),
             auth: HostAuthInput::AskPassword,
+            group_id: None,
+            tags: Vec::new(),
         };
         assert_eq!(
             code(v.save_host(input).await),

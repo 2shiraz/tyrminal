@@ -1,5 +1,5 @@
-import type { HostAuthInput, HostSummary, KeySummary } from "@tyrminal/contracts";
-import { type FormEvent, useState } from "react";
+import type { GroupSummary, HostAuthInput, HostSummary, KeySummary } from "@tyrminal/contracts";
+import { type FormEvent, useMemo, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, SecretField, TextField } from "../../components/ui/controls";
@@ -10,10 +10,38 @@ import { useAction } from "../../lib/useAsync";
 
 type AuthKind = HostAuthInput["kind"];
 
+/** What a host in `groupId` inherits: the nearest group in the chain that sets each value. */
+export function groupDefaults(groups: GroupSummary[], groupId: string | null) {
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const out: { username: string | null; port: number | null; keyId: string | null } = { username: null, port: null, keyId: null };
+  let current = groupId ? byId.get(groupId) : undefined;
+  for (let depth = 0; current && depth < 16; depth += 1) {
+    out.username ??= current.username;
+    out.port ??= current.port;
+    out.keyId ??= current.keyId;
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return out;
+}
+
+/** `Parent/Child` names for a group, for pickers. */
+export function groupPath(groups: GroupSummary[], id: string): string {
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const names: string[] = [];
+  let current = byId.get(id);
+  for (let depth = 0; current && depth < 16; depth += 1) {
+    names.unshift(current.name);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return names.join(" / ");
+}
+
 export function HostEditor({
   host,
   initial,
   keys,
+  groups = [],
+  defaultGroupId = null,
   onClose,
   onSaved,
 }: {
@@ -21,30 +49,45 @@ export function HostEditor({
   /** Prefill for a new host (quick connect, duplicate). */
   initial?: { label?: string; address: string; port: number; username: string; auth?: HostSummary["auth"] } | undefined;
   keys: KeySummary[];
+  groups?: GroupSummary[];
+  /** Group preselected for a new host (the group being viewed). */
+  defaultGroupId?: string | null;
   onClose: () => void;
   onSaved: (saved: HostSummary) => void;
 }) {
   const source = host ?? initial;
+  const [groupId, setGroupId] = useState<string | null>(host ? host.groupId : defaultGroupId);
   const [label, setLabel] = useState(host?.label ?? initial?.label ?? initial?.address ?? "");
   const [address, setAddress] = useState(source?.address ?? "");
-  const [port, setPort] = useState(String(source?.port ?? 22));
-  const [username, setUsername] = useState(source?.username ?? "");
+  // Inherited values show as empty fields with the group's value as a hint.
+  const [port, setPort] = useState(host?.inherited.port ? "" : String(source?.port ?? (defaultGroupId ? "" : 22)));
+  const [username, setUsername] = useState(host?.inherited.username ? "" : (source?.username ?? ""));
+  const [tags, setTags] = useState((host?.tags ?? []).join(", "));
   const sourceAuth = host?.auth ?? initial?.auth;
   const [authKind, setAuthKind] = useState<AuthKind>(
-    sourceAuth?.kind === "stored_password" && !host ? "ask_password" : (sourceAuth?.kind ?? (keys.length > 0 ? "key" : "ask_password")),
+    host?.inherited.auth
+      ? "inherit"
+      : sourceAuth?.kind === "stored_password" && !host
+        ? "ask_password"
+        : (sourceAuth?.kind ?? (defaultGroupId ? "inherit" : keys.length > 0 ? "key" : "ask_password")),
   );
   const [password, setPassword] = useState("");
-  const [keyId, setKeyId] = useState(sourceAuth?.kind === "key" ? sourceAuth.keyId : (keys[0]?.id ?? ""));
+  const [keyId, setKeyId] = useState(sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : (keys[0]?.id ?? ""));
   const { pending, error, run } = useAction();
 
-  const hadStoredPassword = host?.auth.kind === "stored_password";
-  const portNumber = Number(port);
-  const portValid = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const inherited = useMemo(() => groupDefaults(groups, groupId), [groups, groupId]);
+  const inheritedKey = inherited.keyId ? keys.find((k) => k.id === inherited.keyId) : undefined;
+  const hadStoredPassword = host?.auth.kind === "stored_password" && !host.inherited.auth;
+  const portNumber = port === "" ? null : Number(port);
+  const portValid = portNumber === null ? groupId !== null : Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const effectiveUser = username || inherited.username || "";
+  const effectivePort = portNumber ?? inherited.port ?? 22;
   const authValid =
     authKind === "ask_password" ||
+    (authKind === "inherit" && groupId !== null) ||
     (authKind === "stored_password" && (password.length > 0 || hadStoredPassword)) ||
     (authKind === "key" && keyId !== "");
-  const ready = label.trim() !== "" && address.trim() !== "" && username !== "" && portValid && authValid;
+  const ready = label.trim() !== "" && address.trim() !== "" && effectiveUser !== "" && portValid && authValid;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -54,8 +97,16 @@ export function HostEditor({
         ? { kind: "key", keyId }
         : authKind === "stored_password"
           ? { kind: "stored_password", password: password.length > 0 ? password : null }
-          : { kind: "ask_password" };
-    const saved = await run(() => hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth }));
+          : authKind === "inherit"
+            ? { kind: "inherit" }
+            : { kind: "ask_password" };
+    const tagList = tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t !== "");
+    const saved = await run(() =>
+      hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList }),
+    );
     setPassword("");
     if (saved) onSaved(saved);
   }
@@ -64,6 +115,27 @@ export function HostEditor({
     <Dialog title={host ? msg.hosts.editorEdit : msg.hosts.editorNew} icon={<IconServer size={18} />} onDismiss={onClose}>
       <form className="stack" onSubmit={submit} aria-busy={pending}>
         <TextField label={msg.hosts.label} value={label} onChange={setLabel} autoFocus maxLength={256} />
+        {groups.length > 0 && (
+          <label className="field">
+            <span className="label">{msg.hosts.group}</span>
+            <select
+              className="select"
+              value={groupId ?? ""}
+              onChange={(event) => {
+                const next = event.target.value || null;
+                setGroupId(next);
+                if (!next && authKind === "inherit") setAuthKind("ask_password");
+              }}
+            >
+              <option value="">{msg.hosts.noGroup}</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {groupPath(groups, g.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="split">
           <TextField label={msg.hosts.address} value={address} onChange={setAddress} hint={msg.hosts.addressHint} maxLength={253} />
           <TextField
@@ -72,15 +144,40 @@ export function HostEditor({
             onChange={setPort}
             inputMode="numeric"
             maxLength={5}
+            placeholder={groupId ? String(inherited.port ?? 22) : undefined}
+            hint={groupId && port === "" ? msg.hosts.inherit(String(inherited.port ?? 22)) : undefined}
             error={port !== "" && !portValid ? "1–65535" : undefined}
           />
         </div>
-        <TextField label={msg.hosts.username} value={username} onChange={setUsername} maxLength={255} />
+        <TextField
+          label={msg.hosts.username}
+          value={username}
+          onChange={setUsername}
+          maxLength={255}
+          placeholder={inherited.username ?? undefined}
+          hint={
+            groupId && username === ""
+              ? inherited.username
+                ? msg.hosts.inherit(inherited.username)
+                : msg.hosts.needsUser
+              : undefined
+          }
+        />
+        <TextField label={msg.hosts.tags} value={tags} onChange={setTags} hint={msg.hosts.tagsHint} maxLength={600} />
 
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="label" style={{ marginBottom: 6 }}>
             {msg.hosts.auth}
           </legend>
+          {groupId && (
+            <label className="choice">
+              <input type="radio" name="auth" checked={authKind === "inherit"} onChange={() => setAuthKind("inherit")} />
+              <span className="choice-body">
+                <span className="choice-title">{msg.hosts.authInherit}</span>
+                <span className="hint">{msg.hosts.authInheritHint(inheritedKey?.label ?? null)}</span>
+              </span>
+            </label>
+          )}
           <label className="choice">
             <input type="radio" name="auth" checked={authKind === "key"} onChange={() => setAuthKind("key")} />
             <span className="choice-body">
@@ -130,7 +227,7 @@ export function HostEditor({
 
         {ready && (
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msg.hosts.effective(username, address.trim(), portNumber)}
+            {msg.hosts.effective(effectiveUser, address.trim(), effectivePort)}
           </p>
         )}
         <ErrorNotice error={error} />

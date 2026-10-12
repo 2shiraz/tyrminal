@@ -25,6 +25,8 @@ export function PaneGrid({
   onRatio,
   onOpenKnownHosts,
   register,
+  broadcasting,
+  onUserInput,
 }: {
   ws: Workspace;
   prefs: TerminalPreferences;
@@ -37,6 +39,9 @@ export function PaneGrid({
   onRatio: (tab: number, path: ("a" | "b")[], ratio: number) => void;
   onOpenKnownHosts: () => void;
   register: (pane: number, handle: PaneHandle | null) => void;
+  /** Tabs whose typed input goes to every pane (an explicit, unsaved mode). */
+  broadcasting: ReadonlySet<number>;
+  onUserInput: (tab: number, pane: number, bytes: Uint8Array) => void;
 }) {
   return (
     <>
@@ -58,6 +63,7 @@ export function PaneGrid({
                     key={id}
                     className="pane"
                     data-focused={focused}
+                    data-broadcast={broadcasting.has(tab.id) || undefined}
                     aria-label={pane.label}
                     style={{ left: pct(rect.x), top: pct(rect.y), width: pct(rect.w), height: pct(rect.h) }}
                   >
@@ -95,6 +101,7 @@ export function PaneGrid({
                         onClose={() => onClose(id)}
                         onOpenKnownHosts={onOpenKnownHosts}
                         register={(handle) => register(id, handle)}
+                        onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                       />
                     </div>
                   </section>

@@ -92,6 +92,16 @@ pub enum HostAuth {
     },
 }
 
+/// Which connection settings of a host come from its group chain rather than the host itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct InheritedFields {
+    pub username: bool,
+    pub port: bool,
+    pub auth: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -99,12 +109,114 @@ pub struct HostSummary {
     pub id: String,
     pub label: String,
     pub address: String,
+    /// Effective port: the host's own, else the nearest group's, else 22.
     pub port: u16,
+    /// Effective user name: the host's own, else the nearest group's; empty if neither sets one
+    /// (connecting then asks the user to set it).
     pub username: String,
+    /// Effective authentication: the host's own, else the nearest group's key, else ask.
     pub auth: HostAuth,
+    /// What the effective values above were inherited from the group chain.
+    pub inherited: InheritedFields,
+    pub group_id: Option<String>,
+    pub tags: Vec<String>,
     /// Unix seconds of the last connection that reached the shell, if any (recent connections).
     #[ts(type = "number | null")]
     pub last_connected_at: Option<u64>,
+}
+
+/// A host group. Groups nest (no cycles) and give their hosts default connection settings;
+/// the nearest group that sets a value wins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GroupSummary {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub username: Option<String>,
+    pub port: Option<u16>,
+    pub key_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GroupInput {
+    /// `None` creates a group; `Some` edits that group.
+    pub id: Option<String>,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub username: Option<String>,
+    pub port: Option<u16>,
+    pub key_id: Option<String>,
+}
+
+/// One change applied to several hosts at once, in a single transaction.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BulkHostChange {
+    /// Move to a group (`None`: out of every group).
+    MoveToGroup {
+        #[serde(rename = "groupId")]
+        group_id: Option<String>,
+    },
+    AddTag {
+        tag: String,
+    },
+    RemoveTag {
+        tag: String,
+    },
+    Delete,
+}
+
+/// Where imported host definitions come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ImportFormat {
+    /// An OpenSSH client configuration (`~/.ssh/config` syntax). Read as data only: nothing in
+    /// it is executed, included or followed.
+    OpensshConfig,
+    /// CSV with a header row: label, address, port, username, group, tags.
+    Csv,
+}
+
+/// A host the import would create.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ImportHost {
+    pub label: String,
+    pub address: String,
+    pub port: u16,
+    pub username: String,
+    /// Group path (`Parent/Child`), created on import if missing; empty for none.
+    pub group: String,
+    pub tags: Vec<String>,
+    /// Notes for this entry, such as an identity file that was not imported.
+    pub notes: Vec<String>,
+}
+
+/// Something in the source that was not imported, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ImportSkipped {
+    pub line: u32,
+    pub text: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ImportPreview {
+    pub hosts: Vec<ImportHost>,
+    pub skipped: Vec<ImportSkipped>,
+    /// Hosts whose label already exists in the vault (imported as additional hosts).
+    pub duplicates: Vec<String>,
 }
 
 /// Authentication part of a host edit. `StoredPassword { password: None }` keeps the password
@@ -113,6 +225,8 @@ pub struct HostSummary {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum HostAuthInput {
+    /// Use the nearest group's key, else ask for the password.
+    Inherit,
     AskPassword,
     StoredPassword {
         password: Option<String>,
@@ -126,6 +240,7 @@ pub enum HostAuthInput {
 impl core::fmt::Debug for HostAuthInput {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::Inherit => f.write_str("Inherit"),
             Self::AskPassword => f.write_str("AskPassword"),
             Self::StoredPassword { .. } => f.write_str("StoredPassword(<redacted>)"),
             Self::Key { key_id } => f.debug_struct("Key").field("key_id", key_id).finish(),
@@ -141,9 +256,15 @@ pub struct HostInput {
     pub id: Option<String>,
     pub label: String,
     pub address: String,
-    pub port: u16,
+    /// `None`: inherit from the group chain (default 22).
+    pub port: Option<u16>,
+    /// Empty: inherit from the group chain.
     pub username: String,
     pub auth: HostAuthInput,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 // ---------- keys ----------
@@ -188,6 +309,22 @@ impl core::fmt::Debug for KeyImportInput {
 }
 
 // ---------- known hosts ----------
+
+/// What installing a public key on a server would do (or did), read from the server over an
+/// open, verified session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KeyDeployPreview {
+    /// The file on the server, as the server's shell names it.
+    pub path: String,
+    /// Keys already in that file (other lines are kept as they are).
+    pub existing_keys: u32,
+    /// The key is already authorized; deploying changes nothing.
+    pub already_present: bool,
+    /// The exact line that is (or would be) appended.
+    pub line: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -485,4 +622,136 @@ mod tests {
     fn serde_json_like<T: Serialize>(value: &T) -> String {
         serde_json::to_string(value).unwrap_or_default()
     }
+}
+
+// ---------- files (SFTP) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RemoteEntryKind {
+    File,
+    Dir,
+    Symlink,
+    Other,
+}
+
+/// One entry of a remote folder. `name` is server-supplied text: display it, never interpret it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub kind: RemoteEntryKind,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    /// Permission bits (`0o7777`).
+    pub permissions: Option<u32>,
+    /// Seconds since the Unix epoch.
+    #[ts(type = "number | null")]
+    pub modified: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RemoteListing {
+    /// The folder's absolute path on the server.
+    pub path: String,
+    /// The parent folder, unless this is the root.
+    pub parent: Option<String>,
+    pub entries: Vec<RemoteEntry>,
+    /// The folder has more entries than are listed.
+    pub truncated: bool,
+}
+
+/// A local file or folder the user chose in a native dialog. The path stays on the native side;
+/// the renderer refers to it by `token`, valid for the window that chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LocalPick {
+    pub token: String,
+    pub name: String,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+}
+
+/// What a transfer does when its target name is taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConflictChoice {
+    /// Refuse with a conflict, so the user can decide.
+    Ask,
+    /// Replace the existing file (files only; folders are never merged or replaced).
+    Replace,
+    /// Keep the existing one and use the first free name like `name (1).ext`.
+    KeepBoth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TransferDirection {
+    Upload,
+    Download,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TransferStarted {
+    pub transfer_id: String,
+    pub name: String,
+    pub direction: TransferDirection,
+    #[ts(type = "number | null")]
+    pub total: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum TransferEvent {
+    Progress {
+        #[ts(type = "number")]
+        done: u64,
+    },
+    /// The file or folder is complete under its final name. `files` counts files copied;
+    /// `skipped` counts links and special files inside a folder, which are never copied.
+    Done {
+        #[ts(type = "number")]
+        bytes: u64,
+        files: u32,
+        skipped: u32,
+    },
+    /// Nothing was left under the final name; temporary data was removed where possible.
+    Failed {
+        error: IpcError,
+    },
+    Cancelled,
+}
+
+/// A remote file opened in a local application. `changed`: the local copy differs from what
+/// was downloaded or last saved to the server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditStatus {
+    pub edit_id: String,
+    pub name: String,
+    pub changed: bool,
+}
+
+/// A folder inside a local folder the user chose (`token`), listed for the two-pane view. `path`
+/// is the list of names below the chosen folder; the chosen folder itself is `[]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LocalListing {
+    pub token: String,
+    pub root_name: String,
+    pub path: Vec<String>,
+    pub entries: Vec<RemoteEntry>,
+    pub truncated: bool,
 }
