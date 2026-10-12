@@ -1101,6 +1101,14 @@ export function installMockBackend(options) {
       // Typed by the "core": the renderer never receives the password, and no Enter is added.
       write(a.sessionId, new TextEncoder().encode(password));
     },
+    app_info: () => ({
+      commit: "1a2b3c4",
+      buildDate: "2026-10-12",
+      os: "linux",
+      arch: "x86_64",
+      tauriVersion: "2.12.1",
+      webviewVersion: "2.50.1",
+    }),
     // LAN discovery: synthetic announcements (documentation addresses), never a real network.
     discovery_networks: () => options.discoveryNetworks ?? [{ id: "en0", addresses: ["192.0.2.20", "fe80::1"] }],
     discovery_start: (a) => {

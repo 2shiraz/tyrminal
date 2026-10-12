@@ -7,6 +7,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  AppInfo,
   BackupCredentialKind,
   BackupFile,
   BackupPreview,
@@ -328,6 +329,11 @@ export const preferences = {
 export const links = {
   /** Opens an http(s) link in the OS browser after the user confirmed it. Validated natively. */
   open: (url: string) => call<void>("link_open", { url }),
+};
+
+export const app = {
+  /** Static build and platform facts (commit, build date, OS, architecture, runtime versions). */
+  info: () => call<AppInfo>("app_info"),
 };
 
 /** Portable backups. Files are picked in native dialogs; paths and bytes never reach the page. */
