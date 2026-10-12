@@ -97,6 +97,14 @@ pub fn run() {
                         let _ = handle.emit_to("main", VAULT_STATUS_EVENT, current);
                     }
                 });
+                // The vault locks when the OS locks the screen (where the platform reports it).
+                let vault = std::sync::Arc::clone(&core.vault);
+                let _ = tyrminal_core::watch_screen_lock(std::sync::Arc::new(move || {
+                    let vault = std::sync::Arc::clone(&vault);
+                    tauri::async_runtime::spawn(async move {
+                        let _ = vault.lock().await;
+                    });
+                }));
                 // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
                 tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }
@@ -171,6 +179,7 @@ pub fn run() {
             commands::files::files_download,
             commands::files::files_cancel,
             commands::files::files_local_list,
+            commands::files::files_copy,
             commands::files::files_edit_open,
             commands::files::files_edit_status,
             commands::files::files_edit_save,
@@ -181,6 +190,8 @@ pub fn run() {
             commands::snippets::snippet_send,
             commands::settings::prefs_get,
             commands::settings::prefs_set,
+            commands::settings::terminal_choices,
+            commands::settings::editor_pick_app,
             commands::settings::host_recent,
             commands::settings::link_open,
             commands::backup::backup_export,

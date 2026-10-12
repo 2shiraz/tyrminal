@@ -253,3 +253,27 @@ test("files: two panes copy between this computer and the server by button and b
   await local.getByRole("button", { name: "Up one local folder" }).click();
   await expect(local.getByRole("button", { name: "Up one local folder" })).toBeDisabled();
 });
+
+test("files: copy to another server is offered with two SSH sessions and runs as a transfer", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  // With one SSH session there is nowhere to copy to.
+  await expect(panel(page).getByRole("button", { name: "Copy to another server…" })).toHaveCount(0);
+
+  await connect(page, "db-primary");
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await panel(page).getByRole("button", { name: "Copy to another server…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Copy “README.md” to another server" });
+  await expect(dialog.getByRole("combobox", { name: "Connected session" })).toHaveValue(/.+/);
+  await expect(dialog.getByRole("combobox", { name: "Connected session" }).locator("option")).toHaveText(["api-gateway"]);
+  await expect(dialog.getByRole("textbox", { name: "Folder on that server" })).toHaveValue("/home/deploy");
+  await dialog.getByRole("button", { name: "Copy" }).click();
+  // The destination already has README.md: never replaced silently.
+  await page.getByRole("alertdialog", { name: "Replace “README.md”?" }).getByRole("button", { name: "Keep both" }).click();
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("2.5 KB of 5.0 KB");
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
+});

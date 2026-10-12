@@ -1,0 +1,8 @@
+# Owner requests during testing
+
+Requests the owner makes while testing builds. Each is mapped to a feature-matrix row and an
+agent (see `docs/work-split.md`); a request with no matching row gets a new `P-` row.
+
+| Date | Request | Matrix row | Phase | Owner agent | Status |
+|---|---|---|---|---|---|
+| 2026-10-12 | Import a private key from a key file (not only pasted text) | KEY-01 (key import: file or pasted text) | 04 | D | requested |

@@ -44,7 +44,36 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     t.letter_spacing = finite_in(t.letter_spacing, -2.0, 4.0)?;
     t.padding = t.padding.min(32);
     t.scrollback = t.scrollback.min(MAX_SCROLLBACK_LINES);
+    if let Some(shell) = &prefs.local_shell {
+        let listed = tyrminal_pty::available_shells();
+        if !listed.iter().any(|p| p.to_str() == Some(shell.as_str())) {
+            return Err(invalid("That shell is not one of the shells installed on this computer."));
+        }
+    }
+    if prefs.editor_apps.len() > MAX_EDITOR_APPS {
+        return Err(invalid("Too many editor choices."));
+    }
+    for e in &prefs.editor_apps {
+        if !extension_ok(&e.extension) || !Path::new(&e.app).is_absolute() {
+            return Err(invalid("An editor choice is not valid."));
+        }
+    }
     Ok(prefs)
+}
+
+/// Editor choices kept at most.
+const MAX_EDITOR_APPS: usize = 64;
+
+/// A file extension as used for editor choices: 1–16 lower-case letters or digits.
+pub fn extension_ok(ext: &str) -> bool {
+    (1..=16).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// The extension of a file name for editor lookup (`None` for names without one).
+pub fn extension_of(name: &str) -> Option<String> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    (!stem.is_empty() && extension_ok(&ext)).then_some(ext)
 }
 
 impl PreferencesStore {
@@ -65,8 +94,39 @@ impl PreferencesStore {
         self.current.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
+    /// Stores preferences from the renderer. Editor choices can be kept or removed here but never
+    /// added or changed: an application that runs downloaded files is chosen only natively.
+    pub fn set(&self, mut prefs: Preferences) -> Result<Preferences, IpcError> {
+        let current = self.get().editor_apps;
+        if prefs.editor_apps.iter().any(|e| !current.contains(e)) {
+            return Err(invalid("Editors are added with the app picker only."));
+        }
+        prefs.editor_apps.dedup();
+        self.store(prefs)
+    }
+
+    /// Adds (or replaces) the editor for `extension` with an application the user picked in a
+    /// native dialog. Called by the adapter only.
+    pub fn add_editor_app(&self, extension: &str, app: &Path) -> Result<Preferences, IpcError> {
+        let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+        if !extension_ok(&extension) {
+            return Err(invalid("Use a file extension of letters and digits, like conf or yml."));
+        }
+        let app = app.to_str().ok_or_else(|| invalid("That application path cannot be used."))?.to_owned();
+        let mut prefs = self.get();
+        prefs.editor_apps.retain(|e| e.extension != extension);
+        prefs.editor_apps.push(tyrminal_contracts::EditorApp { extension, app });
+        self.store(prefs)
+    }
+
+    /// The editor chosen for a file name, if any.
+    pub fn editor_for(&self, file_name: &str) -> Option<std::path::PathBuf> {
+        let ext = extension_of(file_name)?;
+        self.get().editor_apps.into_iter().find(|e| e.extension == ext).map(|e| e.app.into())
+    }
+
     /// Validates, writes atomically (temporary file, then rename) and returns what was stored.
-    pub fn set(&self, prefs: Preferences) -> Result<Preferences, IpcError> {
+    fn store(&self, prefs: Preferences) -> Result<Preferences, IpcError> {
         let prefs = sanitize(prefs)?;
         let json = serde_json::to_vec_pretty(&prefs).map_err(|_| io_error())?;
         let tmp = self.path.with_extension("json.tmp");
@@ -97,6 +157,43 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editors_are_added_natively_only_and_can_be_removed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = PreferencesStore::open(&dir.path().join("preferences.json"));
+        let app = dir.path().join("Editor");
+        let added = store.add_editor_app(".YML", &app).unwrap();
+        assert_eq!(added.editor_apps.len(), 1);
+        assert_eq!(added.editor_apps[0].extension, "yml");
+        assert_eq!(store.editor_for("deploy.YML").as_deref(), Some(app.as_path()));
+        assert_eq!(store.editor_for("Makefile"), None);
+        // The renderer cannot add or change an editor ...
+        let mut forged = store.get();
+        forged.editor_apps.push(tyrminal_contracts::EditorApp { extension: "sh".into(), app: "/bin/sh".into() });
+        assert!(store.set(forged).is_err());
+        let mut changed = store.get();
+        changed.editor_apps[0].app = "/bin/sh".into();
+        assert!(store.set(changed).is_err());
+        // ... but it can remove one.
+        let mut removed = store.get();
+        removed.editor_apps.clear();
+        assert!(store.set(removed).unwrap().editor_apps.is_empty());
+        assert!(store.add_editor_app("a.b", &app).is_err());
+        assert_eq!(extension_of(".bashrc"), None);
+        assert_eq!(extension_of("x.Conf").as_deref(), Some("conf"));
+    }
+
+    #[test]
+    fn the_local_shell_must_be_an_installed_one() {
+        let mut prefs = Preferences { local_shell: Some("/tmp/not-a-shell".into()), ..Preferences::default() };
+        assert!(sanitize(prefs.clone()).is_err());
+        if let Some(listed) = tyrminal_pty::available_shells().first() {
+            prefs.local_shell = Some(listed.to_string_lossy().into_owned());
+            assert!(sanitize(prefs).is_ok());
+        }
+        assert!(sanitize(Preferences::default()).is_ok(), "no choice means the login shell");
+    }
 
     #[test]
     fn values_are_clamped_and_unknown_choices_rejected() {

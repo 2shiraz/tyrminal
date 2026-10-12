@@ -9,6 +9,7 @@ export type { ChainHop } from "./ChainHop";
 export type { ConflictChoice } from "./ConflictChoice";
 export type { CursorStyle } from "./CursorStyle";
 export type { EditStatus } from "./EditStatus";
+export type { EditorApp } from "./EditorApp";
 export type { ErrorCode } from "./ErrorCode";
 export type { GroupInput } from "./GroupInput";
 export type { GroupSummary } from "./GroupSummary";
