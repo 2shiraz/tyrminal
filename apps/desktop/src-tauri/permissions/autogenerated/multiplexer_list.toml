@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-multiplexer-list"
+description = "Enables the multiplexer_list command without any pre-configured scope."
+commands.allow = ["multiplexer_list"]
+
+[[permission]]
+identifier = "deny-multiplexer-list"
+description = "Denies the multiplexer_list command without any pre-configured scope."
+commands.deny = ["multiplexer_list"]

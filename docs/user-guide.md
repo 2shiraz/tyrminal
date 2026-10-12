@@ -179,9 +179,9 @@ the session is open, that server (and anyone with administrator rights on it) ca
 host's key**, and only that key, to sign in to other servers as you. It is never forwarded to
 jump hosts, and the server cannot add or remove keys or see any other key.
 
-To see what happened while connecting, choose **Connection details…** in the command palette,
-or **Show connection details** on a failed connection. **Copy** puts the lines on the clipboard;
-they never contain passwords, passphrases or keys.
+To see what happened while connecting, choose **Show connection log** in the command palette,
+or **Connection log** on a failed connection. **Copy** puts the lines on the clipboard; they
+never contain passwords, passphrases or keys.
 
 ## Keys
 
@@ -222,6 +222,12 @@ Each tab holds one or more panes (split right or down). A pane is an SSH session
 terminal (Ctrl+Shift+T, ⌘T on macOS). Settings → Terminal sets the color scheme, font, size,
 cursor and scrollback, and the shell for local terminals (only shells installed on this computer
 are offered).
+
+**Long commands.** With shell integration on, Tyrminal shows a desktop notification when a command
+that ran for at least 10 seconds finishes in a tab you are not looking at, and marks that tab
+(✓, or ✕ when it failed) until you open it. The notification names the tab, the exit status and
+how long it took; it never contains the command or its output. Change the time or turn it off in
+Settings → Terminal.
 
 Safety features:
 
@@ -304,6 +310,14 @@ with a fixed command on a separate channel of the same connection, so nothing is
 shell. It reads them every 5 s, and only while the panel is open. A value the server did not
 report in the expected form shows as "Unavailable" instead of a guess. Turn off "Show for this
 host" in the panel to stop it for one host.
+
+**tmux and screen.** The same panel lists the server's tmux and screen sessions when it opens
+(and on **Refresh sessions**), again over a separate channel without typing anything. Session
+names come from the server and are shown as text. **Attach** types the attach command into the
+terminal, and only when you click it. A session whose name contains characters such as spaces,
+quotes or `;` is listed without **Attach**; attach to it yourself. If the connection drops and
+Tyrminal reconnects, the pane offers to reattach the session you attached from the panel; it
+never reattaches by itself.
 
 ## Files (SFTP)
 

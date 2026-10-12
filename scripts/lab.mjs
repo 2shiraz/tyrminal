@@ -26,13 +26,23 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { randomBytes } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const labDir = join(root, "tests", "ssh-lab");
-const runDir = join(labDir, ".run");
+// TYRMINAL_LAB_RUN_DIR runs a second lab beside the first (CI's post-quantum container lab on
+// Linux). It must be a ".run-<name>" folder in tests/ssh-lab, since `down` deletes it.
+const runDir = (() => {
+  const dir = process.env.TYRMINAL_LAB_RUN_DIR;
+  if (!dir) return join(labDir, ".run");
+  const name = basename(dir);
+  if (resolve(root, dir) !== join(labDir, name) || !/^\.run-[a-z0-9-]+$/.test(name)) {
+    throw new Error(`TYRMINAL_LAB_RUN_DIR must be tests/ssh-lab/.run-<name>, not ${dir}`);
+  }
+  return join(labDir, name);
+})();
 const LABEL = "tyrminal.lab=1";
 const IMAGE = "tyrminal-lab-sshd:alpine3.22-openssh10.0p1";
 const SERVERS = ["a", "b"];
@@ -345,7 +355,7 @@ function removeLocalUser(name) {
 
 const toConfigPath = (p) => (isWindows ? p.replaceAll("\\", "/") : p);
 
-function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false }) {
+function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false, secondStep = null }) {
   const lines = [
     "# Tyrminal local lab sshd (generated per run by scripts/lab.mjs). Never use outside tests.",
     `Port ${port}`,
@@ -357,9 +367,12 @@ function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false })
     `AllowUsers ${Object.values(LOCAL_USERS).join(" ")}`,
     // The "kbd" server takes keyboard-interactive only (answered through PAM), like servers that
     // use one-time codes; the others take passwords and keys.
-    `PasswordAuthentication ${kbdOnly ? "no" : "yes"}`,
-    `KbdInteractiveAuthentication ${kbdOnly ? "yes" : "no"}`,
+    // The "mfa" servers require a key and then a second step (SSH partial success): a password
+    // ("mfa") or keyboard-interactive answered through PAM ("mfakbd").
+    `PasswordAuthentication ${kbdOnly || secondStep === "keyboard-interactive" ? "no" : "yes"}`,
+    `KbdInteractiveAuthentication ${kbdOnly || secondStep === "keyboard-interactive" ? "yes" : "no"}`,
     `PubkeyAuthentication ${kbdOnly ? "no" : "yes"}`,
+    ...(secondStep ? [`AuthenticationMethods publickey,${secondStep}`] : []),
     // The lab's own file, and the user's own one, so a key the app installs (KEY deploy) is the
     // key that then signs in.
     `AuthorizedKeysFile ${toConfigPath(authFile ?? join(inDir, "authorized_keys"))} .ssh/authorized_keys`,
@@ -381,7 +394,7 @@ function sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly = false })
     "Subsystem sftp internal-sftp",
     "LogLevel VERBOSE",
   ];
-  if (!isWindows) lines.push(`UsePAM ${process.platform === "darwin" || kbdOnly ? "yes" : "no"}`);
+  if (!isWindows) lines.push(`UsePAM ${process.platform === "darwin" || kbdOnly || secondStep === "keyboard-interactive" ? "yes" : "no"}`);
   // macOS: sessions get the compiled-in PATH; add Homebrew so the lab applications are found.
   if (process.platform === "darwin") lines.push("SetEnv PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin");
   // Lab only, as in the container image: all clients share one source address and the suite
@@ -515,7 +528,8 @@ async function localUp() {
   const authDir = authorizedKeysDir();
   // Windows OpenSSH has no PAM, so it cannot serve keyboard-interactive; tests that need the
   // "kbd" server report BLOCKED there.
-  for (const name of isWindows ? SERVERS : [...SERVERS, "kbd"]) {
+  // "mfa" (key, then password) runs everywhere; "mfakbd" (key, then keyboard-interactive) needs PAM.
+  for (const name of isWindows ? [...SERVERS, "mfa"] : [...SERVERS, "kbd", "mfa", "mfakbd"]) {
     const inDir = serverHostKeys(name);
     if (!isWindows) chmodSync(inDir, 0o711);
     writeFileSync(join(inDir, "authorized_keys"), `${material.authorized}\n`, { mode: 0o644 });
@@ -534,7 +548,15 @@ async function localUp() {
     }
     const port = await freePort();
     const config = join(inDir, "sshd_config");
-    writeFileSync(config, sshdConfig({ port, inDir, authFile, caFile, version, kbdOnly: name === "kbd" }), { mode: 0o644 });
+    writeFileSync(config, sshdConfig({
+        port,
+        inDir,
+        authFile,
+        caFile,
+        version,
+        kbdOnly: name === "kbd",
+        secondStep: { mfa: "password", mfakbd: "keyboard-interactive" }[name] ?? null,
+      }), { mode: 0o644 });
     const logFile = join(inDir, "sshd.log");
     writeFileSync(logFile, "", { mode: 0o644 });
     if (isWindows) {

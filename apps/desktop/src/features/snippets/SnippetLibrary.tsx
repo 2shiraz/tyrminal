@@ -1,5 +1,5 @@
 import type { SnippetSummary } from "@tyrminal/contracts";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
@@ -21,6 +21,7 @@ import {
 } from "../../components/ui/icons";
 import { snippets as snippetsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { useFlip } from "../../lib/motion";
 import { msgD } from "../../lib/messages-d";
 import { msgRuns } from "../../lib/messages-runs";
 import { MultiRunDialog } from "./MultiRunDialog";
@@ -62,6 +63,8 @@ export function SnippetLibrary({
   compact: boolean;
 }) {
   const { snippets } = useVaultData();
+  const listRef = useRef<HTMLDivElement>(null);
+  useFlip(listRef);
   const notify = useToast();
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -134,7 +137,7 @@ export function SnippetLibrary({
         </p>
       )}
 
-      <div role="list" aria-label={msg.snippets.title} data-testid="snippet-list">
+      <div role="list" aria-label={msg.snippets.title} data-testid="snippet-list" ref={listRef}>
         {groups.map(([folder, items]) => {
           const open = !collapsed.has(folder) || query !== "";
           return (
@@ -169,7 +172,7 @@ export function SnippetLibrary({
               {open && (
                 <ul aria-label={folder || msg.snippets.topLevel}>
                   {items.map((snippet) => (
-                    <li key={snippet.id} className="snippet" data-snippet={snippet.name}>
+                    <li key={snippet.id} className="snippet" data-snippet={snippet.name} data-flip-key={snippet.id}>
                       <div className="snippet-name">
                         <span className="truncate" style={{ flex: 1 }}>
                           {snippet.name}

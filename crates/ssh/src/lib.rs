@@ -14,6 +14,7 @@ mod channels;
 mod client;
 mod error;
 mod host_trust;
+mod rsa_sign;
 mod sftp;
 // agent B: tunnels and history
 mod forward;

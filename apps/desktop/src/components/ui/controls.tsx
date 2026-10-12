@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import type { AppError } from "../../lib/ipc";
+import { useDelayed } from "../../lib/useDelayed";
 import { msg } from "../../lib/messages";
 import { isMac } from "../../lib/platform";
 import { type ActionId, bindings, keyCaps, shortcutText } from "../../lib/shortcuts";
@@ -376,15 +377,26 @@ export function BoxEmpty({ children, action }: { children: ReactNode; action?: R
   );
 }
 
+/**
+ * Placeholder rows while a list loads. The space is held at once (the layout does not jump when
+ * the rows arrive), but the rows only show once the wait passes 150 ms, so fast loads never flash.
+ */
 export function SkeletonRows({ count = 3, height = 56 }: { count?: number; height?: number }) {
+  const shown = useDelayed(true);
   return (
-    <div className="stack-sm" aria-hidden="true">
+    <div className="stack-sm skeleton-rows" aria-hidden="true" data-shown={shown || undefined}>
       {Array.from({ length: count }, (_, i) => (
         // Placeholder rows have no identity beyond their position.
-        <div key={i} className="skeleton" style={{ height }} />
+        <div key={i} className={shown ? "skeleton" : "skeleton-space"} style={{ height }} />
       ))}
     </div>
   );
+}
+
+/** One placeholder block (for example a preview that is still loading), shown after 150 ms. */
+export function SkeletonBlock({ className = "" }: { className?: string }) {
+  const shown = useDelayed(true);
+  return <div className={`${className} ${shown ? "skeleton" : "skeleton-space"}`.trim()} aria-hidden="true" />;
 }
 
 /** Relative time for "last connected" labels. */

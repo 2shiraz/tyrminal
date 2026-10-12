@@ -132,6 +132,26 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     loaded.proxy?.passwordStored === true &&
     (usesGroup || proxyKind === "none" || proxyUser.trim() !== loaded.proxy.username);
 
+  /** Key exchange or port suggestions differ from the stored ones (settings that are not route parts). */
+  const settingsChanged = keyExchange !== loaded.keyExchange || noPortSuggestions !== loaded.noPortSuggestions;
+  /**
+   * Autosave while the route itself is incomplete: these settings with the route exactly as stored
+   * (the proxy password is kept, same user), so the route is never half-saved.
+   */
+  const settingsInput = useCallback(
+    (): HostConnectionInput => ({
+      jumpHostId: loaded.jumpHostId,
+      keyExchange,
+      noPortSuggestions,
+      proxy:
+        loaded.proxy === null
+          ? null
+          : { kind: loaded.proxy.kind, host: loaded.proxy.host, port: loaded.proxy.port, username: loaded.proxy.username, password: null },
+      inherit: loaded.inherit,
+    }),
+    [loaded, keyExchange, noPortSuggestions],
+  );
+
   /** Autosave: the route was written as `written` (with a proxy password when `withPassword`). */
   const markStored = useCallback(
     (written: HostConnectionInput, withPassword: boolean) => {
@@ -162,6 +182,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
   const restore = useCallback((route: Loaded) => {
     setInherit(route.inherit);
     setKeyExchange(route.keyExchange);
+    setNoPortSuggestions(route.noPortSuggestions);
     setJumpHostId(route.jumpHostId);
     setProxyKind(route.proxy?.kind ?? "none");
     setProxyHost(route.proxy?.host ?? "");
@@ -188,6 +209,8 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     valid: proxyValid,
     changed,
     routeChanged,
+    settingsChanged,
+    settingsInput,
     dropsPassword,
     loaded,
     input,

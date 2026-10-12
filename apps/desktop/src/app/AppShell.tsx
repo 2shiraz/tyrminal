@@ -21,6 +21,8 @@ import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "..
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+// tmux and screen session awareness (P-31)
+import { msgMx } from "../lib/messages-multiplexers";
 import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
@@ -47,7 +49,6 @@ import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
 import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
 import { extraPaletteItems } from "../features/commands/extraActions";
-import { ConnectionDetails } from "../features/connection/ConnectionDetails";
 import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
 import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
@@ -58,6 +59,7 @@ import { msgProduction } from "../lib/messages-production";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
+import { useCommandFinished } from "../features/notify/useCommandFinished";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -165,8 +167,6 @@ function Shell() {
   // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
   const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
-  // terminal input: the connection details dialog (CON-15)
-  const [details, setDetails] = useState<{ sessionId: string; label: string } | null>(null);
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // privilege prompts (KEY-18)
   const [inserting, setInserting] = useState<{ sessionId: string; hostId: string } | null>(null);
@@ -196,6 +196,36 @@ function Shell() {
   const tab = activeTab(ws);
   const pane = activePane(ws);
   const paneStatus = pane ? statuses[pane.id] : undefined;
+
+  // terminal notifications (P-23): tabs whose long command finished out of view, until shown.
+  const [finished, setFinished] = useState<ReadonlyMap<number, number | null>>(new Map());
+  const [finishedNotice, setFinishedNotice] = useState("");
+  useEffect(() => {
+    if (ws.active !== null && finished.has(ws.active)) {
+      const next = new Map(finished);
+      next.delete(ws.active);
+      setFinished(next);
+    }
+  }, [ws.active, finished]);
+  useCommandFinished(
+    prefs.commandNotifications ?? { enabled: true, minSeconds: 10 },
+    (sessionId) => {
+      const current = wsRef.current;
+      for (const t of current.tabs) {
+        for (const id of panesOf(t.layout)) {
+          if (handles.current.get(id)?.sessionId() !== sessionId) continue;
+          const inView = current.active === t.id && document.visibilityState === "visible" && document.hasFocus();
+          return { tabId: t.id, title: tabTitle(current, t), inView };
+        }
+      }
+      return null;
+    },
+    (tabId, exitStatus, notice) => {
+      setFinished((current) => new Map(current).set(tabId, exitStatus));
+      setFinishedNotice(notice);
+    },
+    (tabId) => setWs((current) => (current.tabs.some((t) => t.id === tabId) ? selectTab(current, tabId) : current)),
+  );
 
   /** Panes of a tab that can take part in broadcast: connected, and able to tell user input apart. */
   const broadcastPanes = useCallback(
@@ -770,6 +800,7 @@ function Shell() {
           onNewLocal={openLocal}
           onNewSftp={openSftp}
           onOpenPalette={() => setPaletteOpen(true)}
+          finished={finished}
           recent={(data.recent.value ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) }))}
           layout={
             ws.template
@@ -778,6 +809,10 @@ function Shell() {
           }
           production={productionPanes}
         />
+        {/* terminal notifications (P-23): announced to assistive technology as well */}
+        <div className="visually-hidden" role="status" data-testid="command-finished">
+          {finishedNotice}
+        </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
           {!terminalVisible && destination === "home" && (
@@ -813,6 +848,14 @@ function Shell() {
                   showPanel && sidePanel === "server" ? (
                     <ServerPanel
                       target={glanceTarget}
+                      // tmux and screen session awareness (P-31): typed into the focused pane only.
+                      onAttach={(session) => {
+                        const handle = focusedHandle();
+                        if (handle?.attachMultiplexer(session)) {
+                          notify("success", msgMx.attachedNotice(session.name));
+                          handle.focus();
+                        }
+                      }}
                       onClose={() => {
                         setSidePanel(null);
                         focusedHandle()?.focus();
@@ -962,13 +1005,6 @@ function Shell() {
             onCopy: () => void focusedHandle()?.copy(),
             onPaste: () => focusedHandle()?.paste(),
             onShowSection: showSection,
-            onDetails:
-              pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
-                ? () => {
-                    const sessionId = focusedHandle()?.sessionId();
-                    if (sessionId) setDetails({ sessionId, label: pane.label });
-                  }
-                : undefined,
           })}
           openTabs={ws.tabs.map((t) => {
             const p = ws.panes[t.focused];
@@ -1114,17 +1150,6 @@ function Shell() {
 
       {/* terminal input: an address clicked in the output becomes a prefilled new host */}
       <NewHostFromTerminal onDone={() => focusedHandle()?.focus()} />
-
-      {details && (
-        <ConnectionDetails
-          sessionId={details.sessionId}
-          label={details.label}
-          onClose={() => {
-            setDetails(null);
-            focusedHandle()?.focus();
-          }}
-        />
-      )}
 
       {searchingSessions && (
         <SearchSessionsDialog

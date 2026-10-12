@@ -46,10 +46,11 @@ import {
 import { msgSftp } from "../sftp/messages";
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { msgAutosave } from "../../lib/messages-autosave";
+import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
 import { msgProduction } from "../../lib/messages-production";
+import { flashSaved, useFlip } from "../../lib/motion";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -131,6 +132,8 @@ export function HostsView({
   onOpenSftp?: (host: HostSummary) => void;
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
+  const listRef = useRef<HTMLUListElement>(null);
+  useFlip(listRef);
   const notify = useToast();
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
@@ -148,10 +151,10 @@ export function HostsView({
   const setFilter = (next: HostsFilter) => setView({ filter: next });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
-  // state (a password typed but not set).
+  // state (what is not autosaved: a password typed but not set, note edits).
   const [panel, setPanel] = useState<{ target: PanelTarget; version: number } | null>(null);
-  const [discarding, setDiscarding] = useState<(() => void) | null>(null);
-  const panelSecret = useRef(false);
+  const [discarding, setDiscarding] = useState<{ then: () => void; wording: NonNullable<ReturnType<typeof discardWording>> } | null>(null);
+  const panelUnsaved = useRef<Unsaved>({ password: false, note: false });
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -345,14 +348,15 @@ export function HostsView({
     return () => observer.disconnect();
   }, []);
 
-  /** Runs `then` now, or after the user agrees to discard a password typed in the panel but not set. */
+  /** Runs `then` now, or after the user agrees to discard what the panel has not saved (a typed password, note edits). */
   const guard = (then: () => void) => {
-    if (panel && panelSecret.current) setDiscarding(() => then);
+    const wording = panel ? discardWording(panelUnsaved.current) : null;
+    if (wording) setDiscarding({ then, wording });
     else then();
   };
   const show = (target: PanelTarget) => {
     version.current += 1;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel({ target, version: version.current });
   };
   const openPanel = (target: PanelTarget) => {
@@ -366,7 +370,7 @@ export function HostsView({
   const closePanel = useCallback(() => {
     const back = opener.current;
     opener.current = null;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
@@ -547,11 +551,11 @@ export function HostsView({
           {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
 
           {layout === "grid" ? (
-            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list">
+            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
               {filtered.map((host) => {
                 const isConnected = connected.has(host.id);
                 return (
-                  <li key={host.id}>
+                  <li key={host.id} data-flip-key={host.id}>
                     <article
                       className="host-card"
                       data-connected={isConnected}
@@ -643,9 +647,9 @@ export function HostsView({
               })}
             </ul>
           ) : (
-            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list">
+            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
               {filtered.map((host) => (
-                <li key={host.id} data-active={panelHostId === host.id}>
+                <li key={host.id} data-flip-key={host.id} data-active={panelHostId === host.id}>
                   <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onClick={(event) => toggle(host.id, event)} readOnly />
                   {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                   <div className="row-main">
@@ -696,13 +700,15 @@ export function HostsView({
           defaultGroupId={currentGroupId}
           os={panelHostId ? (osOf.get(panelHostId) ?? null) : null}
           identity={identityList ? { list: identityList, current: panelHostId ? (assignments.get(`host:${panelHostId}`)?.identityId ?? null) : null } : undefined}
-          secretRef={panelSecret}
+          unsavedRef={panelUnsaved}
           onRequestClose={() => guard(closePanel)}
           onSaved={(saved) => {
             // Only the panel that saved: a write that finishes after switching hosts updates the list only.
             const mine = panel.version;
             setPanel((current) => (current && current.version === mine ? { ...current, target: { kind: "edit", host: saved } } : current));
             reload();
+            // The saved row tints once, so the change is seen in the list as well as the panel.
+            requestAnimationFrame(() => flashSaved(listRef.current?.querySelector<HTMLElement>(`[data-flip-key="${CSS.escape(saved.id)}"]`)));
           }}
           onConnect={(host) => guard(() => onConnect(host))}
           onOpenSftp={onOpenSftp}
@@ -981,14 +987,14 @@ export function HostsView({
 
       {discarding && (
         <Dialog
-          title={msgAutosave.discardSecretTitle}
+          title={discarding.wording.title}
           role="alertdialog"
           icon={<IconTrash2 size={18} />}
           tone="warning"
           onDismiss={() => setDiscarding(null)}
         >
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msgAutosave.discardSecretBody}
+            {discarding.wording.body}
           </p>
           <div className="dialog-actions">
             <button type="button" className="btn" onClick={() => setDiscarding(null)} autoFocus data-autofocus>
@@ -998,13 +1004,13 @@ export function HostsView({
               type="button"
               className="btn btn-danger-solid"
               onClick={() => {
-                const then = discarding;
+                const { then } = discarding;
                 setDiscarding(null);
-                panelSecret.current = false;
+                panelUnsaved.current = { password: false, note: false };
                 then();
               }}
             >
-              {msgAutosave.discardSecret}
+              {discarding.wording.action}
             </button>
           </div>
         </Dialog>

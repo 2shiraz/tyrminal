@@ -589,6 +589,13 @@ export const startup = {
   effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };
 
+// terminal notifications (P-23)
+/** Command-finished notifications: the native side builds the text and shows it. */
+export const notices = {
+  commandFinished: (tabTitle: string, exitStatus: number | null, durationMs: number) =>
+    call<import("@tyrminal/contracts").CommandNotice>("notify_command_finished", { tabTitle, exitStatus, durationMs: Math.round(durationMs) }),
+};
+
 /** LAN discovery (HST-14): user-started, time-limited browsing for SSH servers on one network. */
 export const discovery = {
   /** Local network interfaces to choose from; sends nothing. */
@@ -620,6 +627,12 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+// tmux and screen session awareness (P-31)
+export const multiplexers = {
+  /** The server's tmux and screen sessions, listed with a fixed command; nothing is typed. */
+  list: (sessionId: string) => call<import("@tyrminal/contracts").MultiplexerList>("multiplexer_list", { sessionId }),
 };
 
 /** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
