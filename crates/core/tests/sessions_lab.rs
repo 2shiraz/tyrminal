@@ -2233,3 +2233,51 @@ async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_promp
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
 }
+
+/// A transfer holds its own SFTP handle, but it must not outlive its session: closing the
+/// session, or locking the vault, stops a download at once and leaves no file behind.
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_transfer_stops_when_its_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = fixture().await;
+        let host = f.key_host("a").await;
+        let mut client = Client::open_ssh(&f.core, &host).await;
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+        client.until_connected().await;
+        let id = client.session.clone();
+        let s = &f.core.sessions;
+        let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+        let name = format!("tyr-stop-{}-{lock}.bin", std::process::id());
+        client.send(&format!("head -c 268435456 /dev/zero > ~/{name} && echo BIG-$((40+2))\n")).await;
+        client.output_until("BIG-42").await;
+
+        let down = TempDir::new().unwrap();
+        let (sink, mut rx) = transfer_sink();
+        s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+        match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
+            Some(TransferEvent::Progress { .. }) => {}
+            other => panic!("transfer ended before the session did: {other:?}"),
+        }
+        let started = std::time::Instant::now();
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            s.close(WINDOW, &id).unwrap();
+        }
+        let end = transfer_end(&mut rx).await;
+        assert!(matches!(end, TransferEvent::Cancelled), "lock={lock}: {end:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "stopped with the session: {:?}", started.elapsed());
+        let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert!(leftovers.is_empty(), "no partial or temporary file is left: {leftovers:?}");
+
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let mut again = Client::open_ssh(&f.core, &host).await;
+        again.until_connected().await;
+        again.send(&format!("rm -f ~/{name}; echo RM-$((40+2))\n")).await;
+        again.output_until("RM-42").await;
+    }
+}

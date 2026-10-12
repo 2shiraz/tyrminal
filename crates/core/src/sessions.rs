@@ -105,7 +105,8 @@ struct Offer {
 }
 
 /// A running transfer: the window that started it and its cancel switch.
-type Transfer = (String, watch::Sender<bool>);
+/// Owner window, cancel switch, and the sessions the transfer runs over (it stops with them).
+type Transfer = (String, watch::Sender<bool>, Vec<String>);
 
 pub struct Sessions {
     vault: Arc<VaultService>,
@@ -393,6 +394,12 @@ impl Sessions {
             )),
         };
         self.entries().remove(session_id);
+        // Transfers hold their own SFTP handle; they stop with any session they run over.
+        for (_, cancel, sessions) in self.transfers.lock().unwrap_or_else(|p| p.into_inner()).values() {
+            if sessions.iter().any(|s| s == session_id) {
+                let _ = cancel.send(true);
+            }
+        }
         if let Some(error) = &outcome.error {
             entry.log.note(&format!("ended: {}", error.message));
         }
@@ -564,14 +571,14 @@ impl Sessions {
         self.file_op(owner, session_id, |sftp| async move { sftp.set_permissions(&path, mode).await }).await
     }
 
-    fn start_transfer(&self, owner: &str) -> Result<(String, watch::Receiver<bool>), IpcError> {
+    fn start_transfer(&self, owner: &str, sessions: &[&str]) -> Result<(String, watch::Receiver<bool>), IpcError> {
         let id = random_token()?;
         let (cancel, cancelled) = watch::channel(false);
         let mut transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
         if transfers.len() >= MAX_TRANSFERS {
             return Err(err(ErrorCode::LimitExceeded, "Too many transfers are running. Wait for one to finish."));
         }
-        transfers.insert(id.clone(), (owner.to_owned(), cancel));
+        transfers.insert(id.clone(), (owner.to_owned(), cancel, sessions.iter().map(|s| (*s).to_owned()).collect()));
         Ok((id, cancelled))
     }
 
@@ -604,7 +611,7 @@ impl Sessions {
         if sftp.stat(&remote).await.map_err(from_file)?.kind == tyrminal_ssh::RemoteKind::Dir {
             let job = folders::prepare_download(sftp, remote, local_dir, name, token).await?;
             let total = job.tree.bytes();
-            let (id, cancel) = self.start_transfer(owner)?;
+            let (id, cancel) = self.start_transfer(owner, &[session_id])?;
             let transfers = Arc::clone(&self.transfers);
             let done_id = id.clone();
             tokio::spawn(async move {
@@ -615,7 +622,7 @@ impl Sessions {
         }
         let job = Download { sftp, remote, local_dir, name: name.to_owned(), overwrite, token };
         let total = files::prepare_download(&job).await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[session_id])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -654,7 +661,7 @@ impl Sessions {
             files::remote_name(name)?;
             let job = folders::prepare_upload(sftp, local, dir, name, token).await?;
             let total = job.tree.bytes();
-            let (id, cancel) = self.start_transfer(owner)?;
+            let (id, cancel) = self.start_transfer(owner, &[session_id])?;
             let transfers = Arc::clone(&self.transfers);
             let done_id = id.clone();
             tokio::spawn(async move {
@@ -665,7 +672,7 @@ impl Sessions {
         }
         let job = Upload { sftp, local, dir, name: name.to_owned(), overwrite, token };
         let (total, mode) = files::prepare_upload(&job).await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[session_id])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -865,7 +872,7 @@ impl Sessions {
             random_token()?,
         )
         .await?;
-        let (id, cancel) = self.start_transfer(owner)?;
+        let (id, cancel) = self.start_transfer(owner, &[src_session, dst_session])?;
         let transfers = Arc::clone(&self.transfers);
         let done_id = id.clone();
         tokio::spawn(async move {
@@ -879,7 +886,7 @@ impl Sessions {
     pub fn cancel_transfer(&self, owner: &str, transfer_id: &str) -> Result<(), IpcError> {
         let transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
         match transfers.get(transfer_id) {
-            Some((who, cancel)) if who == owner => {
+            Some((who, cancel, _)) if who == owner => {
                 let _ = cancel.send(true);
                 Ok(())
             }
