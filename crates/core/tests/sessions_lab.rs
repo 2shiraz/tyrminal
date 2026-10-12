@@ -2031,3 +2031,44 @@ async fn a_dropped_file_streams_in_order_and_only_a_complete_upload_appears() {
     }
     s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
 }
+
+/// Opt-in: `TYRMINAL_SMALL_FS` names an empty folder on a filesystem of at most 4 MiB (CI mounts
+/// a tmpfs on Linux and a disk image on macOS).
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn full_disk_download_fails_cleanly_and_leaves_nothing_behind() {
+    // Never a silent pass: the runner reports this test BLOCKED unless it is opted in.
+    let small = std::path::PathBuf::from(
+        std::env::var_os("TYRMINAL_SMALL_FS").expect("set TYRMINAL_SMALL_FS to a folder on a tiny filesystem"),
+    );
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let local = TempDir::new().unwrap();
+    let name = format!("tyr-full-{}.bin", std::process::id());
+    std::fs::write(local.path().join(&name), pattern(8 * 1024 * 1024, 3)).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, local.path().join(&name), &home, &name, ConflictChoice::Ask, sink).await.unwrap();
+    transfer_end(&mut rx).await;
+
+    // Something already there must survive the failure untouched.
+    let target = TempDir::new_in(&small).unwrap();
+    std::fs::write(target.path().join("keep.txt"), b"keep\n").unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &home, &name, target.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    match transfer_end(&mut rx).await {
+        TransferEvent::Failed { error } => assert_eq!(error.code, ErrorCode::StorageFull, "{error:?}"),
+        other => panic!("a download larger than the disk must fail, got {other:?}"),
+    }
+    let mut left: Vec<_> = std::fs::read_dir(target.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, ["keep.txt"], "no partial or temporary file is left");
+    assert_eq!(std::fs::read(target.path().join("keep.txt")).unwrap(), b"keep\n");
+    s.remove_file(WINDOW, &id, &home, &name).await.unwrap();
+}

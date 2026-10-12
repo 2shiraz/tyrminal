@@ -136,7 +136,20 @@ jobs:
           fi
       - name: Security suite
         run: pnpm run test:security
-      - name: Large transfer (2 GiB each way over SFTP)
+      # A tiny filesystem for the full-disk download test (disposable runner).
+      - name: Tiny filesystem (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /mnt/tyr-small
+          sudo mount -t tmpfs -o size=2m,mode=1777 tmpfs /mnt/tyr-small
+          echo "TYRMINAL_SMALL_FS=/mnt/tyr-small" >> "$GITHUB_ENV"
+      - name: Tiny filesystem (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil create -size 4m -fs HFS+ -volname TyrSmall "$RUNNER_TEMP/tyr-small.dmg"
+          hdiutil attach "$RUNNER_TEMP/tyr-small.dmg" -mountpoint "$RUNNER_TEMP/tyr-small"
+          echo "TYRMINAL_SMALL_FS=$RUNNER_TEMP/tyr-small" >> "$GITHUB_ENV"
+      - name: Large transfer (2 GiB each way over SFTP) and full local disk
         # Windows runs the lab inside WSL 1, where 4 GiB of file I/O takes too long for every run.
         if: runner.os != 'Windows'
         env:
