@@ -511,6 +511,7 @@ async fn jump_to(f: &Fixture, host: &str, via: &str) {
         jump_host_id: Some(via.into()),
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     f.core.vault.set_host_connection(host, connection).await.unwrap();
 }
@@ -638,6 +639,7 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         jump_host_id: Some(b.clone()),
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
     let itself = tyrminal_core::contracts::HostConnectionInput {
@@ -645,6 +647,7 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         jump_host_id: Some(a.clone()),
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
     let missing = tyrminal_core::contracts::HostConnectionInput {
@@ -652,6 +655,7 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
         jump_host_id: Some("00000000000000000000000000000000".into()),
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
 
@@ -753,6 +757,7 @@ fn proxy_input(port: u16, password: Option<&str>) -> tyrminal_core::contracts::H
         }),
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     }
 }
 
@@ -877,6 +882,7 @@ async fn a_host_goes_through_its_groups_jump_host_until_it_sets_its_own_route() 
         proxy: None,
         inherit: false,
         key_exchange: Default::default(),
+        no_port_suggestions: false,
     };
     f.core.vault.set_host_connection(&inner, direct).await.unwrap();
     let (session, mut events) = open_until_prompt(&f, &inner).await;
@@ -956,6 +962,7 @@ fn key_exchange(mode: tyrminal_core::contracts::KeyExchangeMode) -> tyrminal_cor
         proxy: None,
         key_exchange: mode,
         inherit: false,
+        no_port_suggestions: false,
     }
 }
 
@@ -1141,4 +1148,140 @@ async fn an_ssh_recording_gets_nothing_more_once_the_session_closes_or_the_vault
         assert_eq!(playback.log.state, tyrminal_core::contracts::SessionLogState::Complete, "lock: {lock}");
         assert_eq!(state(), ended);
     }
+}
+
+// ---------- quick port forwards from detected listening ports (P-24) ----------
+
+/// The ports suggested in `events` until `marker` has been printed (the marker comes after the
+/// output under test, so everything before it has been seen).
+async fn suggestions_until(f: &Fixture, session: &mut Session, marker_cmd: &str) -> Vec<u16> {
+    f.core.sessions.write(WINDOW, &session.id, format!("{marker_cmd}\r").into_bytes()).await.unwrap();
+    let mut ports = Vec::new();
+    loop {
+        // The marker is printed as a suggestion of its own, on a port nobody uses.
+        let event = tokio::time::timeout(WAIT, session.events.recv()).await.expect("marker in time").unwrap();
+        if let SessionEvent::PortSuggestion { port } = event {
+            ports.push(port);
+        }
+        if ports.last() == Some(&65_001) {
+            ports.pop();
+            return ports;
+        }
+    }
+}
+
+const MARKER: &str = "echo listening on localhost:$((65000+1))";
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn output_naming_another_host_or_an_invalid_port_never_yields_a_forward() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let hostile = [
+        "listening on http://10.0.0.5:4100",
+        "listening on http://evil.localhost:4101",
+        "listening on http://localhost.evil.com:4102",
+        "listening on 127.0.0.10:4103",
+        "listening on localhost:0",
+        "listening on localhost:65536",
+        "listening on localhost:099",
+    ];
+    let mut cmd = String::new();
+    for line in hostile {
+        cmd.push_str(&format!("printf '%s\\n' '{line}'; "));
+    }
+    // A link's hidden target is not shown text either.
+    cmd.push_str("printf '\\033]8;;http://localhost:4104\\007docs\\033]8;;\\007\\n'; ");
+    cmd.push_str(MARKER);
+    assert_eq!(suggestions_until(&f, &mut session, &cmd).await, Vec::<u16>::new());
+    for port in [4100, 4101, 4102, 4103, 4104, 22, 0] {
+        let refused = f.core.sessions.quick_forward(WINDOW, &session.id, port).await.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput, "port {port}");
+    }
+    assert!(f.active(WINDOW).is_empty(), "nothing was forwarded");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_suggested_port_is_forwarded_only_when_accepted_and_reaches_the_service_on_the_server() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    // The lab server's loopback is this machine's, so this listener is "on the server".
+    let service = echo_server().await;
+    let mut session = f.connect(WINDOW, &host).await;
+    let printed = format!("printf 'Server listening on http://localhost:%s/\\n' {service}; {MARKER}");
+    assert_eq!(suggestions_until(&f, &mut session, &printed).await, vec![service]);
+    assert!(f.active(WINDOW).is_empty(), "a suggestion alone forwards nothing");
+
+    // Another window cannot accept it.
+    let denied = f.core.sessions.quick_forward(OTHER_WINDOW, &session.id, service).await.unwrap_err();
+    assert_eq!(denied.code, ErrorCode::AccessDenied);
+
+    let run = f.core.sessions.quick_forward(WINDOW, &session.id, service).await.unwrap();
+    assert_eq!((run.bind_host.as_str(), run.dest_host.as_str(), run.dest_port), ("127.0.0.1", "127.0.0.1", service));
+    // The service holds that port here, so the listener took a free one.
+    assert_ne!(run.bound_port, service);
+    assert!(echoes(loopback(run.bound_port), b"through the quick forward").await);
+    assert_eq!(
+        f.core.sessions.quick_forward_url(WINDOW, &run.run_id).unwrap(),
+        format!("http://127.0.0.1:{}/", run.bound_port)
+    );
+    assert_eq!(f.core.sessions.quick_forward_url(OTHER_WINDOW, &run.run_id).unwrap_err().code, ErrorCode::AccessDenied);
+    let again = f.core.sessions.quick_forward(WINDOW, &session.id, service).await.unwrap_err();
+    assert_eq!(again.code, ErrorCode::Conflict, "one forward per port and session");
+
+    // It ends with the session.
+    f.core.sessions.close(WINDOW, &session.id).unwrap();
+    assert_eq!(session.closed().await, None);
+    assert!(!echoes(loopback(run.bound_port), b"after close").await);
+    assert!(f.core.sessions.quick_forward_url(WINDOW, &run.run_id).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_free_port_is_reused_locally_and_the_forward_ends_when_the_vault_locks() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    // A port free on this machine: nothing listens on it, so the forward binds the same number.
+    let free = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    let mut session = f.connect(WINDOW, &host).await;
+    let printed = format!("echo listening on 127.0.0.1:{free}; {MARKER}");
+    assert_eq!(suggestions_until(&f, &mut session, &printed).await, vec![free]);
+    let run = f.core.sessions.quick_forward(WINDOW, &session.id, free).await.unwrap();
+    assert_eq!(run.bound_port, free, "same port when it is free");
+    assert!(TcpStream::connect(loopback(free)).await.is_ok(), "the listener is up");
+
+    f.core.vault.lock().await;
+    assert_eq!(session.closed().await, Some(ErrorCode::VaultLocked));
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while TcpStream::connect(loopback(free)).await.is_ok() {
+        assert!(tokio::time::Instant::now() < deadline, "the listener outlived the lock");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn suggestions_can_be_turned_off_for_a_host() {
+    let f = fixture().await;
+    let host = f.host(&f.lab.str("/user")).await;
+    f.core.vault.set_port_suggestions(&host, false).await.unwrap();
+    assert!(f.core.vault.host_connection(&host).await.unwrap().no_port_suggestions);
+    let mut session = f.connect(WINDOW, &host).await;
+    f.core
+        .sessions
+        .write(WINDOW, &session.id, b"echo listening on localhost:4200; echo done-$((1+1))\r".to_vec())
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    while let Ok(event) = session.events.try_recv() {
+        assert!(!matches!(event, SessionEvent::PortSuggestion { .. }), "{event:?}");
+    }
+    assert_eq!(
+        f.core.sessions.quick_forward(WINDOW, &session.id, 4200).await.unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+    f.core.vault.set_port_suggestions(&host, true).await.unwrap();
+    assert!(!f.core.vault.host_connection(&host).await.unwrap().no_port_suggestions);
 }

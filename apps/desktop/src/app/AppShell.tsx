@@ -16,6 +16,7 @@ import { useIsProduction } from "../features/hosts/production";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, type Section as SettingsSection, SettingsView } from "../features/settings/SettingsViews";
+import { MultiRunDialog } from "../features/snippets/MultiRunDialog";
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
@@ -178,6 +179,8 @@ function Shell() {
   const broadcasting = useMemo<ReadonlySet<number>>(() => new Set(members.keys()), [members]);
   const stopBroadcast = useCallback((tabId: number) => setMembers((current) => withoutTab(current, tabId)), []);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  /** SNP-07: a snippet to run on every open SSH session (reviewed first). */
+  const [runAllOpen, setRunAllOpen] = useState(false);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
@@ -979,6 +982,7 @@ function Shell() {
                 }
               : undefined
           }
+          onRunAllOpen={snippetRunHost.sessions().length > 0 ? () => setRunAllOpen(true) : undefined}
           broadcast={tab ? broadcasting.has(tab.id) : false}
           onToggleBroadcast={
             terminalVisible && tab && (broadcasting.has(tab.id) || tabCanBroadcast)
@@ -1283,6 +1287,8 @@ function Shell() {
           }}
         />
       )}
+
+      {runAllOpen && <MultiRunDialog snippet={null} allOpen onClose={() => setRunAllOpen(false)} />}
 
       {runRequest && (
         <SnippetRunDialog

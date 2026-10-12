@@ -29,4 +29,8 @@ inherited: InheritedRoute | null,
 /**
  * Post-quantum key exchange for this host (each hop of a chain uses its own setting).
  */
-keyExchange: KeyExchangeMode, };
+keyExchange: KeyExchangeMode, 
+/**
+ * Ports this host's output names are not offered for a quick forward (P-24).
+ */
+noPortSuggestions: boolean, };

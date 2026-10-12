@@ -87,7 +87,8 @@ describe("startup snippets and environment in the real application", { concurren
     );
     await s.waitFor('dialog ol[aria-label="Startup snippets"] li');
     await app.screenshot("startup01-environment-dialog");
-    await s.clickButton("Save", { within: "dialog" });
+    // Saved as you go; Done closes once every change is written.
+    await s.clickButton("Done", { within: "dialog" });
     await s.waitGone("dialog");
 
     await t.connect("Lab");

@@ -218,6 +218,16 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_key_install", { hostId, events });
   },
+  /**
+   * A run-only connection for running a snippet on a host without an open session (exec
+   * channels, no shell). Trust and sign-in prompts arrive as events; with `interactive` false a
+   * host that needs sign-in input closes with NEEDS_SIGN_IN instead of asking.
+   */
+  openExec(hostId: string, interactive: boolean, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_exec", { hostId, interactive, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -392,6 +402,15 @@ export const groupDefaults = {
   get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
   set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
     call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
+/** Quick forwards of ports a session's output names (P-24); only after the user accepts. */
+export const quickForward = {
+  start: (sessionId: string, port: number) => call<ActiveTunnelDto>("quick_forward_start", { sessionId, port }),
+  /** Opens http://127.0.0.1:<local port>/ (built natively from the forward); resolves to it. */
+  open: (runId: string) => call<string>("quick_forward_open", { runId }),
+  stop: (runId: string) => call<void>("tunnel_stop", { runId }),
+  setForHost: (hostId: string, enabled: boolean) => call<void>("host_port_suggestions_set", { hostId, enabled }),
 };
 
 export const tunnels = {

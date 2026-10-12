@@ -139,6 +139,8 @@ pub struct Sessions {
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
     pub(crate) recordings: crate::recording::Recordings,
+    /// Ports suggested for a quick forward, per session (P-24).
+    pub(crate) suggested: Arc<crate::port_suggest::Suggested>,
     // agent D: inventory and snippets
     /// Snippet runs on exec channels, with their cancel switches.
     snippet_runs: crate::snippet_runs::Runs,
@@ -180,6 +182,7 @@ impl Sessions {
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
             recordings: crate::recording::Recordings::new(logs_dir),
+            suggested: Arc::default(),
             // agent D: inventory and snippets
             snippet_runs: crate::snippet_runs::Runs::default(),
         })
@@ -287,6 +290,8 @@ impl Sessions {
         let sink = (self.recordings)
             .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
             .await;
+        // Quick port forwards (P-24): ports the output names are offered, never forwarded on their own.
+        let sink = if plan.port_suggestions { crate::port_suggest::wrap(sink, &id, &self.suggested) } else { sink };
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -348,6 +353,39 @@ impl Sessions {
         tokio::spawn(async move {
             let ctx = TaskContext::new(&this, &session_id, &entry, &sink);
             let body = run_files(&ctx, plan);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// Opens a run-only connection to a saved SSH host, for running snippets on a host without an
+    /// open session (SNP-05): host-key trust and sign-in exactly as for a terminal (the same
+    /// prompts, the same refusal of a changed key), then nothing but the exec channels that
+    /// [`Sessions::exec_snippet`] opens. No shell, PTY or SFTP. With `interactive` false, a host
+    /// that would need a sign-in answer fails with `NEEDS_SIGN_IN` instead of asking; the trust
+    /// prompt for an unknown key is always asked. The session belongs to the calling window and
+    /// ends with `close`, a vault lock, or a dropped link.
+    pub async fn open_exec(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        interactive: bool,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let endpoint = self.vault.host_endpoint(host_id).await?;
+        if !matches!(endpoint.protocol, HostProtocol::Ssh) {
+            return Err(invalid("Snippets run on hosts without an open session over SSH only."));
+        }
+        let plan = self.vault.connection_plan(host_id).await?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
+        // No terminal: input, resize and terminal snippets are refused before reaching a channel.
+        drop(input_rx);
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let ctx = TaskContext { interactive, ..TaskContext::new(&this, &session_id, &entry, &sink) };
+            let body = run_exec_only(&ctx, plan);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -547,6 +585,7 @@ impl Sessions {
             crate::records::LogEnd::Locked
         };
         self.recordings.session_ended(&self.vault, session_id, reason).await;
+        self.suggested.session_ended(session_id);
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
@@ -1384,6 +1423,10 @@ struct TaskContext {
     session_id: String,
     /// The jump-chain hop being connected, for prompts (`None` for a direct connection).
     hop: Mutex<Option<tyrminal_contracts::ChainPosition>>,
+    /// Sign-in prompts are shown to the user; when false, a needed answer fails the connection.
+    interactive: bool,
+    /// A sign-in answer was needed but not asked for (`interactive` is false).
+    needed_input: std::sync::atomic::AtomicBool,
 }
 
 impl TaskContext {
@@ -1398,6 +1441,8 @@ impl TaskContext {
             sessions: Arc::clone(sessions),
             session_id: session_id.to_owned(),
             hop: Mutex::new(None),
+            interactive: true,
+            needed_input: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -1421,6 +1466,11 @@ impl TaskContext {
         message: Option<String>,
         echo: bool,
     ) -> Option<Zeroizing<String>> {
+        if !self.interactive {
+            // Nothing is asked and nothing is sent: the connection fails as "needs sign-in".
+            self.needed_input.store(true, std::sync::atomic::Ordering::SeqCst);
+            return None;
+        }
         let prompt_id = random_token().ok()?;
         let (reply, answer) = oneshot::channel();
         self.entry.prompts().auth = Some((prompt_id.clone(), reply));
@@ -1907,6 +1957,36 @@ async fn until_ended(entry: &Entry) -> IpcError {
         Ok(why) => why.clone().unwrap_or_else(internal),
         Err(_) => internal(),
     }
+}
+
+/// A run-only session: the same verified, signed-in connection as a terminal session, kept open
+/// for exec channels only. It lasts until the caller closes it, the vault locks, or the link drops.
+async fn run_exec_only(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
+    let Linked { conn, hops } = match connect_chain(ctx, plan).await {
+        Ok(linked) => linked,
+        Err(_) if ctx.needed_input.load(std::sync::atomic::Ordering::SeqCst) => {
+            return Outcome::failed(err(
+                ErrorCode::NeedsSignIn,
+                "This host needs a sign-in answer (no saved password or key), so it was skipped.",
+            ));
+        }
+        Err(error) => return Outcome::failed(error),
+    };
+    // `Negotiated` was reported per hop during the handshake, as for a terminal session.
+    ctx.entry.log.note("run-only connection opened (exec channels, no shell)");
+    let conn = Arc::new(conn);
+    *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
+    // `Connected` belongs to the session, not to a hop.
+    *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    ctx.state(SessionState::Connected);
+    while !conn.is_closed() {
+        tokio::time::sleep(FILES_LINK_CHECK).await;
+    }
+    ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
+    for hop in hops.into_iter().rev() {
+        hop.disconnect().await;
+    }
+    Outcome::failed(err(ErrorCode::Disconnected, "The connection to the server was lost."))
 }
 
 /// How often a files-only connection checks that its link is still up (it has no shell whose

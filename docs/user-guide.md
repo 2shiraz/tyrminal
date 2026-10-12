@@ -387,6 +387,22 @@ deleted later is skipped. So is a snippet with a line longer than 1000 bytes, wh
 may not be ready to read yet and a terminal would cut or garble (macOS keeps about 1 KB of an
 unfinished line); the list marks such snippets, and the connection log names the line.
 
+**Run on several hosts.** From a snippet's menu, **Run on hosts…** runs it without a terminal on
+the hosts you choose and shows each host's own result. Choose hosts one by one, a whole group
+(with its subgroups) at once, **Select all**, or a saved target; a target saved with a whole
+group keeps the group, so hosts added to it later are included. **Run on all open sessions**
+(snippet menu or command palette) goes straight to the review with every open SSH session of
+the window. The review shows the exact text and the exact hosts before anything runs.
+
+Hosts with an open session run on it. For the others Tyrminal connects just for the run and
+disconnects after: an unknown host key stops that host until you answer its trust question
+(one host at a time), a changed key fails it, and a host that needs a password you have not
+saved asks for it in turn, or is skipped if you tick **Skip hosts that need sign-in input**.
+Four hosts run at once unless you choose another number (1 to 8). **Cancel runs** stops
+everything and drops those connections; locking the vault does the same. Output (up to 512 KiB
+each of output and errors per host) stays in the window until you copy or save it; the
+connection log records only the host and how it ended.
+
 **Broadcast** sends what you type to several sessions at once. Before it starts, Tyrminal lists
 every pane of the tab; clear the box next to a pane to leave it out (it keeps its own input and
 receives nothing). A pane opened later is never added; start broadcast again to include it. The

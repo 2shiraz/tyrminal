@@ -40,6 +40,7 @@ const COMMANDS: &[&str] = &[
     "session_open_ssh",
     "session_open_local",
     "session_open_files",
+    "session_open_exec",
     "session_write",
     "session_resize",
     "session_ack",
@@ -119,6 +120,9 @@ const COMMANDS: &[&str] = &[
     "session_log_delete",
     "session_log_delete_all",
     "session_log_open",
+    "quick_forward_start",
+    "quick_forward_open",
+    "host_port_suggestions_set",
     // agent C: workspaces
     "layout_list",
     "layout_save",

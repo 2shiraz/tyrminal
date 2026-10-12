@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-quick-forward-start"
+description = "Enables the quick_forward_start command without any pre-configured scope."
+commands.allow = ["quick_forward_start"]
+
+[[permission]]
+identifier = "deny-quick-forward-start"
+description = "Denies the quick_forward_start command without any pre-configured scope."
+commands.deny = ["quick_forward_start"]

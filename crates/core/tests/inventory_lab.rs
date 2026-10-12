@@ -326,15 +326,15 @@ async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation
     let no_tty = core.sessions.exec_snippet(WINDOW, &a, &tty.id, "run-tty").await.unwrap();
     assert_ne!(no_tty.exit_status, Some(0));
 
-    // Output beyond 64 KiB per stream is cut and flagged; control characters never reach the UI.
+    // Output beyond 512 KiB per stream is cut and flagged; control characters never reach the UI.
     let loud = v
-        .save_snippet(snippet("loud", "printf '\\033[31mred\\n'; head -c 200000 /dev/zero | tr '\\0' x"))
+        .save_snippet(snippet("loud", "printf '\\033[31mred\\n'; head -c 600000 /dev/zero | tr '\\0' x"))
         .await
         .unwrap();
     let cut = core.sessions.exec_snippet(WINDOW, &a, &loud.id, "run-loud").await.unwrap();
     assert!(cut.truncated);
     assert!(cut.stdout.starts_with("[31mred\n"), "{:?}", &cut.stdout[..20]);
-    assert!(cut.stdout.len() <= 64 * 1024);
+    assert!(cut.stdout.len() <= 512 * 1024);
 
     // After a lock nothing runs.
     v.lock().await;
@@ -863,6 +863,7 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
             jump_host_id: Some(bastion.id.clone()),
             inherit: false,
             key_exchange: Default::default(),
+            no_port_suggestions: false,
         },
     )
     .await

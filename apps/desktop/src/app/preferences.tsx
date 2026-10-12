@@ -13,6 +13,7 @@ const DEFAULTS: Preferences = {
   // compromised-password check (SEC-11): off until the user turns it on; the core supplies the address.
   passwordCheck: { enabled: false, endpoint: "" },
   productionTag: "prod",
+  noPortSuggestions: false,
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

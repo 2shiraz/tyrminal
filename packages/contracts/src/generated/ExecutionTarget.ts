@@ -9,6 +9,11 @@ export type ExecutionTarget = { id: string, name: string,
  */
 hostIds: Array<string>, 
 /**
- * How many saved hosts no longer exist.
+ * Groups that still exist, in the saved order. A group stands for its hosts and its
+ * subgroups' hosts as they are when a run starts. Deleted groups drop out.
+ */
+groupIds: Array<string>, 
+/**
+ * How many saved hosts and groups no longer exist.
  */
 missing: number, };

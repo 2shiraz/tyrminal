@@ -547,6 +547,9 @@ pub struct Preferences {
     /// Hosts carrying this tag are production hosts (P-26), like hosts with the production flag.
     /// Empty: no tag marks production hosts.
     pub production_tag: String,
+    /// Do not suggest quick forwards for ports that programs on a server say they listen on
+    /// (P-24). Suggestions are on unless this is set.
+    pub no_port_suggestions: bool,
     /// How Hosts is shown (layout, sort, group filter), kept across views and restarts. Absent
     /// in files written before it existed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -612,6 +615,7 @@ impl Default for Preferences {
             password_check: crate::PasswordCheckPreferences::default(),
             production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
             hosts_view: None,
+            no_port_suggestions: false,
         }
     }
 }
@@ -704,6 +708,9 @@ pub enum AuthPromptKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum SessionEvent {
+    /// Something on the server says it listens on this port of its loopback (P-24). Only a
+    /// suggestion: the window offers a quick forward and nothing happens unless the user accepts.
+    PortSuggestion { port: u16 },
     State {
         state: SessionState,
         /// During a jump-host chain: which hop this step belongs to (`None` for a direct
