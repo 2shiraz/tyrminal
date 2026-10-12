@@ -320,6 +320,10 @@ pub(crate) fn sanitize_workspace(mut prefs: WorkspacePreferences) -> Result<Work
         }
         keyword.text = validate::label(text)?;
     }
+    // terminal input: mouse mappings
+    if prefs.right_click_paste && prefs.right_click_selects_word {
+        return Err(invalid("Right click can either select a word or paste, not both."));
+    }
     if prefs.bindings.len() > MAX_BINDINGS {
         return Err(invalid("Too many shortcuts are set."));
     }
@@ -536,6 +540,18 @@ mod tests {
             assert!(sanitize_workspace(with(vec![word(bad)])).is_err(), "{bad:?}");
         }
         assert!(sanitize_workspace(with((0..33).map(|i| word(&format!("w{i}"))).collect())).is_err());
+    }
+
+    #[test]
+    fn right_click_does_one_thing() {
+        let both =
+            WorkspacePreferences { right_click_paste: true, right_click_selects_word: true, ..Default::default() };
+        assert!(sanitize_workspace(both).is_err());
+        let paste = WorkspacePreferences { right_click_paste: true, middle_click_paste: true, ..Default::default() };
+        assert!(sanitize_workspace(paste).is_ok());
+        // Files written before these fields existed load with both off.
+        let old: WorkspacePreferences = serde_json::from_str(r#"{"rightClickSelectsWord":true}"#).unwrap();
+        assert!(!old.right_click_paste && !old.middle_click_paste);
     }
 
     #[test]

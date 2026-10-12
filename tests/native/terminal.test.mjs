@@ -10,9 +10,11 @@
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/terminal.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { KEYS, ui } from "./flows.mjs";
+import { KEYS, PASSPHRASE, ui } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -705,6 +707,128 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
       assert.deepEqual(tones, ["danger", "info"]);
       await t.type("echo STILL-HERE\n");
       await t.waitForText(/^STILL-HERE$/m, "shell responsive");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("keyboard and mouse customization through native preferences (TRM-08)", { concurrency: false }, () => {
+  test("a rebound shortcut and the mouse mappings are stored by the core and apply after a restart", async () => {
+    const mod = process.platform === "darwin" ? KEYS.meta : KEYS.ctrl;
+    let app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      let s = app.session;
+      let t = ui(s);
+      await t.createVault();
+      await t.nav("Settings");
+      // Find in terminal → Ctrl+Shift+G (Cmd+Shift+G on macOS), recorded from real key events.
+      await s.click(await s.waitFor('.shortcut-list li[data-action="find"] button[aria-label="Change shortcut for Find in terminal"]'));
+      await s.until(() => s.execute(`return document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent.includes("Press") || null`), {
+        describe: "recording",
+      });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.until(() => s.execute(`return /G/.test(document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "") || null`), {
+        describe: "new shortcut shown",
+      });
+      // Right click pastes; middle click pastes.
+      await s.click(await s.waitFor('[role="radiogroup"][aria-label="Right click"] label:nth-child(2)'));
+      const middle = await s.execute(`return [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.htmlFor ?? null`);
+      await s.click(await s.waitFor(`[id="${middle}"]`));
+
+      // The core wrote them to preferences.json (validated natively on the way).
+      const file = join(app.dataDir, "preferences.json");
+      const stored = await s.until(
+        () => {
+          try {
+            const w = JSON.parse(readFileSync(file, "utf8")).workspace;
+            return w?.rightClickPaste && w.middleClickPaste && w.bindings?.some((b) => b.action === "find" && b.key === "g" && b.shift) ? w : null;
+          } catch {
+            return null;
+          }
+        },
+        { describe: "preferences.json updated" },
+      );
+      assert.equal(stored.rightClickSelectsWord, false);
+
+      const dataDir = app.dataDir;
+      await app.quit({ keepData: true });
+      app = await App.launch({ dataDir });
+      s = app.session;
+      t = ui(s);
+      await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen", timeout: 20_000 });
+      await s.fill("Passphrase", PASSPHRASE);
+      await s.clickButton("Unlock");
+      await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+
+      await t.nav("Settings");
+      const shown = await s.until(
+        () =>
+          s.execute(`const r = document.querySelector('[role="radiogroup"][aria-label="Right click"] label:nth-child(2) input');
+            const m = [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.querySelector("input");
+            const k = document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "";
+            return r && m ? { right: r.checked, middle: m.checked, keys: k } : null;`),
+        { describe: "settings after restart" },
+      );
+      assert.equal(shown.right, true);
+      assert.equal(shown.middle, true);
+      assert.match(shown.keys, /G/);
+
+      // The rebound shortcut works in a terminal after the restart.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.waitFor(".pane:not([hidden]) .find-bar");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
+  test("a host connected once is offered on Home and in the new-tab menu, and both reconnect", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      const trustOnce = async () => {
+        await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+        await s.clickButton("Trust once", { within: "dialog" });
+        await s.waitGone("dialog");
+        await s.until(async () => /Connected/.test(await t.statusText()), { describe: "connected" });
+      };
+      const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+
+      // Home lists it under Recent once the core has recorded the connection.
+      await t.nav("Home");
+      const tile = await s.until(() => s.find('section[aria-labelledby="home-recent"] button[aria-label="Connect to Lab"]'), {
+        describe: "Lab under Recent on Home",
+        timeout: 20_000,
+      });
+      await s.click(tile);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
+
+      // The new-tab menu offers it too.
+      await s.click(await s.waitFor(".tabstrip button.tab-new"));
+      const item = await s.until(
+        async () => {
+          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
+            if ((await s.text(candidate)).trim() === "Lab") return candidate;
+          }
+          return null;
+        },
+        { describe: "Lab in the new-tab menu" },
+      );
+      await s.click(item);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the menu" });
+      await t.type("echo REOPENED-$((2+2))\n");
+      await t.waitForText("REOPENED-4");
     } finally {
       await app.quit();
     }

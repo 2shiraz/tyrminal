@@ -72,4 +72,13 @@ export const msgI = {
     showHistory: "Show connection history",
     showAppearance: "Show terminal appearance",
   },
+  mouse: {
+    rightClick: "Right click",
+    rightClickHint: "What a right click does in a terminal. Applications that use the mouse (vim, htop, mc) receive it instead; hold Shift to use this anyway.",
+    selectWord: "Select word",
+    paste: "Paste",
+    nothing: "Nothing",
+    middleClick: "Middle click pastes",
+    middleClickHint: "Pastes the clipboard. Like every paste, several lines are shown to you before anything is sent.",
+  },
 };

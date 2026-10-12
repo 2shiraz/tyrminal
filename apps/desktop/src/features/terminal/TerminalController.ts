@@ -23,6 +23,7 @@ import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 import { detach, sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
+import { MouseMap } from "../mouse/mouseMap";
 import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
@@ -162,6 +163,7 @@ export class TerminalController {
   /** Whether user input can be told apart from terminal replies (see the data handler). */
   broadcastable = false;
   private readonly highlighter: OutputHighlighter;
+  private readonly mouse: MouseMap;
   private encoding = new SessionEncoding("utf-8");
 
   private publishCounters(): void {
@@ -201,6 +203,8 @@ export class TerminalController {
     if (composition) this.cleanups.push(composition);
     container.dataset.composition = composition ? "ordered" : "xterm";
     this.highlighter = new OutputHighlighter(this.term, this.toneColors());
+    this.mouse = new MouseMap(container, this.term, () => void this.pasteFromClipboard());
+    this.cleanups.push(() => this.mouse.dispose());
     this.applyRenderer();
     this.applyLigatures();
     this.fitNow();
@@ -250,6 +254,8 @@ export class TerminalController {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      // A middle click mapped to paste already pasted the clipboard (not the X11 selection).
+      if (this.mouse.swallowPaste()) return;
       const text = event.clipboardData?.getData("text/plain") ?? "";
       this.pasteText(text);
     };
@@ -367,7 +373,8 @@ export class TerminalController {
   /** Workspace preferences: output highlighting, Option as Meta, right click. Display only. */
   setWorkspace(ws: WorkspacePreferences): void {
     this.term.options.macOptionIsMeta = isMac && ws.optionAsMeta;
-    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord;
+    this.term.options.rightClickSelectsWord = ws.rightClickSelectsWord && !ws.rightClickPaste;
+    this.mouse.update({ rightClickPaste: ws.rightClickPaste ?? false, middleClickPaste: ws.middleClickPaste ?? false });
     this.highlighter.update(ws.highlight, this.toneColors());
   }
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { HighlightRules } from "../highlight/HighlightRules";
+import { MouseSettings } from "../mouse/MouseSettings";
 import { Keys, Switch } from "../../components/ui/controls";
 import { IconPencil, IconRefreshCw, IconX } from "../../components/ui/icons";
 import { msgC } from "../../lib/messages-c";
@@ -24,6 +25,8 @@ export const WORKSPACE_DEFAULTS: WorkspacePreferences = {
   bindings: [],
   optionAsMeta: isMac,
   rightClickSelectsWord: isMac,
+  rightClickPaste: false,
+  middleClickPaste: false,
 };
 
 export function workspacePrefs(value: WorkspacePreferences | undefined): WorkspacePreferences {
@@ -56,12 +59,7 @@ export function WorkspaceSettings() {
             onChange={(optionAsMeta) => setWs((w) => ({ ...w, optionAsMeta }))}
           />
         )}
-        <Switch
-          label={msgC.keys.rightClickWord}
-          hint={msgC.keys.rightClickWordHint}
-          checked={ws.rightClickSelectsWord}
-          onChange={(rightClickSelectsWord) => setWs((w) => ({ ...w, rightClickSelectsWord }))}
-        />
+        <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
       </section>
 
       <section id="settings-highlight" className="settings-section" aria-labelledby="settings-highlight-title">

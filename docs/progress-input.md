@@ -15,6 +15,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 4 | Ordered IME commits (TRM-11 fix) | Done: UI stress tests; native check on Linux |
 | 5 | Palette completeness (UX-03), Connection details view (CON-15) | Done: UI tests; native waits for `session_diagnostics` |
 | 6 | Connection side panel: snippets, history, appearance (TRM-14) | Done: UI tests; visual baselines updated in the pinned container |
+| 7 | Mouse mappings and native persistence (TRM-08), recent connections native test (UX-04) | Done: core, UI and native tests on Linux |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -87,6 +88,21 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - `SnippetsPanel.tsx` is no longer rendered (its content is the Snippets section).
 - Visual baselines `*-09-terminal-snippets.png` re-recorded with `node scripts/ui-container.mjs`.
 
+## Slice 7: mouse mappings, persistence, recent connections (TRM-08, UX-04)
+
+- Right click: select word, paste or nothing (one choice; refused natively if both flags are
+  set). Middle click can paste. Pastes from the mouse use the terminal's paste path, so
+  several lines are reviewed first. While an application asked for mouse reports, the click is
+  reported to it unless Shift is held. A handled middle click also swallows the X11
+  primary-selection paste that would follow (`features/mouse/mouseMap.ts`).
+- `WorkspacePreferences` gained `rightClickPaste` and `middleClickPaste` (struct default, so older
+  files load with both off).
+- Native: a shortcut recorded from real key events and the mouse settings are written by the core
+  to `preferences.json`, shown again after a restart, and the rebound shortcut opens Find in a
+  real terminal. Recent connections reopen from Home and from the new-tab menu (lab host).
+- Observed once in 3 full native runs: "16 panes of real local shells" (PR #7's test) timed out;
+  it passed in isolation and in the next full run. Not seen in the UI suite.
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -108,3 +124,6 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   and Appearance. History lists the hosts you connected to and when; Tyrminal never records what
   you type. Appearance changes the scheme, font and cursor of every terminal, and zooms only the
   pane you are in."
+- Mouse: "Settings → Shortcuts and input → Right click chooses between selecting a word, pasting
+  and nothing; Middle click pastes can be turned on. A paste from the mouse is reviewed like any
+  paste. Programs that use the mouse (vim, htop, mc) get the click; hold Shift to paste anyway."

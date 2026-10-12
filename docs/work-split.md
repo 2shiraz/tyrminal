@@ -280,3 +280,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 - `app/AppShell.tsx`: the snippets side panel renders `features/sidepanel/ConnectionPanel.tsx` (sections:
   snippets, history, appearance); `SnippetsPanel.tsx` is no longer used. Visual baselines
   `*-09-terminal-snippets.png` re-recorded in the pinned container.
+- `crates/contracts/src/layouts.rs` `WorkspacePreferences`: `right_click_paste`, `middle_click_paste`
+  (marked); `crates/core/src/layouts.rs` refuses both right-click flags; `WorkspaceSettings.tsx`
+  renders `features/mouse/MouseSettings.tsx` instead of its right-click switch;
+  `TerminalController.ts` creates `features/mouse/mouseMap.ts` and lets it swallow the X11 paste
+  that follows a handled middle click.
