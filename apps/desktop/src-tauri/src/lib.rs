@@ -252,6 +252,8 @@ pub fn run() {
             commands::inventory::startup_get,
             commands::inventory::startup_set,
             commands::inventory::startup_effective,
+            commands::inventory::group_defaults_get,
+            commands::inventory::group_defaults_set,
         ])
         .build(tauri::generate_context!());
 

@@ -338,6 +338,13 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** Group defaults for route and appearance (HST-05). */
+export const groupDefaults = {
+  get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
+  set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
+    call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
 export const tunnels = {
   list: () => call<TunnelSummaryDto[]>("tunnel_list"),
   save: (tunnel: TunnelInputDto) => call<TunnelSummaryDto>("tunnel_save", { tunnel }),

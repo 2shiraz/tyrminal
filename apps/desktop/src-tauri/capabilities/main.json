@@ -129,6 +129,8 @@
     "allow-env-effective",
     "allow-startup-get",
     "allow-startup-set",
-    "allow-startup-effective"
+    "allow-startup-effective",
+    "allow-group-defaults-get",
+    "allow-group-defaults-set"
   ]
 }

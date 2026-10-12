@@ -4,4 +4,8 @@ import type { HostOs } from "./HostOs";
 /**
  * Presentation settings of one host, kept apart from its connection settings.
  */
-export type HostAppearance = { hostId: string, os: HostOs, };
+export type HostAppearance = { hostId: string, os: HostOs, 
+/**
+ * The host sets no OS itself; this is its nearest group's default (HST-05).
+ */
+inherited: boolean, };

@@ -34,6 +34,9 @@ pub enum HostOs {
 pub struct HostAppearance {
     pub host_id: String,
     pub os: HostOs,
+    /// The host sets no OS itself; this is its nearest group's default (HST-05).
+    #[serde(default)]
+    pub inherited: bool,
 }
 
 /// Key types Tyrminal generates. RSA is 3072 bits or more; DSA is never offered.

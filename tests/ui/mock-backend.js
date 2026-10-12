@@ -400,8 +400,19 @@ export function installMockBackend(options) {
         tunnel_clear_ended: () => {
           for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
         },
-        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null }),
+        host_connection_get: (a) => {
+          const own = window.__mockOwnRoute.has(a.hostId) || jumps.has(a.hostId) || proxies.has(a.hostId);
+          return { jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null, own, inherited: window.__mockInheritedRoute(a.hostId) };
+        },
         host_connection_set: (a) => {
+          // HST-05: inheriting drops the host's own route.
+          if (a.connection.inherit) {
+            jumps.delete(a.hostId);
+            proxies.delete(a.hostId);
+            window.__mockOwnRoute.delete(a.hostId);
+            return [];
+          }
+          window.__mockOwnRoute.add(a.hostId);
           // Loops are refused as natively; the chain is returned first hop first.
           const next = a.connection.jumpHostId;
           for (let at = next, n = 0; at; at = jumps.get(at), n += 1) {
@@ -863,7 +874,31 @@ export function installMockBackend(options) {
       window.__mockOpenedLinks.push(a.url);
     },
     // agent D: inventory and snippets
-    host_appearance_list: () => Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os })),
+    host_appearance_list: () => {
+      const own = Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os, inherited: false }));
+      for (const h of state.hosts) {
+        if (state.os?.[h.id]) continue;
+        for (let g = state.groups.find((x) => x.id === h.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+          const os = groupDefaultsState.get(g.id)?.os;
+          if (os) {
+            own.push({ hostId: h.id, os, inherited: true });
+            break;
+          }
+        }
+      }
+      return own;
+    },
+    group_defaults_get: (a) => groupDefaultsView(a.groupId),
+    group_defaults_set: (a) => {
+      const d = a.defaults;
+      if (d.jumpHostId && !state.hosts.some((h) => h.id === d.jumpHostId)) throw { code: "NOT_FOUND", message: "That jump host no longer exists. Choose another." };
+      const before = groupDefaultsState.get(a.groupId)?.proxy;
+      const proxy = d.proxy
+        ? { kind: d.proxy.kind, host: d.proxy.host, port: d.proxy.port, username: d.proxy.username.trim(), passwordStored: d.proxy.username.trim() !== "" && (!!d.proxy.password || (d.proxy.password === null && !!before?.passwordStored)) }
+        : null;
+      groupDefaultsState.set(a.groupId, { jumpHostId: d.jumpHostId, proxy, os: d.os });
+      return groupDefaultsView(a.groupId);
+    },
     host_set_os: (a) => {
       state.os ??= {};
       for (const hostId of a.ids) {
@@ -1083,6 +1118,35 @@ export function installMockBackend(options) {
   window.__mockAddFile = (path) => addNode(path, "file", 10);
   /** Environment variables in the mock, per target; hosts get their group chain's, outermost first. */
   const envState = new Map();
+  // HST-05: group route and icon defaults; hosts that set their own route.
+  const groupDefaultsState = new Map();
+  window.__mockOwnRoute = new Set();
+  const groupRoute = (groupId) => {
+    const d = groupDefaultsState.get(groupId);
+    return d && (d.jumpHostId || d.proxy) ? d : null;
+  };
+  window.__mockInheritedRoute = (hostId) => {
+    const host = state.hosts.find((h) => h.id === hostId);
+    for (let g = state.groups.find((x) => x.id === host?.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const r = groupRoute(g.id);
+      if (r) return { jumpHostId: r.jumpHostId === hostId ? null : r.jumpHostId, proxy: r.proxy, origin: { kind: "group", groupId: g.id, name: g.name } };
+    }
+    return null;
+  };
+  function groupDefaultsView(groupId) {
+    const own = groupDefaultsState.get(groupId) ?? { jumpHostId: null, proxy: null, os: null };
+    let inheritedRoute = null;
+    let inheritedOs = null;
+    const group = state.groups.find((g) => g.id === groupId);
+    for (let g = state.groups.find((x) => x.id === group?.parentId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const origin = { kind: "group", groupId: g.id, name: g.name };
+      const r = groupRoute(g.id);
+      if (!inheritedRoute && r) inheritedRoute = { jumpHostId: r.jumpHostId, proxy: r.proxy, origin };
+      const os = groupDefaultsState.get(g.id)?.os;
+      if (!inheritedOs && os) inheritedOs = [os, origin];
+    }
+    return { jumpHostId: own.jumpHostId, proxy: own.proxy, os: own.os, inheritedRoute, inheritedOs };
+  }
   // Startup snippet lists by `host:<id>` / `group:<id>` (absent: inherit).
   const startupState = new Map();
   function startupOf(hostId) {

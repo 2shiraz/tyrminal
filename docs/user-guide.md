@@ -86,6 +86,14 @@ recovery key (the old one stops working at once).
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
 
+A **group** can also give its hosts defaults: a user name, port and key, and, under
+**Defaults for hosts in this group**, a route (a jump host and/or a proxy) and an icon. Hosts
+and subgroups use the nearest group's value unless they set their own, and the host editor
+names the group a value comes from. In a host's **Advanced** section, choose between the
+group's route and one for this host only (which can be "connect directly"). A group's jump
+host is never used for that jump host itself, and a change that would make hosts connect
+through each other in a loop is refused.
+
 A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
 
 - **Telnet** is for old equipment only. It is not encrypted: anything you type, including the
@@ -98,6 +106,10 @@ A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
 
 **Import** reads an OpenSSH `config` file or a CSV file. It shows a preview first and never runs
 anything from the file (`ProxyCommand`, `LocalCommand` and similar are reported, not executed).
+`ProxyJump` becomes a jump host: a hop that names another host of the file is that host, and
+any other hop (`user@host:port`) is imported as a host of its own. A chain that cannot be
+represented (a loop, more than seven jump hosts, or a host that two chains would route
+differently) is imported without a jump host, and the preview says why.
 
 ## Connecting and host keys
 

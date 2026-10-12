@@ -422,3 +422,21 @@ pub async fn startup_effective(
 ) -> Result<tyrminal_core::contracts::EffectiveStartup, IpcError> {
     state.core()?.vault.effective_startup_snippets(&host_id).await
 }
+
+/// A group's route and appearance defaults for its hosts (HST-05).
+#[tauri::command]
+pub async fn group_defaults_get(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<tyrminal_core::contracts::GroupDefaults, IpcError> {
+    state.core()?.vault.group_defaults(&group_id).await
+}
+
+#[tauri::command]
+pub async fn group_defaults_set(
+    state: State<'_, AppState>,
+    group_id: String,
+    defaults: tyrminal_core::contracts::GroupDefaultsInput,
+) -> Result<tyrminal_core::contracts::GroupDefaults, IpcError> {
+    state.core()?.vault.set_group_defaults(&group_id, defaults).await
+}

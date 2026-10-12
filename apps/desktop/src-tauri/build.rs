@@ -134,6 +134,8 @@ const COMMANDS: &[&str] = &[
     "startup_get",
     "startup_set",
     "startup_effective",
+    "group_defaults_get",
+    "group_defaults_set",
 ];
 
 fn main() {

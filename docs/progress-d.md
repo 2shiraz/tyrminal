@@ -124,3 +124,14 @@ cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib
   queues each snippet (as Run, through the session's own input queue, so the terminal encoding and
   ordering apply) once the shell is open. The connection log (CON-15) gets one line per snippet by
   name and a line naming the variables sent and refused; no value or snippet text is logged.
+
+- **Group defaults for route and icon (HST-05)** live in the group's workflow record (`jump_host`,
+  `proxy`, `os`). A host's route is its own when it sets a jump host or proxy, or is marked
+  `own` (connect directly); otherwise the nearest group that sets a jump host or a proxy gives the
+  whole route. One resolver (`effective_route`/`jump_with`) feeds the connection plan, the chain
+  view and loop checks, and a group jump host never applies to itself. `set_group_defaults` checks
+  every host's chain with the proposed route before writing. Host icons fall back to the nearest
+  group's (`HostAppearance.inherited`).
+- **ProxyJump import (IMP-02)**: previewed hosts carry `jump_via` (a label in the same import);
+  `import_hosts` resolves labels to the new ids and checks chains in the same transaction.
+
