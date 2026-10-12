@@ -32,6 +32,7 @@ import { msg } from "../../lib/messages";
 import { bytes, msgB } from "../../lib/messages-b";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { LogPlayer } from "./LogPlayer";
+import { SettingsGroup } from "../settings/SettingsGroup";
 
 const KEEP_CHOICES = [1, 3, 5, 10, 20, 50, 100];
 const LIMIT_CHOICES = [16, 64, 128, 256, 512];
@@ -193,47 +194,46 @@ export function RecordingsView() {
           </div>
         </div>
 
-        <section className="section" aria-label={msgB.recordings.record}>
-          <ErrorNotice error={settings.error} />
-          {current && (
-            <div className="stack">
-              <Switch
-                label={msgB.recordings.record}
-                hint={msgB.recordings.recordHint}
-                checked={current.enabled}
-                onChange={(enabled) => change({ enabled })}
-              />
-              <SettingRow label={msgB.recordings.keep} hint={msgB.recordings.keepHint}>
-                <select
-                  className="select"
-                  aria-label={msgB.recordings.keep}
-                  value={current.keepPerHost}
-                  onChange={(event) => change({ keepPerHost: Number(event.target.value) })}
-                >
-                  {[...new Set([...KEEP_CHOICES, current.keepPerHost])].sort((a, b) => a - b).map((n) => (
-                    <option key={n} value={n}>
-                      {msgB.recordings.keepValue(n)}
-                    </option>
-                  ))}
-                </select>
-              </SettingRow>
-              <SettingRow label={msgB.recordings.limit} hint={msgB.recordings.limitHint}>
-                <select
-                  className="select"
-                  aria-label={msgB.recordings.limit}
-                  value={current.maxLogMib}
-                  onChange={(event) => change({ maxLogMib: Number(event.target.value) })}
-                >
-                  {[...new Set([...LIMIT_CHOICES, current.maxLogMib])].sort((a, b) => a - b).map((n) => (
-                    <option key={n} value={n}>
-                      {msgB.recordings.limitValue(n)}
-                    </option>
-                  ))}
-                </select>
-              </SettingRow>
-            </div>
-          )}
-        </section>
+        <ErrorNotice error={settings.error} />
+        {current && (
+          // The same group as in Settings: a box with a strip, one setting per row.
+          <SettingsGroup title={msgB.recordings.settingsTitle}>
+            <Switch
+              label={msgB.recordings.record}
+              hint={msgB.recordings.recordHint}
+              checked={current.enabled}
+              onChange={(enabled) => change({ enabled })}
+            />
+            <SettingRow label={msgB.recordings.keep} hint={msgB.recordings.keepHint}>
+              <select
+                className="select"
+                aria-label={msgB.recordings.keep}
+                value={current.keepPerHost}
+                onChange={(event) => change({ keepPerHost: Number(event.target.value) })}
+              >
+                {[...new Set([...KEEP_CHOICES, current.keepPerHost])].sort((a, b) => a - b).map((n) => (
+                  <option key={n} value={n}>
+                    {msgB.recordings.keepValue(n)}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+            <SettingRow label={msgB.recordings.limit} hint={msgB.recordings.limitHint}>
+              <select
+                className="select"
+                aria-label={msgB.recordings.limit}
+                value={current.maxLogMib}
+                onChange={(event) => change({ maxLogMib: Number(event.target.value) })}
+              >
+                {[...new Set([...LIMIT_CHOICES, current.maxLogMib])].sort((a, b) => a - b).map((n) => (
+                  <option key={n} value={n}>
+                    {msgB.recordings.limitValue(n)}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+          </SettingsGroup>
+        )}
 
         <section className="section" aria-labelledby="recordings-stored">
           <div className="section-head">
