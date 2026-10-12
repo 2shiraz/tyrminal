@@ -632,6 +632,50 @@ impl Sessions {
             .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(files::local_io(&e)) })
     }
 
+    /// Copies `src_dir/name` (a file or a folder) from one session's server to the folder
+    /// `dst_dir` on another session's server, streaming through this process. A taken name is
+    /// resolved by `choice`; folders are never merged or replaced.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn copy_between(
+        &self,
+        owner: &str,
+        src_session: &str,
+        src_dir: &str,
+        name: &str,
+        dst_session: &str,
+        dst_dir: &str,
+        choice: ConflictChoice,
+        sink: Arc<dyn TransferSink>,
+    ) -> Result<TransferStarted, IpcError> {
+        let src_path = files::join(files::remote_dir(src_dir)?, name)?;
+        let dst_dir = files::remote_dir(dst_dir)?.to_owned();
+        let (_, src) = self.sftp(owner, src_session).await?;
+        let (_, dst) = self.sftp(owner, dst_session).await?;
+        let final_name = if choice == ConflictChoice::KeepBoth {
+            files::free_remote_name(&dst, &dst_dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let (job, total) = crate::remote_copy::prepare(
+            src,
+            src_path,
+            dst,
+            dst_dir,
+            final_name.clone(),
+            choice == ConflictChoice::Replace,
+            random_token()?,
+        )
+        .await?;
+        let (id, cancel) = self.start_transfer(owner)?;
+        let transfers = Arc::clone(&self.transfers);
+        let done_id = id.clone();
+        tokio::spawn(async move {
+            crate::remote_copy::run(job, sink.as_ref(), cancel).await;
+            transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+        });
+        Ok(files::started(id, final_name, TransferDirection::Copy, Some(total)))
+    }
+
     /// Stops a running transfer; its temporary data is removed and nothing replaces the target.
     pub fn cancel_transfer(&self, owner: &str, transfer_id: &str) -> Result<(), IpcError> {
         let transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());

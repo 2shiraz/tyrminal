@@ -222,6 +222,16 @@ export const files = {
     onEvent: (event: TransferEvent) => void,
     path: string[] | null = null,
   ) => call<TransferStarted>("files_download", { sessionId, dir, name, token, choice, path, events: transferChannel(onEvent) }),
+  /** Copies a file or folder from one session's server to another's (streams through the app). */
+  copy: (
+    srcSession: string,
+    srcDir: string,
+    name: string,
+    dstSession: string,
+    dstDir: string,
+    choice: ConflictChoice,
+    onEvent: (event: TransferEvent) => void,
+  ) => call<TransferStarted>("files_copy", { srcSession, srcDir, name, dstSession, dstDir, choice, events: transferChannel(onEvent) }),
   /** Lists a folder inside a local folder the user chose. */
   localList: (token: string, path: string[]) => call<LocalListing>("files_local_list", { token, path }),
   cancel: (transferId: string) => call<void>("files_cancel", { transferId }),

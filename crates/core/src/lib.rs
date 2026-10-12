@@ -14,6 +14,7 @@ mod import;
 mod inventory;
 mod preferences;
 mod records;
+mod remote_copy;
 mod sessions;
 mod validate;
 mod vault;

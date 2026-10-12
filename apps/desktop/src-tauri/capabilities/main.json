@@ -59,6 +59,7 @@
     "allow-files-download",
     "allow-files-cancel",
     "allow-files-local-list",
+    "allow-files-copy",
     "allow-files-edit-open",
     "allow-files-edit-status",
     "allow-files-edit-save",

@@ -712,6 +712,8 @@ pub enum ConflictChoice {
 pub enum TransferDirection {
     Upload,
     Download,
+    /// From one server to another.
+    Copy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

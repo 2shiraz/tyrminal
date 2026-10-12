@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "files_download",
     "files_cancel",
     "files_local_list",
+    "files_copy",
     "files_edit_open",
     "files_edit_status",
     "files_edit_save",

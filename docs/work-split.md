@@ -155,6 +155,10 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
+- **A → C (done by A in A's branch, keep when merging):** `AppShell.tsx` passes `others` (the other
+  connected SSH sessions, for "Copy to another server") to `FilesPanel`, right below its `target`
+  prop. Four lines; nothing else in AppShell changed.
+
 - **A → B (already done by A, keep it when merging):** in `crates/core/src/sessions.rs` `run_ssh`, the
   connection is now stored in the registry entry *before* `SessionState::Connected` is reported
   (it used to be stored after), so a file or key-install call made right after "connected" no

@@ -353,3 +353,26 @@ pub async fn files_local_list(
         tyrminal_core::list_local(&root, &path, tyrminal_core::contracts::limits::MAX_DIR_ENTRIES).await?;
     Ok(LocalListing { token, root_name: file_name(&root), path, entries, truncated })
 }
+
+/// Copies a file or folder from one connected session's server to another's, streaming through
+/// the app (nothing is written locally).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn files_copy(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    src_session: String,
+    src_dir: String,
+    name: String,
+    dst_session: String,
+    dst_dir: String,
+    choice: ConflictChoice,
+    events: Channel<TransferEvent>,
+) -> Result<TransferStarted, IpcError> {
+    let sink = Arc::new(ChannelTransferSink(events));
+    state
+        .core()?
+        .sessions
+        .copy_between(window.label(), &src_session, &src_dir, &name, &dst_session, &dst_dir, choice, sink)
+        .await
+}

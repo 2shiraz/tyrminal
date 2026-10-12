@@ -278,6 +278,20 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    files_copy: (a) => {
+      if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
+      const node = fs.get(childPath(a.srcDir, a.name));
+      const target = childPath(a.dstDir, a.name);
+      if (fs.has(target) && a.choice === "ask") fsErr("CONFLICT", "Something with that name is already there.");
+      const finalName = fs.has(target) && a.choice === "keep_both" ? a.name.replace(/(\.[^.]+)?$/, " (1)$1") : a.name;
+      const transferId = id(9000 + nextTransfer++);
+      channelSend(a.events, { type: "progress", done: Math.floor((node.size ?? 0) / 2) });
+      window.__mockTransfers.set(transferId, {
+        finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
+        cancel: () => channelSend(a.events, { type: "cancelled" }),
+      });
+      return { transferId, name: finalName, direction: "copy", total: node.size };
+    },
     shells_list: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {
       const extension = a.extension.replace(/^\./, "").toLowerCase();
