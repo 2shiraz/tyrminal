@@ -173,7 +173,9 @@ export function TerminalFields({ value, onChange, showTerm }: { value: HostTermi
 export function PasteFields({ value, onChange }: { value: HostTerminal; onChange: (next: HostTerminal) => void }) {
   return (
     <fieldset className="stack-sm" style={{ border: 0, margin: 0, padding: 0 }}>
-      <legend className="label">{msgPaste.hostSection}</legend>
+      <legend className="label" style={{ padding: 0 }}>
+        {msgPaste.hostSection}
+      </legend>
       <Switch label={msgPaste.hostSkipMultiline} checked={value.pasteSkipMultiline} onChange={(on) => onChange({ ...value, pasteSkipMultiline: on })} />
       <Switch
         label={msgPaste.hostSkipTrailingNewline}
