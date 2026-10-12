@@ -312,6 +312,8 @@ pub fn run() {
             commands::server_glance::glance_get,
             commands::server_glance::glance_host_get,
             commands::server_glance::glance_host_set,
+            // tmux and screen session awareness (P-31)
+            commands::multiplexers::multiplexer_list,
         ])
         .build(tauri::generate_context!());
 

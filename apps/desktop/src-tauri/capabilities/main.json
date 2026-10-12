@@ -180,6 +180,7 @@
     "allow-history-clear",
     "allow-glance-get",
     "allow-glance-host-get",
-    "allow-glance-host-set"
+    "allow-glance-host-set",
+    "allow-multiplexer-list"
   ]
 }

@@ -405,6 +405,29 @@ export function installMockBackend(options) {
           if (offHosts.has(host.id)) return { kind: "off" };
           return window.__mockGlance ?? sample;
         },
+        // tmux and screen session awareness (P-31): what the core would return for the lab-like
+        // server (names already cleaned; attach commands only for strict names).
+        multiplexer_list: (a) => {
+          const s = state.sessions.get(a.sessionId);
+          if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          const host = state.hosts.find((h) => h.label === s.host);
+          if (!host || host.protocol?.type === "telnet" || host.protocol?.type === "serial")
+            throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
+          (window.__mockMultiplexerCalls ??= []).push(a.sessionId);
+          return (
+            window.__mockMultiplexers ?? {
+              state: "listed",
+              tmuxInstalled: true,
+              screenInstalled: true,
+              sessions: [
+                { kind: "tmux", name: "work", attached: false, windows: 3, createdAt: 1760000000, attachCommand: "tmux attach-session -t '=work'" },
+                { kind: "tmux", name: "<img src=x onerror=alert(1)>; rm -rf ~", attached: true, windows: 1, createdAt: 1760000100, attachCommand: null },
+                { kind: "screen", name: "4242.build", attached: false, windows: null, createdAt: null, attachCommand: "screen -r '4242.build'" },
+              ],
+              truncated: false,
+            }
+          );
+        },
         glance_host_get: (a) => !offHosts.has(a.hostId),
         glance_host_set: (a) => {
           if (a.enabled) offHosts.delete(a.hostId);

@@ -19,6 +19,8 @@ pub mod privilege;
 pub mod password_check;
 // security review (P-27)
 pub mod security_review;
+// tmux and screen session awareness (P-31)
+pub mod multiplexers;
 // agent C: workspaces
 pub mod layouts;
 // command history

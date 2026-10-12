@@ -125,3 +125,7 @@ pub const MAX_HISTORY_SUGGESTIONS: usize = 8;
 pub const MAX_GLANCE_DISKS: usize = 16;
 /// The shortest time between two reads of one server's values, in milliseconds.
 pub const GLANCE_MIN_INTERVAL_MS: u64 = 5_000;
+
+// tmux and screen session awareness (P-31)
+/// At most this many sessions of each multiplexer are listed.
+pub const MAX_MULTIPLEXER_SESSIONS: usize = 64;
