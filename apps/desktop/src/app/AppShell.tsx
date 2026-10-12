@@ -1,5 +1,5 @@
 import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, useMemo } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
@@ -15,6 +15,7 @@ import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/S
 import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
+import { SnippetRunContext } from "../features/snippets/runContext";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
@@ -310,7 +311,26 @@ function Shell() {
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
+  // agent D: inventory and snippets
+  const snippetRunHost = useMemo(
+    () => ({
+      sessions: () =>
+        wsRef.current.tabs.flatMap((tab) =>
+          panesOf(tab.layout).flatMap((id) => {
+            const pane = wsRef.current.panes[id];
+            const handle = handles.current.get(id);
+            const sessionId = handle?.connected() ? handle.sessionId() : null;
+            return pane?.target.kind === "ssh" && sessionId ? [{ hostId: pane.target.hostId, sessionId }] : [];
+          }),
+        ),
+      connect,
+    }),
+    [connect],
+  );
+
   return (
+    // agent D: snippet runs on several sessions read this window's open SSH sessions.
+    <SnippetRunContext.Provider value={snippetRunHost}>
     <div className="shell" data-sidebar={collapsed ? "collapsed" : "expanded"}>
       <Sidebar
         destination={terminalVisible ? null : destination}
@@ -499,5 +519,6 @@ function Shell() {
         />
       )}
     </div>
+    </SnippetRunContext.Provider>
   );
 }

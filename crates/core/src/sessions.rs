@@ -91,6 +91,9 @@ pub struct Sessions {
     transfers: Arc<Mutex<HashMap<String, Transfer>>>,
     /// Remote files open in local applications.
     edits: edits::Edits,
+    // agent D: inventory and snippets
+    /// Snippet runs on exec channels, with their cancel switches.
+    snippet_runs: crate::snippet_runs::Runs,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -123,6 +126,8 @@ impl Sessions {
             connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             edits: edits::Edits::default(),
+            // agent D: inventory and snippets
+            snippet_runs: crate::snippet_runs::Runs::default(),
         })
     }
 
@@ -1237,6 +1242,32 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                 }
             },
         }
+    }
+}
+
+// agent D: inventory and snippets
+impl Sessions {
+    /// Runs a saved snippet non-interactively on an exec channel of a session the caller owns
+    /// (multi-host and existing-session execution). The text is read from the vault under the
+    /// session's generation. `run_id` lets the caller cancel with [`Sessions::cancel_snippet_run`].
+    pub async fn exec_snippet(
+        &self,
+        owner: &str,
+        session_id: &str,
+        snippet_id: &str,
+        run_id: &str,
+    ) -> Result<tyrminal_contracts::SnippetExecResult, IpcError> {
+        // Ownership first: a wrong window learns nothing about which snippets exist.
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let cancel = self.snippet_runs.start(owner, run_id)?;
+        let result = crate::snippet_runs::run(&conn, &text, cancel).await;
+        self.snippet_runs.finish(run_id);
+        result
+    }
+
+    pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
+        self.snippet_runs.cancel(owner, run_id);
     }
 }
 

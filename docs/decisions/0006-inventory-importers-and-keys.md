@@ -10,6 +10,7 @@ parallel branches never assign the same number.
 | Kind | Record | Notes |
 |---|---|---|
 | 200 | `HostAppearanceRecord` (host id, OS) | One per host; deleted with the host and copied with it in the same transaction. Kept apart from `HostRecord` so host fields wait for agent B's (work-split ordering). |
+| 202 | `ExecutionTargetRecord` (name, host ids) | Saved host selections for snippet runs; ids of deleted hosts are skipped and counted on read. |
 | 201 | `KeyCertificateRecord` (key id, certificate line, parsed fields) | One per key; deleted with the key in the same transaction. Public data, still encrypted like every record. |
 
 ## Dependencies
@@ -88,3 +89,15 @@ sandbox. Nothing is stubbed in the UI.
 - **SEC-10:** a per-host switch that removes the PQ exchange from the offer is a host setting on
   the connection path; it follows agent B's merge. Disabling PQ never adds weaker algorithms: the
   remaining list is the same modern one.
+
+## Snippet runs (SNP-05/06/07/10) — slice 4
+
+- A run uses an exec channel on a session the window already owns and has connected, never a new
+  connection: host trust and sign-in stay in the normal interactive path with its prompts.
+- No PTY is requested, so `sudo`/`su` cannot prompt and fail instead; nothing is typed into a
+  prompt for the user (spec: no automatic password injection).
+- The snippet text is the exec command (the account's login shell runs it). It is the user's own
+  saved text, read from the vault under the session's generation; nothing is interpolated.
+- Output is untrusted: kept up to 64 KiB per stream, control characters and bidi overrides
+  removed, shown as plain text. A run stops after 30 minutes or 64 MiB read; it can be cancelled
+  by its window only. At most 64 runs at once; the dialog runs 8 hosts in parallel.

@@ -671,6 +671,60 @@ export function installMockBackend(options) {
     key_certificate_remove: (a) => {
       delete state.certificates?.[a.keyId];
     },
+    snippet_exec: (a) =>
+      new Promise((resolve, reject) => {
+        const session = state.sessions.get(a.sessionId);
+        if (!session) return reject({ code: "ACCESS_DENIED", message: "That session is not available." });
+        state.runs ??= new Map();
+        const finish = () => {
+          state.runs.delete(a.runId);
+          // A stand-in for real hosts: "staging-web" fails, "build-runner-03" hangs until cancelled.
+          if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false });
+          else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false });
+        };
+        if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
+        else setTimeout(finish, 50);
+      }),
+    snippet_exec_cancel: (a) => {
+      state.runs?.get(a.runId)?.();
+      state.runs?.delete(a.runId);
+    },
+    execution_target_list: () => structuredClone(state.targets ?? []),
+    execution_target_save: (a) => {
+      state.targets ??= [];
+      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], missing: 0 };
+      state.targets.push(saved);
+      return saved;
+    },
+    execution_target_delete: (a) => {
+      state.targets = (state.targets ?? []).filter((t) => t.id !== a.id);
+    },
+    snippet_move: (a) => {
+      const folder = a.folder.trim().replace(/^\/+|\/+$/g, "");
+      const out = [];
+      for (const sid of a.ids) {
+        const source = state.snippets.find((x) => x.id === sid);
+        if (a.copy) {
+          const copy = { ...source, id: id(950 + state.snippets.length), folder };
+          state.snippets.push(copy);
+          out.push(copy);
+        } else {
+          source.folder = folder;
+          out.push(source);
+        }
+      }
+      return structuredClone(out);
+    },
+    snippet_folder_rename: (a) => {
+      let n = 0;
+      for (const sn of state.snippets) {
+        if (sn.folder === a.from || sn.folder.startsWith(`${a.from}/`)) {
+          sn.folder = a.to + sn.folder.slice(a.from.length);
+          n++;
+        }
+      }
+      return n;
+    },
     import_known_hosts_preview: () => {
       const used = new Set(state.hosts.map((h) => `${h.address}:${h.port}`));
       const hosts = state.knownHosts

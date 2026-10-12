@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execution-target-list"
+description = "Enables the execution_target_list command without any pre-configured scope."
+commands.allow = ["execution_target_list"]
+
+[[permission]]
+identifier = "deny-execution-target-list"
+description = "Denies the execution_target_list command without any pre-configured scope."
+commands.deny = ["execution_target_list"]

@@ -292,3 +292,16 @@ export const keysD = {
     call<import("@tyrminal/contracts").KeyCertificate>("key_certificate_attach", { keyId, certificate }),
   removeCertificate: (keyId: string) => call<void>("key_certificate_remove", { keyId }),
 };
+
+/** Snippet runs without a terminal, saved host selections and snippet organization. */
+export const snippetsD = {
+  exec: (snippetId: string, sessionId: string, runId: string) =>
+    call<import("@tyrminal/contracts").SnippetExecResult>("snippet_exec", { snippetId, sessionId, runId }),
+  cancel: (runId: string) => call<void>("snippet_exec_cancel", { runId }),
+  targets: () => call<import("@tyrminal/contracts").ExecutionTarget[]>("execution_target_list"),
+  saveTarget: (target: import("@tyrminal/contracts").ExecutionTargetInput) =>
+    call<import("@tyrminal/contracts").ExecutionTarget>("execution_target_save", { target }),
+  deleteTarget: (id: string) => call<void>("execution_target_delete", { id }),
+  move: (ids: string[], folder: string, copy: boolean) => call<SnippetSummary[]>("snippet_move", { ids, folder, copy }),
+  renameFolder: (from: string, to: string) => call<number>("snippet_folder_rename", { from, to }),
+};

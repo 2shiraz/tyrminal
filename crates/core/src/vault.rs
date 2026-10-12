@@ -40,8 +40,11 @@ use crate::records::{
 };
 use crate::validate;
 // agent D: inventory and snippets
-use crate::records::{HostAppearanceRecord, KIND_HOST_APPEARANCE, KIND_KEY_CERTIFICATE, KeyCertificateRecord};
-use tyrminal_contracts::{HostAppearance, HostOs, KeyCertificate, KeyKind};
+use crate::records::{
+    ExecutionTargetRecord, HostAppearanceRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE, KIND_KEY_CERTIFICATE,
+    KeyCertificateRecord,
+};
+use tyrminal_contracts::{ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, KeyCertificate, KeyKind};
 
 struct Stored<T> {
     revision: u64,
@@ -60,6 +63,7 @@ struct Open {
     // agent D: inventory and snippets
     appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
     certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
+    targets: BTreeMap<Id, Stored<ExecutionTargetRecord>>,
 }
 
 impl Open {
@@ -74,6 +78,7 @@ impl Open {
             // agent D: inventory and snippets
             appearances: BTreeMap::new(),
             certificates: BTreeMap::new(),
+            targets: BTreeMap::new(),
         }
     }
 }
@@ -464,6 +469,7 @@ impl VaultService {
                 // agent D: inventory and snippets
                 KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
                 KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
+                KIND_EXECUTION_TARGET => load!(ExecutionTargetRecord, open.targets),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1879,6 +1885,184 @@ impl VaultService {
         self.write::<KeyCertificateRecord>(open, record_id, KIND_KEY_CERTIFICATE, revision, None).await?;
         open.certificates.remove(&record_id);
         Ok(())
+    }
+
+    // ---------- saved execution targets (SNP-06) ----------
+
+    fn target_summary(open: &Open, id: &Id, record: &ExecutionTargetRecord) -> ExecutionTarget {
+        let (live, missing): (Vec<&String>, Vec<&String>) =
+            record.host_ids.iter().partition(|h| validate::id(h).ok().is_some_and(|id| open.hosts.contains_key(&id)));
+        ExecutionTarget {
+            id: validate::id_text(id),
+            name: record.name.clone(),
+            host_ids: live.into_iter().cloned().collect(),
+            missing: missing.len() as u32,
+        }
+    }
+
+    pub async fn list_execution_targets(&self) -> Result<Vec<ExecutionTarget>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.targets.iter().map(|(id, t)| Self::target_summary(open, id, &t.record)).collect();
+        list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+        Ok(list)
+    }
+
+    /// Saves a host selection. Every host must exist now; duplicates are dropped.
+    pub async fn save_execution_target(&self, input: ExecutionTargetInput) -> Result<ExecutionTarget, IpcError> {
+        let name = validate::label(&input.name)?;
+        if input.host_ids.is_empty() {
+            return Err(invalid("Choose at least one host."));
+        }
+        if input.host_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one target."));
+        }
+        let ids: Vec<Id> = input.host_ids.iter().map(|h| validate::id(h)).collect::<Result<_, _>>()?;
+        let existing = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut host_ids: Vec<String> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            if !open.hosts.contains_key(id) {
+                return Err(not_found("A selected host no longer exists."));
+            }
+            let text = validate::id_text(id);
+            if !host_ids.contains(&text) {
+                host_ids.push(text);
+            }
+        }
+        let (id, revision) = match existing {
+            Some(id) => {
+                (id, open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1)
+            }
+            None => {
+                if open.targets.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of targets."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = ExecutionTargetRecord { name, host_ids };
+        let content_len = record.name.len() + record.host_ids.iter().map(String::len).sum::<usize>();
+        self.write(open, id, KIND_EXECUTION_TARGET, revision, Some((&record, content_len))).await?;
+        let summary = Self::target_summary(open, &id, &record);
+        open.targets.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_execution_target(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1;
+        self.write::<ExecutionTargetRecord>(open, id, KIND_EXECUTION_TARGET, revision, None).await?;
+        open.targets.remove(&id);
+        Ok(())
+    }
+
+    // ---------- snippet organization (SNP-10) ----------
+
+    /// Moves snippets into `folder` (or, with `copy`, adds copies there), all in one transaction.
+    /// Returns the moved or created snippets.
+    pub async fn move_snippets(
+        &self,
+        ids: &[String],
+        folder: &str,
+        copy: bool,
+    ) -> Result<Vec<SnippetSummary>, IpcError> {
+        if ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many snippets for one change."));
+        }
+        let folder = validate::folder(folder)?;
+        let ids: Vec<Id> = ids.iter().map(|id| validate::id(id)).collect::<Result<_, _>>()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if copy && open.snippets.len() + ids.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many snippets."));
+        }
+        let mut writes: Vec<(Id, u64, SnippetRecord)> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let stored = open.snippets.get(id).ok_or_else(|| not_found("A selected snippet no longer exists."))?;
+            let record = SnippetRecord {
+                name: stored.record.name.clone(),
+                folder: folder.clone(),
+                text: stored.record.text.clone(),
+                updated_at: now_unix(),
+            };
+            if copy {
+                writes.push((random_id().map_err(from_vault)?, 1, record));
+            } else if !writes.iter().any(|(w, _, _)| w == id) {
+                writes.push((*id, stored.revision + 1, record));
+            }
+        }
+        self.write_snippets(open, writes).await
+    }
+
+    /// Renames a folder: every snippet in it or in its subfolders moves under the new path.
+    pub async fn rename_snippet_folder(&self, from: &str, to: &str) -> Result<u32, IpcError> {
+        let from = validate::folder(from)?;
+        let to = validate::folder(to)?;
+        if from.is_empty() {
+            return Err(invalid("Choose a folder to rename."));
+        }
+        if to == from || to.starts_with(&format!("{from}/")) {
+            return Err(invalid("A folder cannot be moved into itself."));
+        }
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut writes = Vec::new();
+        for (id, stored) in &open.snippets {
+            let folder = &stored.record.folder;
+            let rest = if *folder == from {
+                Some("")
+            } else {
+                folder.strip_prefix(&format!("{from}/")).map(|_| &folder[from.len()..])
+            };
+            let Some(rest) = rest else { continue };
+            let moved = validate::folder(&format!("{to}{rest}"))?;
+            writes.push((
+                *id,
+                stored.revision + 1,
+                SnippetRecord {
+                    name: stored.record.name.clone(),
+                    folder: moved,
+                    text: stored.record.text.clone(),
+                    updated_at: now_unix(),
+                },
+            ));
+        }
+        if writes.is_empty() {
+            return Err(not_found("That folder is empty or no longer exists."));
+        }
+        Ok(self.write_snippets(open, writes).await?.len() as u32)
+    }
+
+    async fn write_snippets(
+        &self,
+        open: &mut Open,
+        writes: Vec<(Id, u64, SnippetRecord)>,
+    ) -> Result<Vec<SnippetSummary>, IpcError> {
+        let rows = writes
+            .iter()
+            .map(|(id, revision, r)| {
+                self.seal_row(
+                    open,
+                    *id,
+                    KIND_SNIPPET,
+                    *revision,
+                    Some((r, r.name.len() + r.folder.len() + r.text.len())),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let mut out = Vec::with_capacity(writes.len());
+        for (id, revision, record) in writes {
+            out.push(snippet_summary(&id, &record));
+            open.snippets.insert(id, Stored { revision, record });
+        }
+        Ok(out)
     }
 
     /// The OS recorded for each host that has one.

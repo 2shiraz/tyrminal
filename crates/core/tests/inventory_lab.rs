@@ -12,7 +12,9 @@ use std::time::Duration;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-use tyrminal_core::contracts::{HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, TrustDecision};
+use tyrminal_core::contracts::{
+    ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, SnippetInput, TrustDecision,
+};
 use tyrminal_core::{Core, SessionSink};
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -208,4 +210,125 @@ async fn hybrid_post_quantum_key_exchange_is_negotiated_when_the_server_supports
     }
     let offer = tyrminal_ssh::negotiation_summary();
     assert!(offer.lines().next().unwrap().starts_with("kex=mlkem768x25519-sha256,"), "{offer}");
+}
+
+/// Opens a key-authenticated session to lab server `server` and waits until it is connected.
+async fn connected_session(core: &Core, lab: &Lab, server: &str, key_id: &str) -> String {
+    let host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: key_id.into() },
+            ..host(&format!("lab {server}"), lab.port(server))
+        })
+        .await
+        .unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let session = opened.session_id.clone();
+    let inner = core.clone();
+    // Keep draining events in the background so the session never stalls.
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let mut ready = Some(ready_tx);
+        while let Some(event) = inbox.recv().await {
+            match event {
+                SessionEvent::TrustPrompt { prompt_id, .. } => {
+                    inner.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+                }
+                SessionEvent::State { state: SessionState::Connected } => {
+                    if let Some(tx) = ready.take() {
+                        let _ = tx.send(());
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+    tokio::time::timeout(WAIT, ready_rx).await.expect("connect timed out").unwrap();
+    opened.session_id
+}
+
+/// SNP-05/07: one snippet on two real sessions reports each host's own outcome; a failure on one
+/// does not hide the other's success. Runs belong to their window, can be cancelled, and never get
+/// a terminal, so a password prompt fails instead of being answered.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let a = connected_session(&core, &lab, "a", &key.id).await;
+    let b = connected_session(&core, &lab, "b", &key.id).await;
+    let snippet =
+        |name: &str, text: &str| SnippetInput { id: None, name: name.into(), folder: String::new(), text: text.into() };
+
+    // Succeeds on a, fails on b (a marker file decides), with stdout and stderr kept apart.
+    let marker = format!("/tmp/tyrminal-snp-{}", std::process::id());
+    let check = v
+        .save_snippet(snippet(
+            "check",
+            &format!("echo out-$((40+2))\necho err >&2\nif [ -e {marker} ]; then exit 3; fi"),
+        ))
+        .await
+        .unwrap();
+    let ok = core.sessions.exec_snippet(WINDOW, &a, &check.id, "run-a").await.unwrap();
+    assert_eq!((ok.exit_status, ok.stdout.as_str(), ok.stderr.as_str()), (Some(0), "out-42\n", "err\n"));
+    std::fs::write(&marker, "").unwrap();
+    let failed = core.sessions.exec_snippet(WINDOW, &b, &check.id, "run-b").await.unwrap();
+    std::fs::remove_file(&marker).unwrap();
+    assert_eq!(failed.exit_status, Some(3));
+    assert_eq!(failed.stdout, "out-42\n");
+
+    // Another window can neither run on these sessions nor cancel their runs.
+    assert_eq!(
+        core.sessions.exec_snippet("other", &a, &check.id, "run-x").await.unwrap_err().code,
+        ErrorCode::AccessDenied
+    );
+
+    // A long run is cancelled promptly; the session stays usable.
+    let slow = v.save_snippet(snippet("slow", "sleep 30; echo late")).await.unwrap();
+    let runner = core.clone();
+    let session = a.clone();
+    let slow_id = slow.id.clone();
+    let handle =
+        tokio::spawn(async move { runner.sessions.exec_snippet(WINDOW, &session, &slow_id, "run-slow").await });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    core.sessions.cancel_snippet_run("other", "run-slow");
+    assert!(!handle.is_finished(), "another window cannot cancel");
+    let started = std::time::Instant::now();
+    core.sessions.cancel_snippet_run(WINDOW, "run-slow");
+    let cancelled = tokio::time::timeout(Duration::from_secs(5), handle).await.expect("cancel is prompt").unwrap();
+    assert_eq!(cancelled.unwrap_err().code, ErrorCode::Cancelled);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(core.sessions.exec_snippet(WINDOW, &a, &check.id, "run-again").await.unwrap().exit_status, Some(0));
+
+    // No PTY: a command that wants a terminal for a password cannot prompt, so it fails.
+    let tty = v.save_snippet(snippet("tty", "tty; test -t 0")).await.unwrap();
+    let no_tty = core.sessions.exec_snippet(WINDOW, &a, &tty.id, "run-tty").await.unwrap();
+    assert_ne!(no_tty.exit_status, Some(0));
+
+    // Output beyond 64 KiB per stream is cut and flagged; control characters never reach the UI.
+    let loud = v
+        .save_snippet(snippet("loud", "printf '\\033[31mred\\n'; head -c 200000 /dev/zero | tr '\\0' x"))
+        .await
+        .unwrap();
+    let cut = core.sessions.exec_snippet(WINDOW, &a, &loud.id, "run-loud").await.unwrap();
+    assert!(cut.truncated);
+    assert!(cut.stdout.starts_with("[31mred\n"), "{:?}", &cut.stdout[..20]);
+    assert!(cut.stdout.len() <= 64 * 1024);
+
+    // After a lock nothing runs.
+    v.lock().await;
+    assert!(core.sessions.exec_snippet(WINDOW, &a, &check.id, "run-locked").await.is_err());
 }

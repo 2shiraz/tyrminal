@@ -84,6 +84,13 @@ const COMMANDS: &[&str] = &[
     "key_certificate_list",
     "key_certificate_attach",
     "key_certificate_remove",
+    "snippet_exec",
+    "snippet_exec_cancel",
+    "execution_target_list",
+    "execution_target_save",
+    "execution_target_delete",
+    "snippet_move",
+    "snippet_folder_rename",
 ];
 
 fn main() {

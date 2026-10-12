@@ -552,3 +552,54 @@ async fn certificates_attach_only_to_their_key_and_go_with_it() {
     assert!(v.list_key_certificates().await.unwrap().is_empty());
     assert_eq!(code(v.remove_key_certificate(&ppk.id).await), ErrorCode::NotFound);
 }
+
+#[tokio::test]
+async fn execution_targets_keep_existing_hosts_and_snippets_move_copy_and_rename_folders() {
+    use tyrminal_core::contracts::{ExecutionTargetInput, SnippetInput};
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let a = v.save_host(host("a", None)).await.unwrap();
+    let b = v.save_host(host("b", None)).await.unwrap();
+    let target = |hosts: Vec<String>| ExecutionTargetInput { id: None, name: "web fleet".into(), host_ids: hosts };
+    assert_eq!(code(v.save_execution_target(target(vec![])).await), ErrorCode::InvalidInput);
+    assert_eq!(code(v.save_execution_target(target(vec!["0".repeat(32)])).await), ErrorCode::NotFound);
+    let saved = v.save_execution_target(target(vec![a.id.clone(), b.id.clone(), a.id.clone()])).await.unwrap();
+    assert_eq!(saved.host_ids, [a.id.clone(), b.id.clone()]);
+    // A deleted host drops out and is counted as missing; the target itself stays.
+    v.delete_host(&b.id).await.unwrap();
+    let listed = v.list_execution_targets().await.unwrap();
+    assert_eq!((listed[0].host_ids.clone(), listed[0].missing), (vec![a.id.clone()], 1));
+    v.delete_execution_target(&saved.id).await.unwrap();
+    assert!(v.list_execution_targets().await.unwrap().is_empty());
+
+    let snippet = |name: &str, folder: &str| SnippetInput {
+        id: None,
+        name: name.into(),
+        folder: folder.into(),
+        text: "uptime".into(),
+    };
+    let s1 = v.save_snippet(snippet("one", "Ops")).await.unwrap();
+    let s2 = v.save_snippet(snippet("two", "Ops/Deep")).await.unwrap();
+    let s3 = v.save_snippet(snippet("three", "Other")).await.unwrap();
+
+    let copies = v.move_snippets(std::slice::from_ref(&s3.id), "Ops", true).await.unwrap();
+    assert_eq!(copies[0].folder, "Ops");
+    assert_ne!(copies[0].id, s3.id);
+    assert_eq!(v.list_snippets().await.unwrap().len(), 4);
+    assert_eq!(code(v.move_snippets(&[s1.id.clone(), "0".repeat(32)], "X", false).await), ErrorCode::NotFound);
+    assert!(v.list_snippets().await.unwrap().iter().all(|s| s.folder != "X"), "all or nothing");
+
+    // Renaming a folder moves its subfolders along; a folder cannot go inside itself.
+    assert_eq!(code(v.rename_snippet_folder("Ops", "Ops/Inner").await), ErrorCode::InvalidInput);
+    assert_eq!(v.rename_snippet_folder("Ops", "Team/Ops").await.unwrap(), 3);
+    let all = v.list_snippets().await.unwrap();
+    let folder_of = |id: &str| all.iter().find(|s| s.id == id).unwrap().folder.clone();
+    assert_eq!(folder_of(&s1.id), "Team/Ops");
+    assert_eq!(folder_of(&s2.id), "Team/Ops/Deep");
+    assert_eq!(folder_of(&s3.id), "Other");
+    v.move_snippets(std::slice::from_ref(&s2.id), "", false).await.unwrap();
+    v.lock().await;
+    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(v.list_snippets().await.unwrap().iter().find(|s| s.id == s2.id).unwrap().folder, "");
+}

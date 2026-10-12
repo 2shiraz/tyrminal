@@ -19,6 +19,7 @@ mod validate;
 mod vault;
 // agent D: inventory and snippets
 mod importers;
+mod snippet_runs;
 
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;

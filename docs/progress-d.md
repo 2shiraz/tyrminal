@@ -13,7 +13,7 @@ Updated: 2026-10-12.
 | 1. Inventory presentation (HST-13) and group-wide connection (HST-06) | Done, tested (core + UI mock) |
 | 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Done, tested (core, lab, UI mock); cloud discovery IMP-07..13 BLOCKED (third-party APIs) |
 | 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Done except certificate sign-in and the per-host PQ switch (after B); hardware keys and SEC-09 BLOCKED |
-| 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Next |
+| 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Done, tested (lab, real vault, UI mock) |
 | 5. After agent B merges: identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), IMP-02, HST-05 | Waiting on B |
 
 ## Design notes
@@ -47,6 +47,16 @@ Updated: 2026-10-12.
 - **SEC-08:** the lab test asserts `mlkem768x25519-sha256` with OpenSSH ≥ 9.9. The Docker lab
   (10.0p1) cannot be built in this sandbox (no trusted route to the Alpine mirror from the image
   build), so only the 9.6 fallback branch has run here.
+
+- **Snippet runs** (`crates/core/src/snippet_runs.rs`): one exec channel per chosen host on that
+  host's open session in this window, so trust and sign-in already happened interactively. No PTY:
+  a password prompt fails rather than being answered. Per-host exit status, signal and output
+  (64 KiB per stream, control characters removed); cancellable per run (owner window only); 30 min
+  and 64 MiB read caps. The dialog reviews the exact text and every target first, skips and
+  reports hosts without a session, and can open sessions for them. Saved targets are record kind
+  202; deleted hosts drop out and are counted.
+- **Organization:** move/copy a snippet to a folder, rename a folder with its subfolders, each in
+  one transaction.
 
 ## Evidence
 

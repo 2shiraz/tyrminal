@@ -69,3 +69,42 @@ pub struct KeyCertificate {
     /// `SHA256:` fingerprint of the signing CA key.
     pub ca_fingerprint: String,
 }
+
+/// What running a snippet on one host produced. Output is untrusted remote text: control
+/// characters other than newline and tab are removed, and each stream keeps its first 64 KiB.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SnippetExecResult {
+    /// `null` when the command ended without a status (killed by a signal, link closed).
+    pub exit_status: Option<u32>,
+    /// Signal name if the remote command was killed by one (untrusted text).
+    pub exit_signal: Option<String>,
+    pub stdout: String,
+    pub stderr: String,
+    /// Some output was not kept (over the per-stream limit).
+    pub truncated: bool,
+}
+
+/// A saved selection of hosts to run snippets on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecutionTarget {
+    pub id: String,
+    pub name: String,
+    /// Hosts that still exist, in the saved order. Deleted hosts drop out.
+    pub host_ids: Vec<String>,
+    /// How many saved hosts no longer exist.
+    pub missing: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecutionTargetInput {
+    /// `None` creates a target; `Some` replaces that target.
+    pub id: Option<String>,
+    pub name: String,
+    pub host_ids: Vec<String>,
+}

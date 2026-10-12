@@ -192,6 +192,13 @@ pub fn run() {
             commands::inventory::key_certificate_list,
             commands::inventory::key_certificate_attach,
             commands::inventory::key_certificate_remove,
+            commands::snippets::snippet_exec,
+            commands::snippets::snippet_exec_cancel,
+            commands::snippets::execution_target_list,
+            commands::snippets::execution_target_save,
+            commands::snippets::execution_target_delete,
+            commands::snippets::snippet_move,
+            commands::snippets::snippet_folder_rename,
         ])
         .build(tauri::generate_context!());
 

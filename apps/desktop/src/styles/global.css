@@ -3136,3 +3136,14 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   max-height: 280px;
   overflow: auto;
 }
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.folder-row > .folder-head {
+  flex: 1;
+  min-width: 0;
+}

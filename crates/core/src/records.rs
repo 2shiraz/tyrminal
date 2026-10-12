@@ -127,6 +127,15 @@ pub(crate) struct HostAppearanceRecord {
 }
 
 pub(crate) const KIND_KEY_CERTIFICATE: u16 = 201;
+pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
+
+/// A saved selection of hosts to run snippets on. Host ids may outlive their hosts; readers
+/// skip the missing ones and report how many.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct ExecutionTargetRecord {
+    pub name: String,
+    pub host_ids: Vec<String>,
+}
 
 /// An OpenSSH user certificate for a key in the keychain (public data), checked against the key
 /// when attached. At most one per key; deleting the key deletes it in the same transaction.

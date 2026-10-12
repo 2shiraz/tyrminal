@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | Snippets: multi-host execution with target review, saved targets, existing sessions, organization |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check) |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | — | Waiting for agent B's merge (identities, environment variables, startup scripts, certificate sign-in, per-host PQ switch, IMP-02, HST-05) |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization |
 | Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh); certificate sign-in and per-host PQ switch wait for B's connection path |
 
 ## Requests (one agent asking the other for a change in a file it owns)
