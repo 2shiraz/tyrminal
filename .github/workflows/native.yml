@@ -51,7 +51,9 @@ jobs:
           node --version; pnpm --version; rustc --version
           pnpm run doctor || true
 
+      # On Linux the CI workflow already runs verify:fast for every change.
       - name: verify:fast
+        if: runner.os != 'Linux'
         run: pnpm run verify:fast
 
       - name: Full-screen applications for the macOS lab server
@@ -146,10 +148,18 @@ jobs:
       - name: Native end-to-end suite
         run: pnpm run test:native
 
+      # The optimized release build (thin LTO, one codegen unit) is the slowest step; pull
+      # requests check the release policy statically and main, schedules and the release
+      # workflow build and inspect the real binary.
       - name: Release build (unsigned)
+        if: github.event_name != 'pull_request'
         run: pnpm run build:desktop
       - name: Release policy against the built binary
+        if: github.event_name != 'pull_request'
         run: node scripts/check-release.mjs --require-binary
+      - name: Release policy (static)
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-release.mjs
 
       - name: Lab server logs (on failure)
         if: failure()

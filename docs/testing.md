@@ -77,3 +77,12 @@ No retries and no blind sleeps. Every intermittent failure so far was investigat
 cause, and each is recorded in `docs/progress.md`. Suites were then run repeatedly: the lab suite
 12 times, the PTY suite 30 times, the core session suite 6 times and the native suite 25 times,
 all passing.
+
+## CI cost
+
+- `ci.yml` runs on pull requests and on `main` (not on every branch push, which ran it twice).
+- `native.yml` skips `verify:fast` on Linux (the CI workflow runs it) and, on pull requests,
+  checks the release policy statically instead of building the optimized release binary. `main`,
+  manual runs and the release workflow still build and inspect the real binary.
+- Debug builds keep line tables only (`[profile.dev] debug = "line-tables-only"`): readable
+  panics and backtraces with much faster compiling and linking.

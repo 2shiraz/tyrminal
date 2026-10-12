@@ -4,7 +4,10 @@
 name: CI
 
 on:
+  # Branches get CI through their pull request; pushing to a PR branch used to run everything
+  # twice (once for the push, once for the pull request).
   push:
+    branches: [main]
   pull_request:
   workflow_call:
 
