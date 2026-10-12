@@ -43,6 +43,7 @@ export const msg = {
     recoveryVerify: (group: number) => `To confirm you saved it, type group ${group} of the key`,
     recoveryWrong: "That does not match. Check the group you wrote down.",
     recoveryDone: "I have saved it",
+    steps: "Setup steps",
   },
   unlock: {
     title: "Unlock your vault",
@@ -54,6 +55,7 @@ export const msg = {
     usePassphrase: "Use passphrase instead",
     recoveryHint: "Eleven groups of five characters. Spaces, hyphens and letter case do not matter.",
     localOnly: "Everything stays on this device.",
+    or: "or",
   },
   nav: {
     home: "Home",
