@@ -326,6 +326,40 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // agent C: workspaces
+    layout_list: () => (state.layouts ?? []).slice().sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+    layout_save: (a) => {
+      state.layouts ??= [];
+      const panes = a.layout.tabs.reduce((n, t) => n + t.panes.length, 0);
+      if (panes > 16) throw { code: "INVALID_INPUT", message: "A layout holds at most 16 panes." };
+      for (const t of a.layout.tabs)
+        for (const p of t.panes)
+          if (p.kind === "ssh" && !state.hosts.some((h) => h.id === p.hostId)) throw { code: "NOT_FOUND", message: "A host in this layout no longer exists." };
+      const existing = state.layouts.find((l) => l.id === a.layout.id);
+      if (a.layout.id && !existing) throw { code: "NOT_FOUND", message: "That layout no longer exists." };
+      const saved = { id: existing?.id ?? id(900 + state.layouts.length), name: a.layout.name.trim(), tabs: a.layout.tabs, updatedAt: now };
+      state.layouts = existing ? state.layouts.map((l) => (l.id === saved.id ? saved : l)) : [...state.layouts, saved];
+      return saved;
+    },
+    layout_delete: (a) => {
+      state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
+    },
+    // Detach: the main window hands sessions to a new window. The mock records the request; a
+    // page opened as a detached window (options.detached) receives that tab and attaches.
+    window_detach: (a) => {
+      window.__mockDetached = a.tab;
+      return "detached-0000000000000001";
+    },
+    window_detach_take: () => {
+      const tab = options.detached;
+      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
+      options.detached = null;
+      return tab;
+    },
+    session_attach: (a) => {
+      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return openSession({ ...a }, "local").sessionId;
+    },
     // command history
     ...(() => {
       // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).
@@ -1251,6 +1285,11 @@ export function installMockBackend(options) {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
   };
+  // agent C: workspaces — raw output bytes (legacy encodings) to the most recent session.
+  window.__mockOutputBytes = (bytes) => {
+    const last = [...state.sessions.values()].at(-1);
+    if (last) channelSend(last.output, Uint8Array.from(bytes).buffer);
+  };
   /** Ends the running LAN discovery as if its time ran out. */
   window.__mockDiscoveryFinish = () => {
     if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
@@ -1372,7 +1411,11 @@ export function installMockBackend(options) {
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   window.__TAURI_INTERNALS__ = {
-    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    // agent C: workspaces — a page can play a detached window (options.windowLabel).
+    metadata: {
+      currentWindow: { label: options.windowLabel ?? "main" },
+      currentWebview: { windowLabel: options.windowLabel ?? "main", label: options.windowLabel ?? "main" },
+    },
     transformCallback(callback, once = false) {
       const cid = nextCallback++;
       callbacks.set(cid, (payload) => {

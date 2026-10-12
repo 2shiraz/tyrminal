@@ -44,7 +44,10 @@ check((csp["script-src"] ?? "") === "'self'", "script-src must be exactly 'self'
 check((csp["default-src"] ?? "") === "'none'", "default-src must be 'none'");
 check(config.app?.withGlobalTauri === false, "withGlobalTauri must be false");
 check(!("updater" in (config.plugins ?? {})), "an updater endpoint is configured before an authorized trust root exists");
-check(JSON.stringify(config.app?.security?.capabilities) === '["main"]', "release config must enable exactly the 'main' capability");
+check(
+  JSON.stringify(config.app?.security?.capabilities) === '["main","detached"]',
+  "release config must enable exactly the 'main' and 'detached' capabilities",
+);
 
 // ---- capabilities ----
 const capability = JSON.parse(readFileSync(join(tauriDir, "capabilities", "main.json"), "utf8"));
@@ -56,13 +59,39 @@ for (const permission of capability.permissions) {
 }
 check(JSON.stringify(capability.windows) === '["main"]', "main capability must apply to the main window only");
 const capabilityFiles = readdirSync(join(tauriDir, "capabilities")).filter((f) => f.endsWith(".json"));
-check(capabilityFiles.join() === "main.json", `unexpected capability files: ${capabilityFiles.join(", ")}`);
+check(capabilityFiles.join() === "detached.json,main.json", `unexpected capability files: ${capabilityFiles.join(", ")}`);
+
+// agent C: workspaces. A detached window (a tab moved out of the main window) gets a scoped
+// capability: only these permissions, only for windows labelled detached-*.
+const detached = JSON.parse(readFileSync(join(tauriDir, "capabilities", "detached.json"), "utf8"));
+const DETACHED_ALLOWED = [
+  "allow-window-detach-take",
+  "allow-session-attach",
+  "allow-session-write",
+  "allow-session-resize",
+  "allow-session-ack",
+  "allow-session-close",
+  "allow-session-trust-answer",
+  "allow-session-auth-answer",
+  "allow-prefs-get",
+  "allow-vault-activity",
+];
+check(JSON.stringify(detached.windows) === '["detached-*"]', "detached capability must apply to detached-* windows only");
+for (const permission of detached.permissions) {
+  const id = typeof permission === "string" ? permission : permission.identifier;
+  check(DETACHED_ALLOWED.includes(id), `unexpected permission in detached capability: ${id}`);
+}
 
 // ---- every declared command is granted and vice versa ----
 const buildRs = readFileSync(join(tauriDir, "build.rs"), "utf8");
 const declared = [...buildRs.matchAll(/^\s+"([a-z_]+)",$/gm)].map((m) => m[1]).sort();
-const granted = capability.permissions.filter((p) => typeof p === "string" && p.startsWith("allow-")).map((p) => p.slice(6).replaceAll("-", "_")).sort();
-check(declared.join() === granted.join(), "commands declared in build.rs and permissions in capabilities/main.json differ");
+const allowName = (p) => p.slice(6).replaceAll("-", "_");
+const granted = [
+  ...new Set([...capability.permissions, ...detached.permissions].filter((p) => typeof p === "string" && p.startsWith("allow-")).map(allowName)),
+].sort();
+check(declared.join() === granted.join(), "commands declared in build.rs and the permissions of the capability files differ");
+// Taking a detached tab belongs to detached windows only; the main window never holds its tokens.
+check(!capability.permissions.includes("allow-window-detach-take"), "the main window must not be able to take a detached tab");
 const forbiddenCommand = /(execute|eval|read_any|query_database|decrypt|export_secret|shell|spawn)/;
 for (const command of declared) check(!forbiddenCommand.test(command), `generic or secret-revealing command name: ${command}`);
 
