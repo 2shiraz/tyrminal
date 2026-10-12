@@ -8,7 +8,7 @@ import type { SessionState } from "./SessionState";
  * Events for one session, delivered only on that session's own channel (never broadcast).
  * Text fields that originate from the server are untrusted: render as plain text.
  */
-export type SessionEvent = { "type": "state", state: SessionState, 
+export type SessionEvent = { "type": "port_suggestion", port: number, } | { "type": "state", state: SessionState, 
 /**
  * During a jump-host chain: which hop this step belongs to (`None` for a direct
  * connection and for session-level states such as `Connected`).
