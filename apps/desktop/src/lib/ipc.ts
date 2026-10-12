@@ -198,6 +198,12 @@ export const sessions = {
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
   openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_local", { cols, rows, ...channels(onOutput, onEvent) }),
+  /** A files-only connection (SFTP, no shell). Trust and sign-in prompts arrive as events. */
+  openFiles(hostId: string, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_files", { hostId, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {

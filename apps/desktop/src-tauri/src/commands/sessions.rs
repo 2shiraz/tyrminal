@@ -53,6 +53,31 @@ pub async fn session_open_local(
     core.sessions.open_local_with(window.label(), cols, rows, shell, sink).await
 }
 
+/// A files-only connection (the SFTP tab): host-key trust and sign-in as for a terminal, then
+/// SFTP only. It never produces terminal output, so it has no output channel.
+#[tauri::command]
+pub async fn session_open_files(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    host_id: String,
+    events: Channel<SessionEvent>,
+) -> Result<SessionOpened, IpcError> {
+    let sink = Arc::new(EventSink(events));
+    state.core()?.sessions.open_files(window.label(), &host_id, sink).await
+}
+
+struct EventSink(Channel<SessionEvent>);
+
+impl SessionSink for EventSink {
+    fn output(&self, _: Vec<u8>) -> bool {
+        true
+    }
+
+    fn event(&self, event: SessionEvent) -> bool {
+        self.0.send(event).is_ok()
+    }
+}
+
 /// Terminal input. The body is the raw bytes (no JSON array of numbers); the session id travels
 /// in a header because a raw body has no other fields.
 #[tauri::command]

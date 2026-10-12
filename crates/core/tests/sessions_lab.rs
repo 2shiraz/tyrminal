@@ -148,6 +148,22 @@ impl Client {
         }
     }
 
+    /// A files-only connection (SFTP, no shell).
+    async fn open_files(core: &Core, host_id: &str) -> Self {
+        let (tx, inbox) = mpsc::unbounded_channel();
+        let opened = core.sessions.open_files(WINDOW, host_id, Arc::new(ChannelSink(tx))).await.expect("open files");
+        Self {
+            core: core.clone(),
+            session: opened.session_id,
+            inbox,
+            text: String::new(),
+            received: 0,
+            auto_ack: true,
+            negotiated: None,
+            window: WINDOW,
+        }
+    }
+
     async fn open_local(core: &Core) -> Self {
         let (tx, inbox) = mpsc::unbounded_channel();
         let opened = core.sessions.open_local(WINDOW, 100, 30, Arc::new(ChannelSink(tx))).await.expect("open local");
@@ -2232,4 +2248,165 @@ async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_promp
     client.until_connected().await;
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
+}
+
+// ---------- files-only connections (the SFTP tab) ----------
+
+/// sshd log lines written since `before` lines.
+fn new_log_lines(lab: &Lab, server: &str, before: usize) -> Vec<String> {
+    lab.server_log(server).lines().skip(before).map(str::to_owned).collect()
+}
+
+/// A files-only connection signs in, lists, uploads, downloads and copies to another server
+/// over SFTP, and never asks the server for a shell, a command or a terminal.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_transfers_without_a_shell_or_terminal() {
+    let f = fixture().await;
+    let _b = SERVER_B.lock().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f
+        .host("lab b files", f.lab.port("b"), &f.lab.str("/user"), HostAuthInput::Key { key_id: key_id.clone() })
+        .await;
+    let log_before = f.lab.server_log("b").lines().count();
+
+    let mut client = Client::open_files(&f.core, &host).await;
+    let (states, prompt) = client.until_not_state().await;
+    assert!(states.contains(&SessionState::Connecting), "{states:?}");
+    // Trust is asked exactly as for a terminal.
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let s = &f.core.sessions;
+    let id = client.session.clone();
+
+    // No terminal: input, resizing and snippets are refused, not silently dropped.
+    assert_eq!(s.write(WINDOW, &id, b"id\r".to_vec()).await.unwrap_err().code, ErrorCode::InvalidInput);
+    assert_eq!(s.resize(WINDOW, &id, 80, 24).await.unwrap_err().code, ErrorCode::InvalidInput);
+    // Owned by the window that opened it, like any session.
+    assert_eq!(s.list_files("other-window", &id, None).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let home = s.list_files(WINDOW, &id, None).await.unwrap();
+    assert!(home.path.starts_with('/'));
+    let folder = format!("tyr-files-only-{}", std::process::id());
+    let _ = s.remove_file(WINDOW, &id, &home.path, &folder).await;
+    s.make_dir(WINDOW, &id, &home.path, &folder).await.unwrap();
+    let dir = format!("{}/{folder}", home.path.trim_end_matches('/'));
+
+    let local = TempDir::new().unwrap();
+    let data = pattern(3 * 1024 * 1024 + 17, 11);
+    std::fs::write(local.path().join("data.bin"), &data).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, local.path().join("data.bin"), &dir, "data.bin", ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &dir, "data.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    assert_eq!(std::fs::read(down.path().join("data.bin")).unwrap(), data, "byte for byte");
+
+    // Server to server between two files-only connections (remote_copy).
+    let other = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let mut a = Client::open_files(&f.core, &other).await;
+    let (_, prompt) = a.until_not_state().await;
+    a.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    a.until_connected().await;
+    let a_home = s.list_files(WINDOW, &a.session, None).await.unwrap().path;
+    let copied = format!("tyr-files-only-copy-{}.bin", std::process::id());
+    let _ = s.remove_file(WINDOW, &a.session, &a_home, &copied).await;
+    s.rename_file(WINDOW, &id, &dir, "data.bin", &copied).await.unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.copy_between(WINDOW, &id, &dir, &copied, &a.session, &a_home, ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let on_a = s.list_files(WINDOW, &a.session, Some(&a_home)).await.unwrap();
+    assert_eq!(on_a.entries.iter().find(|e| e.name == copied).and_then(|e| e.size), Some(data.len() as u64));
+    s.remove_file(WINDOW, &a.session, &a_home, &copied).await.unwrap();
+    s.remove_file(WINDOW, &id, &dir, &copied).await.unwrap();
+    s.remove_file(WINDOW, &id, &home.path, &folder).await.unwrap();
+
+    // Closing the connection ends it; its file operations stop working.
+    s.close(WINDOW, &id).unwrap();
+    assert_eq!(client.until_closed().await.0, None);
+    assert_eq!(s.list_files(WINDOW, &id, None).await.unwrap_err().code, ErrorCode::AccessDenied);
+    s.close(WINDOW, &a.session).unwrap();
+    a.until_closed().await;
+
+    // The server saw the SFTP subsystem and nothing else: no shell, command or terminal.
+    let lines = new_log_lines(&f.lab, "b", log_before);
+    assert!(lines.iter().any(|l| l.contains("subsystem 'sftp'")), "no SFTP subsystem in {lines:#?}");
+    for line in &lines {
+        for asked in ["Starting session: shell", "Starting session: command", "Starting session: forced-command", "pty"]
+        {
+            assert!(!line.contains(asked), "a files-only connection asked for {asked:?}: {line}");
+        }
+    }
+}
+
+/// A files-only connection refuses a changed host key before anything is sent to the server,
+/// exactly as a terminal does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_refuses_a_changed_host_key_before_signing_in() {
+    let f = fixture().await;
+    let _exclusive = SERVER_B.lock().await;
+    let forwarder = Forwarder::start(f.lab.addr("a")).await;
+    let host_id = f
+        .host(
+            "pinned files",
+            forwarder.port,
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some(f.lab.str("/password")) },
+        )
+        .await;
+    let mut client = Client::open_files(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // Same name and port, another server's key.
+    forwarder.retarget(f.lab.addr("b"));
+    let auth_lines_before = f.lab.auth_log_lines("b");
+    let log_before = f.lab.server_log("b").lines().count();
+    let mut client = Client::open_files(&f.core, &host_id).await;
+    let (_, event) = client.until_not_state().await;
+    match &event {
+        SessionEvent::HostKeyChanged { presented_fingerprint, trusted_fingerprints, .. } => {
+            assert_eq!(*presented_fingerprint, f.lab.str("/servers/b/hostKeyEd25519Fingerprint"));
+            assert_eq!(*trusted_fingerprints, [f.lab.str("/servers/a/hostKeyEd25519Fingerprint")]);
+        }
+        other => panic!("expected HostKeyChanged, got {other:?}"),
+    }
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::HostKeyChanged));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(f.lab.auth_log_lines("b"), auth_lines_before, "the stored password reached the impostor");
+    let lines = new_log_lines(&f.lab, "b", log_before);
+    assert!(!lines.iter().any(|l| l.contains("subsystem")), "a channel was opened: {lines:#?}");
+    let known = f.core.vault.list_known_hosts().await.unwrap();
+    assert_eq!(known.len(), 1, "trust was neither replaced nor extended");
+}
+
+/// Files-only connections are for SSH hosts; a Telnet host is refused without connecting.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_is_refused_for_a_telnet_host() {
+    let f = fixture().await;
+    let input = HostInput {
+        id: None,
+        label: "telnet".into(),
+        address: "127.0.0.1".into(),
+        port: Some(f.lab.port("a")),
+        username: String::new(),
+        auth: HostAuthInput::AskPassword,
+        group_id: None,
+        tags: Vec::new(),
+        protocol: HostProtocol::Telnet,
+        terminal: Default::default(),
+        forward_agent: false,
+    };
+    let host = f.core.vault.save_host(input).await.unwrap().id;
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    let refused = f.core.sessions.open_files(WINDOW, &host, Arc::new(ChannelSink(tx))).await.unwrap_err();
+    assert_eq!(refused.code, ErrorCode::InvalidInput);
+    assert_eq!(f.core.sessions.count(), 0);
 }

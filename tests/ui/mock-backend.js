@@ -127,14 +127,19 @@ export function installMockBackend(options) {
 
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
+    // "files": a files-only connection (SFTP tab): SSH trust and sign-in, no terminal output.
+    const files = kind === "files";
+    if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
+    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
+    if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
+    const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked
+        ? trustPrompt || blocked || passwordPrompt
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -181,7 +186,25 @@ export function installMockBackend(options) {
       );
       return { sessionId };
     }
-    setTimeout(() => channelSend(s.output, new TextEncoder().encode(banner(s)).buffer), delay + 10);
+    if (passwordPrompt) {
+      setTimeout(
+        () =>
+          channelSend(s.events, {
+            type: "auth_prompt",
+            promptId: "a1",
+            kind: "password",
+            username: host.username,
+            attempt: 1,
+            maxAttempts: 3,
+            message: null,
+            echo: false,
+            hop: null,
+          }),
+        30,
+      );
+      return { sessionId };
+    }
+    if (!files) setTimeout(() => channelSend(s.output, new TextEncoder().encode(banner(s)).buffer), delay + 10);
     return { sessionId };
   }
 
@@ -817,6 +840,20 @@ export function installMockBackend(options) {
     },
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
+    session_open_files: (a) => openSession(a, "files"),
+    session_auth_answer: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) return;
+      if (a.secret === null) {
+        state.sessions.delete(s.id);
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, { type: "closed", error: { code: "CANCELLED", message: "The connection was cancelled." }, exitStatus: null });
+        return;
+      }
+      channelSend(s.events, NEGOTIATED);
+      channelSend(s.events, { type: "state", state: "connected" });
+      if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+    },
     session_write: (a, o) => write(o.headers["x-session"], a),
     session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
     session_resize: () => null,
@@ -829,7 +866,7 @@ export function installMockBackend(options) {
       if (s && a.decision !== "cancel") {
         channelSend(s.events, NEGOTIATED);
         channelSend(s.events, { type: "state", state: "connected" });
-        channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+        if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
       }
     },
     link_open: (a) => {
@@ -852,6 +889,7 @@ export function installMockBackend(options) {
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
   };
   window.__mockCalls = calls;
+  window.__mockFileSessions = window.__mockFileSessions ?? [];
   window.__mockOpenedLinks = [];
   window.__mockState = state;
   window.__mockEmit = emit;

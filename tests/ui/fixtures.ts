@@ -8,6 +8,8 @@ export interface MockOptions {
   scheme?: string;
   renderer?: "auto" | "compatibility";
   trustPromptFor?: string;
+  /** Ask for a password when connecting to this host (answered with session_auth_answer). */
+  passwordPromptFor?: string;
   // agent B: tunnels and history
   /** Name the jump-chain hop in that trust prompt. */
   trustPromptHop?: { index: number; total: number; label: string };

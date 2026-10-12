@@ -82,6 +82,8 @@ pub(crate) struct Entry {
     connection: Mutex<Option<Arc<VerifiedConnection>>>,
     /// The session's SFTP channel, opened on first use.
     sftp: Mutex<Option<Arc<Sftp>>>,
+    /// A files-only connection: it has no terminal, so input, resizing and snippets are refused.
+    files_only: bool,
     // agent B: tunnels and history
     /// The saved host an SSH session was opened for (`None` for local terminals).
     pub(crate) host_id: Option<String>,
@@ -202,6 +204,7 @@ impl Sessions {
         generation: u32,
         sink: Arc<dyn SessionSink>,
         host_id: Option<String>,
+        files_only: bool,
     ) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
         let id = random_token()?;
         let (input, input_rx) = mpsc::channel(64);
@@ -216,6 +219,7 @@ impl Sessions {
             prompts: Mutex::new(Prompts::default()),
             connection: Mutex::new(None),
             sftp: Mutex::new(None),
+            files_only,
             host_id,
         });
         let mut entries = self.entries();
@@ -253,7 +257,7 @@ impl Sessions {
             }
         }
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()))?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), false)?;
         let sink: Arc<dyn SessionSink> = entry.relay.clone();
         let this = Arc::clone(self);
         let session_id = id.clone();
@@ -263,6 +267,45 @@ impl Sessions {
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
+    }
+
+    /// Opens a files-only connection to a saved SSH host: host-key trust and sign-in exactly as
+    /// for a terminal (same prompts, same refusal of a changed key), then the SFTP subsystem and
+    /// nothing else. The session belongs to the calling window like any other and is closed
+    /// with `close`.
+    pub async fn open_files(
+        self: &Arc<Self>,
+        owner: &str,
+        host_id: &str,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        let endpoint = self.vault.host_endpoint(host_id).await?;
+        if !matches!(endpoint.protocol, HostProtocol::Ssh) {
+            return Err(invalid("Files are available for SSH hosts only."));
+        }
+        let plan = self.vault.connection_plan(host_id).await?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), true)?;
+        // Nothing is ever sent to a terminal here: input, resize and snippets are refused before
+        // they would reach this channel.
+        drop(input_rx);
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let session_id = id.clone();
+        tokio::spawn(async move {
+            let ctx = TaskContext::new(&this, &session_id, &entry, &sink);
+            let body = run_files(&ctx, plan);
+            this.supervise(&session_id, &entry, &sink, body).await;
+        });
+        Ok(SessionOpened { session_id: id })
+    }
+
+    /// A terminal session the caller owns (files-only connections have none).
+    fn terminal(&self, owner: &str, session_id: &str) -> Result<Arc<Entry>, IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        if entry.files_only {
+            return Err(invalid("This connection is for files only; it has no terminal."));
+        }
+        Ok(entry)
     }
 
     /// A Telnet session: says first that nothing is encrypted, then connects (no host-key check
@@ -275,7 +318,7 @@ impl Sessions {
         rows: u16,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
-        let (id, entry, input_rx) = self.register(owner, endpoint.generation, sink, None)?;
+        let (id, entry, input_rx) = self.register(owner, endpoint.generation, sink, None, false)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -299,7 +342,7 @@ impl Sessions {
         encoding: tyrminal_contracts::TerminalEncoding,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
-        let (id, entry, input_rx) = self.register(owner, generation, sink, None)?;
+        let (id, entry, input_rx) = self.register(owner, generation, sink, None, false)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -355,7 +398,7 @@ impl Sessions {
         let shell = shell
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
-        let (id, entry, input_rx) = self.register(owner, generation, sink, None)?;
+        let (id, entry, input_rx) = self.register(owner, generation, sink, None, false)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -458,12 +501,7 @@ impl Sessions {
         if let Some(sftp) = cached {
             return Ok((entry, sftp));
         }
-        let sftp = Arc::new(conn.open_sftp().await.map_err(|e| match e {
-            SshError::ChannelDenied | SshError::RequestDenied => {
-                err(ErrorCode::ChannelDenied, "This server does not offer file access (SFTP).")
-            }
-            other => from_ssh(&other),
-        })?);
+        let sftp = Arc::new(conn.open_sftp().await.map_err(|e| sftp_open_error(&e))?);
         *entry.sftp.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sftp));
         Ok((entry, sftp))
     }
@@ -886,7 +924,7 @@ impl Sessions {
         if data.len() > MAX_TERMINAL_INPUT_CHUNK {
             return Err(err(ErrorCode::LimitExceeded, "That input is too large to send at once."));
         }
-        let entry = self.authorize(owner, session_id)?;
+        let entry = self.terminal(owner, session_id)?;
         if data.is_empty() {
             return Ok(());
         }
@@ -906,7 +944,7 @@ impl Sessions {
         bracketed: bool,
     ) -> Result<(), IpcError> {
         // Ownership first: a wrong window learns nothing about which snippets exist.
-        let entry = self.authorize(owner, session_id)?;
+        let entry = self.terminal(owner, session_id)?;
         let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
         let bytes = snippet_bytes(&text, mode, bracketed);
         for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
@@ -919,7 +957,7 @@ impl Sessions {
         if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION {
             return Err(invalid("The terminal size is out of range."));
         }
-        let entry = self.authorize(owner, session_id)?;
+        let entry = self.terminal(owner, session_id)?;
         entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())
     }
 
@@ -1463,6 +1501,16 @@ async fn connect_ssh(
     cols: u16,
     rows: u16,
 ) -> Result<(Linked, ShellReader, ShellWriter), IpcError> {
+    let Linked { conn, hops } = connect_chain(ctx, plan).await?;
+    ctx.state(SessionState::OpeningChannel);
+    let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
+    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
+    Ok((Linked { conn, hops }, reader, writer))
+}
+
+/// Connects, verifies and signs in to every hop and the host. Opens no channel.
+async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked, IpcError> {
     ctx.state(SessionState::Connecting);
     // Bounds simultaneous connection attempts; released when this function returns.
     let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
@@ -1573,12 +1621,65 @@ async fn connect_ssh(
         chain.push(conn);
     }
     let conn = chain.pop().ok_or_else(internal)?;
+    Ok(Linked { conn, hops: chain })
+}
 
+/// How often a files-only connection checks that its link is still up (it has no shell whose
+/// end would tell).
+const FILES_LINK_CHECK: Duration = Duration::from_secs(1);
+
+/// A files-only session: the same verified, signed-in connection as a terminal session, with
+/// the SFTP subsystem opened at once and no shell, command or PTY channel. It lasts until the
+/// user closes it, the vault locks, or the link drops.
+async fn run_files(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
+    let (host_id, generation) = (plan.host_id.clone(), plan.generation);
+    let Linked { conn, hops } = match connect_chain(ctx, plan).await {
+        Ok(linked) => linked,
+        Err(error) => return Outcome::failed(error),
+    };
+    if let Some(n) = conn.negotiated() {
+        ctx.sink.event(SessionEvent::Negotiated {
+            kex: n.kex,
+            host_key: n.host_key,
+            cipher: n.cipher,
+            mac: n.mac,
+            strict_kex: n.strict_kex,
+        });
+    }
     ctx.state(SessionState::OpeningChannel);
-    let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
-    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
-    ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
-    Ok((Linked { conn, hops: chain }, reader, writer))
+    let outcome = match conn.open_sftp().await {
+        Err(e) => Outcome::failed(sftp_open_error(&e)),
+        Ok(sftp) => {
+            ctx.entry.log.note("file access opened (SFTP, no shell)");
+            let conn = Arc::new(conn);
+            *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
+            *ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(sftp));
+            ctx.state(SessionState::Connected);
+            let vault = Arc::clone(&ctx.vault);
+            tokio::spawn(async move {
+                let _ = vault.mark_connected(generation, &host_id).await;
+            });
+            while !conn.is_closed() {
+                tokio::time::sleep(FILES_LINK_CHECK).await;
+            }
+            ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
+            ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
+            Outcome::failed(err(ErrorCode::Disconnected, "The connection to the server was lost."))
+        }
+    };
+    for hop in hops.into_iter().rev() {
+        hop.disconnect().await;
+    }
+    outcome
+}
+
+fn sftp_open_error(e: &SshError) -> IpcError {
+    match e {
+        SshError::ChannelDenied | SshError::RequestDenied => {
+            err(ErrorCode::ChannelDenied, "This server does not offer file access (SFTP).")
+        }
+        other => from_ssh(other),
+    }
 }
 
 async fn run_local(
