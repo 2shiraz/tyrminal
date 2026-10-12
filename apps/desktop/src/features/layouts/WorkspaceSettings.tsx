@@ -1,6 +1,7 @@
 import type { KeyBindingPreference, WorkspacePreferences } from "@tyrminal/contracts";
 import { useEffect, useRef, useState } from "react";
 
+import { requestSection } from "../settings/settingsIndex";
 import { usePreferences } from "../../app/preferences";
 import { BuiltinKinds } from "../highlight/BuiltinKinds";
 import { HighlightRules } from "../highlight/HighlightRules";
@@ -49,62 +50,52 @@ export function workspacePrefs(value: WorkspacePreferences | undefined): Workspa
   return value ?? WORKSPACE_DEFAULTS;
 }
 
-/** Shortcuts, Option/Alt and mouse, and output highlighting (agent C's settings). */
-export function WorkspaceSettings() {
+/** Keyboard shortcuts, Option/Alt and mouse (agent C's settings): the Keyboard shortcuts section. */
+export function ShortcutsSettings() {
   const { prefs, update } = usePreferences();
   const ws = workspacePrefs(prefs.workspace);
   const setWs = (change: (w: WorkspacePreferences) => WorkspacePreferences) =>
     update((p) => ({ ...p, workspace: change(workspacePrefs(p.workspace)) }));
-
   return (
     <>
-      <section id="settings-shortcuts" className="settings-section" aria-labelledby="settings-shortcuts-title">
-        <header>
-          <h2 id="settings-shortcuts-title">{msgC.keys.title}</h2>
-          <p>{msgC.keys.body}</p>
-        </header>
-        <ShortcutList
-          overrides={ws.bindings}
-          onChange={(list) => setWs((w) => ({ ...w, bindings: list }))}
-        />
-        {isMac ? (
-          <Switch
-            label={msgC.keys.optionAsMeta}
-            hint={msgC.keys.optionAsMetaHint}
-            checked={ws.optionAsMeta}
-            onChange={(optionAsMeta) => setWs((w) => ({ ...w, optionAsMeta }))}
-          />
-        ) : (
-          <p className="faint" style={{ fontSize: "var(--text-sm)" }}>
-            {msgC.keys.altAsMeta}
-          </p>
-        )}
-        <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
-      </section>
-
-      <section id="settings-highlight" className="settings-section" aria-labelledby="settings-highlight-title">
-        <header>
-          <h2 id="settings-highlight-title">{msgC.highlight.title}</h2>
-          <p>{msgC.highlight.body}</p>
-        </header>
+      <ShortcutList overrides={ws.bindings} onChange={(list) => setWs((w) => ({ ...w, bindings: list }))} />
+      {isMac ? (
         <Switch
-          label={msgC.highlight.enabled}
-          checked={ws.highlight.enabled}
-          onChange={(enabled) => setWs((w) => ({ ...w, highlight: { ...w.highlight, enabled } }))}
+          id="option-as-meta"
+          label={msgC.keys.optionAsMeta}
+          hint={msgC.keys.optionAsMetaHint}
+          checked={ws.optionAsMeta}
+          onChange={(optionAsMeta) => setWs((w) => ({ ...w, optionAsMeta }))}
         />
-        {ws.highlight.enabled && (
-          <>
-            <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
-            <HighlightRules
-              words={ws.highlight.keywords}
-              onChange={(keywords) => setWs((w) => ({ ...w, highlight: { ...w.highlight, keywords } }))}
-            />
-            <p className="faint" style={{ fontSize: "var(--text-sm)" }}>
-              {msgC.highlight.stored}
-            </p>
-          </>
-        )}
-      </section>
+      ) : (
+        <p className="faint settings-note">{msgC.keys.altAsMeta}</p>
+      )}
+      <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
+    </>
+  );
+}
+
+/** Output highlighting (agent C's settings): the Highlighting section. */
+export function HighlightSettings() {
+  const { prefs, update } = usePreferences();
+  const ws = workspacePrefs(prefs.workspace);
+  const setWs = (change: (w: WorkspacePreferences) => WorkspacePreferences) =>
+    update((p) => ({ ...p, workspace: change(workspacePrefs(p.workspace)) }));
+  return (
+    <>
+      <Switch
+        id="highlight"
+        label={msgC.highlight.enabled}
+        checked={ws.highlight.enabled}
+        onChange={(enabled) => setWs((w) => ({ ...w, highlight: { ...w.highlight, enabled } }))}
+      />
+      {ws.highlight.enabled && (
+        <>
+          <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
+          <HighlightRules words={ws.highlight.keywords} onChange={(keywords) => setWs((w) => ({ ...w, highlight: { ...w.highlight, keywords } }))} />
+          <p className="faint settings-note">{msgC.highlight.stored}</p>
+        </>
+      )}
     </>
   );
 }
@@ -163,10 +154,11 @@ function assign(list: KeyBindingPreference[], action: ActionId, binding: Binding
   return sameBinding(binding, defaultBindings[action]) ? rest : [...rest, toPreference(action, binding)];
 }
 
-// Asked from the command palette: the section scrolls into view and its search takes focus.
+// Asked from the command palette: Settings opens on this section and its search takes focus.
 let showRequested = false;
 export function requestShortcutsSection(): void {
   showRequested = true;
+  requestSection("shortcuts");
 }
 
 function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference[]; onChange: (list: KeyBindingPreference[]) => void }) {
@@ -181,7 +173,6 @@ function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference
   useEffect(() => {
     if (!showRequested) return;
     showRequested = false;
-    document.getElementById("settings-shortcuts")?.scrollIntoView({ block: "start" });
     search.current?.focus();
   }, []);
 
@@ -243,7 +234,7 @@ function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference
 
 
   return (
-    <div className="stack-xs">
+    <div className="stack-xs" data-setting="shortcuts">
       <input
         ref={search}
         className="input"

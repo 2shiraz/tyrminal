@@ -7,7 +7,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, waitForTerminalText } from "./fixtures";
+import { openApp, openSettings, waitForTerminalText } from "./fixtures";
 
 async function connected(page: Page) {
   await openApp(page, { renderer: "compatibility" });
@@ -55,7 +55,7 @@ test("quick forward: suggestions can be turned off for a host and everywhere", a
   expect(await page.evaluate(() => [...(window as unknown as { __mockPortSuggestionsOff: Set<string> }).__mockPortSuggestionsOff])).toHaveLength(1);
 
   // Turned off everywhere in Settings: a new suggestion is not shown.
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Settings/ }).click();
+  await openSettings(page, "Privacy");
   await page.getByRole("switch", { name: /Forwarding suggestions/ }).uncheck();
   await page.getByRole("tab").first().click();
   await suggest(page, 9000);

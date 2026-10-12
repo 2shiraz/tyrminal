@@ -1,0 +1,398 @@
+/* Settings: a nav pane beside one section (docs/design/revamp.md §6). Tokens only, so light and dark
+   themes both follow. Groups carry `.box`/`.box-strip` too; the rules here give them their shape
+   until the shared box primitives land, and come out then. */
+
+.settings-page {
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-panes {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- nav pane */
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.settings-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.settings-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.settings-search input:focus-visible {
+  outline: none;
+}
+
+.settings-search:focus-within {
+  box-shadow: inset 0 0 0 var(--focus-width) var(--focus);
+}
+
+.settings-nav-label {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  height: 30px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+}
+
+.settings-nav-item[aria-current="page"] {
+  border-left-color: var(--accent);
+  background: var(--bg-active);
+  font-weight: var(--weight-medium);
+}
+
+.settings-nav-item:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* ---------------------------------------------------------------- section pane */
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-app);
+}
+
+.settings-section-strip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.settings-section-strip h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.settings-section-strip p {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.settings-section > .notice {
+  border-radius: 0;
+}
+
+.settings-section-body {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  max-width: 760px;
+  padding: var(--space-4);
+}
+
+/* ---------------------------------------------------------------- groups and rows */
+
+.settings-group {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+.settings-group-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-group-strip h3 {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.settings-group-hint {
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.settings-group-rows {
+  display: grid;
+}
+
+/* The one row: label and hint left, the control in a fixed right column. Outside a group (dialogs)
+   a switch row keeps the plain label-left, switch-right layout. */
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.setting-row[data-variant="switch"] {
+  display: flex;
+  justify-content: space-between;
+}
+
+.settings-group .setting-row,
+.settings-group .setting-row[data-variant="switch"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.settings-group .setting-row + .setting-row,
+.settings-group-rows > * + * {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.setting-label {
+  display: grid;
+  gap: 2px;
+  max-width: 60ch;
+}
+
+.setting-label > span:first-child {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.setting-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.setting-row[data-variant="switch"] .setting-control,
+.setting-row[data-variant="action"] .setting-control,
+.setting-row[data-variant="link"] .setting-control {
+  justify-content: flex-end;
+}
+
+.setting-control > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.setting-row[data-variant="control"] .setting-control > :only-child {
+  flex: 1;
+}
+
+[data-setting]:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.settings-note {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------------- colour scheme */
+
+.settings-scheme {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 1100px) {
+  .settings-scheme {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.scheme-list {
+  display: grid;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+
+.scheme-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 14px auto 16px;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.scheme-row:hover {
+  background: var(--bg-hover);
+}
+
+.scheme-row[aria-checked="true"] {
+  background: var(--bg-selected);
+}
+
+.scheme-row:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.scheme-radio {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+}
+
+.scheme-row[aria-checked="true"] .scheme-radio {
+  border: 4px solid var(--accent);
+}
+
+.scheme-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheme-kind {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.scheme-swatch {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.scheme-swatch > span {
+  width: 10px;
+  height: 12px;
+}
+
+.scheme-warn {
+  display: inline-flex;
+  color: var(--warning);
+}
+
+.settings-scheme-preview {
+  overflow: hidden;
+}
+
+.settings-scheme-preview .terminal-preview {
+  border: 0;
+  border-radius: 0;
+}
+
+.terminal-preview {
+  height: 220px;
+  padding: 0;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- search results */
+
+.settings-results {
+  display: grid;
+  max-width: 760px;
+  margin: var(--space-4);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  list-style: none;
+}
+
+.settings-results li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-results button {
+  display: block;
+  width: 100%;
+  height: 28px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-results button:hover {
+  background: var(--bg-hover);
+}
+
+.settings-results button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}

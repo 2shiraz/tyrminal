@@ -2,7 +2,7 @@
 // backend. Native enforcement of the same rules is tested in crates/core and tests/native.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, terminalText, waitForTerminalText } from "./fixtures";
+import { openApp, openSettings, terminalText, waitForTerminalText } from "./fixtures";
 import { pointOf } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
@@ -264,9 +264,10 @@ test("multi-line paste is previewed; single-line paste goes straight through", a
 
 test("theme and terminal preferences apply live and are persisted natively", async ({ page }) => {
   await openApp(page, { theme: "dark" });
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Appearance");
   await page.locator(".segmented label", { hasText: "Light" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Terminal" }).click();
   await page.getByRole("radio", { name: /Solarized Light/ }).click();
   await expect.poll(async () => (await calls(page, "prefs_set")).at(-1)?.args).toMatchObject({
     prefs: { theme: "light", terminal: { scheme: "solarized-light" } },
@@ -358,7 +359,7 @@ test("a dropped SSH session reconnects on its own with backoff; Stop retrying an
 
 test("backup: export reports the file; restore checks first and needs an explicit replace", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Backup");
   await page.getByRole("button", { name: "Save a backup…" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Backup saved as tyrminal-backup-2026-10-11.tyrbackup" })).toBeVisible();
 
@@ -389,7 +390,7 @@ test("backup: export reports the file; restore checks first and needs an explici
 
 test("quick unlock: turned on with the passphrase, then the unlock screen offers it", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Vault and unlock");
   const setting = page.getByTestId("quick-unlock");
   await expect(setting.getByRole("status")).toHaveText("Quick unlock is off.");
   await setting.getByRole("button", { name: "Turn on quick unlock…" }).click();

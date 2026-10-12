@@ -1,4 +1,4 @@
-// Compromised-password check (SEC-11) in Settings → Security. Off by default; the text says
+// Compromised-password check (SEC-11) in Settings → Password check. Off by default; the text says
 // exactly what leaves the computer before the user can turn it on. Runs only on request.
 
 import type { PasswordCheckPreferences, PasswordCheckReport, PasswordCheckStatus } from "@tyrminal/contracts";
@@ -49,12 +49,9 @@ export function PasswordCheckSetting() {
 
   return (
     <div className="stack-sm" data-testid="password-check">
-      <h3 style={{ fontSize: "var(--text-md)" }}>{msgPC.title}</h3>
-      <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-        {msgPC.body}
-      </p>
       <Notice tone="info">{msgPC.whatIsSent}</Notice>
       <Switch
+        id="password-check"
         label={msgPC.enable}
         hint={msgPC.enableHint}
         checked={settings.enabled}

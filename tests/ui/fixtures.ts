@@ -73,6 +73,12 @@ export async function openApp(page: Page, options: MockOptions = {}) {
 }
 
 /** Visible terminal text. Requires the DOM renderer (the GPU renderer draws to a canvas). */
+/** Opens Settings, and with `section` that section (Settings shows one section at a time). */
+export async function openSettings(page: Page, section?: string) {
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Settings/ }).click();
+  if (section) await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: section, exact: true }).click();
+}
+
 export function terminalText(page: Page): Promise<string> {
   return page.evaluate(() =>
     [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows")].map((e) => (e as HTMLElement).innerText.replaceAll("\u00a0", " ")).join("\n"),
