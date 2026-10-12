@@ -2080,7 +2080,7 @@ kbd,
 .panel-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden auto;
   padding: var(--space-3);
 }
 
@@ -2118,25 +2118,37 @@ kbd,
   width: auto;
 }
 
+/* Where snippets go: a slim strip under the panel head. */
 .panel-target {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
-  margin: 0 var(--space-3) var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
   font-size: var(--text-xs);
 }
 
 .panel-target[data-ready="false"] {
-  border-style: dashed;
   color: var(--text-muted);
 }
 
+/* Snippets (revamp §7): folders are strips with a count, snippets dense rows with the command's
+   first line in muted mono. Nothing is wider than its container. */
+.snippet-list {
+  display: grid;
+  min-width: 0;
+}
+
 .folder {
-  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.folder + .folder {
+  margin-top: var(--space-2);
 }
 
 .folder-head {
@@ -2144,10 +2156,11 @@ kbd,
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 28px;
-  padding: 0 6px;
+  min-width: 0;
+  height: var(--row-dense);
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -2156,11 +2169,15 @@ kbd,
 }
 
 .folder-head:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
+.folder-head .box-count {
+  margin-left: auto;
+}
+
 .folder-head svg.chevron {
+  flex: none;
   transition: transform var(--duration-press) var(--ease-out);
 }
 
@@ -2168,29 +2185,38 @@ kbd,
   transform: rotate(90deg);
 }
 
+.folder ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .snippet {
-  display: grid;
-  gap: 6px;
-  margin: 4px 0;
-  padding: 10px var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
-  transition:
-    border-color var(--duration-press) var(--ease-out),
-    box-shadow var(--duration-press) var(--ease-out);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--box-rule);
 }
 
 .snippet:hover,
 .snippet:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-1);
+  background: var(--bg-hover);
+}
+
+.snippet-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
 }
 
 .snippet-name {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
@@ -2201,14 +2227,53 @@ kbd,
   font: var(--text-xs) / 1.5 var(--font-mono);
   white-space: pre;
   text-overflow: ellipsis;
-  max-height: 3em;
   font-variant-ligatures: none;
 }
 
 .snippet-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+/* In the side panel Run shows on hover or when the row has focus; Paste is in the row's menu. */
+.snippet-list[data-compact] .snippet-run {
+  opacity: 0;
+}
+
+.snippet-list[data-compact] .snippet:hover .snippet-run,
+.snippet-list[data-compact] .snippet:focus-within .snippet-run {
+  opacity: 1;
+}
+
+.snippets-panel-body {
+  padding: var(--space-2) 0 0;
+}
+
+.snippets-panel-body .row-flex {
+  padding: 0 var(--space-3);
+}
+
+/* On the Snippets page each folder is a box. */
+.snippet-list:not([data-compact]) .folder {
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
+}
+
+.snippet-list:not([data-compact]) .folder li:last-child {
+  border-bottom: 0;
+}
+
+.snippet-list:not([data-compact]) .folder-row:has(> .folder-head[aria-expanded="false"]) {
+  border-bottom: 0;
+}
+
+.snippet :focus-visible,
+.folder-head:focus-visible {
+  outline-offset: -2px;
 }
 
 /* ---------- status bar ---------- */
@@ -3741,16 +3806,20 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* The side panel's sections: snippets, history, appearance (TRM-14). */
+/* Section tabs under the panel head: a strip of square tabs, the current one with the live edge. */
 .panel-sections {
   display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) 0;
+  flex: none;
+  min-width: 0;
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .panel-section-tab {
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
-  padding: var(--space-1) var(--space-2);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
@@ -3763,9 +3832,14 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .panel-section-tab[aria-selected="true"] {
-  background: var(--bg-inset);
+  background: var(--bg-sidebar);
+  box-shadow: var(--edge-live);
   color: var(--text);
   font-weight: var(--weight-medium);
+}
+
+.panel-section-tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .panel-section {
@@ -3775,10 +3849,22 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-height: 0;
 }
 
+/* Connection history in the side panel: dense rows on the panel's edges, Open on hover or focus. */
+.panel-history-body {
+  padding: 0;
+}
+
+.panel-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--box-rule);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .panel-history {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3788,18 +3874,48 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--box-rule);
   font-size: var(--text-sm);
 }
 
+.panel-history li:hover,
+.panel-history li:focus-within {
+  background: var(--bg-hover);
+}
+
 .panel-history li[data-current] {
-  font-weight: var(--weight-medium);
+  box-shadow: var(--edge-select);
 }
 
 .panel-history .row-main {
-  display: flex;
+  display: grid;
   flex: 1;
-  flex-direction: column;
   min-width: 0;
+}
+
+.panel-history-name {
+  font-weight: var(--weight-medium);
+}
+
+.panel-history-sub {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.panel-history-open {
+  opacity: 0;
+}
+
+.panel-history li:hover .panel-history-open,
+.panel-history li:focus-within .panel-history-open {
+  opacity: 1;
+}
+
+.panel-history :focus-visible {
+  outline-offset: -2px;
 }
 
 /* Highlight kinds (TRM-07): a toggle per kind with a sample in the scheme's own colors. */
@@ -3944,6 +4060,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  padding-right: var(--space-1);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .folder-row > .folder-head {

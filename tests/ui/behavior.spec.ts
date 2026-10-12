@@ -119,6 +119,33 @@ test("snippets: target is the visible session, multi-line runs only after a prev
   expect(await calls(page, "snippet_send")).toHaveLength(2);
 });
 
+test("snippets panel: dense rows; Paste is in the row menu, double-click runs, nothing overflows sideways", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+S");
+  const panel = page.getByRole("complementary", { name: "Snippets" });
+  const row = panel.locator('[data-snippet="Disk usage"]');
+  // The command's first line is shown as text, exactly as it will be sent.
+  await expect(row).toContainText("df -h");
+  // No Paste button in the row; it is the first item of the row's menu.
+  await expect(row.getByRole("button", { name: "Paste Disk usage into the terminal" })).toHaveCount(0);
+  await row.getByRole("button", { name: "More actions for Disk usage" }).click();
+  await page.getByRole("menuitem", { name: "Paste Disk usage into the terminal" }).click();
+  await expect.poll(async () => (await calls(page, "snippet_send")).map((c) => (c.args as { mode: string }).mode)).toEqual(["paste"]);
+  // Double-clicking the row runs it, as Run does.
+  await row.locator(".snippet-name").dblclick();
+  await expect.poll(async () => (await calls(page, "snippet_send")).map((c) => (c.args as { mode: string }).mode)).toEqual(["paste", "run"]);
+  // Nothing in the panel is wider than the panel, and it cannot scroll sideways.
+  const sticking = await panel.evaluate((el) => {
+    const body = el.querySelector<HTMLElement>(".panel-body");
+    if (!body) return ["no panel body"];
+    const right = body.getBoundingClientRect().right;
+    return [...body.querySelectorAll<HTMLElement>("*")].filter((e) => e.getBoundingClientRect().right > right + 0.5).map((e) => e.className);
+  });
+  expect(sticking).toEqual([]);
+  await expect(panel.locator(".panel-body")).toHaveCSS("overflow-x", "hidden");
+});
+
 test("snippets page has no target, so nothing can be sent from it", async ({ page }) => {
   await openApp(page);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).click();
