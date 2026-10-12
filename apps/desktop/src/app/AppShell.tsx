@@ -1025,7 +1025,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} onLocal={openLocal} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

@@ -96,7 +96,16 @@ a tab, and installing a public key on the connected server.
 
 ## Hosts and groups
 
-**Hosts** lists your saved servers as a grid or a list. Each host has an address, port, user name
+**Hosts** is the first page. At the top, a search bar finds hosts and groups as you type; Enter
+or **Connect** opens the first match, and an address or `user@host` that matches no saved host
+starts a quick connect. Under it: **New host** (its menu adds a group, imports, or finds servers on
+the network), **Terminal** for this computer, **Serial**, and on the right the tag filter, the sort
+order and List or Cards. **Favourites** come first, then **Groups** (open one to see its subgroups
+and its own hosts, with a breadcrumb back), then **Hosts**: those in no group, or every host with
+**Show all hosts**. A search lists every match with the group it lives in. Each host shows its OS
+logo when its OS is set, otherwise a server mark.
+
+Hosts lists your saved servers as cards or a list. Each host has an address, port, user name
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
 Hosts opens as a list. It remembers the layout (list or cards), the sort order and the group you picked, also after
@@ -161,9 +170,12 @@ Hosts select like files in Finder or Explorer, in both the list and cards:
   is refused, never cut short.
 
 Selected hosts are tinted with an accent edge on the left; there are no checkboxes. With two or
-more hosts selected, a one-line strip above the list shows the count and offers **Connect**,
-**Open in SFTP**, **Move to group**, **Set OS**, tags, **Delete** (after a confirmation) and
-**Clear**. Every host still asks for
+more hosts selected, a slim strip above the list shows the count with **Connect**, **Move to
+group**, **Delete** (after a confirmation), **More…** and **Clear**. Right-clicking a selected host
+(or its **…**, or Shift+F10) opens the menu for the whole selection: connect in tabs or one split
+tab, open in SFTP, run a snippet on them, move, set the OS icon, add or remove a tag or the
+production tag, duplicate, copy their addresses, or delete them. Right-clicking a host outside the
+selection selects just that host first. Every host still asks for
 its own host-key and sign-in decisions in its own pane, and production hosts are confirmed first
 (below).
 

@@ -2,6 +2,7 @@
 @import "./motion.css";
 @import "./fonts.css";
 @import "./box.css";
+@import "./hosts.css";
 
 /* ===================================================================== base */
 
@@ -3780,9 +3781,36 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* agent D: inventory and snippets */
+/* The host tile: an OS logo (or a server glyph) on a neutral square. */
 .os-icon {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-inset);
+  color: var(--os-dark, var(--text-muted));
+}
+
+:root[data-theme="light"] .os-icon {
+  color: var(--os-light, var(--text-muted));
+}
+
+.os-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.os-icon-sm {
+  width: 28px;
+  height: 28px;
+}
+
+.os-icon-sm svg {
+  width: 16px;
+  height: 16px;
 }
 
 .connect-all-list {
@@ -4757,14 +4785,15 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .host-card[data-selected="true"],
 .tile[data-selected="true"],
 .list > li[data-selected="true"] {
-  /* The row tint plus the accent edge on the left: selection reads without any checkbox. */
-  background: var(--bg-selected);
+  /* The row tint plus the accent edge on the left: selection reads without any checkbox. The
+     tint is laid over the row's own colour, not over the list's divider grey behind it. */
+  background: linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg-raised);
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
   box-shadow: var(--edge-select);
 }
 
 .list > li[data-selected="true"]:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 16%, transparent)), var(--bg-raised);
 }
 
 /* The selection strip (two or more hosts): one compact line above the list. */

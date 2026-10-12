@@ -622,6 +622,9 @@ pub struct HostsViewPreferences {
     pub layout: HostsLayout,
     pub sort: HostsSort,
     pub filter: HostsFilter,
+    /// Connections made by double-click or Enter on Hosts, counted up to the few that show the
+    /// "Double-click to connect" hint.
+    pub connect_hint_uses: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
