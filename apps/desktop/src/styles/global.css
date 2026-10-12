@@ -1771,9 +1771,19 @@ kbd,
   grid-area: 1 / 1;
 }
 
-/* The dot only shows state; clicks in the slot go to the close button. */
-.tab-lead .status-dot {
+/* A plain 8 px dot in tabs (no halo); it only shows state, and clicks in the slot go to the close
+   button. */
+.tab-lead .status-dot,
+.tab-lead .status-dot[data-unread] {
+  box-shadow: none;
+  outline: none;
   pointer-events: none;
+}
+
+/* Unread output in a background tab shows in its name rather than as a ring round the dot. */
+.tab[data-unread]:not([aria-selected="true"]) .tab-label {
+  color: var(--text);
+  font-weight: var(--weight-medium);
 }
 
 .tab-close {
