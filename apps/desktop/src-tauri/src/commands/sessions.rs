@@ -3,7 +3,9 @@ use std::sync::Arc;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::{State, WebviewWindow};
 use tyrminal_core::SessionSink;
-use tyrminal_core::contracts::{ErrorCode, IpcError, SessionEvent, SessionOpened, TrustDecision};
+use tyrminal_core::contracts::{
+    ContainerEngine, ContainerList, ErrorCode, IpcError, SessionEvent, SessionOpened, TrustDecision,
+};
 
 use crate::state::AppState;
 
@@ -199,4 +201,37 @@ pub async fn session_diagnostics(
     session_id: String,
 ) -> Result<Vec<String>, IpcError> {
     state.core()?.sessions.diagnostics(window.label(), &session_id)
+}
+
+/// P-33: the running Docker or Podman containers on the host of an SSH session this window owns.
+#[tauri::command]
+pub async fn containers_list(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<ContainerList, IpcError> {
+    state.core()?.sessions.list_containers(window.label(), &session_id).await
+}
+
+/// P-33: a shell in a container, opened as a new session on the connection of `session_id`.
+/// The core refuses any `container_id` that is not a container ID.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn container_session_open(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    engine: ContainerEngine,
+    container_id: String,
+    cols: u16,
+    rows: u16,
+    output: Channel<InvokeResponseBody>,
+    events: Channel<SessionEvent>,
+) -> Result<SessionOpened, IpcError> {
+    let sink = Arc::new(ChannelSink { output, events });
+    state
+        .core()?
+        .sessions
+        .open_container_shell(window.label(), &session_id, engine, &container_id, cols, rows, sink)
+        .await
 }

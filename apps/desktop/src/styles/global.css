@@ -3908,6 +3908,21 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--warning);
 }
 
+/* P-33: containers on the connected host (plain; the visual overhaul owns the look). */
+.containers {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.containers th,
+.containers td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .connection-log {
   max-height: 360px;
   overflow: auto;

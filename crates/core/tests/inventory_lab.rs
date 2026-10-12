@@ -1045,3 +1045,130 @@ async fn a_refused_key_is_named_and_installing_it_with_a_password_lets_it_sign_i
     assert_eq!(out.exit_status, Some(0), "{}", out.stderr);
     s.close(WINDOW, &opened.session_id).unwrap();
 }
+
+/// Everything a session sends: terminal output and events.
+struct Captured {
+    output: mpsc::UnboundedSender<Vec<u8>>,
+    events: mpsc::UnboundedSender<SessionEvent>,
+}
+
+impl SessionSink for Captured {
+    fn output(&self, data: Vec<u8>) -> bool {
+        self.output.send(data).is_ok()
+    }
+    fn event(&self, event: SessionEvent) -> bool {
+        self.events.send(event).is_ok()
+    }
+}
+
+/// P-33 against the real lab, whatever engine its machine has: listing runs the fixed command
+/// on a real exec channel and reports what it found (no engine; an engine that refused, with its
+/// own error as it is; or containers, each with a container ID). An ID that is not a container ID
+/// is refused before any session or channel exists. A container shell for a container that does
+/// not exist opens a real PTY channel on the session's connection, and the failure is the remote
+/// side's own message and exit status, never retried another way. Shells in a running container,
+/// and that they stop with their session or the lock, are in `containers_lab.rs`.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn container_listing_and_shells_use_the_sessions_connection_and_refuse_bad_ids() {
+    use tyrminal_core::contracts::ContainerEngine;
+
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let session = connected_session(&core, &lab, "a", &key.id).await;
+    let s = &core.sessions;
+
+    let list = s.list_containers(WINDOW, &session).await.unwrap();
+    let log = s.diagnostics(WINDOW, &session).unwrap().join("\n");
+    match (list.engine, &list.problem) {
+        (None, problem) => {
+            assert_eq!((list.containers.len(), problem), (0, &None));
+            assert!(log.contains("neither Docker nor Podman"), "{log}");
+        }
+        (Some(_), Some(problem)) => {
+            // For example the lab user may not use the engine: its error, as it is.
+            assert!(list.containers.is_empty() && !problem.is_empty(), "{list:?}");
+            assert!(log.contains("reported an error"), "{log}");
+        }
+        (Some(_), None) => assert!(list.containers.iter().all(|c| tyrminal_core::containers::valid_id(&c.id))),
+    }
+    // Another window learns nothing.
+    assert_eq!(s.list_containers("other", &session).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let (output, _) = mpsc::unbounded_channel();
+    let (events, _) = mpsc::unbounded_channel();
+    let sink = Arc::new(Captured { output, events });
+    let before = s.count();
+    for bad in ["my-container", "4f1c2b3a9d8e; id", "4F1C2B3A9D8E", "4f1c2b3a9d8e$(id)", "--privileged", "4f1c2b3a9d8"]
+    {
+        let refused = s
+            .open_container_shell(WINDOW, &session, ContainerEngine::Docker, bad, 80, 24, sink.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput, "{bad:?}");
+    }
+    assert_eq!(s.count(), before, "no session was registered for a refused ID");
+
+    for engine in [ContainerEngine::Docker, ContainerEngine::Podman] {
+        let (output, mut out_rx) = mpsc::unbounded_channel();
+        let (events, mut ev_rx) = mpsc::unbounded_channel();
+        let opened = s
+            .open_container_shell(
+                WINDOW,
+                &session,
+                engine,
+                "4f1c2b3a9d8e",
+                80,
+                24,
+                Arc::new(Captured { output, events }),
+            )
+            .await
+            .unwrap();
+        let (mut states, mut closed) = (Vec::new(), None);
+        while closed.is_none() {
+            match tokio::time::timeout(WAIT, ev_rx.recv()).await.expect("timed out").expect("events ended") {
+                SessionEvent::State { state, hop } => {
+                    assert_eq!(hop, None);
+                    states.push(state);
+                }
+                SessionEvent::Closed { error, exit_status } => closed = Some((error, exit_status)),
+                _ => {}
+            }
+        }
+        let mut text = Vec::new();
+        while let Ok(chunk) = out_rx.try_recv() {
+            text.extend(chunk);
+        }
+        let text = String::from_utf8_lossy(&text);
+        assert_eq!(states[..2], [SessionState::OpeningChannel, SessionState::Connected], "{engine:?}");
+        // No such engine (127, from the remote shell), or the engine's own refusal: no such
+        // container, or no permission. Either way the session ends with that status.
+        let (error, status) = closed.unwrap();
+        assert_eq!(error, None, "{engine:?}: {text}");
+        assert!(matches!(status, Some(code) if code != 0), "{engine:?}: {status:?} {text}");
+        if status == Some(127) {
+            assert!(text.contains("not found"), "{engine:?}: {text}");
+        } else {
+            assert!(
+                ["No such container", "no such container", "permission denied"].iter().any(|m| text.contains(m)),
+                "{engine:?}: the engine's own message: {text}"
+            );
+        }
+        assert!(!text.contains("sudo"));
+        let log = s.diagnostics(WINDOW, &opened.session_id).unwrap().join("\n");
+        assert!(log.contains("container 4f1c2b3a9d8e"), "{log}");
+    }
+    // The SSH session the shells ran over is still up.
+    assert!(s.list_containers(WINDOW, &session).await.is_ok());
+}

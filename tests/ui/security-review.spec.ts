@@ -89,7 +89,7 @@ test("a password host opens the host editor; choosing a key clears the finding",
   const dialog = page.getByRole("dialog", { name: "Edit host" });
   await expect(dialog.getByLabel("Address")).toHaveValue("203.0.113.24");
   await dialog.getByText("Use a key from the keychain").click();
-  await dialog.getByLabel("Choose a key").selectOption({ label: "Deploy key (ssh-ed25519)" });
+  await dialog.getByLabel("Choose a key", { exact: true }).selectOption({ label: "Deploy key (ssh-ed25519)" });
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden();
   await expect(finding(section, '"edge-cache" signs in with a password')).toHaveCount(0);

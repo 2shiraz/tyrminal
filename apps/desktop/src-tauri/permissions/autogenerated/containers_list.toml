@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-containers-list"
+description = "Enables the containers_list command without any pre-configured scope."
+commands.allow = ["containers_list"]
+
+[[permission]]
+identifier = "deny-containers-list"
+description = "Denies the containers_list command without any pre-configured scope."
+commands.deny = ["containers_list"]

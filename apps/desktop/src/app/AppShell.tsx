@@ -27,6 +27,7 @@ import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
+import { ContainersDialog, engineName } from "../features/terminal/ContainersDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
 // command history
@@ -177,6 +178,8 @@ function Shell() {
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
+  // P-33: the containers dialog for an SSH session (its host label).
+  const [containersOf, setContainersOf] = useState<{ sessionId: string; label: string } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -988,6 +991,14 @@ function Shell() {
                 }
               : undefined
           }
+          onContainers={
+            pane?.target.kind === "ssh" && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (sessionId) setContainersOf({ sessionId, label: pane.label });
+                }
+              : undefined
+          }
           onSearchSessions={ws.tabs.length > 0 ? () => setSearchingSessions(true) : undefined}
           onCommandOutput={pane && focusedHandle()?.commands().length ? () => setOutputFor(pane.id) : undefined}
           onShellIntegration={
@@ -1177,6 +1188,26 @@ function Shell() {
               .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
               .then(() => handle.focus())
               .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {containersOf && (
+        <ContainersDialog
+          sessionId={containersOf.sessionId}
+          host={containersOf.label}
+          onOpen={(engine, container) => {
+            const name = container.name || container.id.slice(0, 12);
+            open(
+              { kind: "container", sessionId: containersOf.sessionId, engine, containerId: container.id },
+              msgD.containers.tabLabel(name),
+              msgD.containers.identity(containersOf.label, engineName(engine)),
+            );
+            setContainersOf(null);
+          }}
+          onClose={() => {
+            setContainersOf(null);
+            focusedHandle()?.focus();
           }}
         />
       )}
