@@ -834,3 +834,59 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
     }
   });
 });
+
+describe("broadcast with a pane left out, on real shells (P-13)", { concurrency: false }, () => {
+  test("only the confirmed panes receive typed input; the one left out keeps its own", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      const runCommand = async (name) => {
+        await s.chord(PALETTE);
+        const input = await s.waitFor("dialog.palette input");
+        await s.type(input, name);
+        await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+        await s.chord([KEYS.enter]);
+        await s.waitGone("dialog.palette");
+      };
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await runCommand("Split pane right");
+      await runCommand("Split pane right");
+      await runCommand("Arrange panes in a grid");
+      await s.until(() => s.execute(`return [...document.querySelectorAll(".pane .status-dot")].filter((d) => d.dataset.tone === "ok").length === 3 || null`), {
+        describe: "three connected panes",
+        timeout: 30_000,
+      });
+      await runCommand("Type into every pane");
+      await s.waitFor('dialog[role="alertdialog"] input[type="checkbox"]');
+      const boxes = await s.findAll('dialog[role="alertdialog"] input[type="checkbox"]');
+      assert.equal(boxes.length, 3, "every pane is listed");
+      // Leave out the second pane.
+      await s.click(boxes[1]);
+      await s.clickButton("Type into 2 panes", { within: 'dialog[role="alertdialog"]' });
+      await s.waitGone('dialog[role="alertdialog"]');
+      await s.until(() => s.execute(`return document.querySelectorAll('.pane[data-broadcast="true"]').length === 2 && document.querySelectorAll('.pane[data-broadcast="excluded"]').length === 1 || null`), {
+        describe: "two receiving panes, one left out",
+      });
+
+      // Typed in a confirmed pane once every shell shows a prompt. A literal token: the local
+      // shell differs per platform; the point is where the input goes.
+      await s.until(
+        () => s.execute(`return [...document.querySelectorAll(".pane .xterm-rows")].every((e) => /[$%#>]\\s*$/m.test(e.innerText.replaceAll("\\u00a0", " "))) || null`),
+        { describe: "prompts in all panes", timeout: 30_000 },
+      );
+      const focusedReceiving = await s.execute(`return document.querySelector('.pane[data-focused="true"]')?.dataset.broadcast ?? null`);
+      assert.equal(focusedReceiving, "true", "typing from a confirmed pane");
+      await s.type(await s.waitFor('.pane[data-focused="true"] .xterm-helper-textarea'), "echo BCAST-TOKEN-7\n");
+      const where = () =>
+        s.execute(`return [...document.querySelectorAll(".pane")].map((p) => (p.dataset.broadcast ?? "") + ":" + (p.querySelector(".xterm-rows")?.textContent.includes("BCAST-TOKEN-7") ? "yes" : "no"))`);
+      await s.until(async () => ((await where()).filter((x) => x.endsWith("yes")).length === 2 ? true : null), { describe: "token in two panes" });
+      await new Promise((r) => setTimeout(r, 500));
+      assert.deepEqual((await where()).sort(), ["excluded:no", "true:yes", "true:yes"]);
+    } finally {
+      await app.quit();
+    }
+  });
+});

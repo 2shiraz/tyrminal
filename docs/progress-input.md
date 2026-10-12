@@ -10,7 +10,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | # | Slice | State |
 |---|---|---|
 | 1 | IME composition (TRM-11) | Done: UI tests over Chromium's IME path, native test on Linux |
-| 2 | Broadcast targets can be left out (P-13) | Done: UI tests |
+| 2 | Broadcast targets can be left out (P-13) | Done: UI tests; native test on Linux (real local shells) |
 | 3 | Highlight patterns with bounded matching (TRM-07) | Done: core, UI and native tests on Linux |
 | 4 | Ordered IME commits (TRM-11 fix) | Done: UI stress tests; native check on Linux |
 | 5 | Palette completeness (UX-03), Connection details view (CON-15) | Done: UI tests; native waits for `session_diagnostics` |
