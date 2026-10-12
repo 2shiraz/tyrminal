@@ -170,6 +170,7 @@ pub(crate) async fn prepare_download(
 }
 
 async fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = tokio::fs::DirBuilder::new();
     #[cfg(unix)]
     builder.mode(0o700);
