@@ -242,17 +242,27 @@ pub(crate) struct WorkflowRecord {
     pub group_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_id: Option<String>,
+    /// Environment variables sent with sessions, in order. Values are sensitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<StoredEnv>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct StoredEnv {
+    pub name: String,
+    pub value: Zeroizing<String>,
 }
 
 impl WorkflowRecord {
     pub fn is_empty(&self) -> bool {
-        self.identity_id.is_none()
+        self.identity_id.is_none() && self.env.is_empty()
     }
 
     pub fn content_len(&self) -> usize {
         self.host_id.as_ref().map_or(0, String::len)
             + self.group_id.as_ref().map_or(0, String::len)
             + self.identity_id.as_ref().map_or(0, String::len)
+            + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
     }
 }
 

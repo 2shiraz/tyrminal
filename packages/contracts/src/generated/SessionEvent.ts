@@ -29,4 +29,4 @@ echo: boolean, hop: ChainPosition | null, } | { "type": "negotiated", kex: strin
 /**
  * Empty for AEAD ciphers.
  */
-mac: string, strictKex: boolean, } | { "type": "banner", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
+mac: string, strictKex: boolean, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };

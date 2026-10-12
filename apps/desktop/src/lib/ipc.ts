@@ -380,3 +380,11 @@ export const identities = {
   assign: (target: import("@tyrminal/contracts").SettingsTarget, identityId: string | null) =>
     call<import("@tyrminal/contracts").IdentityAssignment>("identity_assign", { target, identityId }),
 };
+
+/** Environment variables of hosts and groups, and what a host ends up sending. */
+export const environment = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").EnvVar[]>("env_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, vars: import("@tyrminal/contracts").EnvVar[]) =>
+    call<import("@tyrminal/contracts").EnvVar[]>("env_set", { target, vars }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
+};

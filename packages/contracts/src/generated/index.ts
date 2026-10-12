@@ -11,6 +11,8 @@ export type { ConflictChoice } from "./ConflictChoice";
 export type { CursorStyle } from "./CursorStyle";
 export type { EditStatus } from "./EditStatus";
 export type { EditorApp } from "./EditorApp";
+export type { EffectiveEnvVar } from "./EffectiveEnvVar";
+export type { EnvVar } from "./EnvVar";
 export type { ErrorCode } from "./ErrorCode";
 export type { ExecutionTarget } from "./ExecutionTarget";
 export type { ExecutionTargetInput } from "./ExecutionTargetInput";

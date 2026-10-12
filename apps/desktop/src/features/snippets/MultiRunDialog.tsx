@@ -340,6 +340,7 @@ function ResultRow({ host, row }: { host: HostSummary; row: Row | undefined }) {
             </>
           )}
           {row.result.truncated && <p className="hint">{msgD.runs.truncated}</p>}
+          {row.result.envRejected.length > 0 && <p className="hint" role="note">{msgD.env.runRejected(row.result.envRejected)}</p>}
         </details>
       )}
     </li>

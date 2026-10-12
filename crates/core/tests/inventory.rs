@@ -700,7 +700,7 @@ async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_
     };
     assert_eq!(uses(&v.list_identities().await.unwrap(), &ops.id), 3, "root group, pinned host and its copy");
     v.delete_host(&copy.id).await.unwrap();
-    v.bulk_update_hosts(&[pinned.id.clone()], BulkHostChange::Delete).await.unwrap();
+    v.bulk_update_hosts(std::slice::from_ref(&pinned.id), BulkHostChange::Delete).await.unwrap();
     assert_eq!(uses(&v.list_identities().await.unwrap(), &ops.id), 1);
 
     // Editing an identity keeps its password unless asked; every user follows the change.

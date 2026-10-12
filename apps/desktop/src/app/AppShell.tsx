@@ -97,7 +97,7 @@ function Shell() {
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
-  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string } | null>(null);
+  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -290,7 +290,7 @@ function Shell() {
           const p = activePane(wsRef.current);
           const handle = p ? handles.current.get(p.id) : undefined;
           const sessionId = handle?.connected() ? handle.sessionId() : null;
-          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId });
+          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId, hostId: p.target.hostId });
           else notify("info", msgD.suggest.needsTerminal);
           break;
         }
@@ -558,6 +558,7 @@ function Shell() {
       {suggesting && (
         <SuggestDialog
           sessionId={suggesting.sessionId}
+          hostId={suggesting.hostId}
           onClose={() => {
             setSuggesting(null);
             handles.current.get(suggesting.paneId)?.focus();

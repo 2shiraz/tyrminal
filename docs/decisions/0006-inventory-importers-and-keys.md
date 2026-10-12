@@ -169,3 +169,21 @@ sandbox. Nothing is stubbed in the UI.
 - Deleting an identity removes its references in the same transaction and reports how many
   hosts and groups used it; they fall back to their own settings. There is one personal vault,
   so "accessible vaults" (KEY-17) is this vault.
+
+## Environment variables (SNP-11..14)
+
+- Stored per host or group in the workflow record (kind 204), encrypted like every record. Names
+  are portable shell names (`[A-Za-z_][A-Za-z0-9_]*`, 64 bytes); values are one line of at most
+  4096 bytes; 64 per target. Values are shown only in the editor; events carry names only.
+- **Inheritance:** outermost group first, nearer groups override, the host overrides everything.
+  The host's editor lists what it inherits, from which group, and what it overrides.
+- **Delivery:** SSH `env` requests with want-reply on the session channel, before the shell
+  (interactive sessions) or the exec request (snippet runs), via
+  `VerifiedConnection::open_shell_with_env` / `open_command_with_env` in `crates/ssh/src/client.rs`.
+  Each refusal (normally a name the server's `AcceptEnv` does not allow) is collected and
+  reported: `SessionEvent::Environment { sent, rejected }` (names only) becomes an error notice
+  in the window, and snippet results list refused names. Nothing is dropped silently, and
+  nothing falls back to typing `export` into the shell. russh copies values into its own
+  buffers while sending, which Tyrminal cannot zeroize.
+- **Lab:** the lab servers already allow `AcceptEnv TYR_*`; the lab test checks an accepted group
+  variable, a host override, and a refused name.

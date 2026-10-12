@@ -119,6 +119,9 @@ const COMMANDS: &[&str] = &[
     "identity_delete",
     "identity_assignments",
     "identity_assign",
+    "env_get",
+    "env_set",
+    "env_effective",
 ];
 
 fn main() {

@@ -45,12 +45,12 @@ use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelIn
 // agent D: inventory and snippets
 use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
-    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, WorkflowRecord,
+    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
 };
 use tyrminal_contracts::{
-    ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment, IdentityInput, IdentitySummary,
-    KeyCertificate, KeyKind, KnownHostImportEntry, KnownHostImportPreview, KnownHostImportStatus, SecretChange,
-    SettingOrigin, SettingsTarget,
+    EffectiveEnvVar, EnvVar, ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment,
+    IdentityInput, IdentitySummary, KeyCertificate, KeyKind, KnownHostImportEntry, KnownHostImportPreview,
+    KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
 
 struct Stored<T> {
@@ -120,6 +120,8 @@ pub(crate) struct ConnectionPlan {
     pub label: String,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
+    /// Environment variables to request for the shell (the host's own, with inherited ones).
+    pub env: Vec<(String, Zeroizing<String>)>,
     pub generation: u32,
 }
 
@@ -1742,7 +1744,10 @@ impl VaultService {
                 (known, k.record.fingerprint.clone())
             })
             .collect();
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let env = Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect();
         Ok(ConnectionPlan {
+            env,
             host_id: validate::id_text(&id),
             endpoint: target.endpoint,
             username: target.username,
@@ -2552,6 +2557,150 @@ impl VaultService {
 
 // Identities and per-host/group workflow settings (KEY-15..17).
 impl VaultService {
+    /// The target with its id in canonical form.
+    fn settings_target(target: SettingsTarget) -> Result<SettingsTarget, IpcError> {
+        Ok(match target {
+            SettingsTarget::Host { host_id } => {
+                SettingsTarget::Host { host_id: validate::id_text(&validate::id(&host_id)?) }
+            }
+            SettingsTarget::Group { group_id } => {
+                SettingsTarget::Group { group_id: validate::id_text(&validate::id(&group_id)?) }
+            }
+        })
+    }
+
+    fn require_target(open: &Open, target: &SettingsTarget) -> Result<(), IpcError> {
+        match target {
+            SettingsTarget::Host { host_id } if !open.hosts.contains_key(&validate::id(host_id)?) => {
+                Err(not_found("That host no longer exists."))
+            }
+            SettingsTarget::Group { group_id } if !open.groups.contains_key(&validate::id(group_id)?) => {
+                Err(not_found("That group no longer exists."))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Applies `change` to the target's workflow record, creating it when needed and deleting it
+    /// when nothing is left in it.
+    async fn update_workflow(
+        &self,
+        open: &mut Open,
+        target: &SettingsTarget,
+        change: impl FnOnce(WorkflowRecord) -> WorkflowRecord,
+    ) -> Result<(), IpcError> {
+        let current = Self::workflow_of(open, target).map(|(id, w)| (id, w.revision, w.record.clone()));
+        let base = current.as_ref().map(|(_, _, r)| r.clone()).unwrap_or_else(|| match target {
+            SettingsTarget::Host { host_id } => WorkflowRecord { host_id: Some(host_id.clone()), ..Default::default() },
+            SettingsTarget::Group { group_id } => {
+                WorkflowRecord { group_id: Some(group_id.clone()), ..Default::default() }
+            }
+        });
+        let next = change(base);
+        match (current, next.is_empty()) {
+            (None, true) => {}
+            (Some((wid, revision, _)), true) => {
+                self.write::<WorkflowRecord>(open, wid, KIND_WORKFLOW, revision + 1, None).await?;
+                open.workflows.remove(&wid);
+            }
+            (current, false) => {
+                if current.is_none() && open.workflows.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of host settings."));
+                }
+                let (wid, revision) = match current {
+                    Some((wid, revision, _)) => (wid, revision + 1),
+                    None => (random_id().map_err(from_vault)?, 1),
+                };
+                self.write(open, wid, KIND_WORKFLOW, revision, Some((&next, next.content_len()))).await?;
+                open.workflows.insert(wid, Stored { revision, record: next });
+            }
+        }
+        Ok(())
+    }
+
+    // ---------- environment variables (SNP-11..14) ----------
+
+    /// A host's environment: outermost group first, nearer groups and then the host override.
+    fn effective_env(open: &Open, id: &Id, host: &HostRecord) -> Vec<(String, Zeroizing<String>, SettingOrigin)> {
+        let mut out: Vec<(String, Zeroizing<String>, SettingOrigin)> = Vec::new();
+        let mut set = |name: &str, value: &Zeroizing<String>, origin: SettingOrigin| {
+            out.retain(|(n, _, _)| n != name);
+            out.push((name.to_owned(), Zeroizing::new(value.as_str().to_owned()), origin));
+        };
+        for (group_id, group) in Self::group_chain(open, host).into_iter().rev() {
+            if let Some((_, w)) = Self::workflow_of_group(open, &group_id) {
+                for e in &w.record.env {
+                    set(
+                        &e.name,
+                        &e.value,
+                        SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() },
+                    );
+                }
+            }
+        }
+        if let Some((_, w)) = Self::workflow_of_host(open, &validate::id_text(id)) {
+            for e in &w.record.env {
+                set(&e.name, &e.value, SettingOrigin::Host);
+            }
+        }
+        out
+    }
+
+    fn own_env(open: &Open, target: &SettingsTarget) -> Vec<EnvVar> {
+        Self::workflow_of(open, target)
+            .map(|(_, w)| {
+                w.record
+                    .env
+                    .iter()
+                    .map(|e| EnvVar { name: e.name.clone(), value: e.value.as_str().to_owned() })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The variables a host or group sets itself, in order.
+    pub async fn env_vars(&self, target: SettingsTarget) -> Result<Vec<EnvVar>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::own_env(open, &target))
+    }
+
+    /// Replaces the variables a host or group sets itself.
+    pub async fn set_env_vars(&self, target: SettingsTarget, vars: Vec<EnvVar>) -> Result<Vec<EnvVar>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let checked = validate::env_vars(&vars)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        let env: Vec<StoredEnv> =
+            checked.into_iter().map(|(name, value)| StoredEnv { name, value: Zeroizing::new(value) }).collect();
+        self.update_workflow(open, &target, |w| WorkflowRecord { env, ..w }).await?;
+        Ok(Self::own_env(open, &target))
+    }
+
+    /// What a host sends, with where each variable comes from (SNP-12).
+    pub async fn effective_env_vars(&self, host_id: &str) -> Result<Vec<EffectiveEnvVar>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::effective_env(open, &id, host)
+            .into_iter()
+            .map(|(name, value, origin)| EffectiveEnvVar { name, value: value.as_str().to_owned(), origin })
+            .collect())
+    }
+
+    /// The variables to request for a session to `host_id` (names and values, in order).
+    pub(crate) async fn session_env(&self, host_id: &str) -> Result<Vec<(String, Zeroizing<String>)>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
     fn workflow_of_host<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<WorkflowRecord>)> {
         open.workflows.iter().find(|(_, s)| s.record.host_id.as_deref() == Some(host_id)).map(|(id, s)| (*id, s))
     }
@@ -2774,57 +2923,18 @@ impl VaultService {
         target: SettingsTarget,
         identity_id: Option<String>,
     ) -> Result<IdentityAssignment, IpcError> {
-        let target = match target {
-            SettingsTarget::Host { host_id } => {
-                SettingsTarget::Host { host_id: validate::id_text(&validate::id(&host_id)?) }
-            }
-            SettingsTarget::Group { group_id } => {
-                SettingsTarget::Group { group_id: validate::id_text(&validate::id(&group_id)?) }
-            }
-        };
+        let target = Self::settings_target(target)?;
         let identity = identity_id.as_deref().map(validate::id).transpose()?;
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
-        match &target {
-            SettingsTarget::Host { host_id } if !open.hosts.contains_key(&validate::id(host_id)?) => {
-                return Err(not_found("That host no longer exists."));
-            }
-            SettingsTarget::Group { group_id } if !open.groups.contains_key(&validate::id(group_id)?) => {
-                return Err(not_found("That group no longer exists."));
-            }
-            _ => {}
-        }
+        Self::require_target(open, &target)?;
         if let Some(identity) = &identity
             && !open.identities.contains_key(identity)
         {
             return Err(not_found("That identity no longer exists."));
         }
-        let current = Self::workflow_of(open, &target).map(|(id, w)| (id, w.revision, w.record.clone()));
-        let base = current.as_ref().map(|(_, _, r)| r.clone()).unwrap_or_else(|| match &target {
-            SettingsTarget::Host { host_id } => WorkflowRecord { host_id: Some(host_id.clone()), ..Default::default() },
-            SettingsTarget::Group { group_id } => {
-                WorkflowRecord { group_id: Some(group_id.clone()), ..Default::default() }
-            }
-        });
-        let next = WorkflowRecord { identity_id: identity.as_ref().map(validate::id_text), ..base };
-        match (current, next.is_empty()) {
-            (None, true) => {}
-            (Some((wid, revision, _)), true) => {
-                self.write::<WorkflowRecord>(open, wid, KIND_WORKFLOW, revision + 1, None).await?;
-                open.workflows.remove(&wid);
-            }
-            (current, false) => {
-                if current.is_none() && open.workflows.len() >= MAX_RECORDS_PER_KIND {
-                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of host settings."));
-                }
-                let (wid, revision) = match current {
-                    Some((wid, revision, _)) => (wid, revision + 1),
-                    None => (random_id().map_err(from_vault)?, 1),
-                };
-                self.write(open, wid, KIND_WORKFLOW, revision, Some((&next, next.content_len()))).await?;
-                open.workflows.insert(wid, Stored { revision, record: next });
-            }
-        }
+        let identity_id = identity.as_ref().map(validate::id_text);
+        self.update_workflow(open, &target, |w| WorkflowRecord { identity_id, ..w }).await?;
         Ok(Self::assignment(open, &target))
     }
 }

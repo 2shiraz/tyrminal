@@ -84,6 +84,8 @@ pub struct SnippetExecResult {
     pub stderr: String,
     /// Some output was not kept (over the per-stream limit).
     pub truncated: bool,
+    /// Environment variables of the host that the server refused (SNP-13); names only.
+    pub env_rejected: Vec<String>,
 }
 
 /// A saved selection of hosts to run snippets on.
@@ -280,4 +282,25 @@ pub struct IdentityAssignment {
     pub identity_id: Option<String>,
     pub effective_identity_id: Option<String>,
     pub origin: Option<SettingOrigin>,
+}
+
+/// One environment variable a host or group sends with its sessions (SNP-11). Values are
+/// sensitive: they are stored encrypted and shown only in the editor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// A variable a host ends up sending, and where it comes from (SNP-12): group values apply from
+/// the outermost group in, nearer groups override them and the host's own override everything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EffectiveEnvVar {
+    pub name: String,
+    pub value: String,
+    pub origin: SettingOrigin,
 }

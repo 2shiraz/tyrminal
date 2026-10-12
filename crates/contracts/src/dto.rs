@@ -597,6 +597,13 @@ pub enum SessionEvent {
     Banner {
         text: String,
     },
+    /// Environment variables were requested for this session (SNP-13). Names only, never values.
+    /// `rejected` lists those the server refused (usually not allowed by its `AcceptEnv`); they
+    /// are not set in the session.
+    Environment {
+        sent: Vec<String>,
+        rejected: Vec<String>,
+    },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
     Closed {

@@ -21,6 +21,7 @@ import {
   IconPlus,
   IconSearch,
   IconServer,
+  IconSlidersHorizontal,
   IconTextCursorInput,
   IconTrash2,
   IconUpload,
@@ -38,6 +39,7 @@ import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
+import { EnvironmentDialog } from "./EnvironmentDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -122,6 +124,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const identityList = useIdentities();
   const [assignments, setAssignments] = useState<Map<string, IdentityAssignment>>(new Map());
   const [assigning, setAssigning] = useState<{ target: SettingsTarget; name: string } | null>(null);
+  const [environmentFor, setEnvironmentFor] = useState<{ target: SettingsTarget; name: string } | null>(null);
   const anchor = useRef<string | null>(null);
   const remove = useAction();
   const action = useAction();
@@ -582,6 +585,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               icon: <IconUser size={15} />,
               onSelect: () => setAssigning({ target: { kind: "host", hostId: menu.host.id }, name: menu.host.label }),
             },
+            {
+              label: msgD.env.menu,
+              icon: <IconSlidersHorizontal size={15} />,
+              onSelect: () => setEnvironmentFor({ target: { kind: "host", hostId: menu.host.id }, name: menu.host.label }),
+            },
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
           ]}
         />
@@ -624,6 +632,11 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               label: msgD.identities.assign,
               icon: <IconUser size={15} />,
               onSelect: () => setAssigning({ target: { kind: "group", groupId: groupMenu.group.id }, name: groupMenu.group.name }),
+            },
+            {
+              label: msgD.env.menu,
+              icon: <IconSlidersHorizontal size={15} />,
+              onSelect: () => setEnvironmentFor({ target: { kind: "group", groupId: groupMenu.group.id }, name: groupMenu.group.name }),
             },
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeletingGroup(groupMenu.group) },
           ]}
@@ -712,6 +725,18 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             setConnectAll(null);
             notify("success", msgD.inventory.connectAllDone(list.length));
             for (const host of list) onConnect(host);
+          }}
+        />
+      )}
+
+      {environmentFor && (
+        <EnvironmentDialog
+          target={environmentFor.target}
+          name={environmentFor.name}
+          onClose={() => setEnvironmentFor(null)}
+          onDone={() => {
+            setEnvironmentFor(null);
+            notify("success", msgD.env.saved);
           }}
         />
       )}

@@ -237,6 +237,9 @@ pub fn run() {
             commands::inventory::identity_delete,
             commands::inventory::identity_assignments,
             commands::inventory::identity_assign,
+            commands::inventory::env_get,
+            commands::inventory::env_set,
+            commands::inventory::env_effective,
         ])
         .build(tauri::generate_context!());
 
