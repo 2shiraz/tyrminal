@@ -430,6 +430,8 @@ test("broadcast: typed input reaches every pane of the tab, terminal replies do 
   await page.keyboard.press("Control+Shift+K");
   await page.getByRole("combobox").fill("every pane");
   await page.keyboard.press("Enter");
+  // P-13: the receiving panes are reviewed before broadcast starts.
+  await page.getByRole("alertdialog", { name: "Type into these 2 panes?" }).getByRole("button", { name: "Type into 2 panes" }).click();
   await expect(page.getByTestId("broadcast")).toHaveText("Typing into 2 panes");
   await expect(page.locator(".pane[data-broadcast]")).toHaveCount(2);
   // Choosing the action returns focus to the terminal.

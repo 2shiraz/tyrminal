@@ -108,6 +108,12 @@ const COMMANDS: &[&str] = &[
     "host_connection_get",
     "host_connection_set",
     "host_chain",
+    // agent C: workspaces
+    "layout_list",
+    "layout_save",
+    "layout_delete",
+    "window_detach",
+    "window_detach_take",
     // agent D: inventory and snippets
     "host_appearance_list",
     "host_set_os",

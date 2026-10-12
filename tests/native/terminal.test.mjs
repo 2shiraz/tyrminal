@@ -309,3 +309,314 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
     }
   });
 });
+
+/** The command palette shortcut: Cmd+K on macOS, Ctrl+Shift+K elsewhere (lib/shortcuts.ts). */
+const PALETTE = process.platform === "darwin" ? [KEYS.meta, "K"] : [KEYS.ctrl, KEYS.shift, "K"];
+
+describe("workspaces with real sessions", { concurrency: false }, () => {
+  /** @type {App} */ let app;
+  let s;
+  let t;
+
+  before(async () => {
+    app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    s = app.session;
+    t = ui(s);
+    await t.createVault();
+    await t.importKey(lab.keys.ed25519);
+    await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+    await t.connect("Lab");
+    await t.type("export PS1='tyr$ '; clear\n");
+    await t.waitForText("tyr$");
+  });
+
+  after(async () => {
+    await app?.quit();
+  });
+
+  const tabState = (name) =>
+    s.execute(
+      `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+       return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
+    );
+  /** Clicks a terminal tab with a real pointer. */
+  const clickTab = async (name) => {
+    const rect = await s.until(
+      () =>
+        s.execute(
+          `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+           if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2 };`,
+        ),
+      { describe: `tab ${name}` },
+    );
+    await s.clickAt(rect.x, rect.y);
+  };
+  const selectTab = (name) => clickTab(name);
+
+  test("output from a background SSH session marks its tab unread until it is shown", async () => {
+    await t.type("sleep 2; echo LATE-$((40+2))\n");
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    assert.equal((await tabState("Lab")).unread, null, "nothing unseen yet");
+    await s.until(async () => (await tabState("Lab"))?.unread === "true", { describe: "Lab tab marked unread", timeout: 10_000 });
+    await selectTab("Lab");
+    await t.waitForText("LATE-42");
+    await s.until(async () => (await tabState("Lab"))?.unread === null, { describe: "unread cleared" });
+    await app.screenshot("w01-unread-cleared");
+  });
+
+  test("duplicating a tab opens a new, separate session to the same host", async () => {
+    await selectTab("Lab");
+    await t.type("echo ORIGINAL-$((1+1))\n");
+    await t.waitForText("ORIGINAL-2");
+    // Keyboard route: the command palette's "Duplicate tab" acts on the tab in front.
+    await s.chord(PALETTE);
+    const palette = await s.waitFor("dialog.palette input");
+    await s.type(palette, "Duplicate tab");
+    await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Duplicate tab") || null`), {
+      describe: "palette match",
+    });
+    await s.chord([KEYS.enter]);
+    const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+    await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ tabs: [...document.querySelectorAll(".tabstrip .tab")].map((e) => e.textContent), dialogs: [...document.querySelectorAll("dialog[open]")].map((d) => d.className + ":" + d.textContent.slice(0, 80)) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
+    // A new session is a new server connection: the host key is confirmed again ("Trust once").
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the copy" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "copy connected" });
+    const tabs = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].map((e) => e.textContent)`);
+    assert.equal(tabs.filter((x) => x.includes("Lab")).length, 2, JSON.stringify(tabs));
+    // Its screen starts fresh: nothing from the original tab is replayed into it.
+    await t.waitForText(/\$\s*$/m, "a prompt in the copy");
+    assert.doesNotMatch(await t.terminalText(), /ORIGINAL-2/);
+    await t.type("echo COPY-$((2+2))\n");
+    await t.waitForText("COPY-4");
+    await app.screenshot("w02-duplicate");
+  });
+
+  test("16 panes of real local shells: the limit holds, a grid tiles them, input reaches only the focused one", async () => {
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    const visibleCount = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    const total = () => s.execute(`return document.querySelectorAll(".pane").length`);
+    // Other tabs already hold panes; split until 16 are open in all (the grid below re-tiles them).
+    const runCommand = async (name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; (await total()) < 16 && i < 16; i += 1) {
+      const before = await total();
+      // The palette first, then the focused pane's own header button.
+      const button = i === 0 ? null : await s.find('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]');
+      if (button) await s.click(button);
+      else await runCommand("Split pane right");
+      await s.until(async () => (await total()) === before + 1, { describe: `pane ${before + 1}` });
+    }
+    assert.equal(await total(), 16);
+    // Repeated halving leaves the newest panes very narrow; tile them before using their headers.
+    await runCommand("Arrange panes in a grid");
+    await s.click(await s.waitFor('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]'));
+    await s.until(() => s.execute(`return document.body.textContent.includes("At most 16 panes can be open")`), { describe: "limit message" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ panes: document.querySelectorAll(".pane").length, focused: document.querySelector('.pane:not([hidden])[data-focused="true"]')?.getBoundingClientRect(), toasts: document.querySelector(".toasts, [role=region]")?.outerHTML?.slice(0, 300) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
+    assert.equal(await total(), 16);
+    const mine = await visibleCount();
+    // Every local pane reaches a connected shell.
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .status-dot")].filter((d) => d.dataset.tone === "ok").length`).then((n) => (n === mine ? n : null)),
+      { describe: "all panes connected", timeout: 30_000 },
+    );
+    // A literal token: the local shell differs per platform (PowerShell on Windows), and the point
+    // is where the input goes, not what the shell computes.
+    // Into the focused pane, once its shell shows a prompt (zsh on macOS, PowerShell on Windows).
+    const focusedRows = `document.querySelector('.pane:not([hidden])[data-focused="true"] .xterm-rows')?.innerText ?? ""`;
+    await s.until(() => s.execute(`return /[$%#>]\\s*$/m.test(${focusedRows}.replaceAll("\\u00a0", " ")) || null`), { describe: "a prompt in the focused pane", timeout: 30_000 });
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo ONLY-HERE-42\n");
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .xterm-rows")].filter((e) => e.textContent.includes("ONLY-HERE-42")).length`).then((n) => (n > 0 ? n : null)),
+      { describe: "echo in the focused pane" },
+    );
+    const panesWithText = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden])")].filter((p) => p.querySelector(".xterm-rows")?.textContent.includes("ONLY-HERE-42")).map((p) => p.dataset.focused)`);
+    assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
+    await app.screenshot("w03-sixteen-panes");
+  });
+
+  test("a saved layout restores disconnected; only Connect opens a new session", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    // Close every tab, then start from one SSH tab to the lab.
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    await t.type("echo NOT-IN-TEMPLATE-$((3*3))\n");
+    await t.waitForText("NOT-IN-TEMPLATE-9");
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Lab layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(() => s.execute(`return document.querySelector(".tab-layout")?.textContent?.includes("Lab layout") || null`), { describe: "layout indicator" });
+
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout Lab", "Lab layout");
+    await s.waitFor(".pane:not([hidden]) .overlay-card");
+    // No session exists for the restored pane: no terminal, no xterm, nothing received.
+    const restored = await s.execute(`return { xterm: document.querySelectorAll(".pane:not([hidden]) .xterm").length, status: document.querySelector(".statusbar")?.textContent ?? "" }`);
+    assert.equal(restored.xterm, 0, "no terminal was started");
+    assert.doesNotMatch(restored.status, /Connected/);
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the restored pane" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "restored pane connected" });
+    // A fresh session: the earlier output is not replayed.
+    await t.waitForText(/\$/, "a prompt");
+    assert.doesNotMatch(await t.terminalText(), /NOT-IN-TEMPLATE-9/);
+    await app.screenshot("w04-layout-restored");
+  });
+
+  test("a saved directory (OSC 7) is offered after Connect and only changes directory when sent", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    // The report shells with OSC 7 support send (the lab account's sh does not, so it is sent here).
+    await t.type(`mkdir -p /tmp/tyr-osc7; cd /tmp/tyr-osc7; printf '\\033]7;file://%s%s\\007' "$(hostname)" "$PWD"; echo OSC7-$((1+1))\n`);
+    await t.waitForText("OSC7-2");
+    // The report comes with the next prompt.
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden])[data-has-directory]') !== null || null`), { describe: "directory reported" }).catch(async (e) => {
+      throw new Error(`${e.message}\n${(await t.terminalText()).split("\n").slice(-8).join("\n")}`);
+    });
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Dir layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout Dir", "Dir layout");
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    const offered = await s.until(() => s.execute(`return document.querySelector('[data-testid="restore-command"]')?.textContent ?? null`), { describe: "directory offer" });
+    assert.equal(offered, "cd -- '/tmp/tyr-osc7'");
+    // Not sent yet: the new shell is still in its login directory.
+    await t.type("echo AT-$PWD-END\n");
+    await t.waitForText(/AT-.*-END/);
+    assert.doesNotMatch(await t.terminalText(), /AT-\/tmp\/tyr-osc7-END/);
+    await s.clickButton("Send", { within: ".pane:not([hidden]) .term-banner" });
+    await t.type("echo NOW-$PWD-END\n");
+    await t.waitForText("NOW-/tmp/tyr-osc7-END");
+    await app.screenshot("w06-directory-restored");
+  });
+
+  test("focus layout and the unsaved-layout indicator with real sessions", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await runCommand("Split pane right");
+    await runCommand("Split pane down");
+    const visible = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes" });
+    await s.until(() => s.execute(`return document.querySelectorAll('.pane .status-dot[data-tone="ok"]').length === 3 || null`), { describe: "three shells" });
+
+    await runCommand("Focus layout");
+    await s.until(async () => ((await visible()) === 1 ? true : null), { describe: "one pane in focus layout" });
+    const items = await s.findAll('nav[aria-label="Panes in this tab"] .focus-item');
+    assert.equal(items.length, 3);
+    await s.click(items[0]);
+    await s.until(() => s.execute(`return document.querySelector('nav[aria-label="Panes in this tab"] .focus-item[aria-current="true"]') === document.querySelectorAll('nav[aria-label="Panes in this tab"] .focus-item')[0] || null`), { describe: "first pane shown" });
+    // The shown pane is a live shell (its session kept running while it was listed).
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo FOCUS-OK\n");
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden]) .xterm-rows')?.textContent?.includes("FOCUS-OK") || null`), { describe: "input in the focused pane" });
+    await runCommand("Leave focus layout");
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes again" });
+
+    // Saved as a layout: clean; rearranged: marked unsaved; saved again: clean.
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Three", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    const dirty = () => s.execute(`return document.querySelector(".tab-layout")?.dataset.dirty ?? null`);
+    await s.until(async () => ((await s.find(".tab-layout")) ? true : null), { describe: "layout indicator" });
+    assert.equal(await dirty(), null);
+    await runCommand("Arrange panes side by side");
+    await s.until(async () => ((await dirty()) === "true" ? true : null), { describe: "unsaved marker" });
+    await runCommand("Save layout Three", "Three");
+    await s.until(async () => ((await dirty()) === null ? true : null), { describe: "saved again" });
+    await app.screenshot("w07-focus-and-unsaved");
+  });
+});
+
+describe("a tab moved to its own window", { concurrency: false }, () => {
+  test("the live SSH session moves with it and keeps delivering output there; the main window lets it go", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      await t.type("export PS1='tyr$ '; echo BEFORE-$((2+3))\n");
+      await t.waitForText("BEFORE-5");
+      const main = await s.windowHandle();
+      // Started here, printed after the move: the same shell keeps running in the new window.
+      await t.type("sleep 4; echo LATE-$((5+6))\n");
+
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, "Move tab to a new window");
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Move tab") || null`), {
+        describe: "palette match",
+      });
+      await s.chord([KEYS.enter]);
+      // The tab leaves the main window without ending its session.
+      await s.until(() => s.execute(`return document.querySelectorAll(".tabstrip .tab:not(.tab-page)").length === 0 || null`), { describe: "tab gone from main" });
+      const handles = await s.until(async () => {
+        const list = await s.windowHandles();
+        return list.length === 2 ? list : null;
+      }, { describe: "a second window", timeout: 20_000 });
+      await s.switchToWindow(handles.find((h) => h !== main));
+      await s.until(() => s.execute(`return document.querySelector(".detached-head")?.textContent?.includes("Lab") || null`), { describe: "detached window shows the tab", timeout: 20_000 });
+      await t.waitForText("LATE-11", "output of the moved session arrives in the new window", 20_000);
+      // A fresh terminal here: earlier screen contents do not move with the tab.
+      assert.doesNotMatch(await t.terminalText(), /BEFORE-5/);
+      await app.screenshot("w05-detached");
+      // The embedded WebDriver sends keys to the main window only, so typing here is covered by
+      // the UI test and the core lab test (only the new window may write after the handoff).
+      await s.switchToWindow(main);
+      assert.equal(await s.execute(`return document.querySelectorAll(".pane").length`), 0, "the main window holds no pane of the moved tab");
+    } finally {
+      await app.quit();
+    }
+  });
+});

@@ -25,6 +25,8 @@ import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
 import { AboutSection } from "./AboutSection";
+import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
+import { msgC } from "../../lib/messages-c";
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
 const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -144,7 +146,7 @@ function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary
   );
 }
 
-export type Section = "appearance" | "terminal" | "security" | "backup" | "privacy" | "about";
+export type Section = "appearance" | "terminal" | "shortcuts" | "security" | "backup" | "privacy" | "about";
 
 export function SettingsView({ initialSection }: { initialSection?: Section | undefined } = {}) {
   const { prefs, update, saveError } = usePreferences();
@@ -168,6 +170,7 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
   const sections: { id: Section; label: string }[] = [
     { id: "appearance", label: msg.settings.appearance },
     { id: "terminal", label: msg.settings.terminal },
+    { id: "shortcuts", label: msgC.keys.title },
     { id: "security", label: msg.settings.security },
     { id: "backup", label: msg.backup.title },
     { id: "privacy", label: msg.settings.privacy },
@@ -386,6 +389,8 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
                 </button>
               </div>
             </section>
+
+            <WorkspaceSettings />
 
             <section id="settings-security" className="settings-section" aria-labelledby="settings-security-title">
               <header>

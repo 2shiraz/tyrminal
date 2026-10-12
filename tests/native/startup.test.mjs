@@ -57,6 +57,12 @@ describe("startup snippets and environment in the real application", { concurren
     await s.click(await s.waitFor('button[aria-label="More actions for Lab"]'));
     await menuItem("Environment…");
     await s.waitFor("dialog");
+    // "Add variable" stays disabled until the host's variables have loaded; a click before that
+    // does nothing (seen on slower runners).
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll("dialog button")].some((b) => b.textContent.trim() === "Add variable" && !b.disabled) || null`),
+      { describe: "variables loaded" },
+    );
     await s.clickButton("Add variable", { within: "dialog" });
     await s.type(await s.waitFor('dialog input[aria-label="Name 1"]'), "TYR_APP");
     await s.type(await s.waitFor('dialog input[aria-label="Value 1"]'), "orders desk");

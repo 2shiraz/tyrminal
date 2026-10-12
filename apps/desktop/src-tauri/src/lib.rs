@@ -231,6 +231,12 @@ pub fn run() {
             commands::tunnels::host_connection_get,
             commands::tunnels::host_connection_set,
             commands::tunnels::host_chain,
+            // agent C: workspaces
+            commands::layouts::layout_list,
+            commands::layouts::layout_save,
+            commands::layouts::layout_delete,
+            commands::layouts::window_detach,
+            commands::layouts::window_detach_take,
             // agent D: inventory and snippets
             commands::inventory::host_appearance_list,
             commands::inventory::host_set_os,
