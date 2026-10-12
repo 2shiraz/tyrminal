@@ -17,9 +17,14 @@ test("connecting shows the steps that happened, the current one, and Cancel stop
   await page.clock.runFor(15); // verifying_host
   const sheet = page.getByRole("dialog", { name: "Connecting to api-gateway" });
   await expect(sheet).toBeVisible();
-  await expect(steps(page).getByRole("listitem")).toHaveText([/Connected/, /Checking server identity/, /Signing in/, /Opening the shell/]);
+  // The list is what happened and what is under way; the steps still ahead are the track's stops,
+  // in the same words, and are not listed a second time.
+  await expect(steps(page).getByRole("listitem")).toHaveText([/Connected/, /Checking server identity/]);
   await expect(steps(page).locator('[aria-current="step"]')).toHaveText(/Checking server identity/);
-  // No progress bar or spinner: the pending steps are just listed.
+  const track = sheet.getByTestId("connect-track");
+  await expect(track.locator('.track-stop[data-state="now"]')).toContainText("Server identity");
+  await expect(track.locator('.track-stop[data-state="pending"]')).toHaveText([/Sign in/, /Shell/]);
+  // No progress bar or spinner.
   await expect(sheet.locator(".spinner, progress")).toHaveCount(0);
 
   await sheet.getByRole("button", { name: "Cancel" }).click();

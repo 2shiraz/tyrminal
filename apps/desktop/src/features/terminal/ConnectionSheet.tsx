@@ -116,6 +116,13 @@ function buildRows(props: {
   return rows;
 }
 
+/** The rows without the steps still ahead (and a trailing hop heading left with nothing under it). */
+function happened(rows: Row[]): Row[] {
+  const kept = rows.filter((row) => row.kind !== "pending");
+  while (kept.at(-1)?.kind === "hop") kept.pop();
+  return kept;
+}
+
 function Steps({ rows }: { rows: Row[] }) {
   const focused = useWindowFocused();
   return (
@@ -478,6 +485,9 @@ export function ConnectionSheet(props: {
   const showSteps = ssh && !(closed && !closed.error) && !(closed && cancelled);
   // The track follows the same events as the steps; a lost connection's retries are told by the list.
   const showTrack = ssh && (settling || (showSteps && !retrying));
+  // One presentation per fact: with the track showing what is ahead, the list keeps only what has
+  // happened (and the step now under way), not the track's stops again as faint rows.
+  const listed = showTrack ? happened(rows) : rows;
   const states = trackStates({ timeline, failed: failedNow, hostKeyChanged: changed !== null, trust: trust !== null, auth: auth !== null, connected: settling });
   return (
     <div
@@ -515,11 +525,11 @@ export function ConnectionSheet(props: {
         {retrying && !closed ? (
           <>
             {body}
-            <Steps rows={rows} />
+            <Steps rows={listed} />
           </>
         ) : (
           <>
-            {showSteps && !retrying && <Steps rows={rows} />}
+            {showSteps && !retrying && <Steps rows={listed} />}
             {body}
           </>
         )}
