@@ -192,11 +192,13 @@ impl Client {
 
     async fn absorb(&mut self, bytes: Vec<u8>) {
         self.received += bytes.len();
-        self.text.push_str(&String::from_utf8_lossy(&bytes));
         // Answer cursor-position queries as a terminal would: Windows ConPTY sends one when a
         // console starts and waits for the reply before the shell produces output. (In the
-        // app, xterm.js answers it.)
-        let queries = bytes.windows(4).filter(|w| *w == b"\x1b[6n").count();
+        // app, xterm.js answers it.) Counted over everything received, so a query split across
+        // two chunks is still answered.
+        let before = self.text.matches("\x1b[6n").count();
+        self.text.push_str(&String::from_utf8_lossy(&bytes));
+        let queries = self.text.matches("\x1b[6n").count() - before;
         for _ in 0..queries {
             let _ = self.core.sessions.write(self.window, &self.session, b"\x1b[1;1R".to_vec()).await;
         }
