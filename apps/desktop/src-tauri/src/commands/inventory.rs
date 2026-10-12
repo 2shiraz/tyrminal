@@ -64,6 +64,16 @@ pub async fn host_search(state: State<'_, AppState>, query: String) -> Result<Ve
     state.core()?.vault.search_hosts(&query).await
 }
 
+/// Stars or unstars a host (Home's favourites).
+#[tauri::command]
+pub async fn host_favourite_set(
+    state: State<'_, AppState>,
+    id: String,
+    favourite: bool,
+) -> Result<HostSummary, IpcError> {
+    state.core()?.vault.set_favourite(&id, favourite).await
+}
+
 #[tauri::command]
 pub async fn host_duplicate(state: State<'_, AppState>, id: String) -> Result<HostSummary, IpcError> {
     state.core()?.vault.duplicate_host(&id).await

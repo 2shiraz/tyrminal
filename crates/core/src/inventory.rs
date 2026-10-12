@@ -277,6 +277,7 @@ mod tests {
             terminal: tyrminal_contracts::HostTerminal::default(),
             forward_agent: false,
             production: own,
+            favourite: false,
             connection: crate::records::StoredConnection::default(),
         };
         {

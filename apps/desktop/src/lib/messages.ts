@@ -242,6 +242,8 @@ export const msg = {
     sortName: "Name",
     sortRecent: "Recently used",
     duplicate: "Duplicate",
+    favourite: "Add to favourites",
+    unfavourite: "Remove from favourites",
     copySuffix: "copy",
     more: (label: string) => `More actions for ${label}`,
     connectTo: (label: string) => `Connect to ${label}`,
@@ -668,6 +670,9 @@ export const msg = {
     body: "A backup is one encrypted file with everything in your vault. It opens with your current passphrase or recovery key, on this or another device. Nothing in it is readable without them.",
     export: "Save a backup…",
     exported: (name: string) => `Backup saved as ${name}.`,
+    /** `when` is a relative time ("3 days ago", "just now", or a date). */
+    lastExported: (when: string) => (/^\d/.test(when) && !when.includes("ago") ? `Last exported on ${when}` : `Last exported ${when}`),
+    neverExported: "Never exported",
     restore: "Restore from a backup…",
     restoreFirstRun: "Restore from a backup instead",
     dialogTitle: "Restore from a backup",

@@ -1,0 +1,303 @@
+/* ---------- connection track: this computer to the shell, following the real steps ---------- */
+/* Only transform and opacity move. Every stop changes on an event; nothing runs on a timer except
+   the travel along the segment in progress, which stops at a prompt, a failure or success. */
+
+.connect-track {
+  --track-dot: 14px;
+  --track-end: 28px;
+  display: grid;
+  grid-template-columns: var(--track-end) minmax(0, 1fr) var(--track-end);
+  align-items: start;
+  gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-2);
+}
+
+/* The host tile: OS mark, what is being connected to, and the connection log on the right. */
+.connect-head[data-tile] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+
+.connect-head-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.connect-host-mark {
+  color: var(--text-muted);
+}
+
+.track-end {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--track-end);
+  height: var(--track-end);
+  border: var(--box-border);
+  border-radius: var(--radius-control);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  transition:
+    transform var(--duration-slow) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+}
+
+/* While connecting, an arc turns around this computer's end. */
+.track-from::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 1.5px solid transparent;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.track-from[data-state="now"]::before {
+  opacity: 1;
+  animation: track-spin 0.9s linear infinite;
+}
+
+.track-from[data-state="fail"] {
+  color: var(--danger);
+}
+
+.track-to[data-state="done"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  animation: track-settle var(--duration-fast) var(--ease-out);
+}
+
+.track-rail {
+  position: relative;
+  height: calc(var(--track-end) + 18px);
+}
+
+.track-line,
+.track-fill,
+.track-travel,
+.track-failseg {
+  position: absolute;
+  top: calc(var(--track-end) / 2 - 1px);
+  height: 2px;
+  border-radius: 1px;
+}
+
+.track-line {
+  inset-inline: 0;
+  background: var(--border-subtle);
+}
+
+/* The part travelled so far: grows to the stop reached as each step's event arrives. */
+.track-fill {
+  inset-inline: 0;
+  background: var(--accent);
+  transform: scaleX(var(--reached));
+  transform-origin: left center;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.connect-track[data-state="fail"] .track-fill {
+  background: color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
+}
+
+/* Progress travelling along the segment in progress (from the last stop reached to the current one). */
+.track-travel {
+  left: calc(var(--from) * 100%);
+  width: calc(100% / 6);
+  overflow: hidden;
+}
+
+.track-travel > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent 0 30%, color-mix(in srgb, var(--accent) 35%, var(--text-on-accent)) 50%, transparent 70% 100%);
+  animation: track-travel 1.1s linear infinite;
+}
+
+/* The segment that led to a failure turns danger-coloured. */
+.track-failseg {
+  left: calc(var(--from) * 100%);
+  width: calc(100% / 6);
+  background: var(--danger);
+}
+
+.track-stop {
+  position: absolute;
+  top: calc(var(--track-end) / 2 - var(--track-dot) / 2);
+  left: calc(var(--at) * 100%);
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  transform: translateX(-50%);
+}
+
+.track-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--track-dot);
+  height: var(--track-dot);
+  border: 1.5px solid var(--border-control);
+  border-radius: 50%;
+  background: var(--bg-overlay);
+  color: var(--bg-overlay);
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+}
+
+.track-dot svg {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: scale(var(--scale-enter, 0.97));
+  }
+}
+
+.track-stop[data-state="done"] .track-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.track-stop[data-state="now"] .track-dot,
+.track-stop[data-state="waiting"] .track-dot {
+  border-color: var(--accent);
+}
+
+/* The current stop breathes while its step is in progress. */
+.track-stop[data-state="now"] .track-dot::after,
+.track-stop[data-state="waiting"] .track-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+}
+
+.track-stop[data-state="now"] .track-dot::after {
+  animation: track-pulse 1.4s var(--ease-out) infinite;
+}
+
+/* A prompt holds the travel here: the ring stays, still. */
+.track-stop[data-state="waiting"] .track-dot::after {
+  opacity: 0.5;
+}
+
+.track-stop[data-state="fail"] .track-dot {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--text-on-accent);
+  animation: track-shake 260ms var(--ease-out);
+}
+
+.track-label {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.track-stop[data-state="done"] .track-label {
+  color: var(--text-muted);
+}
+
+.track-stop[data-state="now"] .track-label,
+.track-stop[data-state="waiting"] .track-label {
+  color: var(--text);
+}
+
+.track-stop[data-state="fail"] .track-label {
+  color: var(--danger);
+}
+
+/* On success the sheet fades (an exit: --duration-fast, docs/design/motion.md) while the shell, already live underneath, takes input. */
+.connect-layer[data-leaving="true"] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+@keyframes track-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes track-travel {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes track-pulse {
+  from {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes track-shake {
+  20% {
+    transform: translateX(-3px);
+  }
+  45% {
+    transform: translateX(3px);
+  }
+  70% {
+    transform: translateX(-2px);
+  }
+}
+
+@keyframes track-settle {
+  40% {
+    transform: scale(1.12);
+  }
+}
+
+/* Reduced motion: the same states, standing still. */
+@media (prefers-reduced-motion: reduce) {
+  .connect-track *,
+  .connect-track *::before,
+  .connect-track *::after {
+    animation: none !important;
+  }
+  .track-travel {
+    display: none;
+  }
+}
+
+:root[data-reduce-motion="true"] .connect-track *,
+:root[data-reduce-motion="true"] .connect-track *::before,
+:root[data-reduce-motion="true"] .connect-track *::after {
+  animation: none !important;
+}
+
+:root[data-reduce-motion="true"] .track-travel {
+  display: none;
+}
+
+/* Narrow panes: the labels would collide, the dots say enough. */
+.connection-sheet {
+  container-type: inline-size;
+}
+
+@container (max-width: 380px) {
+  .track-label {
+    display: none;
+  }
+}

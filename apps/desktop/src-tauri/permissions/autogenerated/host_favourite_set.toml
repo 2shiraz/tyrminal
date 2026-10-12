@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-favourite-set"
+description = "Enables the host_favourite_set command without any pre-configured scope."
+commands.allow = ["host_favourite_set"]
+
+[[permission]]
+identifier = "deny-host-favourite-set"
+description = "Denies the host_favourite_set command without any pre-configured scope."
+commands.deny = ["host_favourite_set"]

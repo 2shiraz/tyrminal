@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, State};
-use tyrminal_core::contracts::{BackupCredentialKind, BackupFile, BackupPreview, ErrorCode, IpcError};
+use tyrminal_core::contracts::{BackupCredentialKind, BackupFile, BackupPreview, BackupStatus, ErrorCode, IpcError};
 
 use crate::state::AppState;
 
@@ -114,7 +114,16 @@ pub async fn backup_export(app: AppHandle, state: State<'_, AppState>) -> Result
         .await
         .map_err(|_| io_error("The backup could not be written."))?
         .map_err(|_| io_error("The backup could not be written there. Choose another location."))?;
+    // Only a backup that was actually written counts. If the vault locked meanwhile the file is
+    // still saved; the time is then simply not recorded.
+    let _ = state.core()?.vault.record_backup_export().await;
     Ok(Some(file_name(&path)))
+}
+
+/// When this vault was last backed up.
+#[tauri::command]
+pub async fn backup_status(state: State<'_, AppState>) -> Result<BackupStatus, IpcError> {
+    state.core()?.vault.backup_status().await
 }
 
 /// Lets the user pick a backup to restore. Nothing is decrypted yet.
