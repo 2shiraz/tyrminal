@@ -7,7 +7,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, openSettings } from "./fixtures";
+import { connectHost, openApp, openSettings } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -23,7 +23,7 @@ async function openHosts(page: Page) {
 
 async function connect(page: Page, label: string) {
   await openHosts(page);
-  await page.getByRole("button", { name: `Connect to ${label}` }).click();
+  await connectHost(page, label);
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
 }
 

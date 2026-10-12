@@ -3,7 +3,7 @@
 // The real connection paths are covered by the native and lab tests.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 import { calls, connectHeld, emitSessionEvent } from "./session-events";
 
 const hosts = (page: Page) => page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
@@ -12,7 +12,7 @@ const steps = (page: Page) => page.getByRole("list", { name: "Connection steps" 
 test("connecting shows the steps that happened, the current one, and Cancel stops it", async ({ page }) => {
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to api-gateway" }).first().click());
+  await connectHeld(page, () => connectHost(page, "api-gateway"));
   await page.clock.runFor(12); // connecting
   await page.clock.runFor(15); // verifying_host
   const sheet = page.getByRole("dialog", { name: "Connecting to api-gateway" });
@@ -32,7 +32,7 @@ test("connecting shows the steps that happened, the current one, and Cancel stop
 test("a new server: the fingerprint has focus, Enter trusts nothing, Escape answers no", async ({ page }) => {
   await openApp(page, { trustPromptFor: "staging-web" });
   await hosts(page);
-  await page.getByRole("button", { name: "Connect to staging-web" }).click();
+  await connectHost(page, "staging-web");
   const sheet = page.getByRole("alertdialog", { name: "Verify this server before connecting" });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByTestId("connect-fingerprint")).toBeFocused();
@@ -47,7 +47,7 @@ test("a new server: the fingerprint has focus, Enter trusts nothing, Escape answ
 test("sign-in prompts appear inline under Signing in, and the answer goes to the session", async ({ page }) => {
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to api-gateway" }).first().click());
+  await connectHeld(page, () => connectHost(page, "api-gateway"));
   await page.clock.runFor(42); // authenticating
   await emitSessionEvent(page, { type: "auth_prompt", promptId: "p2", kind: "password", username: "deploy", attempt: 2, maxAttempts: 3, message: null, echo: false, hop: null });
   const sheet = page.getByRole("dialog", { name: "Connecting to api-gateway" });
@@ -73,7 +73,7 @@ test("sign-in prompts appear inline under Signing in, and the answer goes to the
 test("a changed host key blocks the connection: full fingerprints, the failed step, Close tab first", async ({ page }) => {
   await openApp(page, { hostKeyChangedFor: "staging-web" });
   await hosts(page);
-  await page.getByRole("button", { name: "Connect to staging-web" }).click();
+  await connectHost(page, "staging-web");
   const sheet = page.getByRole("alert").filter({ hasText: "This server's identity has changed" });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByTestId("connect-fingerprint")).toHaveCount(2);
@@ -86,7 +86,7 @@ test("a changed host key blocks the connection: full fingerprints, the failed st
 test("a failure is named by its cause and marks the step it happened at", async ({ page }) => {
   await openApp(page);
   await hosts(page);
-  await connectHeld(page, () => page.getByRole("button", { name: "Connect to edge-cache" }).first().click());
+  await connectHeld(page, () => connectHost(page, "edge-cache"));
   await page.clock.runFor(42); // authenticating
   await emitSessionEvent(page, { type: "state", state: "failed" });
   await emitSessionEvent(page, { type: "closed", error: { code: "AUTH_FAILED", message: "The server did not accept the password for ops." }, exitStatus: null });

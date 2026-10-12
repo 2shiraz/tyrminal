@@ -98,7 +98,7 @@ describe("notes in the real application", { concurrency: false }, () => {
     await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen" });
     await s.fill("Passphrase", PASSPHRASE);
     await s.clickButton("Unlock");
-    await s.until(async () => (await t.heading()) === "Home", { describe: "home", timeout: 20_000 });
+    await s.until(async () => (await t.heading()) === "Hosts", { describe: "hosts", timeout: 20_000 });
     await openHostPanel();
     assert.match(await s.text(await noteView()), /echo note-\$\(\(6\*7\)\)/);
   });

@@ -59,7 +59,7 @@ export async function saveAndCloseHostPanel(s) {
 }
 
 export function ui(s) {
-  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const NAV_IDS = { Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const api = {
     heading: () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" }),
     nav: async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`)),
@@ -108,7 +108,7 @@ export function ui(s) {
       const group = Number(/group (\d+)/.exec(prompt)[1]);
       await s.fill(prompt, key[group - 1]);
       await s.clickButton("I have saved it");
-      await s.until(async () => (await api.heading()) === "Home", { describe: "home" });
+      await s.until(async () => (await api.heading()) === "Hosts", { describe: "hosts" });
       return key.join("-");
     },
     async importKey(path, label = "lab key") {
@@ -138,8 +138,7 @@ export function ui(s) {
     /** Connects to the host card labelled `label`, trusting the server once. */
     async connect(label) {
       await api.nav("Hosts");
-      const button = await s.waitFor(`[data-testid="host-list"] button[aria-label="Connect to ${label}"]`);
-      await s.click(button);
+      await s.openHost('[data-testid="host-list"]', label);
       await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
       await s.clickButton("Trust once", { within: "dialog" });
       await s.waitGone("dialog");

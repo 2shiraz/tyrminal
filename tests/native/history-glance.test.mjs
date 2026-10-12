@@ -141,7 +141,7 @@ describe("command history and the server panel in the real application", { concu
     }
     await s.fill("Passphrase", PASSPHRASE);
     await s.clickButton("Unlock");
-    await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+    await s.until(async () => (await t.heading()) === "Hosts", { describe: "hosts after unlock", timeout: 20_000 });
 
     await t.connect("Lab");
     await openSuggestions();

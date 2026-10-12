@@ -47,7 +47,7 @@ describe("installing a refused key through the real application", { concurrency:
 
   test("the refused key is named, installed by signing in once with the password, then used", async () => {
     await t.nav("Hosts");
-    await s.click(await s.waitFor('[data-testid="host-list"] button[aria-label="Connect to Lab"]'));
+    await s.openHost('[data-testid="host-list"]', "Lab");
     await trustOnceIfAsked();
     await s.until(async () => (await bodyText()).includes(`The server did not accept the key "${LABEL}". Its public key may not be installed on this server.`), {
       describe: "named refusal",

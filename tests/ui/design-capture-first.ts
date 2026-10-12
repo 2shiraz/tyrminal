@@ -8,7 +8,7 @@
 // on the session's own channel.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const OUT = process.env.AUDIT_OUT ?? new URL("../../docs/design/before", import.meta.url).pathname;
 const PREFIX = process.env.AUDIT_PREFIX ?? "";
@@ -110,7 +110,7 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { theme });
     await page.clock.pauseAt(new Date("2026-10-11T12:00:05Z"));
     await nav(page, /^Hosts/);
-    await page.getByRole("button", { name: "Connect to api-gateway" }).first().click();
+    await connectHost(page, "api-gateway");
     // Advance until the session is open; its steps are then due 10, 25, 40 and 55 ms later.
     for (let k = 0; k < 400; k += 1) {
       if (await page.evaluate(() => (window as unknown as { __mockState: { sessions: Map<string, unknown> } }).__mockState.sessions.size > 0)) break;
@@ -145,7 +145,7 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { theme });
     await t("connect-failed", async () => {
       await nav(page, /^Hosts/);
-      await page.getByRole("button", { name: "Connect to edge-cache" }).first().click();
+      await connectHost(page, "edge-cache");
       await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
       await emit(page, { type: "state", state: "failed" });
       await emit(page, { type: "closed", error: { code: "AUTH_FAILED", message: "The server did not accept the password for ops." }, exitStatus: null });
@@ -154,7 +154,7 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { theme });
     await t("connect-reconnecting", async () => {
       await nav(page, /^Hosts/);
-      await page.getByRole("button", { name: "Connect to api-gateway" }).first().click();
+      await connectHost(page, "api-gateway");
       await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
       await page.evaluate(() => (window as unknown as { __mockDrop: () => void }).__mockDrop());
       await expect(page.getByTestId("auto-reconnect")).toBeVisible();
@@ -164,13 +164,13 @@ for (const theme of ["dark", "light"] as const) {
     await openApp(page, { theme, trustPromptFor: "staging-web", trustPromptHop: { index: 1, total: 2, label: "bastion" } });
     await t("trust-prompt-hop", async () => {
       await nav(page, /^Hosts/);
-      await page.getByRole("button", { name: "Connect to staging-web" }).click();
+      await connectHost(page, "staging-web");
       await expect(page.getByRole("alertdialog")).toBeVisible();
     });
     await openApp(page, { theme, hostKeyChangedFor: "staging-web" });
     await t("host-key-changed", async () => {
       await nav(page, /^Hosts/);
-      await page.getByRole("button", { name: "Connect to staging-web" }).click();
+      await connectHost(page, "staging-web");
       await expect(page.getByRole("alert")).toBeVisible();
     });
 

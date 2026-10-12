@@ -116,7 +116,7 @@ describe("snippets in the real application", { concurrency: false }, () => {
     // Unlock again: the snippets come back from the vault.
     await s.fill("Passphrase", PASSPHRASE);
     await s.clickButton("Unlock");
-    await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+    await s.until(async () => (await t.heading()) === "Hosts", { describe: "hosts after unlock", timeout: 20_000 });
     await t.nav("Snippets");
     await s.waitFor('[data-snippet="Echo answer"]');
   });

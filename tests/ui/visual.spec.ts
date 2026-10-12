@@ -2,7 +2,7 @@
 // in __screenshots__ and are reviewed like code; a change in appearance shows up as a diff.
 import { expect, test } from "@playwright/test";
 
-import { openApp, openSettings } from "./fixtures";
+import { connectHost, openApp, openSettings } from "./fixtures";
 import { MOTD_LINES } from "./motd-fixture";
 
 // Park the pointer so hover states and tooltips never leak into a baseline.
@@ -45,7 +45,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test(`terminal with snippets panel (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
-      await page.getByRole("button", { name: "Connect to api-gateway" }).first().click();
+      await connectHost(page, "api-gateway");
       await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
       await page.getByRole("button", { name: "Snippets", exact: true }).click();
       await expect(page.getByRole("complementary", { name: "Snippets" })).toBeVisible();
@@ -55,7 +55,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test(`terminal with a highlighted login message (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
-      await page.getByRole("button", { name: "Connect to api-gateway" }).first().click();
+      await connectHost(page, "api-gateway");
       await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
       await page.evaluate((text) => (window as unknown as { __mockOutput: (t: string) => void }).__mockOutput(text), `\u001b[2J\u001b[H${MOTD_LINES.join("\r\n")}\r\n`);
       // Every address on screen is decorated (eleven, the last on the final line).
@@ -66,7 +66,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test(`split panes and command palette (${theme})`, async ({ page }) => {
       await openApp(page, { theme });
-      await page.getByRole("button", { name: "Connect to db-primary" }).first().click();
+      await connectHost(page, "db-primary");
       await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
       await page.getByRole("tab", { name: /db-primary/ }).click({ button: "right" });
       await page.getByRole("menuitem", { name: "Split pane right" }).click();
@@ -104,7 +104,7 @@ for (const theme of ["dark", "light"] as const) {
     test(`trust prompt (${theme})`, async ({ page }) => {
       await openApp(page, { theme, trustPromptFor: "staging-web" });
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-      await page.getByRole("button", { name: "Connect to staging-web" }).click();
+      await connectHost(page, "staging-web");
       await expect(page.getByRole("alertdialog", { name: "Verify this server before connecting" })).toBeVisible();
       await shot(page, `${theme}-17-trust-prompt.png`);
     });

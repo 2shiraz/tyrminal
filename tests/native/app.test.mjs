@@ -49,7 +49,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
       if (i < lines.length - 1) await s.chord([KEYS.enter]);
     }
   };
-  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const NAV_IDS = { Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const nav = async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`));
   const statusText = async () => s.text(await s.waitFor(".statusbar"));
   /** Host entries on the Hosts page (cards), as the user reads them. */
@@ -93,7 +93,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    await s.until(async () => (await heading()) === "Home", { describe: "main window" });
+    await s.until(async () => (await heading()) === "Hosts", { describe: "main window" });
     assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
     await app.screenshot("03-home-empty");
     await nav("Hosts");
@@ -226,7 +226,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clickButton("Use recovery key instead");
     await s.fill("Recovery key", recoveryKey.toLowerCase().replaceAll("-", " "));
     await s.clickButton("Unlock");
-    await s.until(async () => (await heading()) === "Home", { describe: "main window after recovery unlock", timeout: 20_000 });
+    await s.until(async () => (await heading()) === "Hosts", { describe: "main window after recovery unlock", timeout: 20_000 });
     await nav("Hosts");
     assert.match(await hostText(), /Lab server/);
 
@@ -342,7 +342,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.click(await s.waitFor('nav.sidebar [data-nav="lock"]'));
     await s.until(async () => (await heading()) === "Unlock your vault", { describe: "locked" });
     await s.clickButton("Unlock with this device");
-    await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
+    await s.until(async () => (await heading()) === "Hosts", { describe: "unlocked by the device", timeout: 20_000 });
     // Turn it off again so the test leaves no keychain item behind.
     await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
     await s.clickButton("Vault and unlock", { within: "nav.settings-nav" });

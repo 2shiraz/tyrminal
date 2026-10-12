@@ -57,7 +57,7 @@ export function SftpView({
   const queue = useTransferQueue(list, setList, visible);
   const [notice, setNotice] = useState<string | null>(null);
   const sideOf = (id: PaneId): Side => (order[0] === id ? "left" : "right");
-  const [requests, setRequests] = useState<Record<PaneId, LocationRequest | null>>({ a: null, b: null });
+  const [requests, setRequests] = useState<Record<PaneId, readonly LocationRequest[]>>({ a: [], b: [] });
   const seq = useRef(0);
 
   // Open in SFTP: while this tab is in front, it shows each requested host in its right pane.
@@ -68,7 +68,9 @@ export function SftpView({
       const right = order[1];
       for (const r of sftpRequests.take()) {
         seq.current += 1;
-        setRequests((all) => ({ ...all, [right]: { source: r.source, path: r.path, seq: seq.current } }));
+        // Kept in order; a pane handles each once (by seq). At most the last few are kept.
+        const next: LocationRequest = { source: r.source, path: r.path, seq: seq.current };
+        setRequests((all) => ({ ...all, [right]: [...all[right], next].slice(-MAX_LOCATIONS) }));
         setActive(right);
       }
     };
@@ -182,7 +184,7 @@ export function SftpView({
               active={active === id}
               refreshKey={refresh[id]}
               transfers={transfersFor(id)}
-              request={requests[id]}
+              requests={requests[id]}
               onFull={() => setNotice(msgSftp.full(MAX_LOCATIONS))}
               onFocusIn={() => setActive(id)}
               onEndpoint={onEndpoint[id]}
