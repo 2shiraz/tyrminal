@@ -19,17 +19,13 @@ until the native suites pass in CI on macOS arm64 and Windows x64 (the declared 
 
 ## Evidence (2026-10-12)
 
-Linux x64 sandbox (Ubuntu 24.04, 4 cores, local lab = host OpenSSH 9.6p1, WebKitGTK under
-xvfb): `verify:fast` 7/7; ssh lab 16/17 (IPv6 loopback absent in this sandbox only); core lab
-14/14; native app 9/9, terminal 12/12, snippets 3/3, backup 3/3; browser UI 38/38 in the
-pinned Playwright image. Measurements: `docs/reports/performance/2026-10-12-linux-x64-sandbox.json`.
+Native workflow run 38216895650 on commit da60796: **Linux x64, macOS arm64 and Windows x64 all
+green** — fast 7/7, integration 3/3, security 6/6, native 4/4 suites, 0 blocked, release build
+and release policy against the built binary. CI (fast, browser UI, cargo-deny, npm audit,
+secret scan, fuzz smoke) green on the same commit. 24 matrix rows VERIFIED on it.
 
-CI (PR https://github.com/2shiraz/tyrminal/pull/1), native workflow run 38205380325 on commit
-03d906f: **macOS arm64 (macos-15) and Linux x64 (ubuntu-24.04) fully green**: fast 7/7,
-integration 3/3, security 6/6, native 4/4 suites (app, terminal with vim/nano/tmux/htop/mc,
-snippets, backup), 0 blocked; unsigned release build and the release policy check against the
-built binary pass on both. Linux has been green on four runs in a row. Windows x64: fast
-checks pass; the WSL lab server is being brought up (Node inside WSL fixed in 0723e73).
+Windows lab: Debian 12 in WSL 1 with the official Node 20 build (Debian's node does not run
+under WSL 1); OpenSSH 9.2p1, PAM keyboard-interactive and the full-screen apps run there.
 
 ## Findings worth keeping
 
@@ -61,12 +57,10 @@ checks pass; the WSL lab server is being brought up (Node inside WSL fixed in 07
 
 ## Next tasks, in order
 
-1. Windows native job green (lab server in WSL 1, Debian 12, official Node 20 inside WSL).
-   macOS and Linux are green (see Evidence).
-2. Windows lab = Linux OpenSSH in WSL 1, so tmux/htop/mc and PAM keyboard-interactive run there
-   too; the local Win32-OpenSSH mode remains for developers without WSL.
-3. When all three are green: mark matrix rows VERIFIED with `verified_commit`, merge the PR,
-   write `docs/releases/v0.1.0-beta.1.md`, run the release workflow (pre-release, unsigned).
+1. Merge PR #1 and run the release workflow for v0.1.0-beta.1 (pre-release, unsigned).
+2. Phase 04 is implemented on a local branch (groups with inherited settings, tags, search,
+   bulk changes, duplicate, OpenSSH/CSV import); push it on top of main after the release.
+3. Phase 04 remainder: public-key deployment (KEY-05/06), reusable identities (KEY-15..17).
 4. Phase 02 remainder: OS screen-lock hook (needs platform APIs and an ADR for any FFI);
    verify sleep-lock on a real suspend.
 5. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
