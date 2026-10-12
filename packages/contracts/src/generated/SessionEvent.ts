@@ -8,7 +8,12 @@ import type { SessionState } from "./SessionState";
  * Events for one session, delivered only on that session's own channel (never broadcast).
  * Text fields that originate from the server are untrusted: render as plain text.
  */
-export type SessionEvent = { "type": "state", state: SessionState, } | { "type": "trust_prompt", promptId: string, host: string, port: number, resolvedAddress: string | null, algorithm: string, fingerprint: string, 
+export type SessionEvent = { "type": "state", state: SessionState, 
+/**
+ * During a jump-host chain: which hop this step belongs to (`None` for a direct
+ * connection and for session-level states such as `Connected`).
+ */
+hop: ChainPosition | null, } | { "type": "trust_prompt", promptId: string, host: string, port: number, resolvedAddress: string | null, algorithm: string, fingerprint: string, 
 /**
  * For a jump-host chain: which hop is asking.
  */
@@ -29,4 +34,9 @@ echo: boolean, hop: ChainPosition | null, } | { "type": "negotiated", kex: strin
 /**
  * Empty for AEAD ciphers.
  */
-mac: string, strictKex: boolean, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };
+mac: string, strictKex: boolean, 
+/**
+ * During a jump-host chain: the hop whose key exchange this is. Sent for every hop as
+ * soon as its key exchange finishes, before its host key is verified.
+ */
+hop: ChainPosition | null, } | { "type": "banner", text: string, } | { "type": "environment", sent: Array<string>, rejected: Array<string>, } | { "type": "notice", text: string, } | { "type": "closed", error: IpcError | null, exitStatus: number | null, };

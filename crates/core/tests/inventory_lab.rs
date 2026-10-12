@@ -198,7 +198,7 @@ async fn hybrid_post_quantum_key_exchange_is_negotiated_when_the_server_supports
                 core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
             }
             event @ SessionEvent::Negotiated { .. } => negotiated = Some(event),
-            SessionEvent::State { state: SessionState::Connected } => break,
+            SessionEvent::State { state: SessionState::Connected, .. } => break,
             SessionEvent::Closed { error, .. } => panic!("closed: {error:?}"),
             _ => {}
         }
@@ -240,7 +240,7 @@ async fn connected_session(core: &Core, lab: &Lab, server: &str, key_id: &str) -
                 SessionEvent::TrustPrompt { prompt_id, .. } => {
                     inner.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
                 }
-                SessionEvent::State { state: SessionState::Connected } => {
+                SessionEvent::State { state: SessionState::Connected, .. } => {
                     if let Some(tx) = ready.take() {
                         let _ = tx.send(());
                     }
@@ -485,7 +485,7 @@ async fn attempt(core: &Core, host_id: &str) -> Result<(), String> {
             SessionEvent::TrustPrompt { prompt_id, .. } => {
                 core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
             }
-            SessionEvent::State { state: SessionState::Connected } => break Ok(()),
+            SessionEvent::State { state: SessionState::Connected, .. } => break Ok(()),
             SessionEvent::AuthPrompt { .. } => break Err("asked for credentials".to_owned()),
             SessionEvent::Closed { error, .. } => break Err(format!("closed: {error:?}")),
             _ => {}
@@ -661,7 +661,7 @@ async fn environment_variables_are_inherited_sent_and_refusals_reported() {
     let format = format!("{reported:?}");
     assert!(!format.contains("host value") && !format.contains("from group"), "values never leave the vault in events");
     loop {
-        if let SessionEvent::State { state: SessionState::Connected } =
+        if let SessionEvent::State { state: SessionState::Connected, .. } =
             tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed")
         {
             break;
@@ -774,4 +774,116 @@ async fn snippet_runs_stop_when_their_session_closes_or_the_vault_locks() {
         assert_eq!(result.unwrap_err().code, ErrorCode::VaultLocked);
         assert!(took < Duration::from_millis(2500), "stopped by the lock: {took:?}");
     }
+}
+
+/// Connects to `host_id` and returns the session's events up to `Connected`, compacted to
+/// `kind@hop` strings (`-` without a hop). Trust prompts are answered "once" and recorded.
+async fn event_trail(core: &Core, host_id: &str) -> (String, Vec<String>) {
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let session = opened.session_id.clone();
+    let at = |hop: &Option<tyrminal_core::contracts::ChainPosition>| {
+        hop.as_ref().map_or_else(|| "-".to_owned(), |h| format!("{}/{}", h.index, h.total))
+    };
+    let mut trail = Vec::new();
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::State { state, hop } => {
+                trail.push(format!("{state:?}@{}", at(&hop)));
+                if state == SessionState::Connected {
+                    break;
+                }
+            }
+            SessionEvent::Negotiated { kex, hop, .. } => {
+                assert!(!kex.is_empty());
+                trail.push(format!("Negotiated@{}", at(&hop)));
+            }
+            SessionEvent::TrustPrompt { prompt_id, hop, .. } => {
+                trail.push(format!("TrustPrompt@{}", at(&hop)));
+                core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::Closed { error, .. } => panic!("closed: {error:?} after {trail:?}"),
+            _ => {}
+        }
+    }
+    (session, trail)
+}
+
+/// The connection sheet's event contract: `Resolving` before the name is looked up, `Connecting`
+/// after, `Negotiated` for every hop as soon as its key exchange ends and before its key is
+/// verified, every hop-specific state naming its hop, and `Connected` for the session (no hop).
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let keyed = |label: &str, server: &str| HostInput {
+        username: lab.str("/user"),
+        auth: HostAuthInput::Key { key_id: key.id.clone() },
+        ..host(label, lab.port(server))
+    };
+
+    let direct = v.save_host(keyed("direct", "a")).await.unwrap();
+    let (session, trail) = event_trail(&core, &direct.id).await;
+    core.sessions.close(WINDOW, &session).unwrap();
+    assert_eq!(
+        trail,
+        [
+            "Resolving@-",
+            "Connecting@-",
+            "Negotiated@-",
+            "VerifyingHost@-",
+            "TrustPrompt@-",
+            "Authenticating@-",
+            "OpeningChannel@-",
+            "Connected@-",
+        ],
+    );
+
+    let bastion = v.save_host(keyed("bastion", "a")).await.unwrap();
+    let inner = v.save_host(keyed("inner", "b")).await.unwrap();
+    v.set_host_connection(
+        &inner.id,
+        tyrminal_core::contracts::HostConnectionInput {
+            proxy: None,
+            jump_host_id: Some(bastion.id.clone()),
+            inherit: false,
+        },
+    )
+    .await
+    .unwrap();
+    let (session, trail) = event_trail(&core, &inner.id).await;
+    core.sessions.close(WINDOW, &session).unwrap();
+    assert_eq!(
+        trail,
+        [
+            "Resolving@1/2",
+            "Connecting@1/2",
+            "Negotiated@1/2",
+            "VerifyingHost@1/2",
+            "TrustPrompt@1/2",
+            "Authenticating@1/2",
+            "Connecting@2/2",
+            "Negotiated@2/2",
+            "VerifyingHost@2/2",
+            "TrustPrompt@2/2",
+            "Authenticating@2/2",
+            "OpeningChannel@2/2",
+            "Connected@-",
+        ],
+    );
+    // The events never carry a secret: only labels, positions and algorithm names.
+    let text = format!("{trail:?}");
+    assert!(!text.contains("PRIVATE KEY"));
 }

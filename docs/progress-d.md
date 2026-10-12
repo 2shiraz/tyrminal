@@ -135,3 +135,11 @@ cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib
 - **ProxyJump import (IMP-02)**: previewed hosts carry `jump_via` (a label in the same import);
   `import_hosts` resolves labels to the new ids and checks chains in the same transaction.
 
+- **Startup typing ends with its session** (audit after snippet runs were found to outlive close
+  and lock): the typing runs alongside the pump inside the session body (`run_ssh`), so the
+  supervisor's close/lock `select!` drops both; `Entry::startup_left` lets it note what was not
+  typed. Against a real server the sequence is queued in microseconds, so the mid-sequence stop
+  is covered by unit tests; the lab test checks close, lock, refused input and a fresh run.
+- **SNP-09** is BLOCKED on team vaults (Phase 10/11). The personal vault already holds snippets
+  and backups carry them; no interim snippet-package format was added (a new crypto format, or a
+  plaintext export of possibly secret text).
