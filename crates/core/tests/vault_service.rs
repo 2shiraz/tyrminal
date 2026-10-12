@@ -551,7 +551,9 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     }
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
 
-    // Silence: locked within one timeout (plus scheduling slack), not before.
+    // Silence, measured from the last reported activity: locked within one timeout (plus
+    // scheduling slack), not before.
+    core.vault.note_activity();
     let quiet_from = Instant::now();
     tokio::time::timeout(timeout * 4, status.wait_for(|s| s.state == VaultState::Locked))
         .await
