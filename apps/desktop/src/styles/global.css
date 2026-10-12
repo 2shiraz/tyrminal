@@ -3604,6 +3604,29 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   word-break: break-word;
 }
 
+/* Session recording playback */
+.player-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.player-toolbar .input {
+  width: 16rem;
+}
+.player-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+.log-player {
+  overflow: auto;
+  max-height: 70vh;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-subtle);
+}
+
 /* agent D: inventory and snippets */
 .os-icon {
   font-weight: 700;
@@ -4132,4 +4155,105 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 .glance-usage .muted {
   font-size: var(--text-xs);
+}
+
+/* P-30: host and group notes. Plain token styling. */
+.note-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.note-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.note-view {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.note-view p,
+.note-view ul,
+.note-view ol,
+.note-view blockquote {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.note-view ul,
+.note-view ol {
+  padding-left: var(--space-5);
+}
+
+.note-view blockquote {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+}
+
+.note-view hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.note-view :not(pre) > code {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font: 0.92em var(--font-mono);
+}
+
+.note-heading[data-level="1"] {
+  font-size: var(--text-lg);
+}
+
+.note-heading[data-level="2"] {
+  font-size: var(--text-md);
+}
+
+.note-plain {
+  white-space: pre-wrap;
+}
+
+.note-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.note-image {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.note-code {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+.note-code .code-block {
+  justify-self: stretch;
+}
+
+.note-inherited {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
 }

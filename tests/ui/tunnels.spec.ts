@@ -194,3 +194,36 @@ test("a direct connection's trust prompt shows no hop", async ({ page }) => {
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await expect(page.getByTestId("hop-notice")).toHaveCount(0);
 });
+
+test("hosts: post-quantum key exchange can be required or turned off per host", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-nav="hosts"]').click();
+  const edit = async (label: string) => {
+    await page.getByRole("button", { name: `More actions for ${label}` }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    return page.getByRole("complementary", { name: "Host details" });
+  };
+  const saved = () =>
+    page.evaluate(() => Object.fromEntries((window as unknown as { __mockKeyExchanges: Map<string, string> }).__mockKeyExchanges));
+
+  let panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  const kex = panel.getByRole("combobox", { name: "Post-quantum key exchange" });
+  await expect(kex).toHaveValue("prefer_post_quantum");
+  await expect(panel).toContainText("Servers without it use X25519");
+  await kex.selectOption("classic");
+  await expect(panel).toContainText("For servers that fail with post-quantum key exchange");
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByTestId("host-panel-status")).toHaveText("Saved");
+  expect(Object.values(await saved())).toEqual(["classic"]);
+
+  // Reopening shows the saved setting.
+  panel = await edit("db-primary");
+  await panel.getByText("Show more").click();
+  await expect(panel.getByRole("combobox", { name: "Post-quantum key exchange" })).toHaveValue("classic");
+  await panel.getByRole("combobox", { name: "Post-quantum key exchange" }).selectOption("require_post_quantum");
+  await expect(panel).toContainText("Otherwise the connection stops before you sign in");
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByTestId("host-panel-status")).toHaveText("Saved");
+  expect(Object.values(await saved())).toEqual(["require_post_quantum"]);
+});

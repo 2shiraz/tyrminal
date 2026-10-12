@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+base64 = "0.22.1"
 getrandom = "0.4.3"
 quick-xml = { version = "0.42.0", default-features = false }
 if-addrs = "0.15"
@@ -29,6 +30,7 @@ tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "fs", "i
 tyrminal-contracts = { path = "../contracts" }
 tyrminal-platform = { path = "../platform" }
 tyrminal-pty = { path = "../pty" }
+tyrminal-session-log = { path = "../session-log" }
 tyrminal-ssh = { path = "../ssh" }
 tyrminal-storage = { path = "../storage" }
 tyrminal-vault = { path = "../vault" }

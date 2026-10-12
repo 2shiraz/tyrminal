@@ -219,6 +219,16 @@ pub fn host_key_from_openssh(text: &str) -> Option<crate::PresentedHostKey> {
     crate::PresentedHostKey::from_public_key(&key)
 }
 
+/// The modulus size in bits of an OpenSSH RSA public key (`ssh-rsa <base64> [comment]`), for the
+/// security review (P-27). `None` for any other key type or text that does not parse.
+pub fn rsa_public_key_bits(public_key: &str) -> Option<u32> {
+    if public_key.len() > MAX_KEY_TEXT_LEN {
+        return None;
+    }
+    let key = PublicKey::from_openssh(public_key.trim()).ok()?;
+    key.key_data().rsa().map(|rsa| rsa.key_size())
+}
+
 /// What a checked user certificate says. `text` is the normalized certificate line (public data).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CertificateInfo {

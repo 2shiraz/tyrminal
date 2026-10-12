@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-session-log-storage"
+description = "Enables the session_log_storage command without any pre-configured scope."
+commands.allow = ["session_log_storage"]
+
+[[permission]]
+identifier = "deny-session-log-storage"
+description = "Denies the session_log_storage command without any pre-configured scope."
+commands.deny = ["session_log_storage"]
