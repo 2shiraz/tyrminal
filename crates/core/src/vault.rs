@@ -3788,6 +3788,84 @@ impl VaultService {
     }
 }
 
+// security review (P-27)
+impl VaultService {
+    /// Reviews keys, sign-in methods, certificates and known hosts as of `now` (Unix seconds).
+    /// Reads public facts only; nothing is changed and no secret leaves this function.
+    pub async fn security_review(&self, now: u64) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        use crate::security_review::{CertificateFacts, HostFacts, KeyFacts, KnownHostFacts, SignIn, review};
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let keys: Vec<_> = open
+            .ssh_keys
+            .iter()
+            .map(|(id, s)| KeyFacts {
+                id: validate::id_text(id),
+                label: s.record.label.clone(),
+                algorithm: s.record.algorithm.clone(),
+                public_key: s.record.public_key.clone(),
+                passphrase_protected: s.record.passphrase_protected,
+                passphrase_stored: s.record.passphrase.is_some(),
+            })
+            .collect();
+        let certificates: Vec<_> = open
+            .certificates
+            .values()
+            .map(|c| CertificateFacts { key_id: c.record.key_id.clone(), valid_before: c.record.valid_before })
+            .collect();
+        let groups = group_index(open);
+        let hosts: Vec<_> = open
+            .hosts
+            .iter()
+            .map(|(id, s)| {
+                let host = &s.record;
+                let effective = inventory::effective(&groups, host);
+                // The same resolution a connection uses (see `hop_plan`), without reading secrets.
+                let sign_in = match Self::identity_for_host(open, id, host).map(|(_, record, _)| record) {
+                    Some(identity) => match (&identity.key_id, &identity.password) {
+                        (Some(key_id), _) => SignIn::Key(key_id.clone()),
+                        (None, Some(_)) => SignIn::StoredPassword,
+                        (None, None) => SignIn::AskPassword,
+                    },
+                    None => match &effective.auth {
+                        EffectiveAuth::Own(StoredAuth::Password { .. }) => SignIn::StoredPassword,
+                        EffectiveAuth::Own(StoredAuth::Key { key_id }) | EffectiveAuth::GroupKey(key_id) => {
+                            SignIn::Key(key_id.clone())
+                        }
+                        EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => {
+                            SignIn::AskPassword
+                        }
+                    },
+                };
+                HostFacts {
+                    id: validate::id_text(id),
+                    label: host.label.clone(),
+                    ssh: host.protocol.is_ssh(),
+                    endpoint: (tyrminal_ssh::canonical_host(&host.address), effective.port),
+                    sign_in,
+                }
+            })
+            .collect();
+        let known_hosts: Vec<_> = open
+            .known_hosts
+            .iter()
+            .map(|(id, s)| KnownHostFacts {
+                id: validate::id_text(id),
+                host: s.record.host.clone(),
+                port: s.record.port,
+                algorithm: s.record.algorithm.clone(),
+                fingerprint: s.record.fingerprint.clone(),
+            })
+            .collect();
+        Ok(review(&keys, &certificates, &hosts, &known_hosts, now))
+    }
+
+    /// The review as of the current time.
+    pub async fn security_review_now(&self) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        self.security_review(now_unix()).await
+    }
+}
+
 #[cfg(test)]
 mod suspend_tests {
     use super::*;

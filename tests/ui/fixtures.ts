@@ -23,6 +23,9 @@ export interface MockOptions {
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;
+  // security review (P-27)
+  /** Adds a DSA key, a 2048-bit RSA key and an RSA-only trusted key for a retired host. */
+  reviewFixtures?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

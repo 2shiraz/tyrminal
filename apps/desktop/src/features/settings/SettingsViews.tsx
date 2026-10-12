@@ -26,6 +26,9 @@ import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore"
 import { RecoveryKeyStep } from "../vault/VaultScreens";
 // compromised-password check (SEC-11)
 import { PasswordCheckSetting } from "../password-check/PasswordCheckSetting";
+// security review (P-27)
+import { SecurityReviewSection } from "../security-review/SecurityReviewSection";
+import { msgSR } from "../../lib/messages-security-review";
 import { AboutSection } from "./AboutSection";
 import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
 import { msgC } from "../../lib/messages-c";
@@ -115,7 +118,15 @@ export function KnownHostsView() {
   );
 }
 
-function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary; onClose: () => void; onDone: () => void }) {
+export function RemoveTrustDialog({
+  entry,
+  onClose,
+  onDone,
+}: {
+  entry: Pick<KnownHostSummary, "id" | "host" | "port">;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const [reason, setReason] = useState("");
   const { pending, error, run } = useAction();
 
@@ -148,9 +159,12 @@ function RemoveTrustDialog({ entry, onClose, onDone }: { entry: KnownHostSummary
   );
 }
 
-export type Section = "appearance" | "terminal" | "shortcuts" | "security" | "backup" | "privacy" | "about";
+export type Section = "appearance" | "terminal" | "shortcuts" | "security" | "review" | "backup" | "privacy" | "about";
 
-export function SettingsView({ initialSection }: { initialSection?: Section | undefined } = {}) {
+export function SettingsView({
+  initialSection,
+  onOpenKeychain = () => undefined,
+}: { initialSection?: Section | undefined; onOpenKeychain?: () => void } = {}) {
   const { prefs, update, saveError } = usePreferences();
   const [section, setSection] = useState<Section>(initialSection ?? "appearance");
   useEffect(() => {
@@ -174,6 +188,8 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
     { id: "terminal", label: msg.settings.terminal },
     { id: "shortcuts", label: msgC.keys.title },
     { id: "security", label: msg.settings.security },
+    // security review (P-27)
+    { id: "review", label: msgSR.title },
     { id: "backup", label: msg.backup.title },
     { id: "privacy", label: msg.settings.privacy },
     { id: "about", label: msg.about.title },
@@ -416,6 +432,9 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
               {/* compromised-password check (SEC-11) */}
               <PasswordCheckSetting />
             </section>
+
+            {/* security review (P-27) */}
+            <SecurityReviewSection onOpenKeychain={onOpenKeychain} />
 
             <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">
               <header>

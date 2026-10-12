@@ -165,7 +165,7 @@ export function KeychainView() {
   );
 }
 
-function GenerateKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function GenerateKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [label, setLabel] = useState("");
   const [kind, setKind] = useState<KeyKind>("ed25519");
   const { pending, error, run } = useAction();

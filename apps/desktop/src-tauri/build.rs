@@ -152,6 +152,8 @@ const COMMANDS: &[&str] = &[
     // compromised-password check (SEC-11)
     "password_check_status",
     "password_check_run",
+    // security review (P-27)
+    "security_review",
     "startup_get",
     "startup_set",
     "startup_effective",

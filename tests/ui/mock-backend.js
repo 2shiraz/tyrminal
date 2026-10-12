@@ -94,6 +94,15 @@ export function installMockBackend(options) {
       { id: id(300), host: "10.20.0.11", port: 22, algorithm: "ssh-ed25519", fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8", addedAt: now - 86400 * 30 },
       { id: id(301), host: "ci3.lab.example", port: 2222, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Z0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4", addedAt: now - 86400 * 4 },
     ];
+    // security review (P-27): an old DSA key, a 2048-bit RSA key and an RSA-only trusted key for
+    // a host that is no longer in the inventory.
+    if (options.reviewFixtures) {
+      state.keys.push(
+        { id: id(3), label: "Old DSA", algorithm: "ssh-dss", fingerprint: "SHA256:dsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-dss AAAAB3NzaC1kc3MFakeSynthetic old-dsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 1024 },
+        { id: id(4), label: "Laptop RSA", algorithm: "ssh-rsa", fingerprint: "SHA256:rsaSyntheticFingerprintForUiTests0000000000", publicKey: "ssh-rsa AAAAB3NzaC1yc2EFakeSynthetic laptop-rsa", passphraseProtected: true, passphraseStored: false, usedBy: 0, bits: 2048 },
+      );
+      state.knownHosts.push({ id: id(303), host: "retired.example", port: 22, algorithm: "ssh-rsa", fingerprint: "SHA256:retiredRsaSyntheticFingerprint000000000000", addedAt: now - 86400 * 90 });
+    }
     if (options.orphanKnownHost) {
       state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });
     }
@@ -1013,6 +1022,51 @@ export function installMockBackend(options) {
     },
     key_list: () => structuredClone(state.keys),
     known_host_list: () => structuredClone(state.knownHosts),
+    known_host_remove: (a) => {
+      if (String(a.reason ?? "").trim().length < 3) throw { code: "INVALID_INPUT", message: "Say why you are removing this key." };
+      state.knownHosts = state.knownHosts.filter((k) => k.id !== a.id);
+    },
+    // security review (P-27): the same rules as crates/core/src/security_review.rs, over mock state.
+    security_review: () => {
+      const reviewedAt = Math.floor(Date.now() / 1000);
+      const ssh = state.hosts.filter((h) => (h.protocol?.type ?? "ssh") === "ssh");
+      const usedBy = (keyId) => ssh.filter((h) => h.auth.kind === "key" && h.auth.keyId === keyId).length;
+      const findings = [];
+      for (const k of state.keys) {
+        if (k.algorithm === "ssh-dss") findings.push({ kind: "dsa_key", keyId: k.id, label: k.label, usedBy: usedBy(k.id) });
+        else if (k.algorithm === "ssh-rsa" && (k.bits ?? 3072) < 3072) findings.push({ kind: "short_rsa_key", keyId: k.id, label: k.label, bits: k.bits, usedBy: usedBy(k.id) });
+        if (!k.passphraseProtected || k.passphraseStored)
+          findings.push({ kind: "key_without_passphrase", keyId: k.id, label: k.label, passphraseStored: k.passphraseProtected, usedBy: usedBy(k.id) });
+      }
+      for (const h of ssh) {
+        if (h.auth.kind !== "key") findings.push({ kind: "password_sign_in", hostId: h.id, label: h.label, stored: h.auth.kind === "stored_password" });
+      }
+      for (const c of Object.values(state.certificates ?? {})) {
+        const label = state.keys.find((k) => k.id === c.keyId)?.label ?? "";
+        if (c.validBefore !== null && c.validBefore <= reviewedAt) findings.push({ kind: "certificate_expired", keyId: c.keyId, label, validBefore: c.validBefore });
+        else if (c.validBefore !== null && c.validBefore - reviewedAt <= 30 * 86400)
+          findings.push({ kind: "certificate_expiring", keyId: c.keyId, label, validBefore: c.validBefore });
+      }
+      const used = new Set(ssh.map((h) => `${h.address.toLowerCase()}:${h.port}`));
+      const stronger = new Set(state.knownHosts.filter((k) => k.algorithm !== "ssh-rsa").map((k) => `${k.host}:${k.port}`));
+      for (const k of state.knownHosts) {
+        const endpoint = `${k.host}:${k.port}`;
+        if (!used.has(endpoint))
+          findings.push({ kind: "unused_known_host", knownHostId: k.id, host: k.host, port: k.port, algorithm: k.algorithm, fingerprint: k.fingerprint });
+        if (k.algorithm === "ssh-rsa" && !stronger.has(endpoint))
+          findings.push({ kind: "ssh_rsa_only_known_host", knownHostId: k.id, host: k.host, port: k.port, fingerprint: k.fingerprint });
+      }
+      const rank = ["dsa_key", "short_rsa_key", "certificate_expired", "certificate_expiring", "password_sign_in", "key_without_passphrase", "unused_known_host", "ssh_rsa_only_known_host"];
+      const severity = (f) =>
+        f.kind === "dsa_key" || f.kind === "certificate_expired" || (f.kind === "short_rsa_key" && f.bits < 2048)
+          ? 0
+          : ["short_rsa_key", "password_sign_in", "certificate_expiring"].includes(f.kind)
+            ? 1
+            : 2;
+      const name = (f) => (f.label ?? f.host).toLowerCase();
+      findings.sort((a, b) => severity(a) - severity(b) || rank.indexOf(a.kind) - rank.indexOf(b.kind) || name(a).localeCompare(name(b)));
+      return { findings, keys: state.keys.length, hosts: ssh.length, certificates: Object.keys(state.certificates ?? {}).length, knownHosts: state.knownHosts.length, reviewedAt };
+    },
     snippet_list: () => structuredClone(state.snippets),
     snippet_save: (a) => {
       const existing = state.snippets.find((s) => s.id === a.snippet.id);

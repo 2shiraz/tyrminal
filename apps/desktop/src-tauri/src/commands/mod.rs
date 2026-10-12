@@ -16,6 +16,8 @@ pub mod tunnels;
 pub mod privilege;
 // compromised-password check (SEC-11)
 pub mod password_check;
+// security review (P-27)
+pub mod security_review;
 // agent C: workspaces
 pub mod layouts;
 // command history
