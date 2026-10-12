@@ -6,7 +6,8 @@ import type { GroupSummary, HostAuthInput, HostOs, HostSummary, HostTerminal, Id
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
-import { SecretField, Switch, TextField } from "../../components/ui/controls";
+import { useOptionalVaultData } from "../../app/vaultData";
+import { ErrorNotice, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconKeyRound, IconPlus, IconX } from "../../components/ui/icons";
 import { hosts as hostsApi, identities as identitiesApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -327,36 +328,46 @@ export interface LiveHost {
   isNew: boolean;
 }
 
-/** One card of the form, a group named by its heading. */
+/** One box of the form (docs/design/revamp.md §4): a strip with its heading, then its fields. */
 function Card({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
   return (
-    <section className="host-section" role="group" aria-labelledby={id}>
-      <h3 id={id} className="host-section-title">
-        {title}
-      </h3>
-      {children}
+    <section className="box host-section" role="group" aria-labelledby={id}>
+      <div className="box-strip">
+        <h3 id={id} className="host-section-title">
+          {title}
+        </h3>
+      </div>
+      <div className="host-section-body">{children}</div>
     </section>
   );
 }
 
-/** 1. Address, with the host's OS mark (or a neutral server mark). The field's label names the card. */
+/**
+ * 1. Address, with the host's OS mark (or a neutral server mark). The strip names the box and the
+ * field's own label stays for assistive technology only, so "Address" is not shown twice.
+ */
 function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | null; autoFocus: boolean }) {
   return (
-    <section className="host-section host-address">
-      <OsIcon os={os} />
-      <TextField
-        label={msg.hosts.address}
-        value={form.fields.address}
-        onChange={form.set.setAddress}
-        // A panel opened for a new host says it is saved once the address is valid. The hint stays
-        // for the panel's life (form.host is the host it opened with), so nothing below it moves
-        // under the pointer when autosave creates the host.
-        hint={form.live && form.host === null ? msgAutosave.newHostHint : msg.hosts.addressHint}
-        error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
-        maxLength={253}
-        autoFocus={autoFocus}
-      />
+    <section className="box host-section host-address">
+      <div className="box-strip">
+        <h3 className="host-section-title">{msg.hosts.address}</h3>
+      </div>
+      <div className="host-section-body">
+        <OsIcon os={os} />
+        <TextField
+          label={msg.hosts.address}
+          value={form.fields.address}
+          onChange={form.set.setAddress}
+          // A panel opened for a new host says it is saved once the address is valid. The hint stays
+          // for the panel's life (form.host is the host it opened with), so nothing below it moves
+          // under the pointer when autosave creates the host.
+          hint={form.live && form.host === null ? msgAutosave.newHostHint : msg.hosts.addressHint}
+          error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
+          maxLength={253}
+          autoFocus={autoFocus}
+        />
+      </div>
     </section>
   );
 }
@@ -403,7 +414,7 @@ function GeneralCard({ form }: { form: HostForm }) {
 
 const PROTOCOL_NAMES: Record<ProtocolKind, string> = { ssh: "SSH", telnet: msg.hosts.telnet, serial: msg.hosts.serial };
 
-/** 3. "[SSH] on [22] port": the protocol (SSH, or Telnet or a serial device instead) and its port or line settings. */
+/** 3. Connection, "[SSH] on [22] port": the protocol (SSH, or Telnet or a serial device instead) and its port or line settings. */
 function ProtocolCard({ form }: { form: HostForm }) {
   const { fields, set, inherited, portValid } = form;
   const id = useId();
@@ -412,7 +423,7 @@ function ProtocolCard({ form }: { form: HostForm }) {
   const error = fields.port !== "" && !portValid ? "1–65535" : undefined;
   const hint = fields.protocol === "ssh" && fields.groupId && fields.port === "" ? msg.hosts.inherit(inheritedPort) : undefined;
   return (
-    <Card title={msgD.hostPanel.protocol}>
+    <Card title={msgD.hostPanel.connection}>
       <div className="protocol-line">
         <label htmlFor={protocolId} className="visually-hidden">
           {msg.hosts.protocol}
@@ -480,6 +491,27 @@ function CredentialsCard({ form }: { form: HostForm }) {
   const plainKeys = keys.filter((k) => !certified.has(k.id));
   const certKeys = keys.filter((k) => certified.has(k.id));
   const chosenIdentity = identity?.list.find((i) => i.id === fields.identityId);
+  const reuse = useReuse(form);
+  const create = useAction();
+
+  /** Makes an identity from this host's user name and key and uses it here; the others keep theirs. */
+  async function createIdentity() {
+    const key = keys.find((k) => k.id === fields.keyId);
+    const made = await create.run(() =>
+      identitiesApi.save({
+        id: null,
+        label: msgD.hostPanel.identityName(fields.username, key?.label ?? ""),
+        username: fields.username,
+        password: { kind: "keep" },
+        keyId: fields.keyId,
+      }),
+    );
+    if (!made) return;
+    identityEvents.changed();
+    set.setIdentityId(made.id);
+    setShowIdentity(true);
+  }
+
   return (
     <Card title={msgD.hostPanel.credentials}>
       <TextField
@@ -635,11 +667,45 @@ function CredentialsCard({ form }: { form: HostForm }) {
               {msgD.hostPanel.addIdentity}
             </button>
           )}
-          {!showIdentity && identity.list.length === 0 && <span className="hint">{msgD.hostPanel.noIdentities}</span>}
+          {!showIdentity && identity.list.length === 0 && reuse === 0 && <span className="hint">{msgD.hostPanel.noIdentities}</span>}
         </div>
       )}
+      {identity && !showIdentity && reuse > 0 && (
+        <div className="host-reuse" data-testid="host-reuse">
+          <span className="hint">{msgD.hostPanel.reuse(reuse, fields.username)}</span>
+          <button type="button" className="btn btn-sm" onClick={() => void createIdentity()} disabled={create.pending}>
+            <IconPlus size={14} />
+            {msgD.hostPanel.createIdentity}
+          </button>
+        </div>
+      )}
+      <ErrorNotice error={create.error} />
     </Card>
   );
+}
+
+/**
+ * How many other saved SSH hosts sign in with this host's own user name and key: the cue for
+ * "Create an identity". Read from the shared host list, so it costs no call; 0 when the host signs
+ * in another way, inherits, or already uses an identity.
+ */
+function useReuse(form: HostForm): number {
+  const vault = useOptionalVaultData();
+  const { fields, host } = form;
+  const all = vault?.hosts.value;
+  return useMemo(() => {
+    if (!all || fields.protocol !== "ssh" || fields.authKind !== "key" || fields.keyId === "" || fields.username === "" || fields.identityId !== "") return 0;
+    return all.filter(
+      (h) =>
+        h.id !== host?.id &&
+        h.protocol.type === "ssh" &&
+        !h.inherited.auth &&
+        !h.inherited.username &&
+        h.auth.kind === "key" &&
+        h.auth.keyId === fields.keyId &&
+        h.username === fields.username,
+    ).length;
+  }, [all, host, fields.protocol, fields.authKind, fields.keyId, fields.username, fields.identityId]);
 }
 
 /** 5. "Show more": the connection settings that live in their own records (jump host, proxy). */
@@ -652,9 +718,11 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
     if (configured) setOpen(true);
   }, [configured]);
   return (
-    <details className="host-section host-more" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary className="host-section-title">{msgD.hostPanel.more}</summary>
-      <div className="stack-sm host-more-body">
+    <details className="box host-section host-more" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="box-strip">
+        <span className="host-section-title">{msgD.hostPanel.more}</span>
+      </summary>
+      <div className="host-section-body host-more-body">
         <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />
         <PasteFields value={form.fields.terminal} onChange={form.set.setTerminal} />
         {form.fields.protocol === "ssh" && form.fields.authKind === "key" && (

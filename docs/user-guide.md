@@ -246,6 +246,9 @@ An **identity** (Keychain → Identities) is a user name with a password and/or 
 Choose **Identity…** in a host's or a group's menu to use it there: a host's own identity wins,
 and a group's identity applies to the hosts in it that sign in with the group's settings.
 Editing an identity changes every host that uses it from their next connection.
+When other saved hosts sign in with the same user name and key as the host you are editing, its
+Credentials box offers **Create an identity**: it saves that user name and key as an identity and
+uses it for this host (the other hosts keep their own settings until you choose it there too).
 
 Deleting an identity that hosts or groups use asks what they should use instead: another
 identity, or nothing (each host then signs in as the dialog lists, for example with its own
@@ -507,7 +510,7 @@ before replacing anything; a damaged or tampered file changes nothing.
 ## Notes on hosts and groups
 
 Every host and group can carry a note: plain text or Markdown, up to 64 KiB. Write it in the
-Notes card of the host's details panel, or in a group's editor, and press **Save note**. Notes
+Notes box of the host's details panel, or in a group's editor, and press **Save note**. Notes
 are stored encrypted in your vault like every other record, are part of encrypted backups, and
 are deleted with their host or group.
 
