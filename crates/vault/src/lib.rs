@@ -6,6 +6,7 @@
 //!
 //! This composition has **not** been independently reviewed.
 
+mod backup;
 mod encoding;
 mod envelope;
 mod error;
@@ -15,6 +16,9 @@ mod keys;
 mod recovery;
 mod secret;
 
+pub use backup::{
+    BACKUP_MAGIC, BACKUP_VERSION, BackupRecord, MAX_BACKUP_LEN, MAX_BACKUP_RECORDS, ParsedBackup, decode_backup,
+};
 pub use envelope::{MAX_PAYLOAD_LEN, PAD_BLOCK, RecordContext, SealedRecord};
 pub use error::VaultError;
 pub use header::{

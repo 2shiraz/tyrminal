@@ -1,0 +1,3 @@
+# Reviewed findings that are synthetic test data, never real credentials. One fingerprint per line.
+# The made-up recovery key shown by the browser UI mock (tests/ui/mock-backend.js).
+be0bcafac35229ba9ef2997f0440664f2b7211c8:tests/ui/mock-backend.js:generic-api-key:181

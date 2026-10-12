@@ -1,159 +1,392 @@
-import type { HostSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useState } from "react";
+import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
+import { Sidebar } from "../components/layout/Sidebar";
+import { StatusBar } from "../components/layout/StatusBar";
+import { TabStrip } from "../components/layout/TabStrip";
+import { useToast } from "../components/ui/Toasts";
 import { KeychainView } from "../features/credentials/KeychainView";
+import { HomeView } from "../features/home/HomeView";
 import { HostsView } from "../features/hosts/HostsView";
+import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
+import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
+import { SnippetsView } from "../features/snippets/SnippetsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
-import type { TabIndicator } from "../features/terminal/TerminalView";
-import { vault } from "../lib/ipc";
+import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
+import { snippets as snippetsApi, vault } from "../lib/ipc";
 import { msg } from "../lib/messages";
+import { actionFor, tabIndexFor } from "../lib/shortcuts";
+import { usePreferences } from "./preferences";
+import { VaultDataProvider, useVaultData } from "./vaultData";
+import {
+  type Direction,
+  type Workspace,
+  activePane,
+  activeTab,
+  closeOtherTabs,
+  closePane,
+  closeTab,
+  cycleTab,
+  emptyWorkspace,
+  focusPane,
+  focusPaneInActiveTab,
+  moveTab,
+  neighbour,
+  openTab,
+  patchPane,
+  renameTab,
+  selectTab,
+  setRatio,
+  splitPane,
+  tabTitle,
+} from "./workspace";
 
-type Destination = "hosts" | "keychain" | "knownHosts" | "settings";
-
-interface SessionTab {
-  id: number;
-  target: TerminalTarget;
-  /** The user's own name for the destination. */
-  label: string;
-  identity: string;
-  /** Title requested by the remote side, already sanitized. Shown after the label, never instead of it. */
-  remoteTitle: string;
-  indicator: TabIndicator;
-}
+export type Destination = "home" | "hosts" | "snippets" | "keychain" | "knownHosts" | "settings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
-const TerminalView = lazy(() => import("../features/terminal/TerminalView").then((m) => ({ default: m.TerminalView })));
-
-const NAV: { id: Destination; label: string; glyph: string }[] = [
-  { id: "hosts", label: msg.nav.hosts, glyph: "▤" },
-  { id: "keychain", label: msg.nav.keychain, glyph: "⚿" },
-  { id: "knownHosts", label: msg.nav.knownHosts, glyph: "✓" },
-  { id: "settings", label: msg.nav.settings, glyph: "⚙" },
-];
-
-const INDICATOR_CLASS: Record<TabIndicator, string> = {
-  ok: "dot dot-ok",
-  busy: "dot dot-busy",
-  attention: "dot dot-busy",
-  bad: "dot dot-bad",
-  idle: "dot",
-};
-
-let nextTabId = 1;
+const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
 
 export function AppShell() {
-  const [destination, setDestination] = useState<Destination>("hosts");
-  const [tabs, setTabs] = useState<SessionTab[]>([]);
-  // `null` shows the navigation destination; a number shows that session tab.
-  const [activeTab, setActiveTab] = useState<number | null>(null);
+  return (
+    <VaultDataProvider>
+      <Shell />
+    </VaultDataProvider>
+  );
+}
 
-  const openTab = useCallback((target: TerminalTarget, label: string, identity: string) => {
-    const id = nextTabId++;
-    setTabs((current) => [...current, { id, target, label, identity, remoteTitle: "", indicator: "busy" }]);
-    setActiveTab(id);
-  }, []);
+function hostIdentity(host: HostSummary): string {
+  return msg.hosts.destination(host.username, host.address, host.port);
+}
 
-  const closeTab = useCallback((id: number) => {
-    setTabs((current) => current.filter((tab) => tab.id !== id));
-    setActiveTab((current) => (current === id ? null : current));
-  }, []);
+function Shell() {
+  const { prefs, resolvedTheme, update } = usePreferences();
+  const data = useVaultData();
+  const notify = useToast();
+  const [destination, setDestination] = useState<Destination>("home");
+  const [ws, setWs] = useState<Workspace>(emptyWorkspace);
+  const [collapsed, setCollapsed] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
+  const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  const [renaming, setRenaming] = useState<number | null>(null);
+  const handles = useRef(new Map<number, PaneHandle>());
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
 
-  const patchTab = useCallback((id: number, patch: Partial<SessionTab>) => {
-    setTabs((current) => current.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab)));
-  }, []);
+  const tab = activeTab(ws);
+  const pane = activePane(ws);
+  const paneStatus = pane ? statuses[pane.id] : undefined;
 
-  function connect(host: HostSummary) {
-    openTab({ kind: "ssh", hostId: host.id }, host.label, msg.hosts.destination(host.username, host.address, host.port));
-  }
-
-  function navigate(next: Destination) {
+  const navigate = useCallback((next: Destination) => {
     setDestination(next);
-    setActiveTab(null);
+    setWs((current) => selectTab(current, null));
+  }, []);
+
+  const open = useCallback((target: TerminalTarget, label: string, identity: string) => {
+    setWs((current) => openTab(current, { target, label, identity }));
+  }, []);
+
+  const connect = useCallback(
+    (host: HostSummary) => {
+      open({ kind: "ssh", hostId: host.id }, host.label, hostIdentity(host));
+      // The recent list updates once the session reaches its shell.
+      window.setTimeout(() => void data.recent.reload(), 3_000);
+    },
+    [open, data.recent],
+  );
+
+  const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
+
+  const focusedHandle = useCallback(() => {
+    const p = activePane(wsRef.current);
+    return p ? (handles.current.get(p.id) ?? null) : null;
+  }, []);
+
+  const split = useCallback((dir: Direction) => {
+    const p = activePane(wsRef.current);
+    if (p) setWs((current) => splitPane(current, p.id, dir));
+  }, []);
+
+  const closeFocused = useCallback(() => {
+    const p = activePane(wsRef.current);
+    if (p) setWs((current) => closePane(current, p.id));
+  }, []);
+
+  const moveFocus = useCallback((towards: "left" | "right" | "up" | "down") => {
+    const t = activeTab(wsRef.current);
+    if (!t) return;
+    const next = neighbour(t.layout, t.focused, towards);
+    if (next !== null) setWs((current) => focusPane(current, next));
+  }, []);
+
+  /** Snippets act on the pane the user is looking at, never on a background one. */
+  const requestSnippet = useCallback(
+    (snippet: SnippetSummary, mode: "paste" | "run") => {
+      const p = activePane(wsRef.current);
+      const handle = p ? handles.current.get(p.id) : undefined;
+      const sessionId = handle?.sessionId();
+      if (!p || !handle || !sessionId || !handle.connected()) return;
+      const request: SnippetRunRequest = { snippet, mode, paneId: p.id, sessionId, targetLabel: p.label, targetIdentity: p.identity };
+      const lines = snippet.text.replace(/\n$/, "").split("\n").length;
+      if (lines > 1) {
+        setRunRequest(request);
+      } else {
+        void sendSnippet(request);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  async function sendSnippet(request: SnippetRunRequest) {
+    const handle = handles.current.get(request.paneId);
+    // The target must still be the same live session the preview showed.
+    if (!handle || handle.sessionId() !== request.sessionId) return;
+    try {
+      await snippetsApi.send(request.snippet.id, request.sessionId, request.mode, handle.bracketedPaste());
+      notify("success", msg.snippets.sent(request.snippet.name, request.targetLabel));
+      handle.focus();
+    } catch (error) {
+      notify("danger", (error as Error).message);
+    }
   }
+
+  const runAction = useCallback(
+    (action: ReturnType<typeof actionFor>) => {
+      switch (action) {
+        case "palette":
+          setPaletteOpen(true);
+          break;
+        case "newLocal":
+          openLocal();
+          break;
+        case "closePane":
+          closeFocused();
+          break;
+        case "splitRight":
+          split("row");
+          break;
+        case "splitDown":
+          split("column");
+          break;
+        case "find":
+          focusedHandle()?.openFind();
+          break;
+        case "zoomIn":
+          focusedHandle()?.zoom("in");
+          break;
+        case "zoomOut":
+          focusedHandle()?.zoom("out");
+          break;
+        case "zoomReset":
+          focusedHandle()?.zoom("reset");
+          break;
+        case "nextTab":
+          setWs((current) => cycleTab(current, 1));
+          break;
+        case "prevTab":
+          setWs((current) => cycleTab(current, -1));
+          break;
+        case "focusLeft":
+          moveFocus("left");
+          break;
+        case "focusRight":
+          moveFocus("right");
+          break;
+        case "focusUp":
+          moveFocus("up");
+          break;
+        case "focusDown":
+          moveFocus("down");
+          break;
+        case "toggleSnippets":
+          setPanelOpen((v) => !v);
+          break;
+        case "toggleSidebar":
+          setCollapsed((v) => !v);
+          break;
+        case "settings":
+          navigate("settings");
+          break;
+        case "lock":
+          void vault.lock().catch(() => undefined);
+          break;
+        case "renameTab": {
+          const t = activeTab(wsRef.current);
+          if (t) setRenaming(t.id);
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [openLocal, closeFocused, split, focusedHandle, moveFocus, navigate],
+  );
+
+  // Application shortcuts. Capture phase, so they win over the terminal; plain Ctrl+letter keys
+  // are not bound on Windows/Linux and reach the shell unchanged.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing) return;
+      const inDialog = document.querySelector("dialog[open]") !== null;
+      const index = tabIndexFor(event);
+      if (index !== null && !inDialog) {
+        event.preventDefault();
+        const target = wsRef.current.tabs[index];
+        if (target) setWs((current) => selectTab(current, target.id));
+        return;
+      }
+      let action = actionFor(event);
+      // Outside a terminal, Ctrl+K also opens the palette (inside one it means "kill line").
+      const inTerminal = (event.target as HTMLElement | null)?.closest?.(".xterm") != null;
+      if (!action && !inTerminal && event.ctrlKey && !event.shiftKey && !event.altKey && event.code === "KeyK") action = "palette";
+      if (!action || (inDialog && action !== "palette")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runAction(action);
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [runAction]);
+
+  const terminalVisible = tab !== null;
+  const showPanel = panelOpen && terminalVisible;
 
   return (
-    <div className="shell">
-      <nav className="sidebar" aria-label={msg.nav.primary}>
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            &gt;_
-          </span>
-          <strong>{msg.app.name}</strong>
-        </div>
-        {NAV.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="nav-item"
-            aria-current={activeTab === null && destination === item.id ? "page" : undefined}
-            onClick={() => navigate(item.id)}
-          >
-            <span className="nav-glyph" aria-hidden="true">
-              {item.glyph}
-            </span>
-            {item.label}
-          </button>
-        ))}
-        <div className="sidebar-footer">
-          <button type="button" className="btn" onClick={() => openTab({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local)}>
-            {msg.nav.localTerminal}
-          </button>
-          <button type="button" className="btn" onClick={() => void vault.lock().catch(() => undefined)}>
-            {msg.nav.lock}
-          </button>
-        </div>
-      </nav>
+    <div className="shell" data-sidebar={collapsed ? "collapsed" : "expanded"}>
+      <Sidebar
+        destination={terminalVisible ? null : destination}
+        collapsed={collapsed}
+        ws={ws}
+        onNavigate={navigate}
+        onSelectTab={(id) => setWs((current) => selectTab(current, id))}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onLocalTerminal={openLocal}
+        onToggleCollapsed={() => setCollapsed((v) => !v)}
+        onLock={() => void vault.lock().catch(() => undefined)}
+        hostCount={data.hosts.value?.length ?? 0}
+        snippetCount={data.snippets.value?.length ?? 0}
+      />
 
-      <div className="workspace">
-        <div className="tabstrip" role="tablist" aria-label={msg.nav.sessions}>
-          <button type="button" role="tab" className="tab" aria-selected={activeTab === null} onClick={() => setActiveTab(null)}>
-            <span className="tab-label">{NAV.find((item) => item.id === destination)?.label}</span>
-          </button>
-          {tabs.map((tab) => (
-            <div key={tab.id} role="presentation" className="tab" aria-selected={activeTab === tab.id}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{ all: "unset", display: "inline-flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0, cursor: "pointer" }}
-              >
-                <span className={INDICATOR_CLASS[tab.indicator]} aria-hidden="true" />
-                <span className="tab-label">
-                  {tab.label}
-                  {tab.remoteTitle && <span className="muted"> — {tab.remoteTitle}</span>}
-                </span>
-                {tab.indicator === "attention" && <span className="visually-hidden"> (needs your input)</span>}
-              </button>
-              <button type="button" className="tab-close" aria-label={msg.nav.closeTab(tab.label)} onClick={() => closeTab(tab.id)}>
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
+      <div className="main">
+        <TabStrip
+          ws={ws}
+          destination={destination}
+          renaming={renaming}
+          onRenaming={setRenaming}
+          onSelect={(id) => setWs((current) => selectTab(current, id))}
+          onClose={(id) => setWs((current) => closeTab(current, id))}
+          onCloseOthers={(id) => setWs((current) => closeOtherTabs(current, id))}
+          onRename={(id, title) => setWs((current) => renameTab(current, id, title))}
+          onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
+          onSplit={(id, dir) => {
+            const t = wsRef.current.tabs.find((x) => x.id === id);
+            if (t) setWs((current) => splitPane(selectTab(current, id), t.focused, dir));
+          }}
+          onDuplicate={(id) => {
+            const t = wsRef.current.tabs.find((x) => x.id === id);
+            const p = t ? wsRef.current.panes[t.focused] : undefined;
+            if (p) open(p.target, p.label, p.identity);
+          }}
+          onNewLocal={openLocal}
+          onOpenPalette={() => setPaletteOpen(true)}
+        />
 
-        {activeTab === null && destination === "hosts" && <HostsView onConnect={connect} />}
-        {activeTab === null && destination === "keychain" && <KeychainView />}
-        {activeTab === null && destination === "knownHosts" && <KnownHostsView />}
-        {activeTab === null && destination === "settings" && <SettingsView />}
+        <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
+          {!terminalVisible && destination === "home" && (
+            <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
+          )}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} />}
+          {!terminalVisible && destination === "snippets" && <SnippetsView />}
+          {!terminalVisible && destination === "keychain" && <KeychainView />}
+          {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
+          {!terminalVisible && destination === "settings" && <SettingsView />}
 
-        {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
-        <Suspense fallback={null}>
-          {tabs.map((tab) => (
-            <TerminalView
-            key={tab.id}
-            target={tab.target}
-            identity={tab.identity}
-            active={activeTab === tab.id}
-            onIndicator={(indicator) => patchTab(tab.id, { indicator })}
-            onTitle={(remoteTitle) => patchTab(tab.id, { remoteTitle })}
-            onOpenKnownHosts={() => navigate("knownHosts")}
-            onCloseTab={() => closeTab(tab.id)}
-          />
-          ))}
-        </Suspense>
+          {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
+          <Suspense fallback={null}>
+            {ws.tabs.length > 0 && (
+              <PaneGrid
+                ws={ws}
+                prefs={prefs.terminal}
+                panel={
+                  showPanel ? (
+                    <SnippetsPanel
+                      target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
+                      onSend={requestSnippet}
+                      onClose={() => {
+                        setPanelOpen(false);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : null
+                }
+                onPatch={(paneId, patch) => setWs((current) => patchPane(current, paneId, patch))}
+                onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
+                onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
+                onClose={(paneId) => {
+                  setWs((current) => closePane(current, paneId));
+                  setStatuses((current) => {
+                    const next = { ...current };
+                    delete next[paneId];
+                    return next;
+                  });
+                }}
+                onSplit={(paneId, dir) => setWs((current) => splitPane(current, paneId, dir))}
+                onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
+                onOpenKnownHosts={() => navigate("knownHosts")}
+                register={(paneId, handle) => {
+                  if (handle) handles.current.set(paneId, handle);
+                  else handles.current.delete(paneId);
+                }}
+              />
+            )}
+          </Suspense>
+        </main>
+
+        <StatusBar
+          pane={terminalVisible ? pane : null}
+          status={terminalVisible ? paneStatus : undefined}
+          panelOpen={panelOpen}
+          onTogglePanel={terminalVisible ? () => setPanelOpen((v) => !v) : undefined}
+          theme={resolvedTheme}
+          onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
+        />
       </div>
+
+      {paletteOpen && (
+        <CommandPalette
+          hasTerminal={terminalVisible && pane !== null}
+          terminalConnected={paneStatus?.state === "connected"}
+          onClose={() => {
+            setPaletteOpen(false);
+            if (terminalVisible) focusedHandle()?.focus();
+          }}
+          onConnect={connect}
+          onNavigate={navigate}
+          onAction={runAction}
+          onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
+          onLocal={openLocal}
+          onSnippet={(snippet) => requestSnippet(snippet, "run")}
+        />
+      )}
+
+      {runRequest && (
+        <SnippetRunDialog
+          request={runRequest}
+          onCancel={() => {
+            setRunRequest(null);
+            focusedHandle()?.focus();
+          }}
+          onConfirm={() => {
+            const request = runRequest;
+            setRunRequest(null);
+            void sendSnippet(request);
+          }}
+        />
+      )}
     </div>
   );
 }

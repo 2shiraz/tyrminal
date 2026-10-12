@@ -13,7 +13,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const json = process.argv.includes("--json");
 
 function probe(cmd, args) {
-  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 15_000 });
+  // npm-installed tools are .cmd shims on Windows, which spawn only through a shell. The
+  // arguments here are fixed literals, so the shell sees no outside input.
+  const shim = process.platform === "win32" && ["pnpm", "npm", "npx"].includes(cmd);
+  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 15_000, shell: shim });
   if (r.error || r.status !== 0) return null;
   return `${r.stdout}${r.stderr}`.trim().split("\n")[0];
 }

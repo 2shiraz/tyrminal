@@ -7,6 +7,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  BackupCredentialKind,
+  BackupFile,
+  BackupPreview,
   ErrorCode,
   HostInput,
   HostSummary,
@@ -14,9 +17,13 @@ import type {
   KeyImportInput,
   KeySummary,
   KnownHostSummary,
+  Preferences,
   RecoveryKeyIssued,
   SessionEvent,
   SessionOpened,
+  SnippetInput,
+  SnippetSendMode,
+  SnippetSummary,
   TrustDecision,
   VaultStatus,
 } from "@tyrminal/contracts";
@@ -66,6 +73,11 @@ export const vault = {
   noteActivity: () => call<void>("vault_activity"),
   changePassphrase: (current: string, next: string) => call<void>("vault_change_passphrase", { current, new: next }),
   rotateRecoveryKey: (passphrase: string) => call<RecoveryKeyIssued>("vault_rotate_recovery_key", { passphrase }),
+  /** Whether this device can unlock without the passphrase (OS secret store). */
+  quickUnlockStatus: () => call<boolean>("vault_quick_unlock_status"),
+  enableQuickUnlock: (passphrase: string) => call<void>("vault_quick_unlock_enable", { passphrase }),
+  disableQuickUnlock: () => call<void>("vault_quick_unlock_disable"),
+  unlockWithDevice: () => call<void>("vault_unlock_device"),
   /** Subscribes to vault state changes pushed by the native side. Returns an unsubscribe function. */
   onStatus(handler: (status: VaultStatus) => void): () => void {
     let active = true;
@@ -85,6 +97,8 @@ export const vault = {
 
 export const hosts = {
   list: () => call<HostSummary[]>("host_list"),
+  /** Hosts with a recorded connection, most recent first. */
+  recent: () => call<HostSummary[]>("host_recent"),
   save: (host: HostInput) => call<HostSummary>("host_save", { host }),
   remove: (id: string) => call<void>("host_delete", { id }),
 };
@@ -136,3 +150,40 @@ export const sessions = {
   answerAuth: (sessionId: string, promptId: string, secret: string | null) =>
     call<void>("session_auth_answer", { sessionId, promptId, secret }),
 };
+
+export const snippets = {
+  list: () => call<SnippetSummary[]>("snippet_list"),
+  save: (snippet: SnippetInput) => call<SnippetSummary>("snippet_save", { snippet }),
+  remove: (id: string) => call<void>("snippet_delete", { id }),
+  /**
+   * Sends a saved snippet to a session this window owns. The native side reads the text from the
+   * vault; `bracketed` reports whether the terminal has bracketed-paste mode on.
+   */
+  send: (snippetId: string, sessionId: string, mode: SnippetSendMode, bracketed: boolean) =>
+    call<void>("snippet_send", { snippetId, sessionId, mode, bracketed }),
+};
+
+export const preferences = {
+  get: () => call<Preferences>("prefs_get"),
+  /** Stores preferences; returns them as validated and clamped by the native side. */
+  set: (prefs: Preferences) => call<Preferences>("prefs_set", { prefs }),
+};
+
+export const links = {
+  /** Opens an http(s) link in the OS browser after the user confirmed it. Validated natively. */
+  open: (url: string) => call<void>("link_open", { url }),
+};
+
+/** Portable backups. Files are picked in native dialogs; paths and bytes never reach the page. */
+export const backup = {
+  /** Saves a backup of the unlocked vault; resolves to the file name, or null if cancelled. */
+  export: () => call<string | null>("backup_export"),
+  /** Picks a backup file to restore; null if cancelled. */
+  choose: () => call<BackupFile | null>("backup_choose"),
+  /** Fully validates the chosen backup with its secret and reports what it holds. */
+  preview: (kind: BackupCredentialKind, secret: string) => call<BackupPreview>("backup_preview", { kind, secret }),
+  /** Replaces this device's vault with the chosen backup and locks it. */
+  restore: (kind: BackupCredentialKind, secret: string, replaceExisting: boolean) =>
+    call<BackupPreview>("backup_restore", { kind, secret, replaceExisting }),
+};
+

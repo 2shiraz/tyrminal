@@ -37,3 +37,14 @@ pub const TRUST_PROMPT_TIMEOUT_SECS: u64 = 120;
 pub const AUTH_PROMPT_TIMEOUT_SECS: u64 = 120;
 /// Interactive authentication attempts per connection.
 pub const MAX_AUTH_ATTEMPTS: u32 = 3;
+
+/// Snippet command text, in bytes.
+pub const MAX_SNIPPET_LEN: usize = 64 * 1024;
+/// Snippet folder path, in bytes.
+pub const MAX_FOLDER_LEN: usize = 256;
+/// A URL the user asked to open from terminal output, in bytes.
+pub const MAX_LINK_LEN: usize = 2048;
+/// Terminal scrollback lines a user may configure.
+pub const MAX_SCROLLBACK_LINES: u32 = 100_000;
+/// Hosts kept in the recent-connections list on the home view.
+pub const MAX_RECENT_HOSTS: usize = 12;

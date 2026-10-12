@@ -2,7 +2,10 @@
 //! everything is checked again here before it is stored or used (BUILD_SPEC §4.6).
 
 use tyrminal_contracts::IpcError;
-use tyrminal_contracts::limits::{MAX_ADDRESS_LEN, MAX_LABEL_LEN, MAX_REASON_LEN, MAX_SECRET_LEN, MAX_USERNAME_LEN};
+use tyrminal_contracts::limits::{
+    MAX_ADDRESS_LEN, MAX_FOLDER_LEN, MAX_LABEL_LEN, MAX_LINK_LEN, MAX_REASON_LEN, MAX_SECRET_LEN, MAX_SNIPPET_LEN,
+    MAX_USERNAME_LEN,
+};
 use tyrminal_vault::Id;
 
 use crate::error::invalid;
@@ -91,6 +94,59 @@ pub(crate) fn reason(value: &str) -> Result<String, IpcError> {
         return Err(invalid("The reason is too long or contains control characters."));
     }
     Ok(trimmed.to_owned())
+}
+
+/// Snippet folder path: `/`-separated segments, each a valid label; empty means top level.
+pub(crate) fn folder(value: &str) -> Result<String, IpcError> {
+    let trimmed = value.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    if trimmed.len() > MAX_FOLDER_LEN {
+        return Err(invalid("The folder path is too long (256 bytes at most)."));
+    }
+    let mut segments = Vec::new();
+    for segment in trimmed.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() || segment.chars().any(is_deceptive) {
+            return Err(invalid("Folder names cannot be empty or contain control characters."));
+        }
+        segments.push(segment);
+    }
+    Ok(segments.join("/"))
+}
+
+/// Snippet command text. Multi-line is allowed (tabs and newlines); other control characters,
+/// including ESC, are not: a snippet is something the user types, not a terminal sequence.
+pub(crate) fn snippet_text(value: &str) -> Result<String, IpcError> {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.trim().is_empty() {
+        return Err(invalid("Enter the command text."));
+    }
+    if normalized.len() > MAX_SNIPPET_LEN {
+        return Err(invalid("The snippet is too long (64 KiB at most)."));
+    }
+    if normalized.chars().any(|c| is_deceptive(c) && c != '\n' && c != '\t') {
+        return Err(invalid("The snippet contains control or invisible characters."));
+    }
+    Ok(normalized)
+}
+
+/// A link the user asked to open from terminal output: `http`/`https` only, no embedded
+/// credentials (a classic way to disguise the real destination), no whitespace or controls.
+/// Returns the URL exactly as validated, which is what the confirmation showed.
+pub(crate) fn link(value: &str) -> Result<String, IpcError> {
+    let bad = || invalid("Only web links (http and https) can be opened.");
+    if value.is_empty() || value.len() > MAX_LINK_LEN || value.chars().any(|c| c.is_whitespace() || is_deceptive(c)) {
+        return Err(bad());
+    }
+    let lower = value.to_ascii_lowercase();
+    let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://")).ok_or_else(bad)?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') || authority.contains('\\') {
+        return Err(bad());
+    }
+    Ok(value.to_owned())
 }
 
 pub(crate) fn id(value: &str) -> Result<Id, IpcError> {
@@ -195,6 +251,47 @@ mod tests {
             "../../../../etc/passwd/aaaaaaaaaa",
         ] {
             assert!(id(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn folders_are_normalized_label_paths() {
+        assert_eq!(folder("").unwrap(), "");
+        assert_eq!(folder(" /Deploy / Staging/ ").unwrap(), "Deploy/Staging");
+        for bad in ["a//b", "a/\u{1b}b", &"f".repeat(257)] {
+            assert!(folder(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn snippet_text_allows_lines_and_tabs_but_not_escape_sequences() {
+        assert_eq!(snippet_text("ls -la\r\n\tdf -h\r").unwrap(), "ls -la\n\tdf -h\n");
+        for bad in ["", "  \n ", "printf '\u{1b}]52;c;AAAA\u{7}'", "echo \u{202E}evil", &"x".repeat(64 * 1024 + 1)] {
+            assert!(snippet_text(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn links_are_plain_http_or_https_without_credentials() {
+        for good in ["https://example.com", "http://10.0.0.1:8080/a?b=c#d", "HTTPS://Example.com/Path"] {
+            assert_eq!(link(good).unwrap(), good);
+        }
+        for bad in [
+            "",
+            "javascript:alert(1)",
+            "data:text/html,x",
+            "file:///etc/passwd",
+            "ssh://host",
+            "vscode://x",
+            "https://bank.example@evil.example/",
+            "https://evil.example\\@bank.example",
+            "https://a b",
+            "https://ex\u{202E}moc.ample",
+            "https:///path",
+            "https://",
+            &format!("https://e.com/{}", "a".repeat(2048)),
+        ] {
+            assert!(link(bad).is_err(), "{bad:?}");
         }
     }
 

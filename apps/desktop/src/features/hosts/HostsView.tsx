@@ -1,13 +1,32 @@
-import type { HostAuthInput, HostSummary, KeySummary } from "@tyrminal/contracts";
-import { type FormEvent, useMemo, useState } from "react";
+import type { HostSummary, KeySummary } from "@tyrminal/contracts";
+import { useMemo, useState } from "react";
 
+import { useVaultData } from "../../app/vaultData";
+import { type Workspace, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
-import { ErrorNotice, SecretField, TextField } from "../../components/ui/controls";
-import { hosts as hostsApi, keys as keysApi } from "../../lib/ipc";
+import { Menu } from "../../components/ui/Menu";
+import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, relativeTime } from "../../components/ui/controls";
+import {
+  IconCopy,
+  IconEllipsis,
+  IconKeyRound,
+  IconLayoutGrid,
+  IconList,
+  IconLock,
+  IconPencil,
+  IconPlay,
+  IconPlus,
+  IconSearch,
+  IconServer,
+  IconTextCursorInput,
+  IconTrash2,
+} from "../../components/ui/icons";
+import { hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { useAction, useLoaded } from "../../lib/useAsync";
+import { useAction } from "../../lib/useAsync";
+import { HostEditor } from "./HostEditor";
 
-function authSummary(host: HostSummary, keys: KeySummary[]): string {
+export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
     case "ask_password":
       return msg.hosts.authAsk;
@@ -21,107 +40,258 @@ function authSummary(host: HostSummary, keys: KeySummary[]): string {
   }
 }
 
-export function HostsView({ onConnect }: { onConnect: (host: HostSummary) => void }) {
-  const hosts = useLoaded(hostsApi.list);
-  const keys = useLoaded(keysApi.list);
+function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
+  const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
+  const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
+  return (
+    <span className={`badge ${tone}`}>
+      <Icon size={12} />
+      {authSummary(host, keys)}
+    </span>
+  );
+}
+
+type Layout = "grid" | "list";
+type Sort = "name" | "recent";
+
+export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
+  const { hosts, keys, recent } = useVaultData();
   const [query, setQuery] = useState("");
-  const [editing, setEditing] = useState<HostSummary | "new" | null>(null);
+  const [layout, setLayout] = useState<Layout>("grid");
+  const [sort, setSort] = useState<Sort>("name");
+  const [editing, setEditing] = useState<{ host: HostSummary | null; initial?: HostSummary } | null>(null);
   const [deleting, setDeleting] = useState<HostSummary | null>(null);
+  const [menu, setMenu] = useState<{ host: HostSummary; anchor: HTMLElement } | null>(null);
   const remove = useAction();
+  const keyList = keys.value ?? [];
+
+  // Hosts with an open session, from the user's own tabs (no probing of servers).
+  const connected = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tab of ws.tabs) {
+      for (const id of panesOf(tab.layout)) {
+        const pane = ws.panes[id];
+        if (pane?.target.kind === "ssh" && pane.indicator === "ok") ids.add(pane.target.hostId);
+      }
+    }
+    return ids;
+  }, [ws]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const all = hosts.value ?? [];
+    const all = [...(hosts.value ?? [])];
+    if (sort === "recent") all.sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0));
     if (!needle) return all;
     return all.filter((h) => `${h.label} ${h.address} ${h.username}`.toLowerCase().includes(needle));
-  }, [hosts.value, query]);
+  }, [hosts.value, query, sort]);
 
   const total = hosts.value?.length ?? 0;
+  const reload = () => {
+    void hosts.reload();
+    void recent.reload();
+    void keys.reload();
+  };
+
+  const actions = (host: HostSummary, anchor: HTMLElement) => setMenu({ host, anchor });
 
   return (
-    <section className="panel-view" aria-labelledby="hosts-title">
-      <div className="view-header">
-        <h1 id="hosts-title">{msg.hosts.title}</h1>
-        {total > 0 && (
-          <input
-            className="input"
-            style={{ width: 240 }}
-            type="search"
-            placeholder={msg.common.search}
-            aria-label={msg.hosts.searchLabel}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        )}
-        <button type="button" className="btn btn-primary" onClick={() => setEditing("new")}>
-          {msg.hosts.add}
-        </button>
-      </div>
-
-      <ErrorNotice error={hosts.error ?? remove.error} />
-
-      {hosts.value && total === 0 && (
-        <div className="empty">
-          <h2>{msg.hosts.emptyTitle}</h2>
-          <p>{msg.hosts.emptyBody}</p>
-          <button type="button" className="btn btn-primary" onClick={() => setEditing("new")}>
+    <div className="page">
+      <section className="page-inner" aria-labelledby="hosts-title">
+        <div className="page-header">
+          <div className="page-title">
+            <h1 id="hosts-title">{msg.hosts.title}</h1>
+            {total > 0 && <p>{msg.hosts.subtitle(total)}</p>}
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => setEditing({ host: null })}>
+            <IconPlus size={16} />
             {msg.hosts.add}
           </button>
         </div>
-      )}
 
-      {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
-
-      <ul className="list">
-        {filtered.map((host) => (
-          <li key={host.id} className="row">
-            <div className="row-main">
-              <span className="row-title">{host.label}</span>
-              <span className="row-sub">
-                {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keys.value ?? [])}
-              </span>
+        {total > 0 && (
+          <div className="toolbar">
+            <div className="input-with-icon">
+              <IconSearch size={15} />
+              <input
+                className="input"
+                type="search"
+                placeholder={msg.common.search}
+                aria-label={msg.hosts.searchLabel}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
             </div>
-            <button type="button" className="btn btn-primary" onClick={() => onConnect(host)}>
-              {msg.hosts.connect}
+            <span className="spacer" />
+            <Segmented<Sort>
+              label={msg.hosts.sort}
+              value={sort}
+              onChange={setSort}
+              options={[
+                { value: "name", label: msg.hosts.sortName },
+                { value: "recent", label: msg.hosts.sortRecent },
+              ]}
+            />
+            <Segmented<Layout>
+              label={msg.hosts.view}
+              value={layout}
+              onChange={setLayout}
+              options={[
+                { value: "grid", label: msg.hosts.viewGrid, icon: <IconLayoutGrid size={14} /> },
+                { value: "list", label: msg.hosts.viewList, icon: <IconList size={14} /> },
+              ]}
+            />
+          </div>
+        )}
+
+        <ErrorNotice error={hosts.error ?? remove.error} />
+
+        {hosts.value === null && !hosts.error && <SkeletonRows count={4} height={64} />}
+
+        {hosts.value && total === 0 && (
+          <EmptyState icon={<IconServer size={28} />} title={msg.hosts.emptyTitle} body={msg.hosts.emptyBody}>
+            <button type="button" className="btn btn-primary" onClick={() => setEditing({ host: null })}>
+              <IconPlus size={16} />
+              {msg.hosts.add}
             </button>
-            <button type="button" className="btn" onClick={() => setEditing(host)}>
-              {msg.common.edit}
-            </button>
-            <button type="button" className="btn btn-danger" onClick={() => setDeleting(host)}>
-              {msg.common.delete}
-            </button>
-          </li>
-        ))}
-      </ul>
+          </EmptyState>
+        )}
+
+        {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
+
+        {layout === "grid" ? (
+          <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list">
+            {filtered.map((host) => {
+              const isConnected = connected.has(host.id);
+              return (
+                <li key={host.id}>
+                  <article
+                    className="host-card"
+                    data-connected={isConnected}
+                    aria-label={host.label}
+                    onDoubleClick={() => onConnect(host)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      actions(host, event.currentTarget);
+                    }}
+                  >
+                    <Avatar label={host.label} />
+                    <div className="host-card-main">
+                      <span className="host-card-title">
+                        <span className="truncate">{host.label}</span>
+                      </span>
+                      <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                    </div>
+                    <div className="host-card-meta">
+                      <div className="host-card-badges">
+                      <AuthBadge host={host} keys={keyList} />
+                      {isConnected ? (
+                        <span className="badge badge-success">
+                          <span className="status-dot" data-tone="ok" aria-hidden="true" />
+                          {msg.hosts.connectedNow}
+                        </span>
+                      ) : (
+                        <span className="badge">
+                          {host.lastConnectedAt ? msg.hosts.lastConnected(relativeTime(host.lastConnectedAt)) : msg.hosts.neverConnected}
+                        </span>
+                      )}
+                      </div>
+                      <button type="button" className="btn btn-primary btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
+                        <IconPlay size={13} />
+                        {msg.hosts.connect}
+                      </button>
+                    </div>
+                    <div className="host-card-actions">
+                      <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                        <IconEllipsis size={16} />
+                      </IconButton>
+                    </div>
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <ul className="list" aria-label={msg.hosts.title} data-testid="host-list">
+            {filtered.map((host) => (
+              <li key={host.id}>
+                <Avatar label={host.label} />
+                <div className="row-main">
+                  <span className="row-title">{host.label}</span>
+                  <span className="row-sub">
+                    {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keyList)}
+                  </span>
+                </div>
+                {connected.has(host.id) && (
+                  <span className="badge badge-success">
+                    <span className="status-dot" data-tone="ok" aria-hidden="true" />
+                    {msg.hosts.connectedNow}
+                  </span>
+                )}
+                <div className="row-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => onConnect(host)}>
+                    <IconPlay size={13} />
+                    {msg.hosts.connect}
+                  </button>
+                  <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                    <IconEllipsis size={16} />
+                  </IconButton>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {menu && (
+        <Menu
+          label={msg.hosts.more(menu.host.label)}
+          anchor={menu.anchor}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: msg.hosts.connect, icon: <IconPlay size={15} />, onSelect: () => onConnect(menu.host) },
+            { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => setEditing({ host: menu.host }) },
+            {
+              label: msg.hosts.duplicate,
+              icon: <IconCopy size={15} />,
+              onSelect: () => setEditing({ host: null, initial: { ...menu.host, label: `${menu.host.label} ${msg.hosts.copySuffix}` } }),
+            },
+            "separator",
+            { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
+          ]}
+        />
+      )}
 
       {editing && (
         <HostEditor
-          host={editing === "new" ? null : editing}
-          keys={keys.value ?? []}
+          host={editing.host}
+          initial={editing.initial}
+          keys={keyList}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            void hosts.reload();
+            reload();
           }}
         />
       )}
 
       {deleting && (
-        <Dialog title={msg.hosts.deleteTitle(deleting.label)} role="alertdialog" onDismiss={() => setDeleting(null)}>
-          <p className="muted">{msg.hosts.deleteBody}</p>
+        <Dialog title={msg.hosts.deleteTitle(deleting.label)} role="alertdialog" icon={<IconTrash2 size={18} />} tone="danger" onDismiss={() => setDeleting(null)}>
+          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+            {msg.hosts.deleteBody}
+          </p>
           <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => setDeleting(null)} autoFocus>
+            <button type="button" className="btn" onClick={() => setDeleting(null)} autoFocus data-autofocus>
               {msg.common.cancel}
             </button>
             <button
               type="button"
-              className="btn btn-danger"
+              className="btn btn-danger-solid"
               disabled={remove.pending}
               onClick={async () => {
                 const target = deleting;
                 setDeleting(null);
                 await remove.run(() => hostsApi.remove(target.id));
-                void hosts.reload();
+                reload();
               }}
             >
               {msg.common.delete}
@@ -129,130 +299,6 @@ export function HostsView({ onConnect }: { onConnect: (host: HostSummary) => voi
           </div>
         </Dialog>
       )}
-    </section>
-  );
-}
-
-type AuthKind = HostAuthInput["kind"];
-
-function HostEditor({
-  host,
-  keys,
-  onClose,
-  onSaved,
-}: {
-  host: HostSummary | null;
-  keys: KeySummary[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [label, setLabel] = useState(host?.label ?? "");
-  const [address, setAddress] = useState(host?.address ?? "");
-  const [port, setPort] = useState(String(host?.port ?? 22));
-  const [username, setUsername] = useState(host?.username ?? "");
-  const [authKind, setAuthKind] = useState<AuthKind>(host?.auth.kind ?? (keys.length > 0 ? "key" : "ask_password"));
-  const [password, setPassword] = useState("");
-  const [keyId, setKeyId] = useState(host?.auth.kind === "key" ? host.auth.keyId : (keys[0]?.id ?? ""));
-  const { pending, error, run } = useAction();
-
-  const hadStoredPassword = host?.auth.kind === "stored_password";
-  const portNumber = Number(port);
-  const portValid = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
-  const authValid =
-    authKind === "ask_password" ||
-    (authKind === "stored_password" && (password.length > 0 || hadStoredPassword)) ||
-    (authKind === "key" && keyId !== "");
-  const ready = label.trim() !== "" && address.trim() !== "" && username !== "" && portValid && authValid;
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!ready || pending) return;
-    const auth: HostAuthInput =
-      authKind === "key"
-        ? { kind: "key", keyId }
-        : authKind === "stored_password"
-          ? { kind: "stored_password", password: password.length > 0 ? password : null }
-          : { kind: "ask_password" };
-    const saved = await run(() =>
-      hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth }),
-    );
-    setPassword("");
-    if (saved) onSaved();
-  }
-
-  return (
-    <Dialog title={host ? msg.hosts.editorEdit : msg.hosts.editorNew} onDismiss={onClose}>
-      <form className="stack" onSubmit={submit} aria-busy={pending}>
-        <TextField label={msg.hosts.label} value={label} onChange={setLabel} autoFocus maxLength={256} />
-        <div className="split">
-          <TextField label={msg.hosts.address} value={address} onChange={setAddress} hint={msg.hosts.addressHint} maxLength={253} />
-          <TextField
-            label={msg.hosts.port}
-            value={port}
-            onChange={setPort}
-            inputMode="numeric"
-            maxLength={5}
-            error={port !== "" && !portValid ? "1–65535" : undefined}
-          />
-        </div>
-        <TextField label={msg.hosts.username} value={username} onChange={setUsername} maxLength={255} />
-
-        <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="label" style={{ fontSize: "var(--text-sm)", fontWeight: 550, color: "var(--text-muted)", marginBottom: 4 }}>
-            {msg.hosts.auth}
-          </legend>
-          <label className="radio-row">
-            <input type="radio" name="auth" checked={authKind === "key"} onChange={() => setAuthKind("key")} />
-            <span className="stack-sm" style={{ flex: 1 }}>
-              <span>{msg.hosts.key}</span>
-              <span className="hint muted">{keys.length > 0 ? msg.hosts.keyHint : msg.hosts.keyNone}</span>
-              {authKind === "key" && keys.length > 0 && (
-                <select className="select" aria-label={msg.hosts.keyChoose} value={keyId} onChange={(event) => setKeyId(event.target.value)}>
-                  {keys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.label} ({key.algorithm})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </span>
-          </label>
-          <label className="radio-row">
-            <input type="radio" name="auth" checked={authKind === "ask_password"} onChange={() => setAuthKind("ask_password")} />
-            <span className="stack-sm">
-              <span>{msg.hosts.askPassword}</span>
-              <span className="hint muted">{msg.hosts.askPasswordHint}</span>
-            </span>
-          </label>
-          <label className="radio-row">
-            <input type="radio" name="auth" checked={authKind === "stored_password"} onChange={() => setAuthKind("stored_password")} />
-            <span className="stack-sm" style={{ flex: 1 }}>
-              <span>{msg.hosts.storedPassword}</span>
-              <span className="hint muted">{msg.hosts.storedPasswordHint}</span>
-            </span>
-          </label>
-          {authKind === "stored_password" && (
-            <SecretField
-              label={msg.hosts.password}
-              value={password}
-              onChange={setPassword}
-              hint={hadStoredPassword ? msg.hosts.passwordKeep : undefined}
-              maxLength={1024}
-            />
-          )}
-        </fieldset>
-
-        {ready && <p className="muted">{msg.hosts.effective(username, address.trim(), portNumber)}</p>}
-        <ErrorNotice error={error} />
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose}>
-            {msg.common.cancel}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={!ready || pending}>
-            {pending ? msg.common.working : msg.common.save}
-          </button>
-        </div>
-      </form>
-    </Dialog>
+    </div>
   );
 }

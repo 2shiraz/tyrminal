@@ -46,11 +46,34 @@ pub(crate) fn from_vault(e: VaultError) -> IpcError {
             ErrorCode::VaultDamaged,
             "The vault failed an integrity check and was not opened. Restore it from a backup.",
         ),
+        VaultError::MalformedBackup | VaultError::BackupTampered => err(
+            ErrorCode::VaultDamaged,
+            "This file is not a valid Tyrminal backup, or it was changed after it was written. Nothing was restored.",
+        ),
+        VaultError::UnsupportedBackupVersion => err(
+            ErrorCode::VaultUnsupportedVersion,
+            "This backup was written by a newer version of Tyrminal. Update the application to restore it.",
+        ),
         VaultError::NoSuchSlot => err(ErrorCode::WrongCredential, "This vault has no credential of that kind."),
         VaultError::PayloadTooLarge | VaultError::SlotLimit => {
             err(ErrorCode::LimitExceeded, "That is larger than the vault allows.")
         }
         VaultError::Randomness | VaultError::Internal => internal(),
+    }
+}
+
+/// Like `from_vault`, worded for a backup file rather than this device's vault.
+pub(crate) fn from_backup(e: VaultError) -> IpcError {
+    match e {
+        VaultError::WrongCredential | VaultError::NoSuchSlot => {
+            err(ErrorCode::WrongCredential, "That did not open the backup. Nothing was restored.")
+        }
+        VaultError::HeaderTampered
+        | VaultError::MalformedHeader
+        | VaultError::RecordAuthentication
+        | VaultError::MalformedRecord
+        | VaultError::KeyVersionMismatch => from_vault(VaultError::BackupTampered),
+        other => from_vault(other),
     }
 }
 
@@ -108,6 +131,7 @@ pub(crate) fn from_ssh(e: &SshError) -> IpcError {
             err(ErrorCode::ProtocolError, "The server only offers encryption methods that Tyrminal considers unsafe.")
         }
         SshError::Disconnected(_) => err(ErrorCode::Disconnected, "The server closed the connection."),
+        SshError::Cancelled => err(ErrorCode::Cancelled, "The connection was cancelled."),
         SshError::ChannelDenied | SshError::RequestDenied => {
             err(ErrorCode::ChannelDenied, "The server signed you in but refused to open a terminal.")
         }

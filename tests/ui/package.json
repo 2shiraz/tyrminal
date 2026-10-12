@@ -1,0 +1,14 @@
+{
+  "name": "@tyrminal/ui-tests",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Browser UI, accessibility-behavior and visual regression tests against the production frontend build with a test-only mock backend.",
+  "scripts": {
+    "test": "playwright test -c playwright.config.ts",
+    "update": "playwright test -c playwright.config.ts --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

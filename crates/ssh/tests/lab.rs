@@ -66,11 +66,19 @@ impl Lab {
         ClientKey::from_openssh(&text, passphrase)
     }
 
-    /// sshd log lines that show any authentication activity.
-    fn auth_log_lines(&self, server: &str) -> Vec<String> {
+    /// The sshd log: a file in the container-free lab, `docker logs` in the container lab.
+    fn server_log(&self, server: &str) -> String {
+        if let Some(file) = self.0.pointer(&format!("/servers/{server}/logFile")).and_then(Value::as_str) {
+            return std::fs::read_to_string(file).expect("lab sshd log");
+        }
         let container = self.str(&format!("/servers/{server}/container"));
         let out = Command::new("docker").args(["logs", &container]).output().expect("docker logs");
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    }
+
+    /// sshd log lines that show any authentication activity.
+    fn auth_log_lines(&self, server: &str) -> Vec<String> {
+        let text = self.server_log(server);
         text.lines()
             .filter(|l| {
                 ["Accepted ", "Failed ", "Postponed ", "Invalid user", "userauth", "authentication failure"]
@@ -218,7 +226,7 @@ async fn ed25519_key_authenticates_and_runs_a_fixture_command() {
     assert_eq!(conn.host_key().algorithm, "ssh-ed25519");
     assert_eq!(conn.host_key().fingerprint, lab.str("/servers/a/hostKeyEd25519Fingerprint"));
     let out = conn.exec("echo tyrminal-fixture-ok; id -un", 4096, Duration::from_secs(10)).await.unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "tyrminal-fixture-ok\ntyr\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("tyrminal-fixture-ok\n{}\n", lab.user()));
     assert_eq!(out.exit_status, Some(0));
     conn.disconnect().await;
 }
@@ -427,6 +435,7 @@ async fn interactive_shell_runs_commands_resizes_and_reports_exit_status() {
     writer.write(b"exit 7\n").await.unwrap();
     let mut status = None;
     while let Some(event) = tokio::time::timeout(Duration::from_secs(10), reader.next()).await.unwrap() {
+        assert!(!matches!(event, ShellEvent::ConnectionLost), "a normal exit is not a lost connection");
         if let ShellEvent::ExitStatus(code) = event {
             status = Some(code);
         }
@@ -461,14 +470,18 @@ async fn session_channel_denied_by_the_server_is_reported() {
 // ---------- flow control ----------
 
 /// A producer far faster than the consumer: the consumer stalls, then drains. Every byte must
-/// arrive, in order, with no error. `seq` output makes any loss or reordering detectable.
+/// arrive, in order, with no error. An awk counter makes any loss or reordering detectable (not
+/// `seq`, which prints large numbers in scientific notation on macOS).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn large_output_survives_a_stalled_consumer_without_loss_or_reordering() {
     let lab = Lab::load();
     let conn = connected(&lab).await;
     const LAST: u64 = 3_000_000; // ~22.9 MiB of text
-    let (mut reader, _writer) = conn.open_command(&format!("seq 1 {LAST}")).await.unwrap();
+    let (mut reader, _writer) = conn
+        .open_command(&format!("awk 'BEGIN {{ for (i = 1; i <= {LAST}; i++) printf \"%d\\n\", i }}'"))
+        .await
+        .unwrap();
 
     let mut expected: u64 = 1;
     let mut partial = String::new();
@@ -605,8 +618,35 @@ async fn disconnect_during_authentication_and_mid_session_is_reported_not_hung()
     writer.write(b"echo alive-$((40+2))\n").await.unwrap();
     read_until(&mut reader, "alive-42\r\n", Duration::from_secs(10)).await;
     forwarder.cut_all();
-    let ended = tokio::time::timeout(Duration::from_secs(10), async { while reader.next().await.is_some() {} }).await;
-    assert!(ended.is_ok(), "reader must end after the link drops");
+    let events = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = reader.next().await {
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("reader must end after the link drops");
+    assert!(
+        matches!(events.last(), Some(ShellEvent::ConnectionLost)),
+        "a dropped link is reported as lost: {events:?}"
+    );
+
+    // The server process dies (as when a host reboots): also lost, not a normal end.
+    let conn = connected(&lab).await;
+    let (mut reader, writer) = conn.open_shell(&pty).await.unwrap();
+    writer.write(b"echo alive-$((40+2)); kill -9 $PPID\n").await.unwrap();
+    let events = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = reader.next().await {
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("reader must end after the server process dies");
+    assert!(matches!(events.last(), Some(ShellEvent::ConnectionLost)), "{events:?}");
+    assert!(reader.next().await.is_none(), "nothing follows ConnectionLost");
 }
 
 #[test]

@@ -35,8 +35,8 @@ fn check_account(account: &str) -> Result<(), KeystoreError> {
     if ok { Ok(()) } else { Err(KeystoreError::InvalidAccount) }
 }
 
-/// The platform secret store: macOS Keychain (login keychain, generic password items) or Windows
-/// Credential Manager. Other platforms report `Unavailable`.
+/// The platform secret store: macOS Keychain (login keychain, generic password items), Windows
+/// Credential Manager, or the Linux Secret Service. Other platforms report `Unavailable`.
 ///
 /// What this is and is not: items are protected by the OS for the logged-in user. On macOS the
 /// item's access control is tied to the creating application's code signature; an unsigned
@@ -63,7 +63,15 @@ fn init_default_store() -> Result<(), KeystoreError> {
             keyring_core::set_default_store(store);
             Ok(())
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            // Freedesktop Secret Service (GNOME Keyring, KWallet) over the session bus, with an
+            // encrypted transfer session. No session bus or no provider means Unavailable.
+            let store = zbus_secret_service_keyring_store::Store::new().map_err(|_| KeystoreError::Unavailable)?;
+            keyring_core::set_default_store(store);
+            Ok(())
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             Err(KeystoreError::Unavailable)
         }

@@ -551,7 +551,9 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     }
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
 
-    // Silence: locked within one timeout (plus scheduling slack), not before.
+    // Silence, measured from the last reported activity: locked within one timeout (plus
+    // scheduling slack), not before.
+    core.vault.note_activity();
     let quiet_from = Instant::now();
     tokio::time::timeout(timeout * 4, status.wait_for(|s| s.state == VaultState::Locked))
         .await
@@ -576,4 +578,222 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Locked);
     timer.abort();
+}
+
+/// Snippets (SNP-01..04): encrypted records with folders and multi-line text; validated; they
+/// persist across restarts, never appear in plaintext on disk, and are gone from memory on lock.
+#[tokio::test(flavor = "multi_thread")]
+async fn snippets_are_encrypted_records_that_persist_and_disappear_on_lock() {
+    use tyrminal_core::contracts::SnippetInput;
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    let canary = "echo SNIPPET-CANARY-7f3e";
+    let input = |id: Option<String>, name: &str, folder: &str, text: &str| SnippetInput {
+        id,
+        name: name.into(),
+        folder: folder.into(),
+        text: text.into(),
+    };
+    let deploy = core
+        .vault
+        .save_snippet(input(None, "Deploy", " /Ops/ Staging/ ", &format!("{canary}\r\nuptime")))
+        .await
+        .unwrap();
+    assert_eq!(deploy.folder, "Ops/Staging");
+    assert_eq!(deploy.text, format!("{canary}\nuptime"));
+    core.vault.save_snippet(input(None, "Disk", "", "df -h")).await.unwrap();
+
+    // Validation happens natively, whatever the UI sent.
+    for bad in [
+        input(None, "", "", "ls"),
+        input(None, "x", "", "  "),
+        input(None, "x", "a//b", "ls"),
+        input(None, "x", "", "printf '\u{1b}]52;c;AAAA\u{7}'"),
+        input(None, "x", "", &"y".repeat(64 * 1024 + 1)),
+    ] {
+        assert!(core.vault.save_snippet(bad).await.is_err());
+    }
+    assert_eq!(code(core.vault.save_snippet(input(Some("0".repeat(32)), "x", "", "ls")).await), ErrorCode::NotFound);
+
+    let edited = core.vault.save_snippet(input(Some(deploy.id.clone()), "Deploy v2", "Ops", "uptime")).await.unwrap();
+    assert_eq!(edited.id, deploy.id);
+    let list = core.vault.list_snippets().await.unwrap();
+    assert_eq!(list.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Disk", "Deploy v2"]);
+
+    // Nothing in plaintext on disk (the edited-away canary included).
+    core.vault.save_snippet(input(Some(deploy.id.clone()), "Deploy v3", "Ops", canary)).await.unwrap();
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.list_snippets().await), ErrorCode::VaultLocked);
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        assert!(!bytes.windows(canary.len()).any(|w| w == canary.as_bytes()), "snippet text found on disk");
+    }
+    drop(core);
+
+    let core = open(&dir);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let list = core.vault.list_snippets().await.unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[1].text, canary);
+    core.vault.delete_snippet(&list[0].id).await.unwrap();
+    assert_eq!(core.vault.list_snippets().await.unwrap().len(), 1);
+    assert_eq!(code(core.vault.delete_snippet(&list[0].id).await), ErrorCode::NotFound);
+}
+
+/// Preferences are not vault data: readable while locked, validated, and stored owner-only.
+#[tokio::test(flavor = "multi_thread")]
+async fn preferences_are_available_while_locked_and_validated() {
+    use tyrminal_core::contracts::{Preferences, ThemePreference};
+    let dir = TempDir::new().unwrap();
+    let core = open(&dir);
+    assert_eq!(core.preferences.get(), Preferences::default());
+    let mut prefs = Preferences { theme: ThemePreference::Dark, ..Preferences::default() };
+    prefs.terminal.font_size = 99.0;
+    let stored = core.preferences.set(prefs).unwrap();
+    assert!((stored.terminal.font_size - 32.0).abs() < f32::EPSILON);
+    drop(core);
+    assert_eq!(open(&dir).preferences.get().theme, ThemePreference::Dark);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backup_restores_on_a_fresh_install_and_never_overwrites_silently() {
+    use tyrminal_core::contracts::{BackupCredentialKind, SnippetInput};
+    let dir = TempDir::new().unwrap();
+    let (core, recovery_key) = created(&dir).await;
+    core.vault.save_host(host("alpha", HostAuthInput::StoredPassword { password: Some("pw-1".into()) })).await.unwrap();
+    let doomed = core.vault.save_host(host("deleted", HostAuthInput::AskPassword)).await.unwrap();
+    core.vault.delete_host(&doomed.id).await.unwrap();
+    core.vault.generate_key("k").await.unwrap();
+    core.vault
+        .save_snippet(SnippetInput { id: None, name: "s".into(), folder: String::new(), text: "uptime".into() })
+        .await
+        .unwrap();
+    let backup = core.vault.export_backup().await.unwrap();
+    assert!(!backup.windows(4).any(|w| w == b"pw-1"), "no plaintext in the backup");
+    assert!(!backup.windows(6).any(|w| w == b"uptime"));
+
+    // Locked: no export.
+    core.vault.lock().await;
+    assert_eq!(code(core.vault.export_backup().await), ErrorCode::VaultLocked);
+
+    // Preview validates fully and changes nothing; a wrong secret is reported as such.
+    let fresh_dir = TempDir::new().unwrap();
+    let fresh = open(&fresh_dir);
+    let wrong = fresh.vault.preview_backup(backup.clone(), BackupCredentialKind::Passphrase, "wrong passphrase".into());
+    assert_eq!(code(wrong.await), ErrorCode::WrongCredential);
+    let preview = fresh
+        .vault
+        .preview_backup(backup.clone(), BackupCredentialKind::RecoveryKey, recovery_key.clone())
+        .await
+        .unwrap();
+    assert_eq!((preview.hosts, preview.keys, preview.known_hosts, preview.snippets), (1, 1, 0, 1));
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Uninitialized);
+
+    // Restore on a fresh install: locked afterwards, opens with the backup's passphrase.
+    fresh
+        .vault
+        .restore_backup(backup.clone(), BackupCredentialKind::Passphrase, PASSPHRASE.into(), false)
+        .await
+        .unwrap();
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Locked);
+    fresh.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let hosts = fresh.vault.list_hosts().await.unwrap();
+    assert_eq!(hosts.iter().map(|h| h.label.as_str()).collect::<Vec<_>>(), ["alpha"]);
+    assert_eq!(fresh.vault.list_snippets().await.unwrap()[0].text, "uptime");
+    // Restored records keep their revisions, so editing them works normally.
+    let mut edit = host("alpha 2", HostAuthInput::AskPassword);
+    edit.id = Some(hosts[0].id.clone());
+    fresh.vault.save_host(edit).await.unwrap();
+
+    // An existing vault is replaced only on request, and a replacement locks it.
+    let again = fresh.vault.restore_backup(backup.clone(), BackupCredentialKind::Passphrase, PASSPHRASE.into(), false);
+    assert_eq!(code(again.await), ErrorCode::VaultAlreadyExists);
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Unlocked);
+    fresh.vault.restore_backup(backup, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await.unwrap();
+    assert_eq!(fresh.vault.status().await.unwrap().state, VaultState::Locked);
+    fresh.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(fresh.vault.list_hosts().await.unwrap()[0].label, "alpha", "back to the backup's state");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_damaged_backup_restores_nothing_and_leaves_the_vault_intact() {
+    use tyrminal_core::contracts::BackupCredentialKind;
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    core.vault.save_host(host("keep me", HostAuthInput::AskPassword)).await.unwrap();
+    let mut backup = core.vault.export_backup().await.unwrap();
+    let last = backup.len() - 40;
+    backup[last] ^= 0x80;
+    for bad in [backup.clone(), backup[..backup.len() / 2].to_vec(), b"not a backup".to_vec(), Vec::new()] {
+        let result = core.vault.restore_backup(bad, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await;
+        assert_eq!(code(result), ErrorCode::VaultDamaged);
+    }
+    // Still unlocked and unchanged: validation happens before anything is touched.
+    assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked);
+    assert_eq!(core.vault.list_hosts().await.unwrap()[0].label, "keep me");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn quick_unlock_uses_the_os_store_and_never_falls_back() {
+    use tyrminal_core::{MemorySecretStore, UnavailableSecretStore};
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(MemorySecretStore::default());
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.create(PASSPHRASE.into()).await.unwrap();
+    core.vault.save_host(host("alpha", HostAuthInput::AskPassword)).await.unwrap();
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+
+    // Enabling needs the real passphrase; a wrong one changes nothing.
+    assert_eq!(code(core.vault.enable_quick_unlock("wrong passphrase".into()).await), ErrorCode::WrongCredential);
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    assert!(core.vault.quick_unlock_enabled().await.unwrap());
+    // Enabling again replaces this device's slot rather than adding another.
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+
+    core.vault.lock().await;
+    assert!(core.vault.quick_unlock_enabled().await.unwrap(), "known while locked");
+    core.vault.unlock_with_device().await.unwrap();
+    assert_eq!(core.vault.list_hosts().await.unwrap()[0].label, "alpha");
+
+    // Survives a restart: the slot is in the vault file, the secret in the store.
+    drop(core);
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.unlock_with_device().await.unwrap();
+
+    // Turned off: the device can no longer unlock; the passphrase still can.
+    core.vault.disable_quick_unlock().await.unwrap();
+    core.vault.lock().await;
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+
+    // No OS store: enabling fails without touching the vault, and unlock says so plainly.
+    drop(core);
+    let core = Core::open_with_store(&db_path(&dir), Arc::new(UnavailableSecretStore)).unwrap();
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(code(core.vault.enable_quick_unlock(PASSPHRASE.into()).await), ErrorCode::SecretStoreUnavailable);
+    core.vault.lock().await;
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::SecretStoreUnavailable);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_quick_unlock_entry_opens_nothing_and_is_removed() {
+    use tyrminal_core::MemorySecretStore;
+    use tyrminal_core::contracts::BackupCredentialKind;
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(MemorySecretStore::default());
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.create(PASSPHRASE.into()).await.unwrap();
+    let before = core.vault.export_backup().await.unwrap(); // has no device slot
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    // Restoring the older backup drops the device slot; the keychain entry is now stale.
+    core.vault.restore_backup(before, BackupCredentialKind::Passphrase, PASSPHRASE.into(), true).await.unwrap();
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    // Asking again gives the same answer (the stale entry was removed, not reused).
+    assert_eq!(code(core.vault.unlock_with_device().await), ErrorCode::WrongCredential);
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
 }

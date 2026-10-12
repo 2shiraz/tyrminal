@@ -21,17 +21,27 @@ const e2eBinary = join(root, "target", "e2e", "debug", process.platform === "win
 
 const needsLab = () => (existsSync(labFile) ? null : "SSH lab is not running (pnpm lab:up)");
 const needsE2e = () => (existsSync(e2eBinary) ? null : "e2e application build is missing (pnpm build:e2e)");
-const needsMac = () => (process.platform === "darwin" || process.platform === "win32" ? null : "no OS secret store adapter for this platform");
+const needsSecretStore = () => {
+  if (process.platform === "darwin" || process.platform === "win32") return null;
+  if (process.platform === "linux") return process.env.DBUS_SESSION_BUS_ADDRESS ? null : "no D-Bus session bus for the Secret Service (run under dbus-run-session with gnome-keyring)";
+  return "no OS secret store adapter for this platform";
+};
 
 const cargo = (...args) => ["cargo", args];
 const pnpm = (...args) => ["pnpm", args];
 const node = (...args) => ["node", args];
 
+// Linux without a display (CI, containers) runs the WebKitGTK application under a virtual X server.
+const headless = ([command, args]) =>
+  process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+    ? ["xvfb-run", ["-a", "-s", "-screen 0 1440x900x24", command, ...args]]
+    : [command, args];
+
 const SUITES = {
   fast: [
     { name: "rust format", cmd: cargo("fmt", "--all", "--check") },
     { name: "rust lint", cmd: cargo("clippy", "--workspace", "--all-targets", "--", "-D", "warnings") },
-    { name: "rust unit and property tests", cmd: cargo("test", "--workspace", "--quiet") },
+    { name: "rust unit and property tests", cmd: cargo("test", "--workspace", "--no-fail-fast", "--quiet") },
     { name: "contracts are up to date", cmd: node("scripts/generate-contracts.mjs", "--check") },
     { name: "typescript", cmd: pnpm("--filter", "@tyrminal/desktop", "typecheck") },
     { name: "frontend build", cmd: pnpm("--filter", "@tyrminal/desktop", "build") },
@@ -40,7 +50,7 @@ const SUITES = {
   integration: [
     { name: "ssh adapter against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-ssh", "--test", "lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     { name: "core sessions against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "sessions_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
-    { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsMac },
+    { name: "OS secret store round trip", cmd: cargo("test", "-p", "tyrminal-platform", "--quiet", "--", "--ignored"), blockedBy: needsSecretStore },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -51,7 +61,10 @@ const SUITES = {
     { name: "release policy", cmd: node("scripts/check-release.mjs") },
   ],
   native: [
-    { name: "packaged application end to end", cmd: node("--test", "--test-concurrency=1", "tests/native/app.test.mjs"), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "packaged application end to end", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/app.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "terminal: full-screen apps, input, mouse, resize, escape corpus", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/terminal.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "snippets: panel, owned-session send, lock", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/snippets.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
   ],
 };
 
@@ -77,7 +90,27 @@ for (const step of suite) {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const ok = run.status === 0;
   console.log(`${ok ? "ok     " : "FAILED "}  ${step.name}  (${seconds}s, exit ${run.status})\n         $ ${line}`);
-  if (!ok) console.log(`${run.stdout}${run.stderr}`.trim().split("\n").slice(-40).join("\n"));
+  if (!ok) {
+    const lines = `${run.stdout}${run.stderr}`.trim().split("\n");
+    // The causes (panics, assertion output, failing test names) first, then the tail.
+    const cause = /panicked at|^---- .* (stdout|stderr) ----|assertion|^error(\[|:)|FAILED|^failures:|^\s*[✔✖﹣] /;
+    const picked = new Set();
+    lines.forEach((line, i) => {
+      if (cause.test(line)) for (let j = i; j < Math.min(lines.length, i + 12); j++) picked.add(j);
+    });
+    const context = [...picked].sort((a, b) => a - b).slice(0, 200).map((i) => lines[i]);
+    if (context.length) console.log(`--- failure context ---\n${context.join("\n")}\n--- tail ---`);
+    console.log(lines.slice(-40).join("\n"));
+  }
+  // A skipped test (e.g. a full-screen app missing on this platform's lab) is BLOCKED, never a pass.
+  const output = `${run.stdout}${run.stderr}`;
+  const skipped = Number(/^(?:ℹ skipped|# skipped|# skip) (\d+)/m.exec(output)?.[1] ?? 0);
+  if (ok && skipped > 0) {
+    const reasons = [...new Set(output.split("\n").filter((l) => /BLOCKED:/.test(l)).map((l) => l.trim()))];
+    console.log(`BLOCKED  ${step.name}: ${skipped} test(s) could not run here\n         ${reasons.join("\n         ")}`);
+    results.push({ name: step.name, command: line, status: "BLOCKED", reason: reasons.join("; "), skipped, exitCode: run.status, seconds: Number(seconds) });
+    continue;
+  }
   results.push({ name: step.name, command: line, status: ok ? "PASSED" : "FAILED", exitCode: run.status, seconds: Number(seconds) });
 }
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-quick-unlock-disable"
+description = "Enables the vault_quick_unlock_disable command without any pre-configured scope."
+commands.allow = ["vault_quick_unlock_disable"]
+
+[[permission]]
+identifier = "deny-vault-quick-unlock-disable"
+description = "Denies the vault_quick_unlock_disable command without any pre-configured scope."
+commands.deny = ["vault_quick_unlock_disable"]

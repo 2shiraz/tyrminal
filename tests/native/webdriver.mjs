@@ -32,13 +32,43 @@ export class Session {
     return new Session(base, body.value.sessionId);
   }
 
-  async #call(method, path, payload) {
+  /** Sets the W3C session timeouts (milliseconds). */
+  setTimeouts(timeouts) {
+    return this.#call("POST", "/timeouts", timeouts);
+  }
+
+  /**
+   * Waits until the application document has finished loading. On WebKitGTK a script evaluation
+   * issued while the first page load is still in progress can be dropped and never answer, so
+   * readiness is probed with a short script timeout before the default one is restored.
+   */
+  async waitForDocument({ timeout = 30_000 } = {}) {
+    const deadline = Date.now() + timeout;
+    await this.setTimeouts({ script: 2_000 });
+    try {
+      for (;;) {
+        try {
+          const state = await this.#call("POST", "/execute/sync", { script: "return document.readyState + ':' + !!document.querySelector('#root > *')", args: [] }, 5_000);
+          if (state === "complete:true") return;
+        } catch (error) {
+          if (Date.now() > deadline) throw new Error(`application document did not load: ${error.message}`);
+        }
+        if (Date.now() > deadline) throw new Error("application document did not load");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    } finally {
+      await this.setTimeouts({ script: 30_000 });
+    }
+  }
+
+  async #call(method, path, payload, timeoutMs = 35_000) {
     const response = await fetch(`${this.#base}/session/${this.#id}${path}`, {
       method,
       headers: payload === undefined ? {} : { "content-type": "application/json" },
       body: payload === undefined ? undefined : JSON.stringify(payload),
-      // A command that never answers must fail the test, not hang the run.
-      signal: AbortSignal.timeout(30_000),
+      // A command that never answers must fail the test, not hang the run. Longer than the
+      // server's own 30 s script timeout, so its error (not an abort) is what gets reported.
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.value?.error) throw new WebDriverError(`${method} ${path}`, body.value);
@@ -125,6 +155,43 @@ export class Session {
   /** Runs a script that reports its result by calling the callback passed as its last argument. */
   executeAsync(script, args = []) {
     return this.#call("POST", "/execute/async", { script, args });
+  }
+
+  /** W3C actions: real key and pointer input dispatched by the WebDriver server. */
+  async performActions(actions) {
+    await this.#call("POST", "/actions", { actions });
+    await this.#call("DELETE", "/actions");
+  }
+
+  /** Presses a chord, e.g. `chord(["\uE009", "c"])` for Ctrl+C (W3C key codes for modifiers). */
+  chord(keys) {
+    const down = keys.map((value) => ({ type: "keyDown", value }));
+    const up = [...keys].reverse().map((value) => ({ type: "keyUp", value }));
+    return this.performActions([{ type: "key", id: "keyboard", actions: [...down, ...up] }]);
+  }
+
+  /** Clicks at viewport coordinates with a real pointer (mouse down/up at that position). */
+  clickAt(x, y, button = 0) {
+    return this.performActions([
+      {
+        type: "pointer",
+        id: "mouse",
+        parameters: { pointerType: "mouse" },
+        actions: [
+          { type: "pointerMove", duration: 0, origin: "viewport", x: Math.round(x), y: Math.round(y) },
+          { type: "pointerDown", button },
+          { type: "pointerUp", button },
+        ],
+      },
+    ]);
+  }
+
+  setWindowRect(rect) {
+    return this.#call("POST", "/window/rect", rect);
+  }
+
+  getWindowRect() {
+    return this.#call("GET", "/window/rect");
   }
 
   /** PNG screenshot of the WebView contents as a Buffer. */

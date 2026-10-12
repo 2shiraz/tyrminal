@@ -28,6 +28,9 @@ pub enum ShellEvent {
     /// Remote process ended by a signal; the name is untrusted text.
     ExitSignal(String),
     Eof,
+    /// The connection ended without the server closing the channel (network drop, server
+    /// process killed). Distinguishes a lost link from a session that ended normally.
+    ConnectionLost,
 }
 
 /// Reading half of an interactive shell channel.
@@ -38,6 +41,7 @@ pub enum ShellEvent {
 /// calling `next` is therefore the way to pause the remote producer; nothing is dropped.
 pub struct ShellReader {
     pub(crate) read: ChannelReadHalf,
+    pub(crate) ended: bool,
 }
 
 impl core::fmt::Debug for ShellReader {
@@ -47,10 +51,19 @@ impl core::fmt::Debug for ShellReader {
 }
 
 impl ShellReader {
-    /// Next event, or `None` once the channel is closed. Zero-length data is skipped.
+    /// Next event, or `None` once the channel is closed. A connection that ends without the
+    /// server closing the channel yields [`ShellEvent::ConnectionLost`] once, then `None`.
+    /// Zero-length data is skipped.
     pub async fn next(&mut self) -> Option<ShellEvent> {
+        if self.ended {
+            return None;
+        }
         loop {
-            match self.read.wait().await? {
+            let Some(message) = self.read.wait().await else {
+                self.ended = true;
+                return Some(ShellEvent::ConnectionLost);
+            };
+            match message {
                 ChannelMsg::Data { data } if !data.is_empty() => {
                     return Some(ShellEvent::Output(data));
                 }
@@ -64,7 +77,10 @@ impl ShellReader {
                     return Some(ShellEvent::ExitSignal(format!("{signal_name:?}")));
                 }
                 ChannelMsg::Eof => return Some(ShellEvent::Eof),
-                ChannelMsg::Close => return None,
+                ChannelMsg::Close => {
+                    self.ended = true;
+                    return None;
+                }
                 _ => {}
             }
         }

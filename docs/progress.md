@@ -7,77 +7,75 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 | Phase | State | Report |
 |---|---|---|
 | 00 Repository baseline | Gate met | `docs/reports/phase-00.md` |
-| 01 Feasibility spikes | Gate met on macOS; Windows and mobile open | `docs/reports/phase-01.md` |
-| 02 Vault foundation | In progress: vault works end to end; backup/restore, quick unlock and fault-injection tests missing | `docs/reports/phase-02-03.md` |
-| 03 SSH vertical slice | Gate met on macOS in the real app; reconnect and keyboard-interactive missing | `docs/reports/phase-02-03.md` |
+| 01 Feasibility spikes | Gate met on macOS; Linux in this sandbox; Windows via CI in progress | `docs/reports/phase-01.md` |
+| 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer and disk-full fault injection: done. An OS screen-lock hook remains | `docs/reports/phase-02-03.md` |
+| 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done (native test kills the server process; passes on Linux) | `docs/reports/phase-02-03.md` |
+| UX track (§3 of the 2026-10 brief) | UI redesign, first-class terminal, snippets: done and tested on Linux; CI on macOS/Windows in progress | this file |
 | 04–15 | Not started | |
 
-Feature matrix: 16 rows IMPLEMENTED_UNVERIFIED (tested on macOS, Windows blocked), 15 IN_PROGRESS,
-232 NOT_STARTED, 39 DEFERRED_BY_SCOPE. **Nothing is VERIFIED**: Windows is a declared platform and
-nothing has been built or run there (B-01).
+Feature matrix: see `node scripts/feature-matrix.mjs --check` (29 IMPLEMENTED_UNVERIFIED,
+18 IN_PROGRESS, 216 NOT_STARTED, 39 DEFERRED_BY_SCOPE on 2026-10-12). **Nothing is VERIFIED**
+until the native suites pass in CI on macOS arm64 and Windows x64 (the declared platforms).
 
-## What works today (macOS, Apple Silicon)
+## Evidence (2026-10-12)
 
-Launch with no account → create a local encrypted vault → confirm the recovery key → add hosts,
-import or generate keys → connect over SSH with an explicit first-use trust decision → interactive
-terminal tabs, plus a local terminal → lock (manual, on exit, or after five minutes idle, enforced
-in the core) → unlock by passphrase or recovery key. A changed host key blocks the connection
-before any credential is sent and can only be replaced by removing trust with a written reason.
+Native workflow run 38216895650 on commit da60796: **Linux x64, macOS arm64 and Windows x64 all
+green** — fast 7/7, integration 3/3, security 6/6, native 4/4 suites, 0 blocked, release build
+and release policy against the built binary. CI (fast, browser UI, cargo-deny, npm audit,
+secret scan, fuzz smoke) green on the same commit. 24 matrix rows VERIFIED on it.
 
-## Evidence
-
-| Suite | Command | Result |
-|---|---|---|
-| Fast | `pnpm verify:fast` | 7 steps pass; 108 Rust tests |
-| Integration | `pnpm test:integration` | 17 SSH lab + 10 core session + 1 Keychain test pass |
-| Security | `pnpm test:security` | 6 steps pass |
-| Native | `pnpm test:native` | 9 tests on the real application pass; 25 consecutive runs |
-| Release policy | `pnpm check:release` | Pass (static and release-binary inspection) |
-| Performance | `node tests/performance/measure.mjs` | See phase-01 report; idle memory misses its target, unlock is faster than the target range |
+Windows lab: Debian 12 in WSL 1 with the official Node 20 build (Debian's node does not run
+under WSL 1); OpenSSH 9.2p1, PAM keyboard-interactive and the full-screen apps run there.
 
 ## Findings worth keeping
 
 1. russh reports a link that drops mid-authentication as an auth failure; mapped to a disconnect.
-2. OpenSSH 9.8+ `PerSourcePenalties` throttles a source after failed auth; disabled in the lab
-   only. Automatic reconnect (not built yet) must respect it.
-3. macOS discards unread PTY output when the last slave descriptor closes; `tyrminal-pty` holds
-   the slave until exit and drain.
+2. OpenSSH 9.8+ `PerSourcePenalties` throttles a source after failed auth; disabled in the lab only.
+   Auto-reconnect backs off exponentially with jitter, which also respects it.
+3. macOS discards unread PTY output when the last slave descriptor closes; `tyrminal-pty` holds the
+   slave until exit and drain.
 4. GNU readline (macOS `/bin/sh`) can overwrite a resize; the session re-checks the size.
 5. xterm.js 6 cannot load with `Object.prototype` frozen, so Tauri's `freezePrototype` is off.
-6. macOS `seq` prints numbers from 1,000,000 in scientific notation; do not use it for
-   line-exact workloads on macOS.
-7. The Tauri CLI runs cargo from `src-tauri`, so a relative `CARGO_TARGET_DIR` lands elsewhere.
-   A stale test binary caused a long false trail; `scripts/build-e2e.mjs` uses an absolute path.
+6. macOS `seq` prints numbers from 1,000,000 in scientific notation; tests use an awk counter.
+7. A relative `CARGO_TARGET_DIR` lands in `src-tauri`; `scripts/build-e2e.mjs` uses an absolute path.
 8. `canonical_host` has no IDNA mapping yet (fails closed).
+9. Closing a session cancels its task: any vault write in that task must run in its own task, or
+   the in-memory revision falls behind the database (fixed for recent-connection marks).
+10. GitHub runners: macOS limits Remote Login to `com.apple.access_ssh`; Linux home is 750 so
+    `authorized_keys` must live elsewhere; Win32-OpenSSH loads host keys only if SYSTEM or
+    Administrators own them, and elevated processes leave an explicit Administrators ACE.
+11. Visual baselines are only stable in one pinned image (fonts); record them with
+    `pnpm test:ui:update:container`.
+12. A session state change must not steal focus from a field the user moved to (tab rename).
+13. russh ends a channel stream with `ChannelMsg::Close` when the server closes it and with
+    nothing when the connection is gone; only the second is a lost link (auto-reconnect).
+14. Debian's packaged node does not execute under WSL 1; CI uses the official build there.
+    Git Bash rewrites POSIX-looking environment values into Windows paths, so paths for the
+    WSL side are chosen inside WSL, and `wsl.exe -e` avoids a login shell re-parsing arguments.
+15. macOS: text typed through WebDriver must be ASCII (CJK and emoji never reached the shell);
+    after an interrupt zsh continues a `;` list where bash abandons it.
 
 ## Next tasks, in order
 
-1. **Phase 02 gate:** specify (in `docs/crypto-format.md`) and build the encrypted portable
-   backup and the validated restore with preview; add the file dialog plugin with scoped grants.
-2. Quick unlock: device key slot + OS secret store, with the "store unavailable" path tested.
-3. Fault injection: forced termination during header swap and record writes; disk-full.
-4. OS lock/suspend hooks (lock and disconnect); single-instance guard.
-5. Install cargo-deny and cargo-fuzz (B-06); write `deny.toml`; first fuzz targets for the vault
-   header and record decoders.
-6. Phase 03 remainder: reconnect with capped backoff, keyboard-interactive auth, negotiated
-   algorithm display, escape-sequence corpus tests.
-7. Idle memory: per-process footprint breakdown to explain the 212–278 MiB reading.
-8. Repository hygiene: SECURITY.md (needs a contact from the owner), CONTRIBUTING.md,
-   CODE_OF_CONDUCT.md, CHANGELOG.md, CI workflows, `docs/ipc-contract.md`, `docs/design-system.md`.
-9. Phase 04: groups, tags, inheritance, identities, OpenSSH/CSV import, 10,000-host search.
+1. Merge PR #1 and run the release workflow for v0.1.0-beta.1 (pre-release, unsigned).
+2. Phase 04 is implemented on a local branch (groups with inherited settings, tags, search,
+   bulk changes, duplicate, OpenSSH/CSV import); push it on top of main after the release.
+3. Phase 04 remainder: public-key deployment (KEY-05/06), reusable identities (KEY-15..17).
+4. Phase 02 remainder: OS screen-lock hook (needs platform APIs and an ADR for any FFI);
+   verify sleep-lock on a real suspend.
+5. Phases 04–09 (groups/tags/identities/imports, workspaces/broadcast, SFTP, tunnels, logs).
 
 ## Questions for the owner (none block current work)
 
 - Confirm Apache-2.0, and whether the sync server should share it.
-- A security contact for SECURITY.md.
-- Whether a Windows machine or CI runner will be available; every Windows claim depends on it.
-- Whether the Argon2id cost should be raised given a 0.11 s unlock on this hardware.
+- A security contact for SECURITY.md and CODE_OF_CONDUCT.md (placeholders say so).
+- Whether the Argon2id cost should be raised given a 0.11 s unlock on Apple Silicon.
 
 ## Resume commands
 
 ```sh
 pnpm doctor
-pnpm lab:up            # Docker Desktop must be running
+pnpm lab:up            # Docker, or TYRMINAL_LAB_MODE=local TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES=1 (disposable machines)
 pnpm verify:fast && pnpm test:integration && pnpm test:security
 pnpm build:e2e && pnpm test:native
 pnpm dev               # run the app in development

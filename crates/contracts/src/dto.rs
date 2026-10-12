@@ -34,6 +34,40 @@ pub struct RecoveryKeyIssued {
     pub recovery_key: String,
 }
 
+/// What a backup file contains, shown before anything is restored. Counts only: names and
+/// secrets stay encrypted until the restored vault is unlocked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupPreview {
+    /// Seconds since the Unix epoch when the backup was written.
+    #[ts(type = "number")]
+    pub created_at: u64,
+    pub hosts: u32,
+    pub keys: u32,
+    pub known_hosts: u32,
+    pub snippets: u32,
+}
+
+/// A backup file the user picked in the native dialog. Its bytes stay on the native side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupFile {
+    pub file_name: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+/// Which secret opens a backup: the passphrase or the recovery key it was made with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BackupCredentialKind {
+    Passphrase,
+    RecoveryKey,
+}
+
 impl core::fmt::Debug for RecoveryKeyIssued {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("RecoveryKeyIssued(<redacted>)")
@@ -68,6 +102,9 @@ pub struct HostSummary {
     pub port: u16,
     pub username: String,
     pub auth: HostAuth,
+    /// Unix seconds of the last connection that reached the shell, if any (recent connections).
+    #[ts(type = "number | null")]
+    pub last_connected_at: Option<u64>,
 }
 
 /// Authentication part of a host edit. `StoredPassword { password: None }` keeps the password
@@ -166,6 +203,133 @@ pub struct KnownHostSummary {
     pub added_at: u64,
 }
 
+// ---------- snippets ----------
+
+/// A saved command. The text is shown to the user for editing and preview; it is sent to a
+/// session only by an explicit Paste or Run on a session the calling window owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SnippetSummary {
+    pub id: String,
+    pub name: String,
+    /// Slash-separated folder path, e.g. `Deploy/Staging`; empty for the top level.
+    pub folder: String,
+    pub text: String,
+    /// Unix seconds of the last edit.
+    #[ts(type = "number")]
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SnippetInput {
+    /// `None` creates a snippet; `Some` edits that snippet.
+    pub id: Option<String>,
+    pub name: String,
+    pub folder: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SnippetSendMode {
+    /// Insert the text at the prompt without running it (bracketed when the terminal asks for it).
+    Paste,
+    /// Send the text followed by Enter.
+    Run,
+}
+
+// ---------- preferences ----------
+
+/// Non-secret appearance and terminal preferences, stored in plain JSON next to the vault so the
+/// lock screen can use them. Validated and clamped natively on every write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RendererPreference {
+    /// GPU (WebGL) when available, falling back automatically.
+    #[default]
+    Auto,
+    /// Always the DOM renderer.
+    Compatibility,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct TerminalPreferences {
+    /// Id of a built-in color scheme.
+    pub scheme: String,
+    /// `jetbrains-mono` (bundled) or `system`.
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+    pub cursor_style: CursorStyle,
+    pub cursor_blink: bool,
+    /// Inner padding in CSS pixels.
+    pub padding: u16,
+    pub scrollback: u32,
+    pub ligatures: bool,
+    pub renderer: RendererPreference,
+    /// Ask before sending a paste with more than one line or more than `paste_warn_bytes` bytes.
+    pub confirm_multiline_paste: bool,
+    pub copy_on_select: bool,
+}
+
+impl Default for TerminalPreferences {
+    fn default() -> Self {
+        Self {
+            scheme: "tyrminal-night".into(),
+            font_family: "jetbrains-mono".into(),
+            font_size: 14.0,
+            line_height: 1.2,
+            letter_spacing: 0.0,
+            cursor_style: CursorStyle::Block,
+            cursor_blink: true,
+            padding: 10,
+            scrollback: 5_000,
+            ligatures: false,
+            renderer: RendererPreference::Auto,
+            confirm_multiline_paste: true,
+            copy_on_select: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Preferences {
+    pub theme: ThemePreference,
+    /// Reduce interface motion even if the OS does not ask for it.
+    pub reduce_motion: bool,
+    pub terminal: TerminalPreferences,
+}
+
 // ---------- sessions ----------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -201,6 +365,8 @@ pub enum TrustDecision {
 pub enum AuthPromptKind {
     Password,
     KeyPassphrase,
+    /// A keyboard-interactive (RFC 4256) prompt; `message` carries the server's question.
+    KeyboardInteractive,
 }
 
 /// Events for one session, delivered only on that session's own channel (never broadcast).
@@ -240,6 +406,22 @@ pub enum SessionEvent {
         /// 1-based attempt number.
         attempt: u32,
         max_attempts: u32,
+        /// Keyboard-interactive only: the server's instructions and question, sanitized but
+        /// untrusted (render as plain text, never as markup). `None` for other kinds.
+        message: Option<String>,
+        /// Keyboard-interactive only: the server allows the answer to be shown while typed.
+        echo: bool,
+    },
+    /// The algorithms the connection uses, after key exchange. Values come from the client's
+    /// own offer list, never from server text.
+    #[serde(rename_all = "camelCase")]
+    Negotiated {
+        kex: String,
+        host_key: String,
+        cipher: String,
+        /// Empty for AEAD ciphers.
+        mac: String,
+        strict_kex: bool,
     },
     /// Pre-authentication banner from the server. Untrusted.
     Banner {
@@ -276,6 +458,11 @@ mod tests {
         };
         let auth = HostAuthInput::StoredPassword { password: Some("canary-password".into()) };
         let issued = RecoveryKeyIssued { recovery_key: "CANARY-RECOVERY".into() };
+        // Preferences are not secret, but they must deserialize from partial or older files.
+        let prefs: Preferences = serde_json::from_str(r#"{"theme":"dark","terminal":{"fontSize":16}}"#).unwrap();
+        assert_eq!(prefs.theme, ThemePreference::Dark);
+        assert!((prefs.terminal.font_size - 16.0).abs() < f32::EPSILON);
+        assert_eq!(prefs.terminal.scrollback, 5_000);
         let rendered = format!("{key:?} {auth:?} {issued:?}");
         assert!(!rendered.to_lowercase().contains("canary"), "{rendered}");
     }

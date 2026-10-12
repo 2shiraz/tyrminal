@@ -51,10 +51,18 @@ impl Lab {
     fn key_text(&self, name: &str) -> String {
         std::fs::read_to_string(self.str(&format!("/keys/{name}"))).unwrap()
     }
-    fn auth_log_lines(&self, server: &str) -> usize {
+    /// The sshd log: a file in the container-free lab, `docker logs` in the container lab.
+    fn server_log(&self, server: &str) -> String {
+        if let Some(file) = self.0.pointer(&format!("/servers/{server}/logFile")).and_then(Value::as_str) {
+            return std::fs::read_to_string(file).expect("lab sshd log");
+        }
         let container = self.str(&format!("/servers/{server}/container"));
-        let out = Command::new("docker").args(["logs", &container]).output().unwrap();
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("docker").args(["logs", &container]).output().expect("docker logs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    }
+
+    fn auth_log_lines(&self, server: &str) -> usize {
+        let text = self.server_log(server);
         text.lines()
             .filter(|l| ["Accepted ", "Failed ", "Postponed ", "userauth"].iter().any(|n| l.contains(n)))
             .count()
@@ -118,19 +126,37 @@ struct Client {
     text: String,
     received: usize,
     auto_ack: bool,
+    /// The last `Negotiated` event, which arrives just before `Connected`.
+    negotiated: Option<SessionEvent>,
 }
 
 impl Client {
     async fn open_ssh(core: &Core, host_id: &str) -> Self {
         let (tx, inbox) = mpsc::unbounded_channel();
         let opened = core.sessions.open_ssh(WINDOW, host_id, 100, 30, Arc::new(ChannelSink(tx))).await.expect("open");
-        Self { core: core.clone(), session: opened.session_id, inbox, text: String::new(), received: 0, auto_ack: true }
+        Self {
+            core: core.clone(),
+            session: opened.session_id,
+            inbox,
+            text: String::new(),
+            received: 0,
+            auto_ack: true,
+            negotiated: None,
+        }
     }
 
     async fn open_local(core: &Core) -> Self {
         let (tx, inbox) = mpsc::unbounded_channel();
         let opened = core.sessions.open_local(WINDOW, 100, 30, Arc::new(ChannelSink(tx))).await.expect("open local");
-        Self { core: core.clone(), session: opened.session_id, inbox, text: String::new(), received: 0, auto_ack: true }
+        Self {
+            core: core.clone(),
+            session: opened.session_id,
+            inbox,
+            text: String::new(),
+            received: 0,
+            auto_ack: true,
+            negotiated: None,
+        }
     }
 
     /// Next event, accumulating (and acknowledging) any output that arrives before it.
@@ -147,6 +173,13 @@ impl Client {
     async fn absorb(&mut self, bytes: Vec<u8>) {
         self.received += bytes.len();
         self.text.push_str(&String::from_utf8_lossy(&bytes));
+        // Answer cursor-position queries as a terminal would: Windows ConPTY sends one when a
+        // console starts and waits for the reply before the shell produces output. (In the
+        // app, xterm.js answers it.)
+        let queries = bytes.windows(4).filter(|w| *w == b"\x1b[6n").count();
+        for _ in 0..queries {
+            let _ = self.core.sessions.write(WINDOW, &self.session, b"\x1b[1;1R".to_vec()).await;
+        }
         if self.auto_ack {
             let _ = self.core.sessions.ack(WINDOW, &self.session, bytes.len() as u32).await;
         }
@@ -158,6 +191,7 @@ impl Client {
         loop {
             match self.event().await {
                 SessionEvent::State { state } if state != SessionState::Connected => states.push(state),
+                event @ SessionEvent::Negotiated { .. } => self.negotiated = Some(event),
                 other => {
                     if let SessionEvent::State { state } = &other {
                         states.push(*state);
@@ -184,7 +218,8 @@ impl Client {
 
     async fn output_until(&mut self, needle: &str) {
         let deadline = tokio::time::Instant::now() + WAIT;
-        while !self.text.contains(needle) {
+        // Matched without escape sequences: line editors such as PowerShell's colour each token.
+        while !strip_escapes(&self.text).contains(needle) {
             match tokio::time::timeout_at(deadline, self.inbox.recv()).await {
                 Ok(Some(Message::Output(bytes))) => self.absorb(bytes).await,
                 Ok(Some(Message::Event(event))) => panic!("unexpected event while waiting for {needle:?}: {event:?}"),
@@ -194,8 +229,11 @@ impl Client {
         }
     }
 
+    /// Types `text`; a newline is the Enter key, which a terminal sends as CR (PowerShell under
+    /// ConPTY submits only on CR; Unix terminal drivers turn CR into NL).
     async fn send(&self, text: &str) {
-        self.core.sessions.write(WINDOW, &self.session, text.as_bytes().to_vec()).await.expect("write");
+        let keys = text.replace('\n', "\r");
+        self.core.sessions.write(WINDOW, &self.session, keys.into_bytes()).await.expect("write");
     }
 
     fn trust(&self, prompt_id: &str, decision: TrustDecision) {
@@ -205,6 +243,15 @@ impl Client {
     fn answer(&self, prompt_id: &str, secret: Option<&str>) {
         self.core.sessions.answer_auth(WINDOW, &self.session, prompt_id, secret.map(Into::into)).expect("answer auth");
     }
+}
+
+/// (major, minor) from "OpenSSH_9.6p1 Ubuntu-3", "OpenSSH 10.0p1 (Alpine …)" or "OpenSSH_for_Windows_9.5p1".
+fn openssh_version(text: &str) -> (u32, u32) {
+    let start = text.find(|c: char| c.is_ascii_digit()).unwrap_or_else(|| panic!("no version in {text:?}"));
+    let mut parts = text[start..].split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor)
 }
 
 fn trust_prompt_id(event: &SessionEvent) -> String {
@@ -227,6 +274,42 @@ struct Fixture {
     _dir: TempDir,
     core: Core,
     lab: Lab,
+}
+
+/// Removes terminal escape sequences (CSI, OSC and two-byte ESC sequences) from `text`.
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters and intermediates, then one final byte in @..~.
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 async fn fixture() -> Fixture {
@@ -293,10 +376,28 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
 
     let states = client.until_connected().await;
     assert_eq!(states, [SessionState::Authenticating, SessionState::OpeningChannel, SessionState::Connected]);
+    // The negotiated algorithms are reported, and each one is from this client's own offer.
+    match client.negotiated.as_ref().expect("negotiated algorithms are reported") {
+        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex } => {
+            let offer = tyrminal_ssh::negotiation_summary();
+            for value in [kex, host_key, cipher] {
+                assert!(offer.contains(value.as_str()), "{value} is not in the offer:\n{offer}");
+            }
+            assert!(mac.is_empty() || offer.contains(mac.as_str()), "{mac}");
+            assert_eq!(host_key, "ssh-ed25519");
+            // Strict key exchange (the Terrapin countermeasure) exists from OpenSSH 9.6.
+            let version = f.lab.str("/serverVersion");
+            let (major, minor) = openssh_version(&version);
+            if (major, minor) >= (9, 6) {
+                assert!(*strict_kex, "{version} negotiates strict key exchange");
+            }
+        }
+        other => panic!("{other:?}"),
+    }
     client.send("echo core-$((40+2)); id -un; stty size\n").await;
     client.output_until("core-42").await;
     client.output_until("30 100").await;
-    assert!(client.text.contains("tyr"));
+    assert!(client.text.contains(&f.lab.str("/user")));
 
     f.core.sessions.resize(WINDOW, &client.session, 140, 50).await.unwrap();
     client.send("stty size; echo resized-$((40+2))\n").await;
@@ -659,7 +760,9 @@ async fn unacknowledged_output_is_capped_then_resumes_without_loss() {
     client.auto_ack = false;
     let baseline = client.received;
     client.text.clear();
-    client.send(&format!("seq 1 {LAST}; echo flood-$((40+2))\n")).await;
+    client
+        .send(&format!("awk 'BEGIN {{ for (i = 1; i <= {LAST}; i++) printf \"%d\\n\", i }}'; echo flood-$((40+2))\n"))
+        .await;
 
     // Collect until nothing arrives for a full second: the core has stopped at its ceiling.
     let mut unacked = 0usize;
@@ -761,4 +864,190 @@ async fn unreachable_and_denied_destinations_report_specific_errors() {
         ErrorCode::NotFound
     );
     assert_eq!(f.core.sessions.count(), 0);
+}
+
+/// SNP-07 / TRM-14: a snippet is sent only to a session the calling window owns, its text comes
+/// from the vault at the session's generation, Run executes it and Paste only inserts it, and
+/// after a lock nothing is sent.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn snippets_reach_only_owned_sessions_and_stop_at_lock() {
+    use tyrminal_core::contracts::{SnippetInput, SnippetSendMode};
+    let f = fixture().await;
+    let s = &f.core.sessions;
+    let snippet = f
+        .core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "fixture".into(),
+            folder: "lab".into(),
+            text: "echo snip-$((40+2))\necho line-$((7*6))".into(),
+        })
+        .await
+        .unwrap();
+
+    let mut client = Client::open_local(&f.core).await;
+    client.until_connected().await;
+
+    // Another window cannot send it, and cannot tell a real session from a guessed one.
+    let foreign = s.send_snippet("detached-1", &client.session, &snippet.id, SnippetSendMode::Run, false).await;
+    let guessed = s.send_snippet("detached-1", &"f".repeat(32), &snippet.id, SnippetSendMode::Run, false).await;
+    assert_eq!(foreign.unwrap_err(), guessed.unwrap_err());
+    // A missing snippet on an owned session is reported as such.
+    let missing = s.send_snippet(WINDOW, &client.session, &"0".repeat(32), SnippetSendMode::Run, false).await;
+    assert_eq!(missing.unwrap_err().code, ErrorCode::NotFound);
+
+    s.send_snippet(WINDOW, &client.session, &snippet.id, SnippetSendMode::Run, false).await.unwrap();
+    client.output_until("snip-42").await;
+    client.output_until("line-42").await;
+    assert!(!client.text.contains("hijack"));
+
+    // Paste inserts without executing: the shell echoes the text but no result line follows.
+    let paste = f
+        .core
+        .vault
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "p".into(),
+            folder: String::new(),
+            text: "echo pasted-$((1+1))".into(),
+        })
+        .await
+        .unwrap();
+    s.send_snippet(WINDOW, &client.session, &paste.id, SnippetSendMode::Paste, false).await.unwrap();
+    client.output_until("echo pasted-$((1+1))").await; // on the prompt line, not run
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!client.text.contains("pasted-2"), "Paste must not execute: {:?}", client.text);
+    client.send("\u{3}").await; // Ctrl+C discards the pasted line.
+    // Let the shell discard the line and redraw its prompt before typing on, as a person would.
+    // (Whether "^C" is echoed depends on the shell: bash 3.2 on macOS does not.)
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    client.send("echo after-$((1+1))-paste\n").await;
+    client.output_until("after-2-paste").await;
+    assert!(!client.text.contains("pasted-2"), "Paste must not execute: {:?}", client.text);
+
+    // Lock: the session ends and the snippet can no longer be sent anywhere.
+    f.core.vault.lock().await;
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::VaultLocked));
+    let after = s.send_snippet(WINDOW, &client.session, &snippet.id, SnippetSendMode::Run, false).await;
+    assert_eq!(after.unwrap_err().code, ErrorCode::AccessDenied);
+}
+
+/// The home view's recent connections: a host is recorded when its session reaches the shell.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn connecting_records_the_host_as_recent() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    assert!(f.core.vault.recent_hosts().await.unwrap().is_empty());
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    client.until_connected().await;
+    // Recorded right after Connected is reported; poll the explicit state briefly.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let recent = f.core.vault.recent_hosts().await.unwrap();
+        if let Some(first) = recent.first() {
+            assert_eq!(first.id, host);
+            assert!(first.last_connected_at.is_some());
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "host was not recorded as recent");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn closing_right_after_connect_leaves_the_host_editable() {
+    // Closing drops the session future while the recent-connection write may be in flight; that
+    // must never leave the vault's view of the host's revision behind the database.
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut trusted = false;
+    for _ in 0..5 {
+        let mut client = Client::open_ssh(&f.core, &host).await;
+        if !trusted {
+            let (_, prompt) = client.until_not_state().await;
+            client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+            trusted = true;
+        }
+        client.until_connected().await;
+        f.core.sessions.close(WINDOW, &client.session).unwrap();
+        client.until_closed().await;
+    }
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while f.core.vault.recent_hosts().await.unwrap().is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "host was not recorded as recent");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    f.core.vault.delete_host(&host).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn keyboard_interactive_server_prompts_reach_the_user_and_sign_in() {
+    let f = fixture().await;
+    let Some(port) = f.lab.0.pointer("/servers/kbd/port").and_then(Value::as_u64) else {
+        panic!("BLOCKED: this lab has no keyboard-interactive server (local mode on Linux or macOS provides one)");
+    };
+    let port = port as u16;
+    let user = f.lab.str("/user");
+    let host = f.host("kbd", port, &user, HostAuthInput::AskPassword).await;
+
+    // The server offers only keyboard-interactive: its own question is shown, sanitized, with
+    // the echo flag the server sent (PAM's password question: no echo).
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, prompt) = client.until_not_state().await;
+    let SessionEvent::AuthPrompt { prompt_id, kind, message, echo, attempt, .. } = prompt else {
+        panic!("expected an auth prompt, got {prompt:?}");
+    };
+    assert_eq!((kind, attempt, echo), (AuthPromptKind::KeyboardInteractive, 1, false));
+    let message = message.expect("the server's question is shown");
+    assert!(message.to_lowercase().contains("password"), "{message}");
+    assert!(!message.chars().any(|c| c.is_control() && c != '\n'), "{message:?}");
+
+    // A wrong answer: the exchange starts again and the user is asked again, at most 3 times.
+    client.answer(&prompt_id, Some("definitely wrong"));
+    let (_, prompt) = client.until_not_state().await;
+    let (prompt_id, kind, attempt) = auth_prompt(&prompt);
+    assert_eq!((kind, attempt), (AuthPromptKind::KeyboardInteractive, 2));
+    client.answer(&prompt_id, Some(&f.lab.str("/password")));
+    client.until_connected().await;
+    client.send("echo kbd-$((40+2))\n").await;
+    client.output_until("kbd-42").await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // Dismissing the prompt cancels; nothing is retried on the user's behalf.
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    let (_, prompt) = client.until_not_state().await;
+    client.answer(&auth_prompt(&prompt).0, None);
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::Cancelled));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_dropped_connection_is_reported_as_lost_and_a_normal_exit_is_not() {
+    // The renderer offers automatic reconnect only for a lost connection, so the two endings
+    // must stay distinguishable.
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.send("exit 3\n").await;
+    assert_eq!(client.until_closed().await, (None, Some(3)));
+
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    client.until_connected().await;
+    client.send("kill -9 $PPID\n").await;
+    assert_eq!(client.until_closed().await, (Some(ErrorCode::Disconnected), None));
 }

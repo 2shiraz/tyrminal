@@ -41,6 +41,9 @@ pub enum SshError {
     LimitExceeded,
     #[error("the SSH protocol exchange failed")]
     Protocol,
+    /// The user (or the caller on their behalf) declined to answer an authentication prompt.
+    #[error("authentication was cancelled")]
+    Cancelled,
     #[error("an internal invariant was violated")]
     Internal,
 }
@@ -61,6 +64,7 @@ impl SshError {
             Self::NotAuthenticated => "AUTH_REQUIRED",
             Self::LimitExceeded => "LIMIT_EXCEEDED",
             Self::Protocol => "PROTOCOL_ERROR",
+            Self::Cancelled => "CANCELLED",
             Self::Internal => "INTERNAL",
         }
     }

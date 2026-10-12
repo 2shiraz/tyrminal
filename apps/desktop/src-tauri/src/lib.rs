@@ -25,22 +25,45 @@ fn storage_error() -> IpcError {
 /// Creates the application data directory with owner-only permissions and returns the vault path.
 fn vault_path(data_dir: &Path) -> Result<PathBuf, IpcError> {
     std::fs::create_dir_all(data_dir).map_err(|_| storage_error())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700)).map_err(|_| storage_error())?;
-    }
+    // Owner-only before anything is written (Unix 0700; Windows a user+SYSTEM DACL).
+    tyrminal_core::restrict_to_owner(data_dir).map_err(|_| storage_error())?;
     Ok(data_dir.join("vault.db"))
 }
 
-fn open_core(app: &tauri::App) -> Result<Core, IpcError> {
+/// One running instance per data directory: an exclusive lock on a file inside it, held for the
+/// life of the process (the OS releases it if the process dies). A second instance would keep
+/// its own copy of the vault state and race the first on every write, so it refuses to start.
+fn lock_instance(data_dir: &Path) -> Result<std::fs::File, IpcError> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(data_dir.join("instance.lock"))
+        .map_err(|_| storage_error())?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(IpcError::new(
+            ErrorCode::InUse,
+            "Tyrminal is already open. Switch to the open window; this one can be closed.",
+        )),
+        Err(std::fs::TryLockError::Error(_)) => Err(storage_error()),
+    }
+}
+
+fn open_core(app: &tauri::App) -> Result<(Core, std::fs::File), IpcError> {
     // `TYRMINAL_DATA_DIR` lets tests and second-instance profiles use an isolated directory. It
     // names a location only; it never carries a secret.
     let data_dir = match std::env::var_os("TYRMINAL_DATA_DIR") {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => app.path().app_data_dir().map_err(|_| storage_error())?,
     };
-    Core::open(&vault_path(&data_dir)?)
+    let path = vault_path(&data_dir)?;
+    let lock = lock_instance(&data_dir)?;
+    // Quick-unlock material lives in the OS secret store under this application's own service
+    // name. Test builds use a separate name so they never touch a real installation's items.
+    let service = if cfg!(feature = "e2e") { "app.tyrminal.desktop.e2e" } else { "app.tyrminal.desktop" };
+    let store = std::sync::Arc::new(tyrminal_core::OsSecretStore::new(service));
+    Ok((Core::open_with_store(&path, store)?, lock))
 }
 
 pub fn run() {
@@ -50,9 +73,16 @@ pub fn run() {
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
+    // Native file dialogs for backups, used from Rust only (no renderer permission).
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+
     let app = builder
         .setup(|app| {
-            let core = open_core(app);
+            let opened = open_core(app);
+            let (core, instance_lock) = match opened {
+                Ok((core, lock)) => (Ok(core), Some(lock)),
+                Err(error) => (Err(error), None),
+            };
             if let Ok(core) = &core {
                 // Forward vault state changes (for example a lock) to the main window.
                 let mut status = core.vault.subscribe();
@@ -66,7 +96,7 @@ pub fn run() {
                 // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
                 tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }
-            app.manage(AppState::new(core));
+            app.manage(AppState::new(core, instance_lock));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -86,6 +116,10 @@ pub fn run() {
             commands::vault::vault_change_passphrase,
             commands::vault::vault_rotate_recovery_key,
             commands::vault::vault_activity,
+            commands::vault::vault_quick_unlock_status,
+            commands::vault::vault_quick_unlock_enable,
+            commands::vault::vault_quick_unlock_disable,
+            commands::vault::vault_unlock_device,
             commands::inventory::host_list,
             commands::inventory::host_save,
             commands::inventory::host_delete,
@@ -103,6 +137,18 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_trust_answer,
             commands::sessions::session_auth_answer,
+            commands::snippets::snippet_list,
+            commands::snippets::snippet_save,
+            commands::snippets::snippet_delete,
+            commands::snippets::snippet_send,
+            commands::settings::prefs_get,
+            commands::settings::prefs_set,
+            commands::settings::host_recent,
+            commands::settings::link_open,
+            commands::backup::backup_export,
+            commands::backup::backup_choose,
+            commands::backup::backup_preview,
+            commands::backup::backup_restore,
         ])
         .build(tauri::generate_context!());
 

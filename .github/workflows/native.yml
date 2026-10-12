@@ -1,0 +1,166 @@
+# Native build and test on each platform: unit tests, the SSH lab (the runner's own OpenSSH sshd
+# on every platform; Linux and macOS add a PAM keyboard-interactive server), integration and
+# security suites, the real application end to end over WebDriver, and the release-policy check
+# against a release binary. The Docker lab remains available to developers (`pnpm lab:up`).
+name: Native
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64, os: ubuntu-24.04, lab: local }
+          - { platform: macos-arm64, os: macos-15, lab: local }
+          - { platform: windows-x64, os: windows-2025, lab: wsl }
+    env:
+      TYRMINAL_LAB_MODE: ${{ matrix.lab }}
+      # Disposable runner: the local lab may create its accounts and run sshd.
+      TYRMINAL_LAB_ALLOW_SYSTEM_CHANGES: "1"
+      TYRMINAL_LAB_WSL_DISTRO: Debian-12
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: native-${{ matrix.platform }}
+      - name: Platform details
+        run: |
+          uname -a || true
+          node --version; pnpm --version; rustc --version
+          pnpm run doctor || true
+
+      - name: verify:fast
+        run: pnpm run verify:fast
+
+      - name: Full-screen applications for the macOS lab server
+        if: runner.os == 'macOS'
+        run: brew install tmux htop midnight-commander nano
+      # The app under test is a background process on an unattended desktop; App Nap then pauses
+      # its WebView's rendering, so the screen stops updating while bytes still arrive. Disposable
+      # runner only: turn App Nap off for every app.
+      - name: No App Nap on the test desktop
+        if: runner.os == 'macOS'
+        run: defaults write -g NSAppSleepDisabled -bool YES
+      - name: Full-screen applications for the Linux lab server
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq --no-install-recommends vim nano tmux htop mc
+      # Windows clients are tested against a Linux OpenSSH server running in WSL 1, which shares
+      # the Windows loopback interface: the same server, PAM and full-screen applications as on
+      # the other platforms. `metadata` lets the lab chmod its key files on the Windows drive.
+      - name: Windows node before WSL is installed
+        if: runner.os == 'Windows'
+        run: echo "WIN_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
+      # Debian 12: Ubuntu 24.04's binaries fail to execute under WSL 1 (ENOEXEC on node).
+      - name: WSL lab server (Debian 12, WSL 1)
+        if: runner.os == 'Windows'
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Debian-12
+          wsl-version: 1
+          use-cache: "false"
+          additional-packages: openssh-server procps vim nano tmux htop mc curl xz-utils ca-certificates file
+          wsl-conf: |
+            [automount]
+            options = "metadata,umask=022"
+      # Installing a distribution makes System32\bash.exe the WSL launcher; keep pnpm's script
+      # shell on Git Bash so `pnpm run …` keeps running Windows node.
+      - name: Script shell stays Git Bash
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "npm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
+          "pnpm_config_script_shell=C:\Program Files\Git\bin\bash.exe" >> $env:GITHUB_ENV
+      - name: Which node runs after WSL is installed (diagnostic)
+        if: runner.os == 'Windows'
+        run: |
+          echo "WIN_NODE=$WIN_NODE"
+          type -a node || true
+          cmd //c "where node" || true
+          node -p "process.execPath + ' ' + process.version" || true
+          echo "PATH=$PATH"
+      # Debian's node package fails to execute under WSL 1 (the kernel returns ENOEXEC and the
+      # shell then reads the binary as a script). The official build, pinned by SHA-256, runs the
+      # lab script inside the distribution instead.
+      - name: Node for the lab inside WSL (official build, pinned)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          cd /tmp
+          curl -fsSLo node.tar.xz https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz
+          echo "c6fa75c841cbffac851678a472f2a5bd612fff8308ef39236190e1f8dbb0e567  node.tar.xz" | sha256sum -c -
+          mkdir -p /opt/node
+          tar -xJf node.tar.xz -C /opt/node --strip-components=1
+          rm node.tar.xz
+          /opt/node/bin/node --version
+          /usr/sbin/sshd -V 2>&1 | head -1 || true
+          for b in vim nano htop mc; do command -v "$b" >/dev/null && "$b" --version 2>&1 | head -1 || echo "$b: not runnable"; done
+          tmux -V
+      - name: Keep the WSL instance running for the whole job
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d','Debian-12','-u','root','--','sleep','infinity'
+      - name: Start SSH lab
+        run: pnpm run lab:up
+
+      - name: Integration suite
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            dbus-run-session -- scripts/ci/linux-test-keyring.sh pnpm run test:integration
+          else
+            pnpm run test:integration
+          fi
+      - name: Security suite
+        run: pnpm run test:security
+
+      - name: Build test application (e2e feature)
+        run: pnpm run build:e2e
+      - name: Native end-to-end suite
+        run: pnpm run test:native
+
+      - name: Release build (unsigned)
+        run: pnpm run build:desktop
+      - name: Release policy against the built binary
+        run: node scripts/check-release.mjs --require-binary
+
+      - name: Lab server logs (on failure)
+        if: failure()
+        shell: bash
+        run: |
+          for f in tests/ssh-lab/.run/*/sshd.log; do echo "== $f"; tail -n 120 "$f"; done || true
+          if [ -f tests/ssh-lab/.run/lab.json ] && grep -q '"mode": "docker"' tests/ssh-lab/.run/lab.json; then
+            for c in $(docker ps -aq --filter label=tyrminal.lab=1); do docker logs --tail 120 "$c"; done
+          fi
+      - name: Stop SSH lab
+        if: always()
+        run: pnpm run lab:down || true
+      - name: Keep evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-${{ matrix.platform }}
+          path: docs/reports/raw/
+          if-no-files-found: ignore
+          retention-days: 30

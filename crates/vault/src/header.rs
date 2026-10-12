@@ -343,6 +343,11 @@ impl UnlockedVault {
         self.key_version
     }
 
+    /// `K_backup`, derived on demand so it exists only while a backup is written or checked.
+    pub(crate) fn backup_key(&self) -> Result<SecretKey, VaultError> {
+        keys::subkey(&self.root, &self.vault_id, keys::LABEL_BACKUP)
+    }
+
     fn mac(&self, unsigned: &[u8]) -> Result<Hmac<Sha256>, VaultError> {
         let mut mac =
             <Hmac<Sha256> as KeyInit>::new_from_slice(self.header_mac.expose()).map_err(|_| VaultError::Internal)?;

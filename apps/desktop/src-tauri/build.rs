@@ -12,6 +12,10 @@ const COMMANDS: &[&str] = &[
     "vault_change_passphrase",
     "vault_rotate_recovery_key",
     "vault_activity",
+    "vault_quick_unlock_status",
+    "vault_quick_unlock_enable",
+    "vault_quick_unlock_disable",
+    "vault_unlock_device",
     // inventory
     "host_list",
     "host_save",
@@ -31,6 +35,21 @@ const COMMANDS: &[&str] = &[
     "session_close",
     "session_trust_answer",
     "session_auth_answer",
+    // snippets
+    "snippet_list",
+    "snippet_save",
+    "snippet_delete",
+    "snippet_send",
+    // settings and shell
+    "prefs_get",
+    "prefs_set",
+    "host_recent",
+    "link_open",
+    // backup and restore
+    "backup_export",
+    "backup_choose",
+    "backup_preview",
+    "backup_restore",
 ];
 
 fn main() {

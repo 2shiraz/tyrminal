@@ -43,12 +43,33 @@ fn precreate_private(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Windows: the file inherits the ACL of its directory. The application places the vault under
-/// the per-user application-data directory; an explicit owner-only ACL is not yet applied and
-/// this path is unverified (blocker B-01).
+/// Windows: creates the file so SQLite can open it read-write. Its ACL is inherited from the data
+/// directory, which the application restricts to the current user and SYSTEM
+/// (`tyrminal_platform::restrict_to_owner`) before the vault is opened.
 #[cfg(not(unix))]
-fn precreate_private(_path: &Path) -> std::io::Result<()> {
-    Ok(())
+fn precreate_private(path: &Path) -> std::io::Result<()> {
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// `canonicalize` on Windows returns a verbatim `\\?\C:\...` path. Return the ordinary form for
+/// local drive paths (as the `dunce` crate does) so SQLite derives its WAL/SHM names normally.
+fn canonical_dir(dir: &Path) -> std::io::Result<PathBuf> {
+    let canonical = dir.canonicalize()?;
+    #[cfg(windows)]
+    {
+        let text = canonical.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\")
+            && rest.as_bytes().get(1) == Some(&b':')
+            && !rest.starts_with(r"UNC\")
+        {
+            return Ok(PathBuf::from(rest));
+        }
+    }
+    Ok(canonical)
 }
 
 fn configure(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -97,7 +118,7 @@ impl Database {
         // legitimately reached through symlinks (for example /var on macOS).
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let file_name = path.file_name().ok_or(StorageError::Open)?;
-        let path = &parent.canonicalize().map_err(|_| StorageError::Open)?.join(file_name);
+        let path = &canonical_dir(parent).map_err(|_| StorageError::Open)?.join(file_name);
         if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(StorageError::Open);
         }
@@ -184,6 +205,45 @@ impl Database {
         .await
     }
 
+    /// Replaces the whole vault, header and every record, in one transaction (restore from a
+    /// backup). `expected_header` is the header the caller saw (`None`: no vault yet); if the
+    /// stored one differs, nothing changes (`Conflict`). Either the old vault or the new one is on
+    /// disk, never a mixture.
+    pub async fn replace_vault(
+        &self,
+        expected_header: Option<Vec<u8>>,
+        header: Vec<u8>,
+        rows: Vec<RecordRow>,
+    ) -> Result<(), StorageError> {
+        if rows.len() > MAX_LIST_ROWS {
+            return Err(StorageError::Constraint);
+        }
+        self.call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current: Option<Vec<u8>> =
+                tx.query_row("SELECT header FROM vault_header WHERE id = 1", [], |r| r.get(0)).optional()?;
+            if current != expected_header {
+                return Err(StorageError::Conflict);
+            }
+            tx.execute("DELETE FROM records", [])?;
+            tx.execute("DELETE FROM vault_header", [])?;
+            tx.execute("INSERT INTO vault_header (id, header) VALUES (1, ?1)", params![header])?;
+            for row in &rows {
+                let revision = i64::try_from(row.revision).map_err(|_| StorageError::Constraint)?;
+                if row.revision == 0 {
+                    return Err(StorageError::Constraint);
+                }
+                tx.execute(
+                    &format!("INSERT INTO records ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+                    params![row.record_id, row.kind, revision, row.key_version, row.nonce, row.ciphertext, row.deleted],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Writes one record under an optimistic-concurrency condition.
     pub async fn put_record(&self, row: RecordRow, condition: WriteCondition) -> Result<(), StorageError> {
         self.put_records(vec![(row, condition)]).await
@@ -236,7 +296,7 @@ impl Database {
         self.call(move |conn| {
             let parent = destination.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
             let file_name = destination.file_name().ok_or(StorageError::Open)?;
-            let destination = parent.canonicalize().map_err(|_| StorageError::Open)?.join(file_name);
+            let destination = canonical_dir(parent).map_err(|_| StorageError::Open)?.join(file_name);
             if destination.symlink_metadata().is_ok() {
                 return Err(StorageError::AlreadyInitialized);
             }

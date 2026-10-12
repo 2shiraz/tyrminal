@@ -7,3 +7,26 @@ Third-party components are used under their own licenses. The dependency
 license policy is enforced by deny.toml; a generated attribution list is
 produced as part of the release gate (see docs/release-checklist.md) and is
 not yet bundled because no release artifact has been published.
+
+Bundled assets
+--------------
+
+Lucide icons (apps/desktop/src/components/ui/icons.tsx), from lucide-static 1.47.0
+  ISC License. Copyright (c) 2026 Lucide Icons and Contributors.
+  Permission to use, copy, modify, and/or distribute this software for any purpose with or
+  without fee is hereby granted, provided that the above copyright notice and this permission
+  notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+  WARRANTIES WITH REGARD TO THIS SOFTWARE.
+  Portions derived from Feather (MIT License, Copyright (c) 2013-2023 Cole Bemis).
+
+JetBrains Mono (apps/desktop/public/fonts/jetbrains-mono-*.woff2), via @fontsource/jetbrains-mono 5.2.8
+  SIL Open Font License 1.1. Copyright 2020 The JetBrains Mono Project Authors.
+  Full text: apps/desktop/public/fonts/JetBrainsMono-OFL.txt
+
+Symbols Nerd Font Mono (apps/desktop/public/fonts/SymbolsNerdFontMono-Regular.woff2), Nerd Fonts v3.4.0,
+  converted from TTF to WOFF2 without glyph changes.
+  MIT License. Copyright (c) 2014 Ryan L McIntyre. Full text:
+  apps/desktop/public/fonts/SymbolsNerdFont-LICENSE.txt. Individual icon sets keep their
+  upstream licenses as listed at https://github.com/ryanoasis/nerd-fonts (Font Awesome: OFL-1.1;
+  Material Design Icons: Apache-2.0; Octicons: MIT; Powerline symbols: MIT; Codicons: CC-BY-4.0;
+  Weather Icons: OFL-1.1; Font Logos: Unlicense; Pomicons: OFL-1.1).

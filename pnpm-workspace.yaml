@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - tests/ui
 
 # Supply-chain cool-down: never resolve a version published less than 7 days ago.
 minimumReleaseAge: 10080

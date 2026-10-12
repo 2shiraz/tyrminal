@@ -8,22 +8,28 @@
 // credentials are sent).
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { App, loadLab, startForwarder } from "./harness.mjs";
+import { KEYS } from "./flows.mjs";
+import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
 const lab = loadLab();
 
 function authLogLines(server) {
-  const container = lab.servers[server].container;
-  const out = execFileSync("docker", ["logs", container], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  // `docker logs` writes sshd's stderr to our stderr; capture both.
-  const err = execFileSync("sh", ["-c", `docker logs ${container} 2>&1 >/dev/null`], { encoding: "utf8" });
-  return `${out}${err}`.split("\n").filter((l) => /Accepted |Failed |Postponed |userauth/.test(l)).length;
+  const { container, logFile } = lab.servers[server];
+  let text;
+  if (logFile) {
+    text = readFileSync(logFile, "utf8");
+  } else {
+    // `docker logs` writes sshd's stderr to our stderr; capture both.
+    const r = spawnSync("docker", ["logs", container], { encoding: "utf8" });
+    text = `${r.stdout}${r.stderr}`;
+  }
+  return text.split("\n").filter((l) => /Accepted |Failed |Postponed |userauth/.test(l)).length;
 }
 
 describe("Tyrminal desktop application", { concurrency: false }, () => {
@@ -33,18 +39,28 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   let recoveryKey = "";
 
   const terminalText = () => s.execute(`return [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows")].map((e) => e.innerText).join("\\n")`);
+  // Each newline is the Enter key (a terminal sends CR), not a typed line feed: PowerShell's
+  // line editor, the Windows local shell, treats a line feed as "continue on the next line".
   const typeInTerminal = async (text) => {
     const input = await s.waitFor(".terminal-pane:not([hidden]) .xterm-helper-textarea");
-    await s.type(input, text);
+    const lines = text.split("\n");
+    for (const [i, line] of lines.entries()) {
+      if (line) await s.type(input, line);
+      if (i < lines.length - 1) await s.chord([KEYS.enter]);
+    }
   };
-  const nav = (label) => s.clickButton(label, { within: "nav.sidebar" });
+  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const nav = async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`));
+  const statusText = async () => s.text(await s.waitFor(".statusbar"));
+  /** Host entries on the Hosts page (cards), as the user reads them. */
+  const hostText = () => s.until(() => s.execute(`return document.querySelector('[data-testid="host-list"] li')?.innerText ?? null`), { describe: "a host entry" });
   // Read in one step in the page, so a re-render cannot invalidate an element handle mid-read.
   const heading = () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" });
   const listItemText = () => s.until(() => s.execute(`return document.querySelector("ul.list li")?.innerText ?? null`), { describe: "a list row" });
 
   before(async () => {
     forwarder = await startForwarder(lab.servers.a.port);
-    app = await App.launch();
+    app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     s = app.session;
   });
 
@@ -77,9 +93,11 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    await s.until(async () => (await heading()) === "Hosts", { describe: "main window" });
+    await s.until(async () => (await heading()) === "Home", { describe: "main window" });
+    assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
+    await app.screenshot("03-home-empty");
+    await nav("Hosts");
     assert.match(await s.execute("return document.body.innerText"), /No hosts yet/);
-    await app.screenshot("03-empty-hosts");
   });
 
   test("imports a key and saves a host; secrets never come back to the UI", async () => {
@@ -106,9 +124,10 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await app.screenshot("05-host-editor");
     await s.clickButton("Save", { within: "dialog" });
     await s.waitGone("dialog");
-    const hostRow = await listItemText();
+    const hostRow = await hostText();
     assert.match(hostRow, /Lab server/);
-    assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port} · Key: lab key`));
+    assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port}`));
+    assert.match(hostRow, /Key: lab key/);
 
     // The renderer holds no private key material anywhere in its document.
     const html = await s.execute("return document.documentElement.outerHTML");
@@ -129,21 +148,19 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clickButton("Trust and remember", { within: "dialog" });
     await s.waitGone("dialog");
 
-    await s.until(async () => /Connected/.test(await s.text(await s.waitFor(".terminal-pane:not([hidden]) .statusbar"))), {
-      describe: "connected status",
-    });
+    await s.until(async () => /Connected/.test(await statusText()), { describe: "connected status" });
     await typeInTerminal("echo native-$((40+2)) && id -un\n");
-    await s.until(async () => /native-42/.test(await terminalText()), { describe: "fixture command output" });
-    assert.match(await terminalText(), new RegExp(`\\n${lab.user}\\b`));
+    // Both lines of output: the arithmetic result and then the remote user name.
+    await s.until(async () => /native-42/.test(await terminalText()) && new RegExp(`\\n${lab.user}\\b`).test(await terminalText()), {
+      describe: "fixture command output",
+    });
     await app.screenshot("07-terminal");
   });
 
   test("terminal survives a tab switch and a local terminal runs alongside", async () => {
     await s.clickButton("Local terminal", { within: "nav.sidebar" });
     await s.until(async () => (await s.findAll(".terminal-pane")).length === 2, { describe: "second terminal" });
-    await s.until(async () => /Connected/.test(await s.text(await s.waitFor(".terminal-pane:not([hidden]) .statusbar"))), {
-      describe: "local shell",
-    });
+    await s.until(async () => /Connected/.test(await statusText()) && /Local terminal/.test(await statusText()), { describe: "local shell" });
     await typeInTerminal("echo local-$((40+2))\n");
     await s.until(async () => /local-42/.test(await terminalText()), { describe: "local command output" });
 
@@ -153,6 +170,26 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.until(async () => /native-42/.test(await terminalText()), { describe: "preserved ssh screen" });
     await typeInTerminal("echo again-$((40+2))\n");
     await s.until(async () => /again-42/.test(await terminalText()), { describe: "ssh still interactive" });
+  });
+
+  test("a connection dropped by the server reconnects by itself", async () => {
+    // Kill this session's sshd process from inside the session: the TCP link ends without an
+    // SSH disconnect, as when a network drops. The app retries with backoff and reconnects
+    // with the stored trust and key; nothing is asked again.
+    await typeInTerminal("kill -9 $PPID\n");
+    await s
+      .until(async () => (await s.find('[data-testid="auto-reconnect"]')) !== null, { describe: "automatic reconnect countdown" })
+      .catch(async (error) => {
+        const pane = await s.execute(`return document.querySelector(".terminal-pane:not([hidden])")?.innerText.slice(-600) ?? ""`);
+        throw new Error(`${error.message}\n--- pane ---\n${pane}`);
+      });
+    await s.until(async () => /Connected/.test(await statusText()) && !(await s.find('[data-testid="auto-reconnect"]')), {
+      describe: "reconnected",
+      timeout: 20_000,
+    });
+    assert.equal(await s.find("dialog"), null, "reconnecting asked for nothing");
+    await typeInTerminal("echo back-$((40+2))\n");
+    await s.until(async () => /back-42/.test(await terminalText()), { describe: "reconnected session is interactive" });
   });
 
   test("locking closes every session and nothing decrypted stays on screen", async () => {
@@ -182,14 +219,15 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
       }
     }
 
-    app = await App.launch({ dataDir });
+    app = await App.launch({ dataDir, prefs: DOM_RENDERER_PREFS });
     s = app.session;
     assert.equal(await heading(), "Unlock your vault");
     await s.clickButton("Use recovery key instead");
     await s.fill("Recovery key", recoveryKey.toLowerCase().replaceAll("-", " "));
     await s.clickButton("Unlock");
-    await s.until(async () => (await heading()) === "Hosts", { describe: "main window after recovery unlock", timeout: 20_000 });
-    assert.match(await listItemText(), /Lab server/);
+    await s.until(async () => (await heading()) === "Home", { describe: "main window after recovery unlock", timeout: 20_000 });
+    await nav("Hosts");
+    assert.match(await hostText(), /Lab server/);
 
     await nav("Known hosts");
     const known = await listItemText();
@@ -221,6 +259,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
 
     // Trust was not replaced: the only known key is still the original one.
     await s.clickButton("Open Known hosts");
+    await s.until(async () => (await heading()) === "Known hosts", { describe: "known hosts page" });
+    await app.screenshot("11-known-hosts-after-change");
     await s.waitFor("ul.list li"); // the list loads asynchronously
     const entries = await s.findAll("ul.list li");
     assert.equal(entries.length, 1);
@@ -255,6 +295,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
         remote: [...scripts, ...links].filter((u) => u && !u.startsWith(location.origin)),
         globalTauri: typeof window.__TAURI__,
         localStorageKeys: Object.keys(localStorage).length,
+        fonts: [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family),
       };`);
     assert.deepEqual(report.remote, [], "every script and stylesheet is bundled");
     assert.equal(report.globalTauri, "undefined", "the global Tauri API object is not exposed");
@@ -263,7 +304,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     // Commands that were never granted are refused by the runtime, whatever the page asks for.
     // (This reaches for the internal invoke function deliberately: it is what injected script
     // in a compromised renderer would do.)
-    const attempts = ["plugin:app|version", "plugin:path|resolve_directory", "plugin:webview|create_webview_window", "plugin:shell|open", "plugin:fs|read_text_file", "read_any_file", "decrypt_secret"];
+    const attempts = ["plugin:app|version", "plugin:path|resolve_directory", "plugin:webview|create_webview_window", "plugin:shell|open", "plugin:fs|read_text_file", "plugin:dialog|open", "plugin:dialog|save", "read_any_file", "decrypt_secret"];
     const outcomes = await s.executeAsync(`
       const [commands, done] = arguments;
       Promise.all(commands.map((c) => window.__TAURI_INTERNALS__.invoke(c, {}).then(() => "ALLOWED", (e) => "denied: " + String(e).slice(0, 80))))
@@ -271,5 +312,53 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     for (const [index, outcome] of outcomes.entries()) {
       assert.match(outcome, /^denied: /, `${attempts[index]} must not be callable from the renderer`);
     }
+  });
+
+  test("quick unlock uses the OS secret store, or refuses plainly when there is none", async (t) => {
+    await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    const setting = await s.waitFor('[data-testid="quick-unlock"]');
+    await s.until(async () => /Quick unlock is (on|off)/.test(await s.text(setting)), { describe: "quick unlock state" });
+    await s.clickButton("Turn on quick unlock…");
+    await s.fill("Current passphrase", PASSPHRASE, { within: "dialog" });
+    await s.clickButton("Turn on", { within: "dialog" });
+    const outcome = await s.until(async () => {
+      const text = await s.execute("return document.body.innerText");
+      if (/Quick unlock is on for this device/.test(text)) return "on";
+      if (/keychain is not available/.test(text)) return "unavailable";
+      return null;
+    }, { describe: "quick unlock outcome", timeout: 20_000 });
+    t.diagnostic(`quick unlock path: ${outcome}`);
+    if (outcome === "unavailable") {
+      // No OS secret store here (e.g. Linux without a Secret Service): nothing changed.
+      await s.clickButton("Cancel", { within: "dialog" });
+      assert.match(await s.text(await s.waitFor('[data-testid="quick-unlock"]')), /Quick unlock is off/);
+      return;
+    }
+    await s.click(await s.waitFor('nav.sidebar [data-nav="lock"]'));
+    await s.until(async () => (await heading()) === "Unlock your vault", { describe: "locked" });
+    await s.clickButton("Unlock with this device");
+    await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
+    // Turn it off again so the test leaves no keychain item behind.
+    await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    await s.clickButton("Turn off quick unlock");
+    await s.until(async () => /Quick unlock is off/.test(await s.text(await s.waitFor('[data-testid="quick-unlock"]'))), { describe: "off" });
+  });
+
+  test("a second instance on the same data refuses to start and leaves the first untouched", async () => {
+    const second = await App.launch({ dataDir: app.dataDir });
+    try {
+      await second.session.until(
+        async () => /already open/.test(await second.session.execute("return document.body.innerText")),
+        { describe: "already-open message", timeout: 20_000 },
+      );
+      const text = await second.session.execute("return document.body.innerText");
+      assert.match(text, /could not start/);
+      assert.ok(!/Unlock your vault|Create your local vault/.test(text), "the second instance shows no vault screen");
+    } finally {
+      await second.quit({ keepData: true });
+    }
+    // The first instance still works.
+    assert.ok(await s.execute(`return document.querySelector("nav.sidebar, .auth-card") !== null`), "first window still renders");
+    assert.ok(!/already open/.test(await s.execute("return document.body.innerText")));
   });
 });

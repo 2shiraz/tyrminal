@@ -21,7 +21,8 @@ use tyrminal_contracts::limits::{
     TRUST_PROMPT_TIMEOUT_SECS,
 };
 use tyrminal_contracts::{
-    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, TrustDecision, VaultStatus,
+    AuthPromptKind, ErrorCode, IpcError, SessionEvent, SessionOpened, SessionState, SnippetSendMode, TrustDecision,
+    VaultStatus,
 };
 use tyrminal_pty::{PtyEvent, PtyHandle, PtyReader, ShellSpec};
 use tyrminal_ssh::{
@@ -222,6 +223,28 @@ impl Sessions {
         entry.input.send(Input::Data(data)).await.map_err(|_| denied())
     }
 
+    /// Sends a saved snippet to a session the caller owns. The text is read from the vault here,
+    /// at the session's generation, so it never has to round-trip through the renderer and
+    /// nothing is sent after a lock. Nothing in the core runs a snippet on its own: this is only
+    /// reached from an explicit Paste or Run.
+    pub async fn send_snippet(
+        &self,
+        owner: &str,
+        session_id: &str,
+        snippet_id: &str,
+        mode: SnippetSendMode,
+        bracketed: bool,
+    ) -> Result<(), IpcError> {
+        // Ownership first: a wrong window learns nothing about which snippets exist.
+        let entry = self.authorize(owner, session_id)?;
+        let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let bytes = snippet_bytes(&text, mode, bracketed);
+        for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+            entry.input.send(Input::Data(chunk.to_vec())).await.map_err(|_| denied())?;
+        }
+        Ok(())
+    }
+
     pub async fn resize(&self, owner: &str, session_id: &str, cols: u16, rows: u16) -> Result<(), IpcError> {
         if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION {
             return Err(invalid("The terminal size is out of range."));
@@ -298,6 +321,28 @@ impl Sessions {
     }
 }
 
+/// The bytes a snippet sends. Lines end in carriage returns, as typed. `Paste` wraps the text in
+/// bracketed-paste markers when the terminal enabled that mode, so a shell inserts it without
+/// executing; snippet text is validated to contain no ESC, so it cannot close the bracket early.
+/// `Run` sends the lines and a final Enter.
+pub(crate) fn snippet_bytes(text: &str, mode: SnippetSendMode, bracketed: bool) -> Zeroizing<Vec<u8>> {
+    let body = text.trim_end_matches('\n').replace('\n', "\r");
+    let mut out = Zeroizing::new(Vec::with_capacity(body.len() + 12));
+    match mode {
+        SnippetSendMode::Paste if bracketed => {
+            out.extend_from_slice(b"\x1b[200~");
+            out.extend_from_slice(body.as_bytes());
+            out.extend_from_slice(b"\x1b[201~");
+        }
+        SnippetSendMode::Paste => out.extend_from_slice(body.as_bytes()),
+        SnippetSendMode::Run => {
+            out.extend_from_slice(body.as_bytes());
+            out.push(b'\r');
+        }
+    }
+    out
+}
+
 /// Resolves once the vault generation differs from the one a session was created under.
 async fn locked_since(vault: &mut watch::Receiver<VaultStatus>, generation: u32) {
     if vault.wait_for(|status| status.generation != generation).await.is_err() {
@@ -343,6 +388,18 @@ impl TaskContext {
 
     /// Asks the user for a secret and waits, bounded. `None` means cancelled or timed out.
     async fn ask_secret(&self, kind: AuthPromptKind, username: &str, attempt: u32) -> Option<Zeroizing<String>> {
+        self.ask(kind, username, attempt, None, false).await
+    }
+
+    /// `message` is sanitized server text for keyboard-interactive prompts.
+    async fn ask(
+        &self,
+        kind: AuthPromptKind,
+        username: &str,
+        attempt: u32,
+        message: Option<String>,
+        echo: bool,
+    ) -> Option<Zeroizing<String>> {
         let prompt_id = random_token().ok()?;
         let (reply, answer) = oneshot::channel();
         self.entry.prompts().auth = Some((prompt_id.clone(), reply));
@@ -352,6 +409,8 @@ impl TaskContext {
             username: username.to_owned(),
             attempt,
             max_attempts: MAX_AUTH_ATTEMPTS,
+            message,
+            echo,
         });
         let result = tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), answer).await;
         self.entry.prompts().auth = None;
@@ -478,9 +537,52 @@ async fn authenticate(
 }
 
 async fn ask_password(ctx: &TaskContext, conn: &mut VerifiedConnection, username: &str) -> Result<(), IpcError> {
+    // Servers that take only keyboard-interactive (PAM, one-time codes) get its prompts instead.
+    let methods = match conn.auth_methods(username).await.map_err(|e| from_ssh(&e))? {
+        AuthOutcome::Success => return Ok(()),
+        AuthOutcome::Failure { remaining_methods, .. } => remaining_methods,
+    };
+    let offers = |m: &str| methods.iter().any(|x| x == m);
+    if !offers("password") && offers("keyboard-interactive") {
+        return ask_keyboard_interactive(ctx, conn, username).await;
+    }
     for attempt in 1..=MAX_AUTH_ATTEMPTS {
         let password = ctx.ask_secret(AuthPromptKind::Password, username, attempt).await.ok_or_else(cancelled)?;
         if conn.authenticate_password(username, password).await.map_err(|e| from_ssh(&e))?.is_success() {
+            return Ok(());
+        }
+    }
+    Err(auth_failed())
+}
+
+/// Keyboard-interactive: each server prompt is shown to the user on its own, with the server's
+/// sanitized text. Nothing is answered automatically, and no stored secret is ever sent here.
+async fn ask_keyboard_interactive(
+    ctx: &TaskContext,
+    conn: &mut VerifiedConnection,
+    username: &str,
+) -> Result<(), IpcError> {
+    for attempt in 1..=MAX_AUTH_ATTEMPTS {
+        let outcome = conn
+            .authenticate_keyboard_interactive(username, |round| async move {
+                let mut answers = Vec::with_capacity(round.prompts.len());
+                for prompt in &round.prompts {
+                    let message = [round.name.as_str(), round.instructions.as_str(), prompt.text.as_str()]
+                        .iter()
+                        .filter(|t| !t.is_empty())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let answer = ctx
+                        .ask(AuthPromptKind::KeyboardInteractive, username, attempt, Some(message), prompt.echo)
+                        .await?;
+                    answers.push(answer);
+                }
+                Some(answers)
+            })
+            .await
+            .map_err(|e| from_ssh(&e))?;
+        if outcome.is_success() {
             return Ok(());
         }
     }
@@ -494,9 +596,27 @@ async fn run_ssh(
     rows: u16,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
+    let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     match connect_ssh(ctx, plan, cols, rows).await {
         Ok((conn, reader, writer)) => {
+            if let Some(n) = conn.negotiated() {
+                ctx.sink.event(SessionEvent::Negotiated {
+                    kex: n.kex,
+                    host_key: n.host_key,
+                    cipher: n.cipher,
+                    mac: n.mac,
+                    strict_kex: n.strict_kex,
+                });
+            }
             ctx.state(SessionState::Connected);
+            // Recent connections. Best effort: failing to record must not end a working session.
+            // Its own task, because closing the session drops this future: cancelled between the
+            // database commit and the in-memory revision update, the next edit of the host would
+            // see a false conflict.
+            let vault = Arc::clone(&ctx.vault);
+            tokio::spawn(async move {
+                let _ = vault.mark_connected(generation, &host_id).await;
+            });
             // `conn` stays alive for the whole pump; dropping it closes the transport.
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
             conn.disconnect().await;
@@ -569,6 +689,8 @@ enum Transport {
 enum TransportEvent {
     Output(Vec<u8>),
     Exit(Option<u32>),
+    /// The link dropped without the remote side ending the session.
+    Lost,
 }
 
 impl Transport {
@@ -583,6 +705,7 @@ impl Transport {
                     ShellEvent::ExitStatus(code) => return Some(TransportEvent::Exit(Some(code))),
                     ShellEvent::ExitSignal(_) => return Some(TransportEvent::Exit(None)),
                     ShellEvent::Eof => {}
+                    ShellEvent::ConnectionLost => return Some(TransportEvent::Lost),
                 }
             },
             Self::Local { reader, .. } => match reader.next().await? {
@@ -631,6 +754,10 @@ impl Transport {
     }
 }
 
+fn lost() -> Outcome {
+    Outcome::failed(err(ErrorCode::Disconnected, "The connection was lost."))
+}
+
 /// Moves bytes between the transport and the renderer until either side ends.
 async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: mpsc::Receiver<Input>) -> Outcome {
     let mut unacked = 0usize;
@@ -644,7 +771,7 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                 None => return Outcome::ended(exit_status),
                 Some(Input::Data(data)) => {
                     if !transport.write(&data).await {
-                        return Outcome::failed(err(ErrorCode::Disconnected, "The connection was lost."));
+                        return lost();
                     }
                 }
                 Some(Input::Resize(cols, rows)) => transport.resize(cols, rows).await,
@@ -657,24 +784,48 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
             event = transport.next(), if unacked < MAX_UNACKED_OUTPUT => match event {
                 None => return Outcome::ended(exit_status),
                 Some(TransportEvent::Exit(code)) => exit_status = code,
+                Some(TransportEvent::Lost) => return lost(),
                 Some(TransportEvent::Output(mut batch)) => {
                     // Coalesce what is immediately available into one message, bounded in size
                     // and by a 1 ms wait, to keep IPC message counts down during bulk output.
                     let mut ended = false;
+                    let mut dropped = false;
                     while batch.len() < TERMINAL_OUTPUT_BATCH {
                         match tokio::time::timeout(Duration::from_millis(1), transport.next()).await {
                             Ok(Some(TransportEvent::Output(more))) => batch.extend_from_slice(&more),
                             Ok(Some(TransportEvent::Exit(code))) => exit_status = code,
+                            Ok(Some(TransportEvent::Lost)) => { dropped = true; break; }
                             Ok(None) => { ended = true; break; }
                             Err(_) => break,
                         }
                     }
                     unacked += batch.len();
-                    if !sink.output(batch) || ended {
+                    // The output that arrived before a drop is still shown.
+                    if !sink.output(batch) {
+                        return Outcome::ended(exit_status);
+                    }
+                    if dropped {
+                        return lost();
+                    }
+                    if ended {
                         return Outcome::ended(exit_status);
                     }
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod snippet_tests {
+    use super::*;
+
+    #[test]
+    fn snippets_are_typed_lines_and_paste_is_bracketed_only_when_asked() {
+        let text = "uname -a\ndf -h\n";
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Run, false), b"uname -a\rdf -h\r");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Run, true), b"uname -a\rdf -h\r");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Paste, false), b"uname -a\rdf -h");
+        assert_eq!(&*snippet_bytes(text, SnippetSendMode::Paste, true), b"\x1b[200~uname -a\rdf -h\x1b[201~");
     }
 }

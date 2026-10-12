@@ -14,23 +14,25 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tokio::sync::{Mutex, watch};
-use tyrminal_contracts::limits::MAX_RECORDS_PER_KIND;
+use tyrminal_contracts::limits::{MAX_RECENT_HOSTS, MAX_RECORDS_PER_KIND};
 use tyrminal_contracts::{
-    ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError, KeyImportInput, KeySummary, KnownHostSummary,
-    RecoveryKeyIssued, VaultState, VaultStatus,
+    BackupCredentialKind, BackupPreview, ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError,
+    KeyImportInput, KeySummary, KnownHostSummary, RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState,
+    VaultStatus,
 };
+use tyrminal_platform::{KeystoreError, SecretStore};
 use tyrminal_ssh::{ClientKey, Endpoint, KnownHost, PresentedHostKey};
 use tyrminal_storage::{Database, RecordRow, WriteCondition};
 use tyrminal_vault::{
-    Credential, Id, Passphrase, RecordContext, RecoveryKey, SealedRecord, UnlockedVault, VaultHeader, create_vault,
-    random_id,
+    BackupRecord, Credential, Id, MAX_BACKUP_LEN, ParsedBackup, Passphrase, RecordContext, RecoveryKey, SealedRecord,
+    SecretKey, UnlockedVault, VaultHeader, create_vault, decode_backup, random_id,
 };
 use zeroize::Zeroizing;
 
-use crate::error::{err, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
+use crate::error::{err, from_backup, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
 use crate::records::{
-    Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_TRUST_EVENT, KeyRecord, KnownHostRecord,
-    StoredAuth, TrustEventRecord, decode, encode, tombstone,
+    Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT, KeyRecord,
+    KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
 };
 use crate::validate;
 
@@ -46,6 +48,19 @@ struct Open {
     hosts: BTreeMap<Id, Stored<HostRecord>>,
     ssh_keys: BTreeMap<Id, Stored<KeyRecord>>,
     known_hosts: BTreeMap<Id, Stored<KnownHostRecord>>,
+    snippets: BTreeMap<Id, Stored<SnippetRecord>>,
+}
+
+impl Open {
+    fn new(keys: UnlockedVault) -> Self {
+        Self {
+            keys,
+            hosts: BTreeMap::new(),
+            ssh_keys: BTreeMap::new(),
+            known_hosts: BTreeMap::new(),
+            snippets: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -57,6 +72,7 @@ struct Inner {
 
 /// What a session needs to connect, copied out of the vault at one generation.
 pub(crate) struct ConnectionPlan {
+    pub host_id: String,
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
@@ -73,6 +89,8 @@ pub(crate) enum PlanAuth {
 
 pub struct VaultService {
     db: Database,
+    /// OS secret store for quick unlock. Unavailable stores fail closed: there is no fallback.
+    secret_store: std::sync::Arc<dyn SecretStore>,
     inner: Mutex<Inner>,
     status: watch::Sender<VaultStatus>,
     generation: AtomicU32,
@@ -84,6 +102,15 @@ impl core::fmt::Debug for VaultService {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("VaultService").field("status", &*self.status.borrow()).finish_non_exhaustive()
     }
+}
+
+const SUSPEND_CHECK_EVERY: Duration = Duration::from_secs(5);
+/// More wall-clock time than monotonic time between two checks means the machine was asleep
+/// (or the clock jumped forward); either way the vault locks.
+const SUSPEND_GAP: Duration = Duration::from_secs(30);
+
+pub(crate) fn slept_between(wall: Duration, monotonic: Duration) -> bool {
+    wall.saturating_sub(monotonic) >= SUSPEND_GAP
 }
 
 fn now_unix() -> u64 {
@@ -106,14 +133,26 @@ fn host_summary(id: &Id, record: &HostRecord) -> HostSummary {
             StoredAuth::Password { .. } => HostAuth::StoredPassword,
             StoredAuth::Key { key_id } => HostAuth::Key { key_id: key_id.clone() },
         },
+        last_connected_at: record.last_connected_at,
+    }
+}
+
+fn snippet_summary(id: &Id, record: &SnippetRecord) -> SnippetSummary {
+    SnippetSummary {
+        id: validate::id_text(id),
+        name: record.name.clone(),
+        folder: record.folder.clone(),
+        text: record.text.clone(),
+        updated_at: record.updated_at,
     }
 }
 
 impl VaultService {
-    pub(crate) fn new(db: Database) -> Self {
+    pub(crate) fn new(db: Database, secret_store: std::sync::Arc<dyn SecretStore>) -> Self {
         let (status, _) = watch::channel(VaultStatus { state: VaultState::Locked, generation: 0 });
         Self {
             db,
+            secret_store,
             inner: Mutex::new(Inner::default()),
             status,
             generation: AtomicU32::new(0),
@@ -155,14 +194,21 @@ impl VaultService {
                     self.lock().await;
                     break;
                 }
+                // Wake at least every few seconds so a system sleep is noticed promptly: the
+                // monotonic clock (and so `idle`) does not advance while macOS or Linux sleeps.
+                let (wall, mono) = (SystemTime::now(), std::time::Instant::now());
                 tokio::select! {
-                    () = tokio::time::sleep(timeout - idle) => {}
+                    () = tokio::time::sleep((timeout - idle).min(SUSPEND_CHECK_EVERY)) => {}
                     changed = status.wait_for(|s| s.state != VaultState::Unlocked) => {
                         if changed.is_err() {
                             return;
                         }
                         break;
                     }
+                }
+                if slept_between(wall.elapsed().unwrap_or(Duration::ZERO), mono.elapsed()) {
+                    self.lock().await;
+                    break;
                 }
             }
         }
@@ -221,12 +267,7 @@ impl VaultService {
             self.set_state(VaultState::Locked);
             return Ok(issued);
         }
-        inner.open = Some(Open {
-            keys: created.unlocked,
-            hosts: BTreeMap::new(),
-            ssh_keys: BTreeMap::new(),
-            known_hosts: BTreeMap::new(),
-        });
+        inner.open = Some(Open::new(created.unlocked));
         self.set_state(VaultState::Unlocked);
         Ok(issued)
     }
@@ -304,7 +345,7 @@ impl VaultService {
     /// Decrypts every row. Any authentication failure fails the whole unlock: a vault is opened
     /// completely or not at all, never with a silently missing or substituted record (INV-11).
     fn load_records(keys: UnlockedVault, rows: Vec<RecordRow>) -> Result<Open, IpcError> {
-        let mut open = Open { keys, hosts: BTreeMap::new(), ssh_keys: BTreeMap::new(), known_hosts: BTreeMap::new() };
+        let mut open = Open::new(keys);
         let damaged = || {
             err(
                 ErrorCode::VaultDamaged,
@@ -331,6 +372,7 @@ impl VaultService {
                 KIND_HOST => load!(HostRecord, open.hosts),
                 KIND_KEY => load!(KeyRecord, open.ssh_keys),
                 KIND_KNOWN_HOST => load!(KnownHostRecord, open.known_hosts),
+                KIND_SNIPPET => load!(SnippetRecord, open.snippets),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -345,6 +387,282 @@ impl VaultService {
             }
         }
         Ok(open)
+    }
+
+    // ---------- quick unlock (device slot + OS secret store) ----------
+
+    fn quick_account(vault_id: &Id) -> String {
+        format!("quick-unlock-{}", validate::id_text(vault_id))
+    }
+
+    /// Runs a secret-store call off the async reactor (Secret Service and Keychain can block).
+    async fn store_call<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&dyn SecretStore) -> Result<T, KeystoreError> + Send + 'static,
+    ) -> Result<T, IpcError> {
+        let store = std::sync::Arc::clone(&self.secret_store);
+        tokio::task::spawn_blocking(move || f(store.as_ref())).await.map_err(|_| internal())?.map_err(|_| {
+            err(
+                ErrorCode::SecretStoreUnavailable,
+                "The system keychain is not available, so quick unlock cannot be used. Use your passphrase.",
+            )
+        })
+    }
+
+    /// The stored entry: device slot id (16 bytes) then the device secret (32 bytes).
+    fn parse_entry(bytes: &[u8]) -> Option<(Id, SecretKey)> {
+        let id: Id = bytes.get(..16)?.try_into().ok()?;
+        let secret: [u8; 32] = bytes.get(16..48)?.try_into().ok()?;
+        (bytes.len() == 48).then(|| (id, SecretKey::from_bytes(secret)))
+    }
+
+    /// Whether this device can unlock without the passphrase: the vault has the device slot
+    /// named by this device's keychain entry. Works while locked; never reveals the secret.
+    pub async fn quick_unlock_enabled(&self) -> Result<bool, IpcError> {
+        let header = {
+            let mut inner = self.inner.lock().await;
+            self.ensure_loaded(&mut inner).await?;
+            match inner.header.clone() {
+                Some(header) => header,
+                None => return Ok(false),
+            }
+        };
+        let account = Self::quick_account(&header.vault_id());
+        let Ok(entry) = self.store_call(move |s| s.get(&account)).await else { return Ok(false) };
+        Ok(entry.and_then(|e| Self::parse_entry(&e)).is_some_and(|(id, _)| header.device_slot_ids().contains(&id)))
+    }
+
+    /// Turns on quick unlock for this device after re-checking the passphrase with a real unlock.
+    /// The keychain entry is written first; if the vault header then cannot be written, the
+    /// entry is removed again. Any earlier slot of this device is replaced.
+    pub async fn enable_quick_unlock(&self, passphrase: String) -> Result<(), IpcError> {
+        let passphrase = Passphrase::new(passphrase);
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        if inner.open.is_none() {
+            return Err(locked());
+        }
+        let header = inner.header.clone().ok_or_else(locked)?;
+        let check = header.clone();
+        tokio::task::spawn_blocking(move || check.unlock(&Credential::Passphrase(&passphrase)).map(drop))
+            .await
+            .map_err(|_| internal())?
+            .map_err(from_vault)?;
+        let account = Self::quick_account(&header.vault_id());
+        let previous = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await?
+        };
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut next = header.clone();
+        if let Some((old_id, _)) = previous.as_deref().and_then(|e| Self::parse_entry(e))
+            && next.device_slot_ids().contains(&old_id)
+        {
+            next = open.keys.remove_device_slot(&next, &old_id).map_err(from_vault)?;
+        }
+        let secret = SecretKey::generate().map_err(from_vault)?;
+        let (next, slot_id) = open.keys.add_device_slot(&next, &secret).map_err(from_vault)?;
+        let mut entry = Zeroizing::new(Vec::with_capacity(48));
+        entry.extend_from_slice(&slot_id);
+        entry.extend_from_slice(secret.expose());
+        {
+            let account = account.clone();
+            self.store_call(move |s| s.set(&account, &entry)).await?;
+        }
+        if let Err(e) = self.db.replace_header(header.encode(), next.encode()).await.map_err(from_storage) {
+            let _ = self.store_call(move |s| s.delete(&account)).await;
+            return Err(e);
+        }
+        inner.header = Some(next);
+        Ok(())
+    }
+
+    /// Turns quick unlock off: removes this device's slot from the vault, then its keychain entry.
+    /// If the keychain cannot be read, every device slot is removed (the safe direction).
+    pub async fn disable_quick_unlock(&self) -> Result<(), IpcError> {
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let header = inner.header.clone().ok_or_else(locked)?;
+        let account = Self::quick_account(&header.vault_id());
+        let entry = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await
+        };
+        let ids = match entry.ok().flatten().as_deref().and_then(|e| Self::parse_entry(e)) {
+            Some((id, _)) if header.device_slot_ids().contains(&id) => vec![id],
+            _ => header.device_slot_ids(),
+        };
+        let mut next = header.clone();
+        for id in &ids {
+            next = open.keys.remove_device_slot(&next, id).map_err(from_vault)?;
+        }
+        if !ids.is_empty() {
+            self.db.replace_header(header.encode(), next.encode()).await.map_err(from_storage)?;
+            inner.header = Some(next);
+        }
+        // The slot is gone, so a leftover entry could no longer open anything.
+        let _ = self.store_call(move |s| s.delete(&account)).await;
+        Ok(())
+    }
+
+    /// Unlocks with this device's keychain entry. A store that is unavailable, or an entry whose
+    /// slot no longer exists, fails: the passphrase is the way in, never a weaker fallback.
+    pub async fn unlock_with_device(&self) -> Result<(), IpcError> {
+        let header = {
+            let mut inner = self.inner.lock().await;
+            self.ensure_loaded(&mut inner).await?;
+            inner
+                .header
+                .clone()
+                .ok_or_else(|| err(ErrorCode::VaultNotInitialized, "There is no vault yet. Create one first."))?
+        };
+        let account = Self::quick_account(&header.vault_id());
+        let entry = {
+            let account = account.clone();
+            self.store_call(move |s| s.get(&account)).await?
+        };
+        let not_set_up =
+            || err(ErrorCode::WrongCredential, "Quick unlock is not set up on this device. Use your passphrase.");
+        let (slot_id, secret) = entry.as_deref().and_then(|e| Self::parse_entry(e)).ok_or_else(not_set_up)?;
+        if !header.device_slot_ids().contains(&slot_id) {
+            let _ = self.store_call(move |s| s.delete(&account)).await;
+            return Err(not_set_up());
+        }
+        self.unlock(move |h| h.unlock(&Credential::Device(&secret))).await
+    }
+
+    // ---------- backup and restore (docs/crypto-format.md §10) ----------
+
+    /// A portable backup of the unlocked vault: the header and every live record envelope as
+    /// stored, authenticated under `K_backup`. Nothing is decrypted to write it.
+    pub async fn export_backup(&self) -> Result<Vec<u8>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let header = inner.header.as_ref().ok_or_else(locked)?;
+        let rows = self.db.list_records().await.map_err(from_storage)?;
+        let records: Vec<BackupRecord> = rows
+            .into_iter()
+            .filter(|row| !row.deleted)
+            .map(|row| BackupRecord {
+                record_id: row.record_id,
+                kind: row.kind,
+                revision: row.revision,
+                sealed: SealedRecord { key_version: row.key_version, nonce: row.nonce, ciphertext: row.ciphertext },
+            })
+            .collect();
+        open.keys.encode_backup(header, now_unix(), &records).map_err(from_vault)
+    }
+
+    /// Fully validates a backup with the secret it was made with: strict parse, unlock of its own
+    /// header (Argon2id, off the reactor), header and backup MACs, then every record opened and
+    /// decoded exactly as an unlock would. Nothing is written.
+    async fn open_backup(
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+    ) -> Result<(ParsedBackup, BackupPreview), IpcError> {
+        if bytes.len() > MAX_BACKUP_LEN {
+            return Err(err(ErrorCode::LimitExceeded, "The file is too large to be a Tyrminal backup."));
+        }
+        let secret = Zeroizing::new(secret);
+        let (parsed, keys) = tokio::task::spawn_blocking(move || {
+            let parsed = decode_backup(&bytes)?;
+            let keys = match kind {
+                BackupCredentialKind::Passphrase => {
+                    parsed.header.unlock(&Credential::Passphrase(&Passphrase::new(secret.to_string())))?
+                }
+                BackupCredentialKind::RecoveryKey => {
+                    parsed.header.unlock(&Credential::Recovery(&RecoveryKey::parse(&secret)?))?
+                }
+            };
+            keys.verify_backup(&parsed)?;
+            Ok::<_, tyrminal_vault::VaultError>((parsed, keys))
+        })
+        .await
+        .map_err(|_| internal())?
+        .map_err(from_backup)?;
+        let rows = parsed
+            .records
+            .iter()
+            .map(|r| RecordRow {
+                record_id: r.record_id,
+                kind: r.kind,
+                revision: r.revision,
+                key_version: r.sealed.key_version,
+                nonce: r.sealed.nonce,
+                ciphertext: r.sealed.ciphertext.clone(),
+                deleted: false,
+            })
+            .collect();
+        // A record that fails here was inside an authenticated backup; still report it as a bad
+        // backup, never as damage to this device's vault.
+        let open = Self::load_records(keys, rows).map_err(|e| {
+            if e.code == ErrorCode::VaultDamaged { from_vault(tyrminal_vault::VaultError::BackupTampered) } else { e }
+        })?;
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        let preview = BackupPreview {
+            created_at: parsed.created_at,
+            hosts: count(open.hosts.len()),
+            keys: count(open.ssh_keys.len()),
+            known_hosts: count(open.known_hosts.len()),
+            snippets: count(open.snippets.len()),
+        };
+        Ok((parsed, preview))
+    }
+
+    /// What a backup contains, after full validation. Changes nothing.
+    pub async fn preview_backup(
+        &self,
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+    ) -> Result<BackupPreview, IpcError> {
+        // One KDF at a time, like unlock.
+        let _serial = self.inner.try_lock().map_err(|_| busy())?;
+        Self::open_backup(bytes, kind, secret).await.map(|(_, preview)| preview)
+    }
+
+    /// Replaces this device's vault with a validated backup, in one transaction, and leaves it
+    /// locked: it then opens with the backup's passphrase or recovery key. Ends every session
+    /// first. An existing vault is replaced only when `replace_existing` is set.
+    pub async fn restore_backup(
+        &self,
+        bytes: Vec<u8>,
+        kind: BackupCredentialKind,
+        secret: String,
+        replace_existing: bool,
+    ) -> Result<BackupPreview, IpcError> {
+        let mut inner = self.inner.try_lock().map_err(|_| busy())?;
+        self.ensure_loaded(&mut inner).await?;
+        if inner.header.is_some() && !replace_existing {
+            return Err(err(ErrorCode::VaultAlreadyExists, "A vault already exists here. It was not replaced."));
+        }
+        let (parsed, preview) = Self::open_backup(bytes, kind, secret).await?;
+        // From here on the old vault's keys and sessions must not outlive the replacement.
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        inner.open = None;
+        let expected = inner.header.as_ref().map(VaultHeader::encode);
+        let rows = parsed
+            .records
+            .into_iter()
+            .map(|r| RecordRow {
+                record_id: r.record_id,
+                kind: r.kind,
+                revision: r.revision,
+                key_version: r.sealed.key_version,
+                nonce: r.sealed.nonce,
+                ciphertext: r.sealed.ciphertext,
+                deleted: false,
+            })
+            .collect();
+        let result = self.db.replace_vault(expected, parsed.header.encode(), rows).await.map_err(from_storage);
+        // Whatever happened, the vault is locked now; on failure the old vault is untouched.
+        if result.is_ok() {
+            inner.header = Some(parsed.header);
+        }
+        let state = if inner.header.is_some() { VaultState::Locked } else { VaultState::Uninitialized };
+        self.set_state(state);
+        self.failed_unlocks.store(0, Ordering::Relaxed);
+        result.map(|()| preview)
     }
 
     /// Locks the vault: bumps the generation (ending sessions and invalidating handles), then
@@ -483,19 +801,19 @@ impl VaultService {
             }
         };
 
-        let (id, revision) = match existing_id {
+        let (id, revision, last_connected_at) = match existing_id {
             Some(id) => {
                 let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
-                (id, current.revision + 1)
+                (id, current.revision + 1, current.record.last_connected_at)
             }
             None => {
                 if open.hosts.len() >= MAX_RECORDS_PER_KIND {
                     return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of hosts."));
                 }
-                (random_id().map_err(from_vault)?, 1)
+                (random_id().map_err(from_vault)?, 1, None)
             }
         };
-        let record = HostRecord { label, address, port, username, auth };
+        let record = HostRecord { label, address, port, username, auth, last_connected_at };
         let secret_len = match &record.auth {
             StoredAuth::Password { password } => password.len(),
             StoredAuth::Key { key_id } => key_id.len(),
@@ -516,6 +834,121 @@ impl VaultService {
         self.write::<HostRecord>(open, id, KIND_HOST, revision, None).await?;
         open.hosts.remove(&id);
         Ok(())
+    }
+
+    /// Hosts with a recorded connection, most recent first, at most `MAX_RECENT_HOSTS`.
+    pub async fn recent_hosts(&self) -> Result<Vec<HostSummary>, IpcError> {
+        let mut hosts: Vec<_> =
+            self.list_hosts().await?.into_iter().filter(|h| h.last_connected_at.is_some()).collect();
+        hosts.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at).then_with(|| a.id.cmp(&b.id)));
+        hosts.truncate(MAX_RECENT_HOSTS);
+        Ok(hosts)
+    }
+
+    /// Records that a session to `host_id` reached its shell. Written under the generation the
+    /// session was opened with, so a session that outlived a lock cannot write.
+    pub(crate) async fn mark_connected(&self, generation: u32, host_id: &str) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let Some(stored) = open.hosts.get(&id) else {
+            // Deleted while connecting: nothing to record.
+            return Ok(());
+        };
+        let revision = stored.revision + 1;
+        let previous = &stored.record;
+        let auth = match &previous.auth {
+            StoredAuth::AskPassword => StoredAuth::AskPassword,
+            StoredAuth::Password { password } => {
+                StoredAuth::Password { password: Zeroizing::new(password.as_str().to_owned()) }
+            }
+            StoredAuth::Key { key_id } => StoredAuth::Key { key_id: key_id.clone() },
+        };
+        let record = HostRecord {
+            label: previous.label.clone(),
+            address: previous.address.clone(),
+            port: previous.port,
+            username: previous.username.clone(),
+            auth,
+            last_connected_at: Some(now_unix()),
+        };
+        let secret_len = match &record.auth {
+            StoredAuth::Password { password } => password.len(),
+            StoredAuth::Key { key_id } => key_id.len(),
+            StoredAuth::AskPassword => 0,
+        };
+        let content_len = record.label.len() + record.address.len() + record.username.len() + secret_len;
+        self.write(open, id, KIND_HOST, revision, Some((&record, content_len))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    // ---------- snippets ----------
+
+    pub async fn list_snippets(&self) -> Result<Vec<SnippetSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.snippets.iter().map(|(id, s)| snippet_summary(id, &s.record)).collect();
+        list.sort_by(|a, b| {
+            (a.folder.to_lowercase(), a.name.to_lowercase(), &a.id).cmp(&(
+                b.folder.to_lowercase(),
+                b.name.to_lowercase(),
+                &b.id,
+            ))
+        });
+        Ok(list)
+    }
+
+    pub async fn save_snippet(&self, input: SnippetInput) -> Result<SnippetSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        let folder = validate::folder(&input.folder)?;
+        let text = validate::snippet_text(&input.text)?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.snippets.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of snippets."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = SnippetRecord { name, folder, text, updated_at: now_unix() };
+        let content_len = record.name.len() + record.folder.len() + record.text.len();
+        self.write(open, id, KIND_SNIPPET, revision, Some((&record, content_len))).await?;
+        let summary = snippet_summary(&id, &record);
+        open.snippets.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_snippet(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?.revision + 1;
+        self.write::<SnippetRecord>(open, id, KIND_SNIPPET, revision, None).await?;
+        open.snippets.remove(&id);
+        Ok(())
+    }
+
+    /// The text of a snippet, read under `generation`: after a lock nothing is returned.
+    pub(crate) async fn snippet_text(&self, generation: u32, id: &str) -> Result<Zeroizing<String>, IpcError> {
+        let id = validate::id(id)?;
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let stored = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
+        Ok(Zeroizing::new(stored.record.text.clone()))
     }
 
     // ---------- keys ----------
@@ -745,6 +1178,7 @@ impl VaultService {
             })
             .collect();
         Ok(ConnectionPlan {
+            host_id: validate::id_text(&id),
             endpoint: Endpoint::new(host.address.clone(), host.port),
             username: host.username.clone(),
             auth,
@@ -760,5 +1194,20 @@ impl VaultService {
             return Err(locked());
         }
         Ok(self.generation())
+    }
+}
+
+#[cfg(test)]
+mod suspend_tests {
+    use super::*;
+
+    #[test]
+    fn a_wall_clock_gap_means_the_machine_slept() {
+        let s = Duration::from_secs;
+        assert!(!slept_between(s(5), s(5)));
+        assert!(!slept_between(s(34), s(5)), "small drift or NTP slew is not sleep");
+        assert!(slept_between(s(35), s(5)));
+        assert!(slept_between(s(7200), s(5)));
+        assert!(!slept_between(Duration::ZERO, s(5)), "a clock set backwards is not sleep");
     }
 }

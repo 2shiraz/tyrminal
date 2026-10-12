@@ -15,9 +15,12 @@ mod error;
 mod host_trust;
 
 pub use algorithms::negotiation_summary;
-pub use auth::{AuthOutcome, ClientKey, KeyError};
+pub use auth::{
+    AuthOutcome, ClientKey, KbdPrompt, KbdRound, KeyError, MAX_KBD_PROMPTS, MAX_KBD_ROUNDS, MAX_SERVER_TEXT,
+    sanitize_server_text,
+};
 pub use channels::{ExecOutput, PtyRequest, ShellEvent, ShellReader, ShellWriter};
-pub use client::{ConnectOptions, VerifiedConnection, connect, connect_stream};
+pub use client::{ConnectOptions, Negotiated, VerifiedConnection, connect, connect_stream};
 pub use error::{SshError, Stage};
 pub use host_trust::{
     Endpoint, HostKeyRequest, HostKeyVerifier, KnownHost, PresentedHostKey, RejectReason, TrustStatus, TrustVerdict,

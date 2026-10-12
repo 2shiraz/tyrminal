@@ -24,6 +24,7 @@ pub(crate) const KIND_KEY: u16 = 2;
 pub(crate) const KIND_KNOWN_HOST: u16 = 3;
 /// Append-only notes about trust decisions (why a known host was removed).
 pub(crate) const KIND_TRUST_EVENT: u16 = 4;
+pub(crate) const KIND_SNIPPET: u16 = 5;
 
 const MARKER_TOMBSTONE: u8 = 0x00;
 const MARKER_LIVE_V1: u8 = 0x01;
@@ -43,6 +44,17 @@ pub(crate) struct HostRecord {
     pub port: u16,
     pub username: String,
     pub auth: StoredAuth,
+    /// Unix seconds of the last connection that reached the shell. Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected_at: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct SnippetRecord {
+    pub name: String,
+    pub folder: String,
+    pub text: String,
+    pub updated_at: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,6 +154,7 @@ mod tests {
             port: 2222,
             username: "deploy".into(),
             auth: StoredAuth::Password { password: Zeroizing::new("p\u{0}ss\nword\\".into()) },
+            last_connected_at: None,
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);
