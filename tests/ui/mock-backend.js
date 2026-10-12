@@ -134,6 +134,9 @@ export function installMockBackend(options) {
     const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
     if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
+    // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
+    if (host?.protocol?.type === "telnet")
+      setTimeout(() => channelSend(args.events, { type: "notice", text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network." }), 5);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
@@ -936,6 +939,30 @@ export function installMockBackend(options) {
         if (host && !s.files) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
+    // LAN discovery: synthetic announcements (documentation addresses), never a real network.
+    discovery_networks: () => options.discoveryNetworks ?? [{ id: "en0", addresses: ["192.0.2.20", "fe80::1"] }],
+    discovery_start: (a) => {
+      if (!(options.discoveryNetworks ?? [{ id: "en0" }]).some((n) => n.id === a.networkId)) {
+        throw { code: "INVALID_INPUT", message: "That network is not available. Choose one from the list." };
+      }
+      state.discovery = { running: true, secondsLeft: 30, found: [], truncated: false };
+      return { ...state.discovery };
+    },
+    discovery_status: () => {
+      const d = state.discovery ?? { running: false, secondsLeft: 0, found: [], truncated: false };
+      if (d.running) {
+        d.secondsLeft = Math.max(0, d.secondsLeft - 1);
+        d.found = [
+          { name: "Build server", host: "build.local", addresses: ["192.0.2.30"], port: 22 },
+          { name: "<img src=x onerror=alert(1)>", host: "nas.local", addresses: ["192.0.2.40", "2001:db8::40"], port: 2222 },
+        ];
+      }
+      return { ...d };
+    },
+    discovery_stop: () => {
+      if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
+      return { ...(state.discovery ?? { running: false, secondsLeft: 0, found: [], truncated: false }) };
+    },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
       window.__mockOpenedLinks.push(a.url);
@@ -1172,6 +1199,10 @@ export function installMockBackend(options) {
   window.__mockOutput = (text) => {
     const last = [...state.sessions.values()].at(-1);
     if (last) channelSend(last.output, new TextEncoder().encode(text).buffer);
+  };
+  /** Ends the running LAN discovery as if its time ran out. */
+  window.__mockDiscoveryFinish = () => {
+    if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
   };
   /** Ends the newest session as a network drop (or with another error code). */
   window.__mockDrop = (code = "DISCONNECTED") => {
