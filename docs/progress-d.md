@@ -14,6 +14,7 @@ Updated: 2026-10-12.
 | 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Done, tested (core, lab, UI mock); cloud discovery IMP-07..13 BLOCKED (third-party APIs) |
 | 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Done except certificate sign-in and the per-host PQ switch (after B); hardware keys and SEC-09 BLOCKED |
 | 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Done, tested (lab, real vault, UI mock) |
+| 6. Suggestions (AUT-02/03/04/12) and paste/snippet review (P-14), reassigned by agent A | Done, tested (UI mock); AUT-01 waits for B's command history |
 | 5. After agent B merges: identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), IMP-02, HST-05 | Waiting on B |
 
 ## Design notes
@@ -63,6 +64,13 @@ Updated: 2026-10-12.
 - **VERIFIED from agent A's native CI run 38232479810 (4130b7a, all three platforms):** HST-03,
   HST-04, HST-07, HST-08, HST-09, HST-10, HST-12, IMP-03, KEY-05. IMP-01 stays IN_PROGRESS:
   its scope includes key and known-host import, which is not built.
+
+- **Suggestions** (`apps/desktop/src/features/autocomplete/`): Ctrl+Shift+E (Cmd+Shift+E on macOS)
+  or the palette opens a picker for the focused connected SSH pane: built-in commands, snippets,
+  and the server's files through the session's SFTP listing. A choice is typed on the command line
+  (bracketed when the shell asked for it) and never followed by Enter; multi-line snippets go to the
+  paste review; remote names with control characters cannot be inserted; paths are shell-quoted.
+  Pause per session or everywhere for 15 minutes (in memory).
 
 ## Evidence
 

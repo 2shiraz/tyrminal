@@ -16,9 +16,12 @@ import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 import { SnippetRunContext } from "../features/snippets/runContext";
+import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
-import { snippets as snippetsApi, vault } from "../lib/ipc";
+import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
+import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { actionFor, tabIndexFor } from "../lib/shortcuts";
 import { usePreferences } from "./preferences";
@@ -82,6 +85,8 @@ function Shell() {
   // pane of the tab stops being connected (a reconnect never resumes broadcasting silently).
   const [broadcasting, setBroadcasting] = useState<ReadonlySet<number>>(new Set());
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  // agent D: suggestions for the focused SSH pane.
+  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
   const wsRef = useRef(ws);
@@ -268,6 +273,15 @@ function Shell() {
         case "lock":
           void vault.lock().catch(() => undefined);
           break;
+        // agent D: inventory and snippets
+        case "suggest": {
+          const p = activePane(wsRef.current);
+          const handle = p ? handles.current.get(p.id) : undefined;
+          const sessionId = handle?.connected() ? handle.sessionId() : null;
+          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId });
+          else notify("info", msgD.suggest.needsTerminal);
+          break;
+        }
         case "renameTab": {
           const t = activeTab(wsRef.current);
           if (t) setRenaming(t.id);
@@ -504,6 +518,31 @@ function Shell() {
           onHostChanged={() => {
             void data.hosts.reload();
             void data.keys.reload();
+          }}
+        />
+      )}
+
+      {suggesting && (
+        <SuggestDialog
+          sessionId={suggesting.sessionId}
+          onClose={() => {
+            setSuggesting(null);
+            handles.current.get(suggesting.paneId)?.focus();
+          }}
+          onSnippet={(snippet) => {
+            setSuggesting(null);
+            requestSnippet(snippet, "paste");
+          }}
+          onInsert={(text) => {
+            const target = suggesting;
+            setSuggesting(null);
+            const handle = handles.current.get(target.paneId);
+            // Only into the same live session the dialog was opened for; never with Enter.
+            if (!handle || handle.sessionId() !== target.sessionId) return;
+            void sessionsApi
+              .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
+              .then(() => handle.focus())
+              .catch((error: Error) => notify("danger", error.message));
           }}
         />
       )}

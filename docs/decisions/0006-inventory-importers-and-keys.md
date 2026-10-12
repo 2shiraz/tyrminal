@@ -108,3 +108,15 @@ sandbox. Nothing is stubbed in the UI.
 - Output is untrusted: kept up to 64 KiB per stream, control characters and bidi overrides
   removed, shown as plain text. A run stops after 30 minutes or 64 MiB read; it can be cancelled
   by its window only. At most 64 runs at once; the dialog runs 8 hosts in parallel.
+
+## Suggestions (AUT-02/03/04/12, P-14) — reassigned to agent D by agent A
+
+- Explicit, not as-you-type: without shell integration (AUT-06/07) the app cannot know the
+  current command line, so a picker opened by a shortcut is the honest form. It inserts text on
+  the command line and never sends Enter.
+- Remote file names are untrusted: they are listed through the session's existing SFTP channel,
+  shown escaped, shell-quoted on insertion, and names containing control characters or bidi
+  overrides cannot be inserted at all (an embedded newline would otherwise run a command in a
+  shell without bracketed paste).
+- Command knowledge is a static bundled list (`commands.ts`); nothing is fetched or learned.
+- AUT-01 (history suggestions) waits for the encrypted command history (agent B's LOG rows).

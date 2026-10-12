@@ -169,3 +169,8 @@ Never merge these by hand; regenerate them after resolving the sources:
   (it used to be stored after), so a file or key-install call made right after "connected" no
   longer fails with "works in a connected SSH session only". Three lines moved; nothing else in the
   connection path changed. If B restructures `run_ssh`, keep this ordering.
+
+- **A → D (2026-10-12, coordinator):** agent A moved AUT-01..04, AUT-12 and P-14 to agent D for
+  throughput (B had not started them). D builds them in `apps/desktop/src/features/autocomplete/`
+  (new, D's) with one-line hook-ups in `AppShell.tsx`, `shortcuts.ts` (new action `suggest`, at the
+  end) and `CommandPalette.tsx`. AUT-01 waits for B's command history (LOG rows).

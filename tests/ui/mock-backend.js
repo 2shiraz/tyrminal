@@ -788,6 +788,8 @@ export function installMockBackend(options) {
     channelSend(last.events, { type: "state", state: "failed" });
     channelSend(last.events, { type: "closed", error: { code, message: "The server closed the connection." }, exitStatus: null });
   };
+  // agent D: inventory and snippets
+  window.__mockAddFile = (path) => addNode(path, "file", 10);
   window.__mockCalls = calls;
   window.__mockOpenedLinks = [];
   window.__mockState = state;
