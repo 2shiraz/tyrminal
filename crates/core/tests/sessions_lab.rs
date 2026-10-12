@@ -2241,8 +2241,8 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
     client.send(&format!("{hop}\n")).await;
     let events = output_with_events(&mut client, "HOP-42").await;
     assert!(
-        events.iter().any(|e| matches!(e, SessionEvent::Banner { text } if text.contains("forwarded key"))),
-        "the use is reported: {events:?}"
+        events.iter().any(|e| matches!(e, SessionEvent::Notice { text } if text.contains("forwarded key"))),
+        "the use is reported as a notice the terminal shows (not a server banner): {events:?}"
     );
     // The server cannot change what the agent holds.
     client.send("ssh-add -D; echo REMOVE-EXIT-$?\n").await;

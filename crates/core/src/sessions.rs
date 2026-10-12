@@ -1576,8 +1576,8 @@ async fn connect_ssh(
                                 &key,
                                 Arc::new(move || {
                                     entry.log.note("the server used your forwarded key to sign");
-                                    sink.event(SessionEvent::Banner {
-                                        text: "The server used your forwarded key to sign in somewhere.\n".into(),
+                                    sink.event(SessionEvent::Notice {
+                                        text: "The server used your forwarded key to sign in somewhere.".into(),
                                     });
                                 }),
                             ));
@@ -1696,8 +1696,8 @@ async fn run_telnet(
     rows: u16,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
-    sink.event(SessionEvent::Banner {
-        text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.\n".into(),
+    sink.event(SessionEvent::Notice {
+        text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.".into(),
     });
     sink.event(SessionEvent::State { state: SessionState::Connecting });
     let host = endpoint.address.trim_start_matches('[').trim_end_matches(']').to_owned();
