@@ -83,9 +83,20 @@ fn open_error() -> IpcError {
     err(ErrorCode::IoError, "The serial port could not be opened. Check that it is connected and not in use.")
 }
 
+/// The speed to program into the port. macOS sets it with an ioctl that pseudo-terminals
+/// (`/dev/ttysNNN`, as made by `socat` or device simulators) reject with ENOTTY, so opening one
+/// would always fail; they have no line speed, so none is set. Real ports keep the chosen speed.
+fn line_speed(settings: &SerialSettings) -> u32 {
+    if cfg!(target_os = "macos") && is_macos_pty(&settings.path) { 0 } else { settings.baud }
+}
+
+fn is_macos_pty(path: &str) -> bool {
+    path.strip_prefix("/dev/ttys").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 pub(crate) fn open(settings: &SerialSettings) -> Result<SerialLink, IpcError> {
     validate(settings)?;
-    let port = serialport::new(&settings.path, settings.baud)
+    let port = serialport::new(&settings.path, line_speed(settings))
         .data_bits(match settings.data_bits {
             5 => serialport::DataBits::Five,
             6 => serialport::DataBits::Six,
@@ -151,6 +162,24 @@ impl SerialLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_numbered_macos_pseudo_terminals_skip_the_line_speed() {
+        for pty in ["/dev/ttys000", "/dev/ttys012"] {
+            assert!(is_macos_pty(pty), "{pty}");
+        }
+        for real in [
+            "/dev/ttys",
+            "/dev/ttysa",
+            "/dev/tty.usbserial-1410",
+            "/dev/cu.usbmodem1",
+            "/dev/ttyS0",
+            "/dev/ttys0/x",
+            "COM3",
+        ] {
+            assert!(!is_macos_pty(real), "{real}");
+        }
+    }
 
     fn settings(path: &str) -> SerialSettings {
         SerialSettings { path: path.into(), ..SerialSettings::default() }
