@@ -250,20 +250,23 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  iconOnly = false,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string; icon?: ReactNode }[];
   onChange: (value: T) => void;
+  /** Icons only: each label is kept for assistive technology and shown as a tooltip. */
+  iconOnly?: boolean;
 }) {
   const name = useId();
   return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
+    <div className={`segmented ${iconOnly ? "segmented-icons" : ""}`} role="radiogroup" aria-label={label}>
       {options.map((option) => (
-        <label key={option.value}>
+        <label key={option.value} data-tooltip={iconOnly ? option.label : undefined}>
           <input type="radio" name={name} checked={value === option.value} onChange={() => onChange(option.value)} />
           {option.icon}
-          {option.label}
+          {iconOnly ? <span className="visually-hidden">{option.label}</span> : option.label}
         </label>
       ))}
     </div>

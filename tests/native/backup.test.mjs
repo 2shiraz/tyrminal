@@ -29,7 +29,7 @@ describe("backup and restore in the real application", { concurrency: false }, (
     try {
       recoveryKey = await t.createVault();
       await t.nav("Hosts");
-      await s.clickButton("Add host");
+      await s.clickButton("New host");
       await s.fill("Name", "backup-host-alpha", { within: HOST_PANEL });
       await s.fill("Address", "192.0.2.44", { within: HOST_PANEL });
       await s.fill("User name", "deploy", { within: HOST_PANEL });

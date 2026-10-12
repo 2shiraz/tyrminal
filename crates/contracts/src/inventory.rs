@@ -16,6 +16,8 @@ pub enum HostOs {
     Fedora,
     RedHat,
     Centos,
+    Rocky,
+    Alma,
     Alpine,
     Arch,
     Suse,

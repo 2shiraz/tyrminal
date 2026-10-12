@@ -9,7 +9,13 @@ import { openApp } from "./fixtures";
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
 
+/** Subgroups show inside their parent: open the parents first, from the top level. */
+const PARENTS: Record<string, string[]> = { Databases: ["Production"] };
+
 async function editGroup(page: Page, name: string) {
+  const crumbs = page.getByTestId("breadcrumb");
+  if (await crumbs.count()) await crumbs.getByRole("button", { name: "Hosts" }).click();
+  for (const parent of PARENTS[name] ?? []) await page.getByTestId("group-bar").getByRole("button", { name: parent, exact: true }).click();
   await page.getByRole("button", { name: `Actions for group ${name}` }).first().click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
   return page.getByRole("dialog", { name: "Edit group" });
@@ -60,5 +66,7 @@ test("a group's jump host and icon reach its hosts and subgroups; a host can set
   // The icon of a host in the subgroup is the inherited Debian one.
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).first().click();
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).first().click();
+  // Find it wherever it lives.
+  await page.getByRole("searchbox", { name: "Search hosts" }).fill("db-primary");
   await expect(page.getByTestId("host-list").getByRole("article", { name: /db-primary/ }).locator('[data-os="debian"]')).toHaveCount(1);
 });

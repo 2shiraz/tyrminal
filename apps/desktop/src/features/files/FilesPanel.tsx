@@ -8,6 +8,7 @@ import { IconArrowLeftRight, IconCopy, IconFolderOpen, IconHardDrive, IconPencil
 import { files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { shellContexts } from "../autocomplete/shellContext";
 import { msgSftp } from "../sftp/messages";
 import type { Loc } from "../sftp/model";
@@ -387,6 +388,7 @@ export function FilesPanel({
           onDone={() => setPrompt(null)}
         />
       )}
+      <ResizeHandle panel={twoPane ? "filesTwoPane" : "files"} />
     </aside>
   );
 }

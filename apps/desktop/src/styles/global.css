@@ -2,6 +2,7 @@
 @import "./motion.css";
 @import "./fonts.css";
 @import "./box.css";
+@import "./hosts.css";
 
 /* ===================================================================== base */
 
@@ -1270,8 +1271,9 @@ kbd,
 /* ===================================================================== app shell */
 
 .shell {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--w-sidebar, var(--sidebar-width)) minmax(0, 1fr);
   height: 100%;
   background: var(--bg-app);
   background-image: var(--app-backdrop);
@@ -1857,13 +1859,79 @@ kbd,
   height: 3px;
 }
 
+/* ---------- resizable panel edges ---------- */
+
+/* A 6 px hit area on a panel's inner edge; its hairline sits on the panel's border and turns
+   accent on hover, focus and drag. Placed per panel below. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after,
+.resize-handle[data-active="true"]::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: none;
+}
+
+/* On a panel's left edge (side panels, host details). */
+.side-panel > .resize-handle,
+.host-panel > .resize-handle {
+  left: -3px;
+}
+
+/* On the sidebar's right edge, over its border. */
+.shell > .resize-handle {
+  left: calc(var(--w-sidebar, var(--sidebar-width)) - 4px);
+}
+
+.shell[data-sidebar="collapsed"] > .resize-handle,
+.hosts-layout[data-narrow="true"] .host-panel > .resize-handle {
+  display: none;
+}
+
+/* While an edge is dragged: one cursor everywhere, no text selection, no width transitions. */
+:root[data-resizing],
+:root[data-resizing] * {
+  cursor: col-resize;
+}
+
+:root[data-resizing] body {
+  user-select: none;
+}
+
+:root[data-resizing] .shell {
+  transition: none;
+}
+
 /* ---------- side panel (snippets) ---------- */
 
 .side-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: var(--panel-width);
+  width: var(--w-side-panel, var(--panel-width));
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
@@ -1909,7 +1977,7 @@ kbd,
   align-content: start;
 }
 
-.panel-body > .setting-row {
+.panel-body > .setting-row:not([data-variant="switch"]) {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-2) 0;
@@ -1919,9 +1987,22 @@ kbd,
   border-top: var(--box-rule);
 }
 
-.panel-body > .setting-row .setting-control,
-.panel-body > .setting-row .setting-control > * {
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control,
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control > * {
   width: 100%;
+}
+
+/* A switch keeps its own size: label and hint on the left, the switch on the right. */
+.panel-body .setting-row[data-variant="switch"] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.panel-body .setting-row[data-variant="switch"] .setting-control {
+  flex: none;
+  width: auto;
 }
 
 .panel-target {
@@ -3130,7 +3211,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 /* ---------- files (SFTP) panel ---------- */
 
 .side-panel-wide {
-  width: max(var(--panel-width), 380px);
+  width: var(--w-files, max(var(--panel-width), 380px));
 }
 
 .spinner.spinner-xs {
@@ -3180,7 +3261,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 /* Two-pane files view: this computer on the left, the server on the right. */
 .side-panel-two {
-  width: min(880px, 70vw);
+  width: var(--w-files-two, min(880px, 70vw));
 }
 
 .files-panes {
@@ -3709,9 +3790,36 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 /* agent D: inventory and snippets */
+/* The host tile: an OS logo (or a server glyph) on a neutral square. */
 .os-icon {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-inset);
+  color: var(--os-dark, var(--text-muted));
+}
+
+:root[data-theme="light"] .os-icon {
+  color: var(--os-light, var(--text-muted));
+}
+
+.os-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.os-icon-sm {
+  width: 28px;
+  height: 28px;
+}
+
+.os-icon-sm svg {
+  width: 16px;
+  height: 16px;
 }
 
 .connect-all-list {
@@ -3912,10 +4020,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: 400px;
+  width: var(--w-host-panel, 400px);
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
@@ -4685,14 +4794,15 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .host-card[data-selected="true"],
 .tile[data-selected="true"],
 .list > li[data-selected="true"] {
-  /* The row tint plus the accent edge on the left: selection reads without any checkbox. */
-  background: var(--bg-selected);
+  /* The row tint plus the accent edge on the left: selection reads without any checkbox. The
+     tint is laid over the row's own colour, not over the list's divider grey behind it. */
+  background: linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg-raised);
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
   box-shadow: var(--edge-select);
 }
 
 .list > li[data-selected="true"]:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 16%, transparent)), var(--bg-raised);
 }
 
 /* The selection strip (two or more hosts): one compact line above the list. */

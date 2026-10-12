@@ -42,7 +42,7 @@ test("an address opens a menu: copy it, or start a new host for it without conne
   const opened = await calls(page, "session_open_ssh");
   await click(page, "backend at", "10.0.0.12:2222");
   await page.getByRole("menuitem", { name: "New host for 10.0.0.12…" }).click();
-  const editor = page.getByRole("dialog", { name: "Add host" });
+  const editor = page.getByRole("dialog", { name: "New host" });
   await expect(editor).toBeVisible();
   await expect(editor.getByLabel("Address")).toHaveValue("10.0.0.12");
   await expect(editor.getByLabel("Port")).toHaveValue("2222");
@@ -58,7 +58,7 @@ test("IPv6 in brackets keeps its port; a MAC address can only be copied", async 
   await output(page, "\r\nnode [fe80::1]:2200 mac aa:bb:cc:00:11:22\r\n");
   await click(page, "node [fe80", "[fe80::1]:2200");
   await page.getByRole("menuitem", { name: "New host for fe80::1…" }).click();
-  const editor = page.getByRole("dialog", { name: "Add host" });
+  const editor = page.getByRole("dialog", { name: "New host" });
   await expect(editor.getByLabel("Address")).toHaveValue("fe80::1");
   await expect(editor.getByLabel("Port")).toHaveValue("2200");
   await editor.getByRole("button", { name: "Cancel" }).click();

@@ -41,10 +41,21 @@ const cancelledError = (): AppError => toAppError({ code: "CANCELLED", message: 
  * window run on it; for the others a run-only connection is made for the run (trust and sign-in
  * as for a terminal, asked one host at a time and never assumed) and closed after it.
  */
-export function MultiRunDialog({ snippet, onClose, allOpen = false }: { snippet: SnippetSummary | null; onClose: () => void; allOpen?: boolean }) {
+export function MultiRunDialog({
+  snippet,
+  onClose,
+  allOpen = false,
+  hostIds,
+}: {
+  snippet: SnippetSummary | null;
+  onClose: () => void;
+  allOpen?: boolean;
+  /** Hosts chosen already (a selection on Hosts); the choice can still be changed before the review. */
+  hostIds?: readonly string[];
+}) {
   const [chosen, setChosen] = useState(snippet);
   if (!chosen) return <SnippetPicker onPick={setChosen} onClose={onClose} />;
-  return <MultiRun snippet={chosen} onClose={onClose} allOpen={allOpen} />;
+  return <MultiRun snippet={chosen} onClose={onClose} allOpen={allOpen} hostIds={hostIds} />;
 }
 
 /** "Run a snippet on all open sessions" from the palette: which snippet, before the review. */
@@ -80,14 +91,14 @@ function SnippetPicker({ onPick, onClose }: { onPick: (snippet: SnippetSummary) 
   );
 }
 
-function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onClose: () => void; allOpen: boolean }) {
+function MultiRun({ snippet, onClose, allOpen, hostIds }: { snippet: SnippetSummary; onClose: () => void; allOpen: boolean; hostIds?: readonly string[] | undefined }) {
   const { hosts, groups } = useVaultData();
   const runHost = useSnippetRunHost();
   const notify = useToast();
   const all = hosts.value ?? [];
   const groupList = groups.value ?? [];
   const [step, setStep] = useState<"choose" | "review" | "run">(allOpen ? "review" : "choose");
-  const [selected, setSelected] = useState<Set<string>>(() => (allOpen ? new Set(runHost.sessions().map((s) => s.hostId)) : new Set()));
+  const [selected, setSelected] = useState<Set<string>>(() => (allOpen ? new Set(runHost.sessions().map((s) => s.hostId)) : new Set(hostIds ?? [])));
   const [filter, setFilter] = useState("");
   /** Groups the user picked as a whole: kept as groups when the selection is saved as a target. */
   const [pickedGroups, setPickedGroups] = useState<Set<string>>(new Set());

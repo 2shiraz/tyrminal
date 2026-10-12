@@ -181,7 +181,7 @@ test("a key sign-in without a chosen key is never saved, and autosave never pick
   await expect(select).toHaveValue("");
 
   // A new host too: created with its own sign-in, never with a key nobody chose.
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   await panel(page).getByRole("radio", { name: /Use a key from the keychain/ }).check();
   await panel(page).getByLabel("Address").fill("198.51.100.8");
   await panel(page).getByLabel("Name", { exact: true }).focus();
@@ -263,7 +263,7 @@ test("a failed write says so and Retry writes it", async ({ page }) => {
 
 test("a new host is created on its first valid address, never from an invalid one", async ({ page }) => {
   await openHosts(page);
-  const add = page.getByRole("button", { name: "Add host" });
+  const add = page.getByRole("button", { name: "New host" });
   await add.click();
   const fresh = page.getByRole("complementary", { name: "New host" });
   await expect(fresh.getByLabel("Address")).toBeFocused();
@@ -305,7 +305,7 @@ test("a new host is created on its first valid address, never from an invalid on
 
 test("a new host's route is written right after the host is created", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   const fresh = page.getByRole("complementary", { name: "New host" });
   await fresh.getByText("Show more").click();
   await fresh.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
@@ -439,13 +439,13 @@ test("the menu copies the address, duplicates, and deletes after confirmation", 
   await confirm.getByRole("button", { name: "Delete" }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Add host" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "New host" })).toBeFocused();
   expect(await calls(page, "host_delete")).toHaveLength(1);
 });
 
 test("a new host connects from the bottom button once it exists", async ({ page }) => {
   await openHosts(page);
-  await page.getByRole("button", { name: "Add host" }).click();
+  await page.getByRole("button", { name: "New host" }).click();
   // The panel is renamed "Host details" once the host exists, so address it by its test id.
   await panel(page).getByLabel("Address").fill("198.51.100.7");
   await panel(page).getByLabel("Name", { exact: true }).fill("lab-box");

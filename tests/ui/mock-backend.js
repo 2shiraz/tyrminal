@@ -27,7 +27,7 @@ export function installMockBackend(options) {
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
       interfaceScale: null,
-      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
+      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" }, connectHintUses: 0 } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",

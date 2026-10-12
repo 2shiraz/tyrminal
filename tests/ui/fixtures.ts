@@ -105,3 +105,14 @@ export async function connectHost(page: Page, label: string) {
     .first()
     .dblclick();
 }
+
+/** Hosts: choose List or Cards (icon-only toggle; the names are for assistive technology). */
+export async function chooseLayout(page: Page, name: "List" | "Cards") {
+  await page.getByRole("radiogroup", { name: "Layout" }).locator("label", { hasText: name }).click();
+}
+
+/** Hosts: the sort order, from the Sort menu. */
+export async function sortHosts(page: Page, name: "Name" | "Recently used" | "Address" | "Group") {
+  await page.getByRole("button", { name: "Sort", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name }).click();
+}

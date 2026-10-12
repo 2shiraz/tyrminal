@@ -17,6 +17,7 @@ import { AppearanceSection, TerminalSection, resetTerminal } from "./sections/Ge
 import { VaultSection } from "./sections/Security";
 import { type IndexEntry, type NavGroup, SECTIONS, type Section, onSectionRequest, searchSettings, takeRequestedSection } from "./settingsIndex";
 import "./settings.css";
+import { useGlide } from "../../lib/useGlide";
 
 const DESCRIPTIONS: Record<Section, string> = {
   appearance: msgSettings.descriptions.appearance,
@@ -61,6 +62,8 @@ export function SettingsView({
   // A row to focus once its section has rendered (set by search).
   const [pending, setPending] = useState<string | null>(null);
   const navRef = useRef<HTMLElement>(null);
+  // The current section marker glides to the clicked item (lib/useGlide).
+  useGlide(navRef);
 
   useEffect(() => onSectionRequest(setSection), []);
   useEffect(() => {

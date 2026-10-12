@@ -1,7 +1,8 @@
-import { type ReactNode, memo } from "react";
+import { type ReactNode, memo, useRef } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { msg } from "../../lib/messages";
+import { useGlide } from "../../lib/useGlide";
 import { versionLabel } from "../../lib/version";
 import { Shortcut } from "../ui/controls";
 import {
@@ -81,6 +82,9 @@ function SidebarImpl({
   shortcuts?: unknown;
 }) {
   const counts: Partial<Record<Destination, number>> = { hosts: hostCount, snippets: snippetCount };
+  // The current page marker glides to the clicked item (lib/useGlide).
+  const navRef = useRef<HTMLElement>(null);
+  useGlide(navRef);
 
   const item = (entry: { id: Destination; icon: ReactNode }) => (
     <button
@@ -100,7 +104,7 @@ function SidebarImpl({
   );
 
   return (
-    <nav className="sidebar" aria-label={msg.nav.primary}>
+    <nav className="sidebar" aria-label={msg.nav.primary} ref={navRef}>
       <div className="brand">
         <BrandMark />
         <span className="brand-name">{msg.app.name}</span>

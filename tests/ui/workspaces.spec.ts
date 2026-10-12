@@ -317,7 +317,8 @@ test("templates: explicit save stores the arrangement and destinations only; cha
   ]);
 
   // Resizing changes the arrangement: shown as unsaved until saved again, into the same template.
-  const splitter = page.getByRole("separator").first();
+  // The pane splitter, not a panel edge (the sidebar edge is a separator too).
+  const splitter = page.locator(".splitter[role=separator]").first();
   await splitter.focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("button", { name: "Layout: Ops (Unsaved changes)" })).toBeVisible();
