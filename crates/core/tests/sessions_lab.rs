@@ -1662,3 +1662,191 @@ async fn keep_both_uses_the_next_free_name_and_never_touches_the_existing_file()
     }
     s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_else() {
+    let f = fixture().await;
+    let shells = tyrminal_core::available_shells();
+    let Some(sh) = shells.iter().find(|p| p.file_name().is_some_and(|n| n == "sh")) else {
+        panic!("BLOCKED: no `sh` in /etc/shells on this machine: {shells:?}");
+    };
+    let (tx, inbox) = mpsc::unbounded_channel();
+    let opened = f
+        .core
+        .sessions
+        .open_local_with(WINDOW, 100, 30, Some(sh.to_string_lossy().into_owned()), Arc::new(ChannelSink(tx)))
+        .await
+        .unwrap();
+    let mut client = Client {
+        core: f.core.clone(),
+        session: opened.session_id,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+    };
+    client.until_connected().await;
+    client.send("echo \"SHELL-[$0]\"\n").await;
+    client.output_until("SHELL-[").await;
+    client.output_until("sh]").await;
+
+    // A path that is not an installed shell is never executed; the login shell runs instead.
+    let fake = f._dir.path().join("not-a-shell");
+    std::fs::write(&fake, "#!/bin/sh\necho PWNED\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (tx, inbox) = mpsc::unbounded_channel();
+    let opened = f
+        .core
+        .sessions
+        .open_local_with(WINDOW, 100, 30, Some(fake.to_string_lossy().into_owned()), Arc::new(ChannelSink(tx)))
+        .await
+        .unwrap();
+    let mut client = Client {
+        core: f.core.clone(),
+        session: opened.session_id,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+    };
+    client.until_connected().await;
+    client.send("echo LOGIN-$((40+2))\n").await;
+    client.output_until("LOGIN-42").await;
+    assert!(!client.text.contains("PWNED"));
+}
+
+/// Connects to a lab server with an already imported key, accepting its host key once.
+async fn connected(f: &Fixture, server: &str, key_id: &str) -> Client {
+    let host = f
+        .host(
+            &format!("lab {server}"),
+            f.lab.port(server),
+            &f.lab.str("/user"),
+            HostAuthInput::Key { key_id: key_id.into() },
+        )
+        .await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn copying_between_two_servers_streams_files_and_folders_without_partial_results() {
+    let _b = SERVER_B.lock().await;
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let mut a = connected(&f, "a", &key_id).await;
+    let b = connected(&f, "b", &key_id).await;
+    let s = &f.core.sessions;
+    let a_home = s.list_files(WINDOW, &a.session, None).await.unwrap().path;
+    let b_home = s.list_files(WINDOW, &b.session, None).await.unwrap().path;
+    let tag = std::process::id();
+    let (src_dir_name, dst_dir_name) = (format!("tyr-copy-src-{tag}"), format!("tyr-copy-dst-{tag}"));
+    s.make_dir(WINDOW, &a.session, &a_home, &src_dir_name).await.unwrap();
+    s.make_dir(WINDOW, &b.session, &b_home, &dst_dir_name).await.unwrap();
+    let src = format!("{}/{src_dir_name}", a_home.trim_end_matches('/'));
+    let dst = format!("{}/{dst_dir_name}", b_home.trim_end_matches('/'));
+
+    // Put a file and a small tree on server A.
+    let local = TempDir::new().unwrap();
+    let data = pattern(5 * 1024 * 1024 + 3, 21);
+    std::fs::write(local.path().join("data.bin"), &data).unwrap();
+    std::fs::create_dir_all(local.path().join("tree/inner")).unwrap();
+    std::fs::write(local.path().join("tree/inner/x.txt"), b"x\n").unwrap();
+    for name in ["data.bin", "tree"] {
+        let (sink, mut rx) = transfer_sink();
+        s.upload(WINDOW, &a.session, local.path().join(name), &src, name, ConflictChoice::Ask, sink).await.unwrap();
+        assert!(matches!(transfer_end(&mut rx).await, TransferEvent::Done { .. }));
+    }
+
+    // A link inside the tree on server A (never followed or copied).
+    a.send(&format!("ln -s /etc/hostname {src}/tree/link && echo LN-$((40+2))\n")).await;
+    a.output_until("LN-42").await;
+
+    // Another window cannot use either session.
+    let (sink, _rx) = transfer_sink();
+    let denied =
+        s.copy_between("other-window", &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::Ask, sink);
+    assert_eq!(denied.await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    // A file, byte for byte (read back through B into a local folder).
+    let (sink, mut rx) = transfer_sink();
+    let started = s
+        .copy_between(WINDOW, &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    assert_eq!(started.direction, tyrminal_core::contracts::TransferDirection::Copy);
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &b.session, &dst, "data.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    transfer_end(&mut rx).await;
+    assert!(std::fs::read(back.path().join("data.bin")).unwrap() == data);
+
+    // The same name again: conflict, then keep both.
+    let (sink, _rx) = transfer_sink();
+    let again = s.copy_between(WINDOW, &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::Ask, sink).await;
+    assert_eq!(again.unwrap_err().code, ErrorCode::Conflict);
+    let (sink, mut rx) = transfer_sink();
+    let both = s
+        .copy_between(WINDOW, &a.session, &src, "data.bin", &b.session, &dst, ConflictChoice::KeepBoth, sink)
+        .await
+        .unwrap();
+    assert_eq!(both.name, "data (1).bin");
+    transfer_end(&mut rx).await;
+
+    // A folder: the tree arrives, the link is skipped and counted.
+    let (sink, mut rx) = transfer_sink();
+    s.copy_between(WINDOW, &a.session, &src, "tree", &b.session, &dst, ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Done { bytes: 2, files: 1, skipped: 1 });
+    let inner = s.list_files(WINDOW, &b.session, Some(&format!("{dst}/tree/inner"))).await.unwrap();
+    assert_eq!(inner.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["x.txt"]);
+    let mut names: Vec<_> =
+        s.list_files(WINDOW, &b.session, Some(&dst)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    names.sort();
+    assert_eq!(names, ["data (1).bin", "data.bin", "tree"], "no temporary names are left");
+
+    // Cancelled: nothing appears on B.
+    let big = pattern(64 * 1024 * 1024, 5);
+    std::fs::write(local.path().join("big.bin"), &big).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &a.session, local.path().join("big.bin"), &src, "big.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    transfer_end(&mut rx).await;
+    let (sink, mut rx) = transfer_sink();
+    let started =
+        s.copy_between(WINDOW, &a.session, &src, "big.bin", &b.session, &dst, ConflictChoice::Ask, sink).await.unwrap();
+    s.cancel_transfer(WINDOW, &started.transfer_id).unwrap();
+    assert_eq!(transfer_end(&mut rx).await, TransferEvent::Cancelled);
+    let mut after: Vec<_> =
+        s.list_files(WINDOW, &b.session, Some(&dst)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    after.sort();
+    assert_eq!(after, names);
+
+    // Clean up both servers.
+    for (session, dir, base, name) in
+        [(&a.session, &src, &a_home, &src_dir_name), (&b.session, &dst, &b_home, &dst_dir_name)]
+    {
+        let entries = s.list_files(WINDOW, session, Some(dir)).await.unwrap().entries;
+        for e in entries {
+            if e.kind == tyrminal_core::contracts::RemoteEntryKind::Dir {
+                let _ = s.remove_file(WINDOW, session, &format!("{dir}/{}/inner", e.name), "x.txt").await;
+                let _ = s.remove_file(WINDOW, session, &format!("{dir}/{}", e.name), "inner").await;
+                let _ = s.remove_file(WINDOW, session, &format!("{dir}/{}", e.name), "link").await;
+            }
+            let _ = s.remove_file(WINDOW, session, dir, &e.name).await;
+        }
+        s.remove_file(WINDOW, session, base, name).await.unwrap();
+    }
+}

@@ -81,6 +81,52 @@ pub fn default_shell() -> PathBuf {
     }
 }
 
+/// Shells the user can choose for local terminals: on Unix the executable entries of
+/// `/etc/shells`, on Windows the usual shells that are installed. Deduplicated, in a stable order.
+pub fn available_shells() -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let listed = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+        for line in listed.lines().map(str::trim).filter(|l| l.starts_with('/')) {
+            let path = PathBuf::from(line);
+            let executable = std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+            if executable && !found.contains(&path) {
+                found.push(path);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let program_files =
+            std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+        for path in [
+            root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+            program_files.join(r"PowerShell\7\pwsh.exe"),
+            root.join(r"System32\cmd.exe"),
+            root.join(r"System32\wsl.exe"),
+            program_files.join(r"Git\bin\bash.exe"),
+        ] {
+            if path.is_file() && !found.contains(&path) {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+/// Arguments that start `shell` as a login shell where that is the convention.
+pub fn login_args(shell: &std::path::Path) -> Vec<String> {
+    let name = shell.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if cfg!(unix) && matches!(name, "bash" | "zsh" | "sh" | "dash" | "ksh" | "mksh" | "fish" | "tcsh" | "csh") {
+        vec!["-l".into()]
+    } else {
+        Vec::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PtyEvent {
     /// Raw output bytes. Untrusted when the local shell runs remote-controlled programs.

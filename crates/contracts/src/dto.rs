@@ -465,10 +465,26 @@ pub struct Preferences {
     /// Reduce interface motion even if the OS does not ask for it.
     pub reduce_motion: bool,
     pub terminal: TerminalPreferences,
+    /// Program for local terminals; one of the shells the system lists. `None`: the login shell.
+    pub local_shell: Option<String>,
+    /// Applications chosen (in a native dialog) for editing remote files, by extension.
+    pub editor_apps: Vec<EditorApp>,
     // agent C: workspaces (highlighting, key bindings); validated in core `layouts::sanitize_workspace`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub workspace: Option<crate::WorkspacePreferences>,
+}
+
+/// An application used to edit remote files with a given extension. Added only through the
+/// native app picker; the renderer can keep or remove entries but never add or change one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditorApp {
+    /// Lower-case, without the dot (`conf`, `yml`).
+    pub extension: String,
+    /// Absolute path of the application (an `.app` bundle on macOS).
+    pub app: String,
 }
 
 // ---------- sessions ----------
@@ -700,6 +716,8 @@ pub enum ConflictChoice {
 pub enum TransferDirection {
     Upload,
     Download,
+    /// From one server to another.
+    Copy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

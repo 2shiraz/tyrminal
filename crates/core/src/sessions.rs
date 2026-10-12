@@ -187,7 +187,7 @@ impl Sessions {
         Ok(SessionOpened { session_id: id })
     }
 
-    /// Opens a local terminal running the user's shell.
+    /// Opens a local terminal running the user's login shell.
     pub async fn open_local(
         self: &Arc<Self>,
         owner: &str,
@@ -195,12 +195,28 @@ impl Sessions {
         rows: u16,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        self.open_local_with(owner, cols, rows, None, sink).await
+    }
+
+    /// Opens a local terminal running `shell` when it is one of the installed shells, otherwise
+    /// the login shell (a preference may name a shell that has since been removed).
+    pub async fn open_local_with(
+        self: &Arc<Self>,
+        owner: &str,
+        cols: u16,
+        rows: u16,
+        shell: Option<String>,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
         let generation = self.vault.require_unlocked().await?;
+        let shell = shell
+            .map(std::path::PathBuf::from)
+            .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
         let (id, entry, input_rx) = self.register(owner, generation)?;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let body = run_local(&sink, cols, rows, input_rx);
+            let body = run_local(&sink, cols, rows, shell, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -614,6 +630,50 @@ impl Sessions {
         tokio::fs::remove_dir_all(folder)
             .await
             .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(files::local_io(&e)) })
+    }
+
+    /// Copies `src_dir/name` (a file or a folder) from one session's server to the folder
+    /// `dst_dir` on another session's server, streaming through this process. A taken name is
+    /// resolved by `choice`; folders are never merged or replaced.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn copy_between(
+        &self,
+        owner: &str,
+        src_session: &str,
+        src_dir: &str,
+        name: &str,
+        dst_session: &str,
+        dst_dir: &str,
+        choice: ConflictChoice,
+        sink: Arc<dyn TransferSink>,
+    ) -> Result<TransferStarted, IpcError> {
+        let src_path = files::join(files::remote_dir(src_dir)?, name)?;
+        let dst_dir = files::remote_dir(dst_dir)?.to_owned();
+        let (_, src) = self.sftp(owner, src_session).await?;
+        let (_, dst) = self.sftp(owner, dst_session).await?;
+        let final_name = if choice == ConflictChoice::KeepBoth {
+            files::free_remote_name(&dst, &dst_dir, name).await?
+        } else {
+            name.to_owned()
+        };
+        let (job, total) = crate::remote_copy::prepare(
+            src,
+            src_path,
+            dst,
+            dst_dir,
+            final_name.clone(),
+            choice == ConflictChoice::Replace,
+            random_token()?,
+        )
+        .await?;
+        let (id, cancel) = self.start_transfer(owner)?;
+        let transfers = Arc::clone(&self.transfers);
+        let done_id = id.clone();
+        tokio::spawn(async move {
+            crate::remote_copy::run(job, sink.as_ref(), cancel).await;
+            transfers.lock().unwrap_or_else(|p| p.into_inner()).remove(&done_id);
+        });
+        Ok(files::started(id, final_name, TransferDirection::Copy, Some(total)))
     }
 
     /// Stops a running transfer; its temporary data is removed and nothing replaces the target.
@@ -1082,8 +1142,15 @@ async fn connect_ssh(
     Ok((conn, reader, writer))
 }
 
-async fn run_local(sink: &Arc<dyn SessionSink>, cols: u16, rows: u16, input: mpsc::Receiver<Input>) -> Outcome {
-    let mut spec = ShellSpec::new(tyrminal_pty::default_shell());
+async fn run_local(
+    sink: &Arc<dyn SessionSink>,
+    cols: u16,
+    rows: u16,
+    shell: Option<std::path::PathBuf>,
+    input: mpsc::Receiver<Input>,
+) -> Outcome {
+    let program = shell.unwrap_or_else(tyrminal_pty::default_shell);
+    let mut spec = ShellSpec::new(&program);
     spec.cols = cols;
     spec.rows = rows;
     // Start in the user's home directory when it is known and valid.
@@ -1091,11 +1158,8 @@ async fn run_local(sink: &Arc<dyn SessionSink>, cols: u16, rows: u16, input: mps
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(Into::into)
         .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir());
-    #[cfg(unix)]
-    {
-        // A login shell, as terminal applications conventionally start.
-        spec.args = vec!["-l".into()];
-    }
+    // A login shell, as terminal applications conventionally start (where the shell has one).
+    spec.args = tyrminal_pty::login_args(&program);
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
             sink.event(SessionEvent::State { state: SessionState::Connected });

@@ -3119,6 +3119,28 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   outline-offset: -4px;
 }
 
+.editor-choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.editor-choices li {
+  display: grid;
+  grid-template-columns: 5em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.editor-add {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.editor-add .input {
+  width: 8em;
+}
+
 /* agent C: workspaces */
 
 /* Unseen output in a background tab: a ring around the session dot (shape, not color alone). */

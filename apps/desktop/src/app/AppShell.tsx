@@ -530,6 +530,10 @@ function Shell() {
                   showPanel && sidePanel === "files" ? (
                     <FilesPanel
                       target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
+                      others={Object.values(ws.panes).flatMap((p) => {
+                        const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
+                        return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
+                      })}
                       onClose={() => {
                         setSidePanel(null);
                         focusedHandle()?.focus();
