@@ -1,8 +1,9 @@
-import { type ReactNode, memo } from "react";
+import { type ReactNode, memo, useRef } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { useGlide } from "../../lib/useGlide";
 import { versionLabel } from "../../lib/version";
 import { msgC } from "../../lib/messages-c";
 import { Shortcut } from "../ui/controls";
@@ -22,6 +23,7 @@ import {
   IconHistory,
 } from "../ui/icons";
 import { msgSftp } from "../../features/sftp/messages";
+import { useFlip } from "../../lib/motion";
 
 /** The Tyrminal mark: a prompt chevron and cursor in a rounded tile. Original artwork. */
 export function BrandMark({ size = 26 }: { size?: number }) {
@@ -87,6 +89,12 @@ function SidebarImpl({
   shortcuts?: unknown;
 }) {
   const counts: Partial<Record<Destination, number>> = { hosts: hostCount, snippets: snippetCount };
+  // The current page marker glides to the clicked item (lib/useGlide).
+  const navRef = useRef<HTMLElement>(null);
+  useGlide(navRef);
+  // Open sessions close up when one closes, and a new one rises in.
+  const sessionsRef = useRef<HTMLUListElement>(null);
+  useFlip(sessionsRef, { stagger: false });
 
   const item = (entry: { id: Destination; icon: ReactNode }) => (
     <button
@@ -106,7 +114,7 @@ function SidebarImpl({
   );
 
   return (
-    <nav className="sidebar" aria-label={msg.nav.primary}>
+    <nav className="sidebar" aria-label={msg.nav.primary} ref={navRef}>
       <div className="brand">
         <BrandMark />
         <span className="brand-name">{msg.app.name}</span>
@@ -126,11 +134,11 @@ function SidebarImpl({
       {ws.tabs.length > 0 && (
         <>
           <div className="nav-group-label eyebrow">{msg.nav.sessionsGroup}</div>
-          <ul aria-label={msg.nav.sessions}>
+          <ul aria-label={msg.nav.sessions} ref={sessionsRef}>
             {ws.tabs.map((tab) => {
               const status = tabStatus(ws, tab);
               return (
-                <li key={tab.id}>
+                <li key={tab.id} data-flip-key={tab.id}>
                   <button
                     type="button"
                     className="nav-item nav-session"
