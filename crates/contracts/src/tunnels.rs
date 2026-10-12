@@ -195,6 +195,19 @@ impl core::fmt::Debug for ProxyInput {
     }
 }
 
+/// Where a prompt's server sits in a jump-host chain, so the user knows which hop is asking.
+/// Present only for connections through at least one jump host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChainPosition {
+    /// 1-based; the destination host is `total`.
+    pub index: u32,
+    pub total: u32,
+    /// The saved label of that hop (the user's own name for it, never server text).
+    pub label: String,
+}
+
 /// One hop of a host's connection chain, first hop first; the host itself is last.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

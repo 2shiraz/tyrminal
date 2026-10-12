@@ -25,9 +25,6 @@ Design decisions: `docs/decisions/0004-tunnels-and-connection-path.md`.
 
 ## Known limits
 
-- The trust prompt for a jump-chain hop shows that hop's address and port, but not which hop of
-  the chain it is; adding that needs a field on `SessionEvent::TrustPrompt` (agent A's `dto.rs`),
-  requested in `docs/work-split.md`.
 - Lab proof of routing through the bastion is behavioural (the inner server sees no traffic
   before the bastion is trusted; a bastion with `AllowTcpForwarding no` stops the chain): in the
   local lab every sshd shares this machine's loopback, so the inner server is not unreachable

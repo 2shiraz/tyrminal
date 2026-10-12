@@ -94,6 +94,8 @@ pub(crate) struct ConnectionPlan {
     pub jumps: Vec<HopPlan>,
     /// The host's own proxy, used when it is reached directly (no jump host).
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
+    /// The host's saved label.
+    pub label: String,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     pub generation: u32,
@@ -102,6 +104,8 @@ pub(crate) struct ConnectionPlan {
 // agent B: tunnels and history
 /// One host of a connection chain.
 pub(crate) struct HopPlan {
+    /// The host's saved label, shown in prompts as the hop's name.
+    pub label: String,
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
@@ -1636,6 +1640,7 @@ impl VaultService {
             username: target.username,
             auth: target.auth,
             proxy: target.proxy,
+            label: target.label,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -1668,6 +1673,7 @@ impl VaultService {
             EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
         };
         Ok(HopPlan {
+            label: host.label.clone(),
             endpoint: Endpoint::new(host.address.clone(), effective.port),
             username: effective.username.clone(),
             auth,

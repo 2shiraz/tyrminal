@@ -3158,3 +3158,12 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .advanced > summary:hover {
   color: var(--text);
 }
+
+.hop-notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}

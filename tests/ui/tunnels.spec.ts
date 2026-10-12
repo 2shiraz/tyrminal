@@ -172,3 +172,21 @@ test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials co
   await dialog.getByRole("combobox", { name: "Proxy" }).selectOption("socks5");
   await expect(dialog.getByText(/unencrypted/)).toHaveCount(0);
 });
+
+test("trust prompts name the jump-chain hop they come from", async ({ page }) => {
+  await openApp(page, { trustPromptFor: "staging-web", trustPromptHop: { index: 1, total: 2, label: "bastion" } });
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("staging-web");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog.getByRole("note")).toHaveText("Jump host 1 of 1: bastion");
+});
+
+test("a direct connection's trust prompt shows no hop", async ({ page }) => {
+  await openApp(page, { trustPromptFor: "staging-web" });
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("staging-web");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await expect(page.getByTestId("hop-notice")).toHaveCount(0);
+});

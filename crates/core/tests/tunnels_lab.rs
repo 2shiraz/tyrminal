@@ -181,7 +181,11 @@ impl Fixture {
         let opened = self.core.sessions.open_ssh(window, host_id, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
         loop {
             match tokio::time::timeout(WAIT, events.recv()).await.expect("connect in time").unwrap() {
-                SessionEvent::TrustPrompt { prompt_id, .. } => {
+                SessionEvent::TrustPrompt { prompt_id, hop, .. } => {
+                    let direct = self.core.vault.host_connection(host_id).await.unwrap().jump_host_id.is_none();
+                    if direct {
+                        assert_eq!(hop, None, "a direct connection's prompt names no hop");
+                    }
                     self.core.sessions.answer_trust(window, &opened.session_id, &prompt_id, decision).unwrap();
                 }
                 SessionEvent::State { state: SessionState::Connected } => break,
@@ -518,18 +522,23 @@ async fn a_jump_chain_verifies_and_signs_in_to_every_hop_in_order() {
 
     let (session, mut events) = open_until_prompt(&f, &inner).await;
     // First the bastion's key, and nothing has reached the inner server yet.
-    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, .. } = next_decision(&mut events).await else {
+    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, hop, .. } = next_decision(&mut events).await else {
         panic!("expected the bastion's trust prompt")
     };
     assert_eq!((port, fingerprint), (f.lab.port_of("a"), f.lab.str("/servers/a/hostKeyEd25519Fingerprint")));
+    // The prompt names the hop by its saved label and position, so it cannot pass for the host.
+    let position =
+        |index, label: &str| Some(tyrminal_core::contracts::ChainPosition { index, total: 2, label: label.into() });
+    assert_eq!(hop, position(1, "bastion"));
     assert_eq!(f.lab.auth_log_lines("b"), b_before);
     f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Always).unwrap();
     // Then the inner server's own key, verified end to end through the bastion's channel.
-    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, resolved_address, .. } =
+    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, resolved_address, hop, .. } =
         next_decision(&mut events).await
     else {
         panic!("expected the inner host's trust prompt")
     };
+    assert_eq!(hop, position(2, "inner"));
     assert_eq!((port, fingerprint), (f.lab.port_of("b"), f.lab.str("/servers/b/hostKeyEd25519Fingerprint")));
     assert_eq!(resolved_address, None, "a hop reached through a bastion has no locally resolved address");
     assert_eq!(f.lab.auth_log_lines("b"), b_before, "no credential before the inner key is trusted");

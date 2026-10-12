@@ -187,7 +187,9 @@ Never merge these by hand; regenerate them after resolving the sources:
 5. `crates/core/src/vault.rs` host paths: `HostRecord` gained `connection` (jump host);
    `save_host` keeps the stored value, `copy_host` copies it, CSV/OpenSSH import sets the default.
    `connection_plan` now builds a hop chain through a new `hop_plan` helper (same per-host rules).
-6. **Request:** add an optional hop description to `SessionEvent::TrustPrompt` / `HostKeyChanged`
+6. **Done by B (A delegated it):** `SessionEvent::TrustPrompt`, `HostKeyChanged` and `AuthPrompt` gained
+   `hop: Option<ChainPosition>` (`dto.rs`, marked block), and `TerminalView.tsx` renders it with
+   one marked `<HopNotice>` line per dialog. Original request: add an optional hop description to `SessionEvent::TrustPrompt` / `HostKeyChanged`
    (for example `via: Option<String>`, the saved label of the hop) and show it in the trust dialog,
    so the prompt names the specific jump-chain hop (BUILD_SPEC §4.5). B will fill it in
    `run_ssh`. Until then the prompt shows the hop's own address and port.

@@ -168,6 +168,8 @@ export function installMockBackend(options) {
             resolvedAddress: "198.51.100.7",
             algorithm: "ssh-ed25519",
             fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8",
+            // agent B: tunnels and history
+            hop: options.trustPromptHop ?? null,
           }),
         30,
       );

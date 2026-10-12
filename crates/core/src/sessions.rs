@@ -872,6 +872,8 @@ struct TaskContext {
     sink: Arc<dyn SessionSink>,
     sessions: Arc<Sessions>,
     session_id: String,
+    /// The jump-chain hop being connected, for prompts (`None` for a direct connection).
+    hop: Mutex<Option<tyrminal_contracts::ChainPosition>>,
 }
 
 impl TaskContext {
@@ -883,6 +885,7 @@ impl TaskContext {
             sink: Arc::clone(sink),
             sessions: Arc::clone(sessions),
             session_id: session_id.to_owned(),
+            hop: Mutex::new(None),
         }
     }
 
@@ -915,6 +918,7 @@ impl TaskContext {
             max_attempts: MAX_AUTH_ATTEMPTS,
             message,
             echo,
+            hop: self.hop.lock().unwrap_or_else(|p| p.into_inner()).clone(),
         });
         let result = tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), answer).await;
         self.entry.prompts().auth = None;
@@ -925,6 +929,8 @@ impl TaskContext {
 /// The application's host-key policy: known keys pass, changed keys are refused outright, and an
 /// unknown key waits for an explicit decision. Pressing "connect" is never implicit trust.
 struct PromptingVerifier {
+    /// Which hop of a jump-host chain this verifier decides for, if any.
+    hop: Option<tyrminal_contracts::ChainPosition>,
     known: Vec<(KnownHost, String)>,
     generation: u32,
     vault: Arc<VaultService>,
@@ -951,6 +957,7 @@ impl HostKeyVerifier for PromptingVerifier {
                     algorithm: request.key.algorithm.clone(),
                     presented_fingerprint: request.key.fingerprint.clone(),
                     trusted_fingerprints,
+                    hop: self.hop.clone(),
                 });
                 TrustVerdict::Reject(RejectReason::Changed)
             }
@@ -967,6 +974,7 @@ impl HostKeyVerifier for PromptingVerifier {
                     resolved_address: request.resolved.map(|a| a.ip().to_string()),
                     algorithm: request.key.algorithm.clone(),
                     fingerprint: request.key.fingerprint.clone(),
+                    hop: self.hop.clone(),
                 });
                 let decision = tokio::time::timeout(Duration::from_secs(TRUST_PROMPT_TIMEOUT_SECS), answer).await;
                 self.entry.prompts().trust = None;
@@ -1182,14 +1190,24 @@ async fn connect_ssh(
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
-    let first = (plan.endpoint, plan.username, plan.auth, plan.proxy);
-    let hops = plan.jumps.into_iter().map(|hop| (hop.endpoint, hop.username, hop.auth, hop.proxy));
+    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
+    let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
     let mut chain: Vec<VerifiedConnection> = Vec::new();
-    for (endpoint, username, auth, proxy) in hops.chain(std::iter::once(first)) {
+    for (index, (label, endpoint, username, auth, proxy)) in hops.chain(std::iter::once(first)).enumerate() {
+        // Prompts name the hop when there is more than one, so a jump host's trust or password
+        // prompt cannot be mistaken for the destination's.
+        let hop = (total > 1).then(|| tyrminal_contracts::ChainPosition {
+            index: u32::try_from(index + 1).unwrap_or(u32::MAX),
+            total,
+            label,
+        });
+        *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = hop.clone();
         if !chain.is_empty() {
             ctx.state(SessionState::Connecting);
         }
         let verifier = PromptingVerifier {
+            hop,
             known: plan.known_hosts.clone(),
             generation: plan.generation,
             vault: Arc::clone(&ctx.vault),

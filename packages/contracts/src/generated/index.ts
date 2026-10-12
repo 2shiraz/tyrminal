@@ -6,6 +6,7 @@ export type { BackupFile } from "./BackupFile";
 export type { BackupPreview } from "./BackupPreview";
 export type { BulkHostChange } from "./BulkHostChange";
 export type { ChainHop } from "./ChainHop";
+export type { ChainPosition } from "./ChainPosition";
 export type { ConflictChoice } from "./ConflictChoice";
 export type { CursorStyle } from "./CursorStyle";
 export type { EditStatus } from "./EditStatus";

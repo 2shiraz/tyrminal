@@ -22,6 +22,10 @@ export function endpoint(host: string, port: number | string): string {
 }
 
 export const msgB = {
+  hops: {
+    position: (index: number, total: number, label: string) =>
+      index === total ? `Destination (hop ${index} of ${total}): ${label}` : `Jump host ${index} of ${total - 1}: ${label}`,
+  },
   advanced: {
     title: "Advanced",
     jumpHost: "Jump host",
