@@ -1,4 +1,4 @@
-import type { IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { HostOs, IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
@@ -18,7 +18,7 @@ import {
   IconShieldAlert,
   IconX,
 } from "../../components/ui/icons";
-import { links, sessions } from "../../lib/ipc";
+import { appearance, links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { msgD } from "../../lib/messages-d";
@@ -481,6 +481,36 @@ export function TerminalView(props: TerminalViewProps) {
 
   const sessionId = () => controllerRef.current?.id ?? null;
 
+  // connection track: the host's OS for the sheet's host tile (null: a generic mark).
+  const hostId = target.kind === "ssh" ? target.hostId : null;
+  const [hostOs, setHostOs] = useState<HostOs | null>(null);
+  useEffect(() => {
+    if (!hostId) return;
+    let live = true;
+    appearance.list().then(
+      (list) => live && setHostOs(list.find((a) => a.hostId === hostId)?.os ?? null),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [hostId]);
+
+  // When the session opens, the sheet stays for one slow beat to settle, faded, inert and
+  // click-through, while the shell already takes input. Under reduced motion it goes at once.
+  const showSheet = !pending && (closed !== null || state !== "connected" || needsAttention);
+  const [settling, setSettling] = useState(false);
+  const [sheetWasShown, setSheetWasShown] = useState(showSheet);
+  if (sheetWasShown !== showSheet) {
+    setSheetWasShown(showSheet);
+    setSettling(!showSheet && state === "connected" && closed === null && settleMs() > 0);
+  }
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setTimeout(() => setSettling(false), settleMs() + 60);
+    return () => window.clearTimeout(timer);
+  }, [settling]);
+
   function answerTrust(decision: "cancel" | "once" | "always") {
     const id = sessionId();
     if (id && trust) void sessions.answerTrust(id, trust.promptId, decision).catch(() => undefined);
@@ -626,8 +656,10 @@ export function TerminalView(props: TerminalViewProps) {
         />
       )}
 
-      {!pending && (closed !== null || state !== "connected" || needsAttention) && (
+      {(showSheet || settling) && (
         <ConnectionSheet
+          os={hostOs}
+          settling={settling && !showSheet}
           ssh={target.kind === "ssh"}
           label={label}
           identity={identity}
@@ -956,4 +988,10 @@ function userIsElsewhere(pane: HTMLElement | null): boolean {
   // Another terminal's input is not "elsewhere": the pane that became focused takes over.
   if (active.classList.contains("xterm-helper-textarea")) return false;
   return active.matches("input, textarea, select, [contenteditable='true']") || active.closest("dialog, [role='menu']") !== null;
+}
+
+/** The sheet's settle time on connect: the slow motion token (0 under reduced motion). */
+function settleMs(): number {
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--duration-slow"));
+  return Number.isFinite(value) ? value : 0;
 }
