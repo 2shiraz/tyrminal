@@ -213,7 +213,7 @@ export const msg = {
     authKeyMissing: "Key missing",
     deleteTitle: (label: string) => `Delete “${label}”?`,
     deleteBody: "The host and any password stored for it are removed from the vault. Keys are kept.",
-    editorNew: "Add host",
+    editorNew: "New host",
     editorEdit: "Edit host",
     label: "Name",
     address: "Address",
