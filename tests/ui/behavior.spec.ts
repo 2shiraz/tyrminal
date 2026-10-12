@@ -295,3 +295,23 @@ test("a changed host key blocks the session and leads to Known hosts", async ({ 
   await overlay.getByRole("button", { name: "Open Known hosts" }).click();
   await expect(page.getByRole("heading", { name: "Known hosts", level: 1 })).toBeVisible();
 });
+
+test("IME: composition is not sent until committed, then the exact text arrives once", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await waitForTerminalText(page, "deploy@api-gateway");
+  const cdp = await page.context().newCDPSession(page);
+  const writesBefore = (await calls(page, "session_write")).length;
+  // Composing (what a Japanese IME shows while converting): nothing reaches the session.
+  await cdp.send("Input.imeSetComposition", { text: "にほんご", selectionStart: 4, selectionEnd: 4 });
+  await page.waitForTimeout(200);
+  expect((await calls(page, "session_write")).length).toBe(writesBefore);
+  // Committing sends the converted text; the shell echoes it and runs it on Enter.
+  await cdp.send("Input.insertText", { text: "日本語" });
+  await waitForTerminalText(page, "日本語");
+  await page.keyboard.press("Enter");
+  await waitForTerminalText(page, "日本語: synthetic output");
+  const text = await terminalText(page);
+  expect(text).not.toContain("にほんご");
+  expect(text.match(/日本語/g)?.length).toBe(2);
+});

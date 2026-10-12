@@ -101,6 +101,15 @@ for (const step of suite) {
     if (context.length) console.log(`--- failure context ---\n${context.join("\n")}\n--- tail ---`);
     console.log(lines.slice(-40).join("\n"));
   }
+  // A skipped test (e.g. a full-screen app missing on this platform's lab) is BLOCKED, never a pass.
+  const output = `${run.stdout}${run.stderr}`;
+  const skipped = Number(/^(?:ℹ skipped|# skipped|# skip) (\d+)/m.exec(output)?.[1] ?? 0);
+  if (ok && skipped > 0) {
+    const reasons = [...new Set(output.split("\n").filter((l) => /BLOCKED:/.test(l)).map((l) => l.trim()))];
+    console.log(`BLOCKED  ${step.name}: ${skipped} test(s) could not run here\n         ${reasons.join("\n         ")}`);
+    results.push({ name: step.name, command: line, status: "BLOCKED", reason: reasons.join("; "), skipped, exitCode: run.status, seconds: Number(seconds) });
+    continue;
+  }
   results.push({ name: step.name, command: line, status: ok ? "PASSED" : "FAILED", exitCode: run.status, seconds: Number(seconds) });
 }
 

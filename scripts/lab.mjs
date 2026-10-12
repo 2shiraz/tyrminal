@@ -279,6 +279,11 @@ function ensureLocalUser(name, passwordFile) {
       privileged("mkdir", ["-p", `/Users/${name}`]);
       privileged("chown", [`${uid}:20`, `/Users/${name}`]);
     }
+    // When Remote Login is limited to listed users, macOS admits only members of this group
+    // (checked in PAM's account phase); a lab account outside it is disconnected after auth.
+    if (run("dscl", [".", "-read", "/Groups/com.apple.access_ssh"], { allowFail: true })) {
+      privileged("dseditgroup", ["-o", "edit", "-a", name, "-t", "user", "com.apple.access_ssh"]);
+    }
     return;
   }
   if (!localUserExists(name)) privileged("useradd", ["--create-home", "--shell", "/bin/sh", "--comment", "Tyrminal SSH lab", name]);
@@ -290,6 +295,7 @@ function removeLocalUser(name) {
   if (!localUserExists(name)) return;
   if (isWindows) powershell(`Remove-LocalUser -Name '${name}'`, { allowFail: true });
   else if (process.platform === "darwin") {
+    privileged("dseditgroup", ["-o", "edit", "-d", name, "-t", "user", "com.apple.access_ssh"], { allowFail: true });
     privileged("dscl", [".", "-delete", `/Users/${name}`], { allowFail: true });
     privileged("rm", ["-rf", `/Users/${name}`], { allowFail: true });
   } else privileged("userdel", ["--remove", name], { allowFail: true });

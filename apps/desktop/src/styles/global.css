@@ -829,8 +829,10 @@ kbd,
 }
 
 :root[data-reduce-motion="true"] .status-dot[data-tone="busy"]::after,
-:root[data-reduce-motion="true"] .skeleton {
-  animation: none;
+:root[data-reduce-motion="true"] .skeleton,
+:root[data-reduce-motion="true"] .spinner {
+  animation-duration: 0s;
+  animation-iteration-count: 1;
 }
 
 .avatar {

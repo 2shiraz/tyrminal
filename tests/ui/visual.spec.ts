@@ -7,7 +7,8 @@ import { openApp } from "./fixtures";
 // Park the pointer so hover states and tooltips never leak into a baseline.
 const shot = async (page: import("@playwright/test").Page, name: string) => {
   await page.mouse.move(1, 859);
-  await expect(page).toHaveScreenshot(name);
+  // The timeout bounds capture on a busy runner (software WebGL); matching is unchanged.
+  await expect(page).toHaveScreenshot(name, { timeout: 15_000 });
 };
 
 for (const theme of ["dark", "light"] as const) {

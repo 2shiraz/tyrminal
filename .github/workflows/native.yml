@@ -82,6 +82,14 @@ jobs:
       - name: Release policy against the built binary
         run: node scripts/check-release.mjs --require-binary
 
+      - name: Lab server logs (on failure)
+        if: failure()
+        shell: bash
+        run: |
+          for f in tests/ssh-lab/.run/*/sshd.log; do echo "== $f"; tail -n 120 "$f"; done || true
+          if [ -f tests/ssh-lab/.run/lab.json ] && grep -q '"mode": "docker"' tests/ssh-lab/.run/lab.json; then
+            for c in $(docker ps -aq --filter label=tyrminal.lab=1); do docker logs --tail 120 "$c"; done
+          fi
       - name: Stop SSH lab
         if: always()
         run: pnpm run lab:down || true

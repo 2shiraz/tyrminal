@@ -1,5 +1,5 @@
 use tauri::State;
-use tyrminal_core::contracts::{ErrorCode, HostSummary, IpcError, Preferences};
+use tyrminal_core::contracts::{HostSummary, IpcError, Preferences};
 
 use crate::state::AppState;
 
@@ -32,7 +32,8 @@ pub async fn link_open(url: String) -> Result<(), IpcError> {
     }
     #[cfg(not(feature = "e2e"))]
     {
-        open::that_detached(&url)
-            .map_err(|_| IpcError::new(ErrorCode::IoError, "The link could not be handed to your browser."))
+        open::that_detached(&url).map_err(|_| {
+            IpcError::new(tyrminal_core::contracts::ErrorCode::IoError, "The link could not be handed to your browser.")
+        })
     }
 }
