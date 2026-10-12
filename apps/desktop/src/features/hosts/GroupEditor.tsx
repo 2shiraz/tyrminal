@@ -8,6 +8,7 @@ import { groups as groupsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
+import { NoteCard } from "../notes/NoteCard";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
 import { groupPath } from "./HostEditor";
 
@@ -131,6 +132,7 @@ export function GroupEditor({
         </fieldset>
         <GroupDefaultsSection state={defaults} />
         <Switch label={msgProduction.groupSwitch} hint={msgProduction.groupHint} checked={production} onChange={setProduction} />
+        {group && <NoteCard target={{ kind: "group", groupId: group.id }} />}
         <ErrorNotice error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose}>

@@ -26,9 +26,14 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */
+  notes?: Record<string, { text: string; format?: "plain" | "markdown" }>;
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;
+  // security review (P-27)
+  /** Adds a DSA key, a 2048-bit RSA key and an RSA-only trusted key for a retired host. */
+  reviewFixtures?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

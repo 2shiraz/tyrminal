@@ -6,6 +6,7 @@
 //! adapter crate supplies a [`SessionSink`] and calls these services.
 
 mod connlog;
+pub mod containers;
 mod deploy;
 mod diagnostics;
 mod discovery;
@@ -39,6 +40,8 @@ pub mod shell_integration;
 mod snippet_runs;
 // compromised-password check (SEC-11)
 pub mod password_check;
+// security review (P-27)
+mod security_review;
 // command history
 mod command_history;
 // server at a glance

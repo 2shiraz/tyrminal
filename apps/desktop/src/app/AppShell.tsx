@@ -20,6 +20,7 @@ import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "..
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -28,6 +29,7 @@ import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
+import { ContainersDialog, engineName } from "../features/terminal/ContainersDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
 // command history
@@ -137,10 +139,10 @@ function Shell() {
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
-  // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
+  // The side panel beside the terminals: snippets, files, server facts or host notes, one at a time.
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | "notes" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server" | "notes") => setSidePanel((v) => (v === which ? null : which)), []);
   // terminal input: the side panel's section (snippets, history, appearance; TRM-14)
   const [panelSection, setPanelSection] = useState<PanelSection>("snippets");
   const panelSectionRef = useRef(panelSection);
@@ -179,6 +181,8 @@ function Shell() {
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
   const [connectionLog, setConnectionLog] = useState<{ sessionId: string; label: string } | null>(null);
+  // P-33: the containers dialog for an SSH session (its host label).
+  const [containersOf, setContainersOf] = useState<{ sessionId: string; label: string } | null>(null);
   const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
@@ -761,7 +765,7 @@ function Shell() {
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
-          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} />}
+          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} onOpenKeychain={() => navigate("keychain")} />}
           {/* agent B: tunnels and history */}
           {!terminalVisible && destination === "tunnels" && (
             <TunnelsView
@@ -799,6 +803,15 @@ function Shell() {
                         const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
                         return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
                       })}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : showPanel && sidePanel === "notes" ? (
+                    <NotesPanel
+                      host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
+                      onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (text) => focusedHandle()?.reviewPaste(text) : undefined}
                       onClose={() => {
                         setSidePanel(null);
                         focusedHandle()?.focus();
@@ -862,6 +875,8 @@ function Shell() {
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           serverOpen={sidePanel === "server"}
           onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
+          notesOpen={sidePanel === "notes"}
+          onToggleNotes={terminalVisible && !sftpVisible ? () => togglePanel("notes") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
@@ -986,12 +1001,25 @@ function Shell() {
               : undefined
           }
           // privilege prompts (KEY-18)
+          // security review (P-27)
+          onSecurityReview={() => {
+            navigate("settings");
+            setSettingsAt((current) => ({ section: "review", n: (current?.n ?? 0) + 1 }));
+          }}
           onInsertPassword={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? () => runAction("insertPassword") : undefined}
           onConnectionLog={
             pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
               ? () => {
                   const sessionId = focusedHandle()?.sessionId();
                   if (sessionId) setConnectionLog({ sessionId, label: pane.label });
+                }
+              : undefined
+          }
+          onContainers={
+            pane?.target.kind === "ssh" && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (sessionId) setContainersOf({ sessionId, label: pane.label });
                 }
               : undefined
           }
@@ -1211,6 +1239,26 @@ function Shell() {
               .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
               .then(() => handle.focus())
               .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {containersOf && (
+        <ContainersDialog
+          sessionId={containersOf.sessionId}
+          host={containersOf.label}
+          onOpen={(engine, container) => {
+            const name = container.name || container.id.slice(0, 12);
+            open(
+              { kind: "container", sessionId: containersOf.sessionId, engine, containerId: container.id },
+              msgD.containers.tabLabel(name),
+              msgD.containers.identity(containersOf.label, engineName(engine)),
+            );
+            setContainersOf(null);
+          }}
+          onClose={() => {
+            setContainersOf(null);
+            focusedHandle()?.focus();
           }}
         />
       )}

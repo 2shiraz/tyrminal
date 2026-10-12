@@ -50,6 +50,8 @@ const COMMANDS: &[&str] = &[
     "session_attach",
     "session_diagnostics",
     "session_open_key_install",
+    "containers_list",
+    "container_session_open",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
@@ -161,11 +163,16 @@ const COMMANDS: &[&str] = &[
     // compromised-password check (SEC-11)
     "password_check_status",
     "password_check_run",
+    // security review (P-27)
+    "security_review",
     "startup_get",
     "startup_set",
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    "note_get",
+    "note_set",
+    "note_for_host",
     // LAN discovery
     "discovery_networks",
     "discovery_start",

@@ -133,7 +133,8 @@ export function reconnectDelayMs(attempt: number, random: () => number = Math.ra
  * own. Authentication failures, a changed or rejected host key, cancellation, a locked vault,
  * and a normal exit are never retried automatically.
  */
-export function shouldAutoReconnect(kind: "ssh" | "local", wasConnected: boolean, code: string | null): boolean {
+// A container shell (P-33) is never reconnected on its own: the SSH session it ran in may be gone.
+export function shouldAutoReconnect(kind: "ssh" | "local" | "container", wasConnected: boolean, code: string | null): boolean {
   return kind === "ssh" && wasConnected && code !== null && ["DISCONNECTED", "TIMEOUT", "UNREACHABLE"].includes(code);
 }
 

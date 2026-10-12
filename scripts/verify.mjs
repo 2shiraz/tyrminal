@@ -94,6 +94,13 @@ const SUITES = {
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // privilege prompts (KEY-18)
     { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    // P-33: shells in a real container. The lab images have no engine, so this runs only where the
+    // lab user can use Docker or Podman and says so; otherwise it is BLOCKED (never a silent pass).
+    {
+      name: "container shells in a running container (lab with an engine)",
+      cmd: cargo("test", "-p", "tyrminal-core", "--test", "containers_lab", "--quiet", "--", "--ignored"),
+      blockedBy: () => needsLab() ?? (process.env.TYRMINAL_LAB_CONTAINERS ? null : "needs Docker or Podman usable by the lab user, with alpine:3.22; set TYRMINAL_LAB_CONTAINERS=1 to run"),
+    },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -121,6 +128,8 @@ const SUITES = {
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     // privilege prompts (KEY-18)
     { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    // security review (P-27)
+    { name: "security review through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/security-review.test.mjs")), blockedBy: () => needsE2e() },
     // command history and server at a glance
     { name: "command history and server panel (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/history-glance.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],

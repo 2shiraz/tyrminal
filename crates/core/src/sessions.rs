@@ -2061,6 +2061,9 @@ async fn run_local(
 /// Ended sessions whose connection logs are kept.
 const MAX_ENDED_LOGS: usize = 16;
 
+/// P-33: how long listing containers may take.
+const CONTAINER_LIST_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Telnet connections that take longer than this to answer are given up.
 const TELNET_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -2359,6 +2362,99 @@ impl Sessions {
 
     pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
         self.snippet_runs.cancel(owner, run_id);
+    }
+
+    /// P-33: the running Docker or Podman containers on the host of a connected SSH session,
+    /// listed by a fixed command on an exec channel of its verified connection. Stops when the
+    /// session ends, is closed or the vault locks.
+    pub async fn list_containers(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::ContainerList, IpcError> {
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let listing =
+            conn.exec(crate::containers::LIST_COMMAND, crate::containers::MAX_LIST_OUTPUT, CONTAINER_LIST_TIMEOUT);
+        let out = tokio::select! {
+            out = listing => out.map_err(|e| match e {
+                SshError::LimitExceeded => err(ErrorCode::LimitExceeded, "The container listing was too long to show."),
+                other => from_ssh(&other),
+            })?,
+            why = until_ended(&entry) => return Err(why),
+        };
+        let list = crate::containers::parse_listing(&out.stdout, &out.stderr, out.exit_status)?;
+        entry.log.note(&match (list.engine, &list.problem) {
+            (None, _) => "containers: neither Docker nor Podman was found".to_owned(),
+            (Some(engine), None) => format!("containers: {engine:?} listed {}", list.containers.len()),
+            (Some(engine), Some(_)) => format!("containers: {engine:?} reported an error"),
+        });
+        Ok(list)
+    }
+
+    /// P-33: opens a shell in a container as a new session (its own tab), on a new PTY channel of
+    /// the verified connection of `session_id`. The command is built only from the engine and a
+    /// checked container ID. The shell ends with that session, and like every session when it is
+    /// closed or the vault locks.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_container_shell(
+        self: &Arc<Self>,
+        owner: &str,
+        session_id: &str,
+        engine: tyrminal_contracts::ContainerEngine,
+        container_id: &str,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
+        // The ID is checked first: a value that is not a container ID never reaches the server.
+        let command = crate::containers::shell_command(engine, container_id, &random_token()?)?;
+        let (parent, conn) = self.connection(owner, session_id)?;
+        let (id, entry, input_rx) = self.register(owner, parent.generation, sink, parent.host_id.clone(), false)?;
+        entry.log.note(&format!(
+            "container shell: {engine:?} container {} over the connection of an open session",
+            &container_id[..12]
+        ));
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        let this = Arc::clone(self);
+        let child_id = id.clone();
+        tokio::spawn(async move {
+            let body = async {
+                sink.event(SessionEvent::State { state: SessionState::OpeningChannel, hop: None });
+                let pty = PtyRequest {
+                    term: tyrminal_contracts::HostTerminal::default().term.term().into(),
+                    cols: u32::from(cols),
+                    rows: u32::from(rows),
+                };
+                // The parent's own reason when the vault locked; otherwise that it has ended.
+                let ended = |why: IpcError| {
+                    if why.code == ErrorCode::VaultLocked {
+                        why
+                    } else {
+                        err(ErrorCode::Disconnected, "The SSH session this container shell ran in has ended.")
+                    }
+                };
+                let opened = tokio::select! {
+                    opened = conn.open_command_pty(&pty, &command) => opened,
+                    why = until_ended(&parent) => return Outcome::failed(ended(why)),
+                };
+                let (reader, writer) = match opened {
+                    Ok(channel) => channel,
+                    Err(e) => return Outcome::failed(from_ssh(&e)),
+                };
+                entry.log.note("container shell opened");
+                sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
+                // The engine's own errors (no such container, permission denied) arrive as
+                // terminal output and the exit status, as they are.
+                tokio::select! {
+                    outcome = pump(Transport::Ssh { reader, writer }, &entry.relay, &*sink, input_rx, None) => outcome,
+                    why = until_ended(&parent) => Outcome::failed(ended(why)),
+                }
+            };
+            this.supervise(&child_id, &entry, &sink, body).await;
+            // The channel and this handle to the connection are gone with the body.
+            drop(conn);
+        });
+        Ok(SessionOpened { session_id: id })
     }
 
     /// Shell integration on the server of a session the caller owns: what `~/.bashrc` holds.
