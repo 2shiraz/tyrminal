@@ -3,7 +3,7 @@ import { type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode
 
 import { useWindowFocused } from "../../components/ui/Wordmark";
 import { SecretField, TextField } from "../../components/ui/controls";
-import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconServer, IconShieldAlert, IconX } from "../../components/ui/icons";
+import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconShieldAlert, IconX } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgConnect } from "../../lib/messages-connect";
 import { msgC } from "../../lib/messages-c";
@@ -510,7 +510,8 @@ export function ConnectionSheet(props: {
         onKeyDown={onKeyDown}
       >
         <div className="connect-head" data-tile={ssh || undefined}>
-          {ssh && (props.os ? <OsIcon os={props.os} /> : <span className="avatar connect-host-mark" aria-hidden="true"><IconServer size={16} /></span>)}
+          {/* The host's mark, as in the Hosts list: its OS logo, or the neutral one while unknown. */}
+          {ssh && <OsIcon os={props.os ?? null} />}
           <div className="connect-head-text">
             <h2 id={settling ? undefined : "connect-title"}>
               {tone === "danger" && <IconShieldAlert size={17} />}
