@@ -100,7 +100,6 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [confirming, setConfirming] = useState(false);
   const isProduction = useIsProduction();
-  const [, refresh] = useState(0);
   const cancelled = useRef(false);
   /** Run ids of runs on open sessions, and the run-only connections this dialog opened. */
   const openRuns = useRef(new Set<string>());
@@ -124,12 +123,8 @@ function MultiRun({ snippet, onClose, allOpen }: { snippet: SnippetSummary; onCl
     [],
   );
 
-  // Sessions are read when needed: tabs may connect while the dialog is open.
-  useEffect(() => {
-    if (step === "run") return;
-    const timer = window.setInterval(() => refresh((n) => n + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [step]);
+  // Tabs may connect while the dialog is open: the run host's `version` changes on every session
+  // event, which re-renders this dialog and reads the sessions again (no polling).
   const sessionOf = new Map(runHost.sessions().map((s) => [s.hostId, s.sessionId]));
 
   const chosen = all.filter((h) => selected.has(h.id)).sort((a, b) => a.label.localeCompare(b.label));
