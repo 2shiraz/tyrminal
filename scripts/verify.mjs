@@ -121,6 +121,8 @@ const SUITES = {
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     // privilege prompts (KEY-18)
     { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    // security review (P-27)
+    { name: "security review through the real application", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/security-review.test.mjs")), blockedBy: () => needsE2e() },
     // command history and server at a glance
     { name: "command history and server panel (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/history-glance.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],

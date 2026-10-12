@@ -29,6 +29,8 @@ mod password_check;
 mod command_history;
 // server at a glance
 mod server_glance;
+// security review (P-27)
+mod security_review;
 
 pub use discovery::*;
 pub use dto::*;
@@ -53,3 +55,5 @@ pub use password_check::*;
 pub use command_history::*;
 // server at a glance
 pub use server_glance::*;
+// security review (P-27)
+pub use security_review::*;

@@ -76,6 +76,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `discovery_start` | network id | discovery status | Vault unlocked; id must be a listed interface; browses `_ssh._tcp` there for 30 s |
 | `discovery_status` | — | running, seconds left, found (cleaned, ≤ 64), truncated | This window's browse |
 | `discovery_stop` | — | discovery status | Ends this window's browse; results stay readable |
+| `security_review` | — | `SecurityReview` | Vault unlocked; read-only, on the device, no network. Findings name records (ids, labels, endpoints, fingerprints) and never carry a secret (P-27, ADR 0011) |
 
 ## Events
 

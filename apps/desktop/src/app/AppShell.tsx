@@ -738,7 +738,7 @@ function Shell() {
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
-          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} />}
+          {!terminalVisible && destination === "settings" && <SettingsView key={settingsAt?.n ?? 0} initialSection={settingsAt?.section} onOpenKeychain={() => navigate("keychain")} />}
           {/* agent B: tunnels and history */}
           {!terminalVisible && destination === "tunnels" && (
             <TunnelsView
@@ -962,6 +962,11 @@ function Shell() {
               : undefined
           }
           // privilege prompts (KEY-18)
+          // security review (P-27)
+          onSecurityReview={() => {
+            navigate("settings");
+            setSettingsAt((current) => ({ section: "review", n: (current?.n ?? 0) + 1 }));
+          }}
           onInsertPassword={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? () => runAction("insertPassword") : undefined}
           onConnectionLog={
             pane?.target.kind === "ssh" && focusedHandle()?.sessionId()

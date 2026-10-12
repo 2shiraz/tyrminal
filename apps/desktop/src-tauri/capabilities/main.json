@@ -152,6 +152,7 @@
     "allow-identity-usage",
     "allow-password-check-status",
     "allow-password-check-run",
+    "allow-security-review",
     "allow-startup-get",
     "allow-startup-set",
     "allow-startup-effective",

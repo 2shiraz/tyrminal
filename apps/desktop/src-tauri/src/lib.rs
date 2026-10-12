@@ -284,6 +284,8 @@ pub fn run() {
             // compromised-password check (SEC-11)
             commands::password_check::password_check_status,
             commands::password_check::password_check_run,
+            // security review (P-27)
+            commands::security_review::security_review,
             commands::inventory::startup_get,
             commands::inventory::startup_set,
             commands::inventory::startup_effective,

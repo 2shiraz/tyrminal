@@ -542,6 +542,12 @@ export const passwordCheck = {
   run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
 };
 
+// security review (P-27)
+export const securityReview = {
+  /** Findings over the unlocked vault. Read-only, on the device; never a secret. */
+  run: () => call<import("@tyrminal/contracts").SecurityReview>("security_review"),
+};
+
 /** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
 export const startup = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
