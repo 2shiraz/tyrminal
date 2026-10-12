@@ -6007,6 +6007,7 @@ version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "getrandom 0.4.3",
+ "quick-xml",
  "rusqlite",
  "serde",
  "serde_json",
@@ -6037,6 +6038,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tokio",
  "tyrminal-core",
+ "zeroize",
 ]
 
 [[package]]

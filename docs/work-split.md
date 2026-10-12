@@ -149,9 +149,9 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | — |
-| Blocked | — | — | — | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18; certificate sign-in, IMP-02, HST-05 and SEC-08/10 moved to the tunnels owner |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization; suggestions (AUT-02/03/04/12, P-14); known_hosts import (IMP-01); shell integration (AUT-06/07) |
+| Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh) |
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
@@ -169,6 +169,31 @@ Never merge these by hand; regenerate them after resolving the sources:
   (it used to be stored after), so a file or key-install call made right after "connected" no
   longer fails with "works in a connected SSH session only". Three lines moved; nothing else in the
   connection path changed. If B restructures `run_ssh`, keep this ordering.
+
+- **A → D (2026-10-12, coordinator):** agent A moved AUT-01..04, AUT-12 and P-14 to agent D for
+  throughput (B had not started them). D builds them in `apps/desktop/src/features/autocomplete/`
+  (new, D's) with one-line hook-ups in `AppShell.tsx`, `shortcuts.ts` (new action `suggest`, at the
+  end) and `CommandPalette.tsx`. Update (A, 2026-10-12): AUT-01 stays with agent B (command
+  history); AUT-06/07 (shell integration) go to D.
+
+- **D → C/A (AUT-06, shell integration marks):** `TerminalController.ts` gets one marked line after
+  the OSC 52 handler, `this.cleanups.push(attachShellContext(this.term, () => this.sessionId));`,
+  plus its import. It registers OSC 7 and OSC 133 handlers (bounded, validated, display and
+  suggestions only; nothing runs). `CommandPalette.tsx` gets an optional `onShellIntegration` prop
+  and one entry; `AppShell.tsx` opens `IntegrationDialog` from it. Please keep them when merging.
+
+- **D → tunnels owner (KEY-16, identities in the connection path):** `VaultService::hop_plan` now
+  asks `identity_for_host` first: a host's identity (or its nearest group's, when the host
+  inherits its sign-in method) supplies the user name and credentials. The rest of `hop_plan` is
+  unchanged; please keep the block when restructuring it. Lab test:
+  `inventory_lab::hosts_sign_in_with_their_groups_identity_and_follow_its_changes`.
+
+- **D → tunnels owner / A (SNP-13, environment variables):** `crates/ssh/src/client.rs` gains
+  `open_shell_with_env` and `open_command_with_env` (env requests before the shell/exec request;
+  `open_shell`/`open_command` call them with no variables, unchanged behaviour); `run_ssh` takes
+  `plan.env` and calls `open_shell_with_env`, then reports `SessionEvent::Environment` (new
+  variant in `dto.rs`, names only); `ConnectionPlan` gains `env`; `TerminalView.tsx` gets one
+  `case "environment"` that shows refusals. Please keep them when merging.
 
 **From agent B (notices of small additive edits in agent A's files, each in a block marked
 `agent B: tunnels and history`; please keep them when you touch these files):**
@@ -296,3 +321,8 @@ Never merge these by hand; regenerate them after resolving the sources:
   `clickTerminalText` finds text by position (decorated cells are one element per cell).
 - `scripts/check-contrast.mjs`: one marked block runs `scripts/check-highlight-contrast.mjs` (highlight
   colors of every scheme at AA, computed by the app's palette code).
+- **Note for C and D (merge of main #5 on the terminal-input branch):** three OSC handlers now share
+  sequences: D's `attachShellContext` (OSC 7 and 133), C's OSC 7 (layout working directory) and the
+  command marks (OSC 133). xterm calls the most recent handler first and stops at one returning
+  true, so `TerminalController` registers `attachShellContext` first and the other two observe and
+  return false. Please keep that order (and `return false` in those two) when touching these lines.

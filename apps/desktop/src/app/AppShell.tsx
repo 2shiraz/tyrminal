@@ -16,9 +16,13 @@ import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { SnippetRunContext } from "../features/snippets/runContext";
+import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
+import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
-import { snippets as snippetsApi, vault } from "../lib/ipc";
+import { sessions as sessionsApi, snippets as snippetsApi, vault } from "../lib/ipc";
 import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
@@ -30,6 +34,7 @@ import { ConnectionPanel, type PanelSection } from "../features/sidepanel/Connec
 import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
+import { msgD } from "../lib/messages-d";
 import { msg } from "../lib/messages";
 import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
@@ -145,6 +150,9 @@ function Shell() {
   const broadcasting = useMemo<ReadonlySet<number>>(() => new Set(members.keys()), [members]);
   const stopBroadcast = useCallback((tabId: number) => setMembers((current) => withoutTab(current, tabId)), []);
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
+  // agent D: suggestions for the focused SSH pane.
+  const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string; hostId: string | null } | null>(null);
+  const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
   const wsRef = useRef(ws);
@@ -477,6 +485,15 @@ function Shell() {
         case "lock":
           void vault.lock().catch(() => undefined);
           break;
+        // agent D: inventory and snippets
+        case "suggest": {
+          const p = activePane(wsRef.current);
+          const handle = p ? handles.current.get(p.id) : undefined;
+          const sessionId = handle?.connected() ? handle.sessionId() : null;
+          if (p && sessionId && p.target.kind === "ssh") setSuggesting({ paneId: p.id, sessionId, hostId: p.target.hostId });
+          else notify("info", msgD.suggest.needsTerminal);
+          break;
+        }
         case "renameTab": {
           const t = activeTab(wsRef.current);
           if (t) setRenaming(t.id);
@@ -544,7 +561,26 @@ function Shell() {
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
 
+  // agent D: inventory and snippets
+  const snippetRunHost = useMemo(
+    () => ({
+      sessions: () =>
+        wsRef.current.tabs.flatMap((tab) =>
+          panesOf(tab.layout).flatMap((id) => {
+            const pane = wsRef.current.panes[id];
+            const handle = handles.current.get(id);
+            const sessionId = handle?.connected() ? handle.sessionId() : null;
+            return pane?.target.kind === "ssh" && sessionId ? [{ hostId: pane.target.hostId, sessionId }] : [];
+          }),
+        ),
+      connect,
+    }),
+    [connect],
+  );
+
   return (
+    // agent D: snippet runs on several sessions read this window's open SSH sessions.
+    <SnippetRunContext.Provider value={snippetRunHost}>
     <div className="shell" data-sidebar={collapsed ? "collapsed" : "expanded"}>
       <Sidebar
         destination={terminalVisible ? null : destination}
@@ -808,6 +844,15 @@ function Shell() {
                 }
               : undefined
           }
+          onShellIntegration={
+            pane && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (pane.target.kind === "local") setIntegrating({ kind: "local" });
+                  else if (sessionId) setIntegrating({ kind: "ssh", sessionId });
+                }
+              : undefined
+          }
         />
       )}
 
@@ -901,6 +946,47 @@ function Shell() {
         />
       )}
 
+      {suggesting && (
+        <SuggestDialog
+          sessionId={suggesting.sessionId}
+          hostId={suggesting.hostId}
+          onClose={() => {
+            setSuggesting(null);
+            handles.current.get(suggesting.paneId)?.focus();
+          }}
+          onSnippet={(snippet) => {
+            setSuggesting(null);
+            requestSnippet(snippet, "paste");
+          }}
+          onIntegration={() => {
+            const target = suggesting;
+            setSuggesting(null);
+            setIntegrating({ kind: "ssh", sessionId: target.sessionId });
+          }}
+          onInsert={(text) => {
+            const target = suggesting;
+            setSuggesting(null);
+            const handle = handles.current.get(target.paneId);
+            // Only into the same live session the dialog was opened for; never with Enter.
+            if (!handle || handle.sessionId() !== target.sessionId) return;
+            void sessionsApi
+              .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
+              .then(() => handle.focus())
+              .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {integrating && (
+        <IntegrationDialog
+          target={integrating}
+          onClose={() => {
+            setIntegrating(null);
+            focusedHandle()?.focus();
+          }}
+        />
+      )}
+
       {runRequest && (
         <SnippetRunDialog
           request={runRequest}
@@ -916,5 +1002,6 @@ function Shell() {
         />
       )}
     </div>
+    </SnippetRunContext.Provider>
   );
 }

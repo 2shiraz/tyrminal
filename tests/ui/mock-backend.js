@@ -141,6 +141,11 @@ export function installMockBackend(options) {
     let delay = 10;
     for (const step of steps) {
       if (step === "connected" && kind === "ssh") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+      // Environment variables of the host: the mock server's AcceptEnv allows TYR_* only.
+      if (step === "opening_channel" && host) {
+        const sent = (window.__mockEnvOf?.(host.id) ?? []).map((v) => v.name);
+        if (sent.length) setTimeout(() => channelSend(s.events, { type: "environment", sent, rejected: sent.filter((n) => !n.startsWith("TYR_")) }), delay);
+      }
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
     }
@@ -876,6 +881,193 @@ export function installMockBackend(options) {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };
       window.__mockOpenedLinks.push(a.url);
     },
+    // agent D: inventory and snippets
+    host_appearance_list: () => Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os })),
+    host_set_os: (a) => {
+      state.os ??= {};
+      for (const hostId of a.ids) {
+        if (!state.hosts.some((h) => h.id === hostId)) throw { code: "NOT_FOUND", message: "A selected host no longer exists." };
+      }
+      for (const hostId of a.ids) {
+        if (a.os === null) delete state.os[hostId];
+        else state.os[hostId] = a.os;
+      }
+      return a.ids.length;
+    },
+    key_generate: (a) => {
+      const algorithms = { ed25519: "ssh-ed25519", ecdsa_p256: "ecdsa-sha2-nistp256", ecdsa_p384: "ecdsa-sha2-nistp384", ecdsa_p521: "ecdsa-sha2-nistp521", rsa3072: "ssh-rsa", rsa4096: "ssh-rsa" };
+      const algorithm = algorithms[a.kind ?? "ed25519"];
+      const key = { id: id(800 + state.keys.length), label: a.label, algorithm, fingerprint: `SHA256:synthetic${state.keys.length}`, publicKey: `${algorithm} AAAASynthetic ${a.label}`, passphraseProtected: false, passphraseStored: false, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      return key;
+    },
+    key_import: (a) => {
+      if (a.key.privateKey.startsWith("PuTTY-User-Key-File-3") && !a.key.passphrase) throw { code: "KEY_INVALID", message: "This private key is encrypted. Enter its passphrase to import it." };
+      const key = { id: id(850 + state.keys.length), label: a.key.label, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:imported", publicKey: `ecdsa-sha2-nistp256 AAAAImported ${a.key.label}`, passphraseProtected: Boolean(a.key.passphrase), passphraseStored: a.key.rememberPassphrase, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      return key;
+    },
+    // The native dialog: the mock "picks" a synthetic encrypted PuTTY key and keeps its text here.
+    key_import_pick_file: () => {
+      state.pickedKey = { fileName: "work.ppk", passphraseProtected: true };
+      return structuredClone(state.pickedKey);
+    },
+    key_import_picked: (a) => {
+      if (!state.pickedKey) throw { code: "KEY_INVALID", message: "Choose the key file again." };
+      if (state.pickedKey.passphraseProtected && !a.passphrase) throw { code: "KEY_INVALID", message: "This private key is encrypted. Enter its passphrase to import it." };
+      const key = { id: id(870 + state.keys.length), label: a.label, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:picked", publicKey: `ecdsa-sha2-nistp256 AAAAPicked ${a.label}`, passphraseProtected: true, passphraseStored: a.rememberPassphrase, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      state.pickedKey = null;
+      return key;
+    },
+    key_import_pick_clear: () => {
+      state.pickedKey = null;
+    },
+    key_certificate_list: () => Object.values(state.certificates ?? {}),
+    key_certificate_attach: (a) => {
+      if (!a.certificate.includes("-cert-v01@openssh.com")) throw { code: "KEY_INVALID", message: "That is not a valid OpenSSH certificate, or its signature does not check out." };
+      state.certificates ??= {};
+      const cert = { keyId: a.keyId, algorithm: a.certificate.split(" ")[0], certKeyId: "synthetic-user", principals: ["tyr"], validAfter: now - 60, validBefore: null, caFingerprint: "SHA256:syntheticCA" };
+      state.certificates[a.keyId] = cert;
+      return cert;
+    },
+    key_certificate_remove: (a) => {
+      delete state.certificates?.[a.keyId];
+    },
+    snippet_exec: (a) =>
+      new Promise((resolve, reject) => {
+        const session = state.sessions.get(a.sessionId);
+        if (!session) return reject({ code: "ACCESS_DENIED", message: "That session is not available." });
+        state.runs ??= new Map();
+        const finish = () => {
+          state.runs.delete(a.runId);
+          // A stand-in for real hosts: "staging-web" fails, "build-runner-03" hangs until cancelled.
+          if (session.host === "staging-web") resolve({ exitStatus: 2, exitSignal: null, stdout: "", stderr: "permission denied\n", truncated: false, envRejected: ["LEGACY_MODE"] });
+          else resolve({ exitStatus: 0, exitSignal: null, stdout: `ran on ${session.host}\n`, stderr: "", truncated: false, envRejected: [] });
+        };
+        if (session.host === "build-runner-03") state.runs.set(a.runId, () => reject({ code: "CANCELLED", message: "The run was cancelled." }));
+        else setTimeout(finish, 50);
+      }),
+    snippet_exec_cancel: (a) => {
+      state.runs?.get(a.runId)?.();
+      state.runs?.delete(a.runId);
+    },
+    execution_target_list: () => structuredClone(state.targets ?? []),
+    execution_target_save: (a) => {
+      state.targets ??= [];
+      const saved = { id: id(900 + state.targets.length), name: a.target.name, hostIds: [...new Set(a.target.hostIds)], missing: 0 };
+      state.targets.push(saved);
+      return saved;
+    },
+    execution_target_delete: (a) => {
+      state.targets = (state.targets ?? []).filter((t) => t.id !== a.id);
+    },
+    snippet_move: (a) => {
+      const folder = a.folder.trim().replace(/^\/+|\/+$/g, "");
+      const out = [];
+      for (const sid of a.ids) {
+        const source = state.snippets.find((x) => x.id === sid);
+        if (a.copy) {
+          const copy = { ...source, id: id(950 + state.snippets.length), folder };
+          state.snippets.push(copy);
+          out.push(copy);
+        } else {
+          source.folder = folder;
+          out.push(source);
+        }
+      }
+      return structuredClone(out);
+    },
+    snippet_folder_rename: (a) => {
+      let n = 0;
+      for (const sn of state.snippets) {
+        if (sn.folder === a.from || sn.folder.startsWith(`${a.from}/`)) {
+          sn.folder = a.to + sn.folder.slice(a.from.length);
+          n++;
+        }
+      }
+      return n;
+    },
+    // A small stand-in for the core known_hosts parser: plain "host type key" lines only.
+    known_hosts_import_preview: (a) => {
+      const entries = [];
+      const skipped = [];
+      a.text.split("\n").forEach((line, i) => {
+        const t = line.trim();
+        if (!t || t.startsWith("#")) return;
+        if (t.startsWith("|")) return skipped.push({ line: i + 1, text: t.slice(0, 40), reason: "hashed host name: which host it is for cannot be known" });
+        const [host, algorithm, key] = t.split(/\s+/);
+        const conflict = state.knownHosts.some((k) => k.host === host && k.port === 22 && k.algorithm === algorithm);
+        entries.push({ host, port: 22, algorithm, fingerprint: `SHA256:${key.slice(-12)}`, publicKey: `${algorithm} ${key}`, status: conflict ? "conflict" : "new" });
+      });
+      return { entries, skipped };
+    },
+    known_hosts_import: (a) => {
+      for (const e of a.entries) state.knownHosts.push({ id: id(980 + state.knownHosts.length), host: e.host, port: e.port, algorithm: e.algorithm, fingerprint: e.fingerprint, addedAt: now });
+      return a.entries.length;
+    },
+    import_known_hosts_preview: () => {
+      const used = new Set(state.hosts.map((h) => `${h.address}:${h.port}`));
+      const hosts = state.knownHosts
+        .filter((k) => !used.has(`${k.host}:${k.port}`))
+        .map((k) => ({ label: k.port === 22 ? k.host : `${k.host}:${k.port}`, address: k.host, port: k.port, username: "", group: "", tags: [], notes: [`Trusted ${k.algorithm} key ${k.fingerprint}`] }));
+      return { hosts, skipped: [], duplicates: [] };
+    },
+    env_get: (a) => envState.get(envKey(a.target)) ?? [],
+    env_set: (a) => {
+      for (const v of a.vars) if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(v.name)) throw { code: "INVALID_INPUT", message: "Variable names use letters, digits and _, and do not start with a digit." };
+      if (a.vars.length) envState.set(envKey(a.target), a.vars);
+      else envState.delete(envKey(a.target));
+      return a.vars;
+    },
+    env_effective: (a) => window.__mockEnvOf(a.hostId, true),
+    identity_list: () =>
+      identityState.list.map((i) => ({
+        id: i.id,
+        label: i.label,
+        username: i.username,
+        hasPassword: i.password !== null,
+        keyId: i.keyId,
+        usedBy: [...identityState.uses.values()].filter((u) => u === i.id).length,
+      })),
+    identity_save: (a) => {
+      const input = a.identity;
+      if (!input.label.trim()) throw { code: "INVALID_INPUT", message: "Enter a name." };
+      const existing = identityState.list.find((i) => i.id === input.id);
+      const password = input.password.kind === "set" ? input.password.value : input.password.kind === "clear" ? null : (existing?.password ?? null);
+      const record = { id: existing?.id ?? id(1100 + identityState.list.length), label: input.label, username: input.username, password, keyId: input.keyId };
+      if (existing) Object.assign(existing, record);
+      else identityState.list.push(record);
+      return handlers.identity_list().find((i) => i.id === record.id);
+    },
+    identity_delete: (a) => {
+      identityState.list = identityState.list.filter((i) => i.id !== a.id);
+      let n = 0;
+      for (const [k, v] of identityState.uses) if (v === a.id) {
+        identityState.uses.delete(k);
+        n += 1;
+      }
+      return n;
+    },
+    identity_assignments: () => [
+      ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
+      ...state.groups.map((g) => identityAssignment({ kind: "group", groupId: g.id })),
+    ],
+    identity_assign: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (a.identityId) identityState.uses.set(key, a.identityId);
+      else identityState.uses.delete(key);
+      return identityAssignment(a.target);
+    },
+    prompt_marks_status: (a) => integrationStatus(a.target),
+    prompt_marks_install: (a) => {
+      integration.set(integrationKey(a.target), 1);
+      return integrationStatus(a.target);
+    },
+    prompt_marks_remove: (a) => {
+      integration.delete(integrationKey(a.target));
+      return integrationStatus(a.target);
+    },
   };
 
   /** Writes raw terminal output (escape sequences included) to the most recent session. */
@@ -904,6 +1096,59 @@ export function installMockBackend(options) {
     channelSend(s.events, { type: "state", state: "failed" });
     channelSend(s.events, { type: "closed", error: { code: "DISCONNECTED", message: "The server closed the connection." }, exitStatus: null });
   };
+  // agent D: inventory and snippets
+  window.__mockAddFile = (path) => addNode(path, "file", 10);
+  /** Environment variables in the mock, per target; hosts get their group chain's, outermost first. */
+  const envState = new Map();
+  function envKey(target) {
+    return target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`;
+  }
+  window.__mockEnvOf = (hostId, withOrigin = false) => {
+    const host = state.hosts.find((h) => h.id === hostId);
+    const chain = [];
+    let group = state.groups.find((g) => g.id === host?.groupId);
+    while (group) {
+      chain.unshift(group);
+      group = state.groups.find((g) => g.id === group.parentId);
+    }
+    const out = new Map();
+    for (const g of chain) for (const v of envState.get(`group:${g.id}`) ?? []) out.set(v.name, { ...v, origin: { kind: "group", groupId: g.id, name: g.name } });
+    for (const v of envState.get(`host:${hostId}`) ?? []) out.set(v.name, { ...v, origin: { kind: "host" } });
+    return [...out.values()].map((v) => (withOrigin ? v : { name: v.name, value: v.value }));
+  };
+  /** Identities in the mock: the list (passwords kept here only) and which target uses which. */
+  const identityState = { list: [], uses: new Map() };
+  function identityAssignment(target) {
+    const own = identityState.uses.get(target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`) ?? null;
+    if (target.kind === "group") return { target, identityId: own, effectiveIdentityId: own, origin: own ? { kind: "host" } : null };
+    if (own) return { target, identityId: own, effectiveIdentityId: own, origin: { kind: "host" } };
+    let group = state.groups.find((g) => g.id === state.hosts.find((h) => h.id === target.hostId)?.groupId);
+    while (group) {
+      const fromGroup = identityState.uses.get(`group:${group.id}`);
+      if (fromGroup) return { target, identityId: null, effectiveIdentityId: fromGroup, origin: { kind: "group", groupId: group.id, name: group.name } };
+      group = state.groups.find((g) => g.id === group.parentId);
+    }
+    return { target, identityId: null, effectiveIdentityId: null, origin: null };
+  }
+  /** Shell integration in the mock: per target, installed or not (the block text is fixed). */
+  const integration = new Map();
+  function integrationKey(target) {
+    return target.kind === "session" ? "server" : `local:${target.shell}`;
+  }
+  function integrationStatus(target) {
+    const shell = target.kind === "session" ? "bash" : target.shell;
+    const path = shell === "zsh" ? "~/.zshrc" : "~/.bashrc";
+    return {
+      shell,
+      path,
+      fileExists: true,
+      version: 1,
+      installedVersion: integration.get(integrationKey(target)) ?? null,
+      script: `# >>> tyrminal shell integration v1 >>>\n# (${shell} script)\n# <<< tyrminal shell integration <<<\n`,
+      backupPath: `${path}.tyrminal-backup`,
+      loginShell: target.kind === "session" ? "sh" : null,
+    };
+  }
   window.__mockCalls = calls;
   window.__mockOpenedLinks = [];
   window.__mockState = state;

@@ -14,6 +14,8 @@ mod dto;
 mod error;
 // agent B: tunnels and history
 mod tunnels;
+// agent D: inventory and snippets
+mod inventory;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
@@ -23,3 +25,5 @@ pub use tunnels::*;
 // agent C: workspaces
 mod layouts;
 pub use layouts::*;
+// agent D: inventory and snippets
+pub use inventory::*;

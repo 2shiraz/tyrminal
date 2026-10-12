@@ -39,7 +39,9 @@ export type ActionId =
   | "movePaneDown"
   // terminal input: jump between commands (shell integration marks)
   | "previousCommand"
-  | "nextCommand";
+  | "nextCommand"
+  // agent D: inventory and snippets
+  | "suggest";
 
 export interface Binding {
   key: string;
@@ -82,6 +84,8 @@ const mac: Record<ActionId, Binding> = {
   // terminal input: jump between commands
   previousCommand: { key: "ArrowUp", mod: true },
   nextCommand: { key: "ArrowDown", mod: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -117,6 +121,8 @@ const other: Record<ActionId, Binding> = {
   // terminal input: jump between commands
   previousCommand: { key: "ArrowUp", ctrl: true, shift: true },
   nextCommand: { key: "ArrowDown", ctrl: true, shift: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", ctrl: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */

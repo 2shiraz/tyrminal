@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-set-os"
+description = "Enables the host_set_os command without any pre-configured scope."
+commands.allow = ["host_set_os"]
+
+[[permission]]
+identifier = "deny-host-set-os"
+description = "Denies the host_set_os command without any pre-configured scope."
+commands.deny = ["host_set_os"]

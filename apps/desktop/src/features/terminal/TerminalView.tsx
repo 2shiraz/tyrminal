@@ -24,6 +24,7 @@ import {
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
+import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgI } from "../../lib/messages-input";
@@ -252,6 +253,10 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "banner":
             setBanner(event.text);
+            break;
+          // Environment variables the server refused are always reported (SNP-13).
+          case "environment":
+            if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
           case "negotiated":
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });

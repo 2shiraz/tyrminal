@@ -33,6 +33,7 @@ import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
 import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
+import { attachShellContext } from "../autocomplete/shellContext";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
 
@@ -277,6 +278,11 @@ export class TerminalController {
       if (this.prefs.copyOnSelect && this.term.hasSelection()) void this.copySelection();
     });
 
+    // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries. Registered
+    // first: xterm calls the most recent handler first and stops at one that returns true, so the
+    // handlers registered below only observe these sequences and pass them on (return false).
+    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+
     // OSC 52 (clipboard). Writes go to the owner for a consent decision; a read request ("?")
     // is never answered. Returning true marks the sequence handled so nothing else acts on it.
     this.term.parser.registerOscHandler(52, (data) => {
@@ -284,7 +290,6 @@ export class TerminalController {
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
       return true;
     });
-
     // OSC 133: command boundaries from shell integration (separators and jumping).
     this.commands = new CommandMarks(this.term, () => {
       const scheme = schemeById(this.prefs.scheme);
@@ -296,7 +301,8 @@ export class TerminalController {
     this.term.parser.registerOscHandler(7, (data) => {
       const path = parseOsc7(data);
       if (path !== null) this.callbacks.onDirectory?.(path);
-      return true;
+      // Observe only: the shell-integration handler registered earlier also needs the folder.
+      return false;
     });
 
     this.term.attachCustomKeyEventHandler((event) => this.onKey(event));

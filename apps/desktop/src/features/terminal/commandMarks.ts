@@ -35,13 +35,14 @@ export class CommandMarks {
 
   private onMark(data: string): boolean {
     // Marks on the alternate screen (full-screen applications) are ignored.
-    if (this.term.buffer.active.type === "alternate") return true;
+    if (this.term.buffer.active.type === "alternate") return false;
     const [kind, ...args] = data.split(";");
     if (kind === "A") this.promptStart();
     else if (kind === "C") this.running = this.marks.at(-1) ?? null;
     else if (kind === "D") this.finished(args[0]);
-    // Handled: the sequence is never printed and nothing else acts on it.
-    return true;
+    // Observe only: shell integration (autocomplete context) registered its handler earlier and
+    // must see the mark too. An OSC sequence is never printed either way.
+    return false;
   }
 
   private promptStart(): void {
