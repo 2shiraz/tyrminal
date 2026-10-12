@@ -1,0 +1,195 @@
+/* Motion tokens and utilities, second edition (docs/design/overhaul.md, "Motion").
+   Not imported by the app yet. Rules the utilities encode:
+   - Motion answers something the user did with the pointer, or shows a state change. Nothing loops
+     except a connecting indicator, and nothing moves on its own to decorate.
+   - Only transform and opacity animate. Entrances use @starting-style transitions, so they can be
+     interrupted and need no JavaScript; where @starting-style is missing they simply appear.
+   - Exits are faster than entrances and fade only.
+   - Never animated: terminal output, the cursor, terminal resize, tab switches, page changes, and
+     anything opened from the keyboard (mark it data-opened-by="keyboard").
+   - Reduced motion (OS setting or the in-app switch) sets every duration to 0. */
+
+:root {
+  --duration-press: 100ms; /* press feedback, hover colour */
+  --duration-fast: 140ms; /* tooltips, menus, popovers, exits */
+  --duration-base: 180ms; /* dialogs, side panels, the palette when opened by pointer */
+  --duration-slow: 220ms; /* toasts, first-run sheets; the ceiling for UI motion */
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* entering, answering */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* something moving across the screen */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* side panels */
+  --ease-colour: ease; /* hover and colour changes */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-press: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] {
+  --duration-press: 0ms;
+  --duration-fast: 0ms;
+  --duration-base: 0ms;
+  --duration-slow: 0ms;
+}
+
+/* ---------- hover and press: colour changes ease; pressable things give 2% under the finger ---------- */
+.m-hover {
+  transition:
+    background-color var(--duration-press) var(--ease-colour),
+    color var(--duration-press) var(--ease-colour),
+    border-color var(--duration-press) var(--ease-colour);
+}
+
+.m-press {
+  transition:
+    transform var(--duration-press) var(--ease-out),
+    background-color var(--duration-press) var(--ease-colour),
+    color var(--duration-press) var(--ease-colour);
+}
+
+.m-press:active:not(:disabled, [aria-disabled="true"]) {
+  transform: scale(0.98);
+}
+
+/* ---------- popovers and menus: grow from the trigger (set --origin to the trigger side) ---------- */
+.m-pop {
+  transform-origin: var(--origin, top left);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* ---------- tooltips: appear after the delay, fade only ---------- */
+.m-tip {
+  transition: opacity var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* ---------- dialogs: centred, so they scale from the centre; the scrim fades ---------- */
+dialog.m-dialog[open] {
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.98) translateY(4px);
+  }
+}
+
+dialog.m-dialog[open]::backdrop {
+  transition: opacity var(--duration-base) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* ---------- side panels (Files, Snippets, host details): a short slide from their edge ---------- */
+.m-panel {
+  transition:
+    opacity var(--duration-base) var(--ease-drawer),
+    transform var(--duration-base) var(--ease-drawer);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+/* ---------- toasts: rise into place; leave by fading (add .m-leaving, remove after --duration-fast) ---------- */
+.m-toast {
+  transition:
+    opacity var(--duration-slow) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---------- exits, shared: fade only, faster than the entrance ---------- */
+.m-leaving {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+/* ---------- reveal for disclosure content (a group expanding, an advanced section opening) ---------- */
+.m-reveal {
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* ---------- state indication: a connecting session breathes; nothing else loops ---------- */
+.m-connecting {
+  animation: m-breathe 1.2s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes m-breathe {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.35;
+  }
+}
+
+/* Loading placeholders stay still: a quiet tint, no shimmer sweep (it repaints every frame). */
+.m-skeleton {
+  background: var(--bg-active);
+  border-radius: var(--radius-inner);
+}
+
+/* ---------- keyboard-opened surfaces never animate ---------- */
+[data-opened-by="keyboard"],
+[data-opened-by="keyboard"]::backdrop {
+  transition: none !important;
+}
+
+/* ---------- reduced motion: no transforms at all, and loops stop ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .m-press:active {
+    transform: none;
+  }
+
+  .m-connecting {
+    animation: none;
+  }
+}
+
+:root[data-reduce-motion="true"] .m-press:active {
+  transform: none;
+}
+
+:root[data-reduce-motion="true"] .m-connecting {
+  animation: none;
+}
+
+/* ---------- the terminal never animates, whatever a utility above says ----------
+   Transitions only: xterm's own cursor blink is a CSS animation and stays the user's setting. */
+.terminal-pane,
+.terminal-pane * {
+  transition: none !important;
+}
