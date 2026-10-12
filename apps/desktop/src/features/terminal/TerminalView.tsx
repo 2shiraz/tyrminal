@@ -35,7 +35,7 @@ import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
-import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
+import type { ScrollbackMatch, ScrollbackResult, SearchSlice } from "./scrollbackSearch";
 
 const encodingLabel = (id: string) => encodingById(id).label;
 import { RECONNECT_MAX_ATTEMPTS, cdCommand, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
@@ -82,7 +82,7 @@ export interface PaneHandle {
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
   /** P-28: matches in this pane's scrollback (in memory only). */
-  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  searchScrollback(query: string, caseSensitive: boolean, slice?: SearchSlice): ScrollbackResult;
   /** P-28: scrolls a match into view and selects it. */
   revealMatch(match: ScrollbackMatch): void;
   /** P-29: commands the shell integration marked, newest first (empty without it). */
@@ -404,7 +404,8 @@ export function TerminalView(props: TerminalViewProps) {
         controllerRef.current?.setEncoding(encodingRef.current);
       },
       environment: () => environment.current,
-      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      searchScrollback: (query, caseSensitive, slice) =>
+        controllerRef.current?.searchScrollback(query, caseSensitive, slice) ?? { matches: [], truncated: false, next: 0, length: 0 },
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
       commands: () => controllerRef.current?.commandOutputs.list() ?? [],
       commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,

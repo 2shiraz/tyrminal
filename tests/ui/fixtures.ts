@@ -22,6 +22,8 @@ export interface MockOptions {
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
+  /** Terminal scrollback lines (default 5000). */
+  scrollback?: number;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
   /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */

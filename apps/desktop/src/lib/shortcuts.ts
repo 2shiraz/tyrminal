@@ -57,7 +57,9 @@ export type ActionId =
   // agent D: inventory and snippets
   | "suggest"
   // privilege prompts (KEY-18)
-  | "insertPassword";
+  | "insertPassword"
+  // P-28: search across open sessions
+  | "searchSessions";
 
 export interface Binding {
   key: string;
@@ -126,6 +128,7 @@ const mac: Record<ActionId, Binding> = {
   suggest: { key: "e", mod: true, shift: true },
   // privilege prompts (KEY-18)
   insertPassword: { key: "p", mod: true, shift: true },
+  searchSessions: { key: "f", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -171,6 +174,8 @@ const other: Record<ActionId, Binding> = {
   suggest: { key: "e", ctrl: true, shift: true },
   // privilege prompts (KEY-18)
   insertPassword: { key: "p", ctrl: true, shift: true },
+  // Ctrl+Shift+F is the terminal's own find.
+  searchSessions: { key: "f", alt: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */
