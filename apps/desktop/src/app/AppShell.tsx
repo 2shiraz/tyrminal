@@ -487,6 +487,12 @@ function Shell() {
         case "movePaneUp":
           moveFocused("up");
           break;
+        case "previousCommand":
+          focusedHandle()?.jumpCommand(-1);
+          break;
+        case "nextCommand":
+          focusedHandle()?.jumpCommand(1);
+          break;
         case "movePaneDown":
           moveFocused("down");
           break;

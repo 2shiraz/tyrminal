@@ -128,6 +128,9 @@ export const msgC = {
       movePaneRight: "Move pane right",
       movePaneUp: "Move pane up",
       movePaneDown: "Move pane down",
+      // terminal input
+      previousCommand: "Jump to the previous command",
+      nextCommand: "Jump to the next command",
     } as Record<string, string>,
   },
   highlight: {

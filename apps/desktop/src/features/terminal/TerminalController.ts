@@ -27,6 +27,7 @@ import type { TokenKind } from "../highlight/builtins";
 import { highlightPalette } from "../highlight/palette";
 import { MouseMap } from "../mouse/mouseMap";
 import { type Token, tokenLinkProvider } from "../tokens/tokenLinks";
+import { CommandMarks } from "./commandMarks";
 import { installComposition } from "./composition";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
@@ -169,6 +170,7 @@ export class TerminalController {
   broadcastable = false;
   private readonly highlighter: OutputHighlighter;
   private readonly mouse: MouseMap;
+  private commands!: CommandMarks;
   private encoding = new SessionEncoding("utf-8");
 
   private publishCounters(): void {
@@ -250,6 +252,13 @@ export class TerminalController {
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
       return true;
     });
+
+    // OSC 133: command boundaries from shell integration (separators and jumping).
+    this.commands = new CommandMarks(this.term, () => {
+      const scheme = schemeById(this.prefs.scheme);
+      return { failure: highlightPalette(scheme).danger, text: scheme.foreground };
+    });
+    this.cleanups.push(() => this.commands.dispose());
 
     // OSC 7: the shell's working directory, remembered for layout templates only.
     this.term.parser.registerOscHandler(7, (data) => {
@@ -430,6 +439,11 @@ export class TerminalController {
     } else {
       send();
     }
+  }
+
+  /** Scrolls to the previous or next command (shell integration marks); false without one. */
+  jumpCommand(direction: -1 | 1): boolean {
+    return this.commands.jump(direction);
   }
 
   /** Copies the selection (palette action); false when nothing is selected. */

@@ -69,6 +69,8 @@ export const msgI = {
     copy: "Copy selection",
     paste: "Paste",
     groupTabs: "Tabs and panes",
+    previousCommand: "Jump to the previous command",
+    nextCommand: "Jump to the next command",
   },
   panel: {
     sections: "Panel sections",

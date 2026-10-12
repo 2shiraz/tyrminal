@@ -36,7 +36,10 @@ export type ActionId =
   | "movePaneLeft"
   | "movePaneRight"
   | "movePaneUp"
-  | "movePaneDown";
+  | "movePaneDown"
+  // terminal input: jump between commands (shell integration marks)
+  | "previousCommand"
+  | "nextCommand";
 
 export interface Binding {
   key: string;
@@ -76,6 +79,9 @@ const mac: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", mod: true },
+  nextCommand: { key: "ArrowDown", mod: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -108,6 +114,9 @@ const other: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", alt: true, shift: true },
+  // terminal input: jump between commands
+  previousCommand: { key: "ArrowUp", ctrl: true, shift: true },
+  nextCommand: { key: "ArrowDown", ctrl: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */

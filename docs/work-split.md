@@ -291,3 +291,6 @@ Never merge these by hand; regenerate them after resolving the sources:
 - `TerminalController.ts`: registers `features/tokens/tokenLinks.ts` as a link provider and keeps the
   pane's target; `TerminalView.tsx`: one `onToken` callback and a `<TokenMenu>`; `AppShell.tsx`: one
   `<NewHostFromTerminal>` line (prefilled host editor from a clicked address).
+- `lib/shortcuts.ts`: `previousCommand`/`nextCommand` at the end of the union and both maps (marked);
+  `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines. `tests/ui/behavior.spec.ts`
+  `clickTerminalText` finds text by position (decorated cells are one element per cell).

@@ -18,6 +18,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 7 | Mouse mappings and native persistence (TRM-08), recent connections native test (UX-04) | Done: core, UI and native tests on Linux |
 | 8 | Termius-like highlighting, on by default (TRM-07, owner priority) | Done: UI tests, benchmark; visual baselines re-recorded |
 | 9 | Actions on addresses and paths in the output | Done: UI tests |
+| 10 | Command boundaries from shell integration (OSC 133) and jumping between commands | Done: UI tests |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -134,6 +135,19 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   request channel, `features/tokens/requests.ts`). Nothing connects until the user saves and
   connects. URLs keep the existing confirmed-link flow; nothing on the alternate screen.
 
+## Slice 10: command boundaries (OSC 133)
+
+- When the shell reports prompts and exit statuses (OSC 133 A/B/C/D, as printed by shell
+  integration scripts), a hairline in the scheme's text color is drawn above every prompt after
+  the first and a short bar in the scheme's danger color marks the prompt of a command that
+  exited non-zero (title "Exit status N"). The sequences are handled, never printed; marks on the
+  alternate screen are ignored; at most 2000 marks are kept.
+- "Jump to the previous/next command": Ctrl+Shift+↑/↓ (⌘↑/⌘↓ on macOS), in the palette and in
+  the shortcut settings. At the bottom, "previous" is the last command run; scrolled up, it is
+  relative to the top of the screen.
+- Note for tests: xterm's DOM renderer draws decorated cells one element per cell, so tests find
+  terminal text by position in its row (`tests/ui/highlight-helpers.ts` `pointOf`), not by span.
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -165,3 +179,5 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Addresses in output: "Point at an IP or MAC address in the output to underline it; click it to
   copy it or to start a new host with that address (Tyrminal does not connect until you save
   and connect). In a local terminal, file paths can be copied the same way."
+- Commands: "With shell integration turned on, a thin line separates commands, a red mark shows
+  a command that failed, and Ctrl+Shift+↑/↓ (⌘↑/⌘↓ on macOS) jump between commands."

@@ -3544,3 +3544,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   white-space: pre;
   overflow-x: auto;
 }
+
+/* Command boundaries from shell integration (OSC 133): a hairline above each prompt, and a
+   short bar in the gutter of a command that failed. Display only. */
+.cmd-separator {
+  box-sizing: border-box;
+  border-top: 1px solid color-mix(in srgb, var(--cmd-line) 20%, transparent);
+  pointer-events: none;
+}
+
+.cmd-failed {
+  box-sizing: border-box;
+  width: 3px !important;
+  border-radius: 2px;
+  background: var(--cmd-failed);
+  pointer-events: none;
+}

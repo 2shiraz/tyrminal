@@ -49,6 +49,8 @@ export function extraPaletteItems(c: ExtraContext): PaletteItem[] {
   add("paste", msgI.palette.paste, <IconClipboardPaste size={16} />, c.onPaste, "paste");
   add("show-history", msgI.panel.showHistory, <IconHistory size={16} />, () => c.onShowSection("history"));
   add("show-appearance", msgI.panel.showAppearance, <IconPalette size={16} />, () => c.onShowSection("appearance"));
+  add("previous-command", msgI.palette.previousCommand, <IconChevronLeft size={16} />, () => c.onAction("previousCommand"), "previousCommand");
+  add("next-command", msgI.palette.nextCommand, <IconChevronRight size={16} />, () => c.onAction("nextCommand"), "nextCommand");
   add("rename-tab", msgI.palette.renameTab, <IconPencil size={16} />, () => c.onAction("renameTab"), "renameTab");
   add("close-tab", msgI.palette.closeTab, <IconX size={16} />, c.onCloseTab);
   if (c.tabCount > 1) {

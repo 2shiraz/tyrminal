@@ -74,6 +74,8 @@ export interface PaneHandle {
   // terminal input: palette copy and paste
   copy(): Promise<boolean>;
   paste(): void;
+  /** Scrolls to the previous (-1) or next (+1) command, when the shell marks them. */
+  jumpCommand(direction: -1 | 1): boolean;
 }
 
 interface TerminalViewProps {
@@ -327,6 +329,7 @@ export function TerminalView(props: TerminalViewProps) {
       release: (on) => controllerRef.current?.release(on),
       copy: () => controllerRef.current?.copy() ?? Promise.resolve(false),
       paste: () => controllerRef.current?.paste(),
+      jumpCommand: (direction) => controllerRef.current?.jumpCommand(direction) ?? false,
       setEncoding: (id) => {
         encodingRef.current = encodingById(id).id;
         setEncodingId(encodingRef.current);
