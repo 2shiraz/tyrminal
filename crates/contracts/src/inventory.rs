@@ -100,7 +100,10 @@ pub struct ExecutionTarget {
     pub name: String,
     /// Hosts that still exist, in the saved order. Deleted hosts drop out.
     pub host_ids: Vec<String>,
-    /// How many saved hosts no longer exist.
+    /// Groups that still exist, in the saved order. A group stands for its hosts and its
+    /// subgroups' hosts as they are when a run starts. Deleted groups drop out.
+    pub group_ids: Vec<String>,
+    /// How many saved hosts and groups no longer exist.
     pub missing: u32,
 }
 
@@ -111,7 +114,10 @@ pub struct ExecutionTargetInput {
     /// `None` creates a target; `Some` replaces that target.
     pub id: Option<String>,
     pub name: String,
+    #[serde(default)]
     pub host_ids: Vec<String>,
+    #[serde(default)]
+    pub group_ids: Vec<String>,
 }
 
 /// A private-key file the user picked in the native dialog. Its contents stay on the native side;

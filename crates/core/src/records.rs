@@ -217,6 +217,9 @@ pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
 pub(crate) struct ExecutionTargetRecord {
     pub name: String,
     pub host_ids: Vec<String>,
+    /// Groups, resolved to their hosts when a run starts. Absent in older records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_ids: Vec<String>,
 }
 
 /// An OpenSSH user certificate for a key in the keychain (public data), checked against the key

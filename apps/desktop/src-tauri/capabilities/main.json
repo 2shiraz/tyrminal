@@ -42,6 +42,7 @@
     "allow-session-open-ssh",
     "allow-session-open-local",
     "allow-session-open-files",
+    "allow-session-open-exec",
     "allow-session-write",
     "allow-session-resize",
     "allow-session-ack",

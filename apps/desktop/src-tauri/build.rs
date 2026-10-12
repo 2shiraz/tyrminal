@@ -40,6 +40,7 @@ const COMMANDS: &[&str] = &[
     "session_open_ssh",
     "session_open_local",
     "session_open_files",
+    "session_open_exec",
     "session_write",
     "session_resize",
     "session_ack",

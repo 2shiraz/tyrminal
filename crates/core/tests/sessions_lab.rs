@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use tyrminal_core::contracts::limits::MAX_STARTUP_LINE_LEN;
 use tyrminal_core::contracts::{
     AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, HostProtocol, KeyImportInput, SessionEvent,
-    SessionState, TransferEvent, TrustDecision, VaultState,
+    SessionState, SnippetInput, TransferEvent, TrustDecision, VaultState,
 };
 use tyrminal_core::{Core, SessionSink, TransferSink};
 
@@ -150,6 +150,24 @@ impl Client {
     }
 
     /// A files-only connection (SFTP, no shell).
+    /// A run-only connection (SNP-05): trust and sign-in as for a terminal, then nothing but
+    /// exec channels. `interactive: false` refuses to ask for sign-in input.
+    async fn open_exec(core: &Core, host_id: &str, interactive: bool) -> Self {
+        let (tx, inbox) = mpsc::unbounded_channel();
+        let opened =
+            core.sessions.open_exec(WINDOW, host_id, interactive, Arc::new(ChannelSink(tx))).await.expect("open exec");
+        Self {
+            core: core.clone(),
+            session: opened.session_id,
+            inbox,
+            text: String::new(),
+            received: 0,
+            auto_ack: true,
+            negotiated: None,
+            window: WINDOW,
+        }
+    }
+
     async fn open_files(core: &Core, host_id: &str) -> Self {
         let (tx, inbox) = mpsc::unbounded_channel();
         let opened = core.sessions.open_files(WINDOW, host_id, Arc::new(ChannelSink(tx))).await.expect("open files");
@@ -2913,4 +2931,186 @@ async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
     }
     assert_eq!(locking.until_closed().await.0, Some(ErrorCode::VaultLocked));
     assert_eq!(s.server_glance(WINDOW, &session).await.unwrap_err().code, ErrorCode::AccessDenied);
+}
+
+// ---------- runs on hosts without an open session (SNP-05) ----------
+
+async fn saved_snippet(core: &Core, name: &str, text: &str) -> String {
+    let input = SnippetInput { id: None, name: name.into(), folder: String::new(), text: text.into() };
+    core.vault.save_snippet(input).await.unwrap().id
+}
+
+/// No event other than state changes arrives for a while: the connection is waiting on the user.
+async fn stays_waiting(client: &mut Client) {
+    let quiet = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match client.event().await {
+                SessionEvent::State { .. } => {}
+                other => return other,
+            }
+        }
+    })
+    .await;
+    assert!(quiet.is_err(), "something happened without a decision: {quiet:?}");
+}
+
+/// A run-only connection never trusts a key by itself: it waits on the trust prompt, nothing can
+/// run meanwhile, another window cannot answer for it, and a changed key fails the host before
+/// anything is sent. The server sees exec requests only: no shell and no PTY.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_run_only_connection_never_trusts_by_itself_and_refuses_a_changed_key() {
+    let f = fixture().await;
+    let _exclusive = SERVER_B.lock().await;
+    let forwarder = Forwarder::start(f.lab.addr("a")).await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host_id = f.host("run a", forwarder.port, &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let snippet = saved_snippet(&f.core, "answer", "echo run-$((40+2))").await;
+
+    // Unknown key: the prompt waits; nothing runs and nobody else can answer it.
+    let mut client = Client::open_exec(&f.core, &host_id, false).await;
+    let (_, prompt) = client.until_not_state().await;
+    let prompt_id = trust_prompt_id(&prompt);
+    let early = f.core.sessions.exec_snippet(WINDOW, &client.session, &snippet, "run-early").await;
+    assert!(early.is_err(), "a run started before the host key was decided");
+    assert!(
+        f.core.sessions.answer_trust("other", &client.session, &prompt_id, TrustDecision::Always).is_err(),
+        "another window answered the trust prompt"
+    );
+    stays_waiting(&mut client).await;
+    client.trust(&prompt_id, TrustDecision::Cancel);
+    assert!(client.until_closed().await.0.is_some(), "a cancelled trust prompt must fail the host");
+    assert!(f.core.vault.list_known_hosts().await.unwrap().is_empty(), "nothing was trusted");
+
+    // Trusted explicitly: the snippet runs on an exec channel.
+    let log_before = f.lab.server_log("a").lines().count();
+    let mut client = Client::open_exec(&f.core, &host_id, false).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let ran = f.core.sessions.exec_snippet(WINDOW, &client.session, &snippet, "run-a").await.unwrap();
+    assert_eq!((ran.exit_status, ran.stdout.as_str()), (Some(0), "run-42\n"));
+    // A run-only connection has no terminal.
+    assert!(f.core.sessions.write(WINDOW, &client.session, b"echo typed\r".to_vec()).await.is_err());
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    assert_eq!(client.until_closed().await.0, None);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let lines = new_log_lines(&f.lab, "a", log_before);
+    for asked in ["Starting session: shell", "pty"] {
+        assert!(!lines.iter().any(|l| l.contains(asked)), "a run-only connection asked for {asked:?}: {lines:#?}");
+    }
+
+    // Same name and port, another server's key: refused before signing in or running anything.
+    forwarder.retarget(f.lab.addr("b"));
+    let auth_lines_before = f.lab.auth_log_lines("b");
+    let log_before = f.lab.server_log("b").lines().count();
+    let mut client = Client::open_exec(&f.core, &host_id, false).await;
+    let (_, event) = client.until_not_state().await;
+    assert!(matches!(event, SessionEvent::HostKeyChanged { .. }), "expected HostKeyChanged, got {event:?}");
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::HostKeyChanged));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(f.lab.auth_log_lines("b"), auth_lines_before, "the impostor saw a sign-in attempt");
+    assert!(!new_log_lines(&f.lab, "b", log_before).iter().any(|l| l.contains("Starting session")));
+    assert_eq!(f.core.vault.list_known_hosts().await.unwrap().len(), 1, "trust was neither replaced nor extended");
+}
+
+/// A host that needs sign-in input (no saved password or key) is not asked when the user chose to
+/// skip such hosts: it fails with NEEDS_SIGN_IN and no prompt. Asked interactively, it signs in.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_run_only_connection_that_needs_sign_in_input_is_skipped_without_asking() {
+    let f = fixture().await;
+    let host_id = f.host("ask", f.lab.port("a"), &f.lab.str("/user"), HostAuthInput::AskPassword).await;
+    let snippet = saved_snippet(&f.core, "who", "echo signed-in-$((40+2))").await;
+
+    let mut client = Client::open_exec(&f.core, &host_id, false).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    let error = loop {
+        match client.event().await {
+            event @ SessionEvent::AuthPrompt { .. } => panic!("a non-interactive run asked for input: {event:?}"),
+            SessionEvent::Closed { error, .. } => break error,
+            _ => {}
+        }
+    };
+    assert_eq!(error.map(|e| e.code), Some(ErrorCode::NeedsSignIn));
+
+    let mut client = Client::open_exec(&f.core, &host_id, true).await;
+    let (_, prompt) = client.until_not_state().await;
+    let (prompt_id, kind, _) = auth_prompt(&prompt);
+    assert_eq!(kind, AuthPromptKind::Password);
+    client.answer(&prompt_id, Some(&f.lab.str("/password")));
+    client.until_connected().await;
+    let ran = f.core.sessions.exec_snippet(WINDOW, &client.session, &snippet, "run-ask").await.unwrap();
+    assert_eq!(ran.stdout, "signed-in-42\n");
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
+
+/// Closing the connection (Cancel) or locking the vault stops a run on a run-only connection
+/// mid-way and drops the connection; nothing keeps it alive.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn runs_on_run_only_connections_stop_on_cancel_and_on_lock() {
+    let f = fixture().await;
+    let host_id = f.key_host("a").await;
+    let slow = saved_snippet(&f.core, "slow", "sleep 30; echo late").await;
+
+    for how in ["cancel", "lock"] {
+        let mut client = Client::open_exec(&f.core, &host_id, false).await;
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+        client.until_connected().await;
+        let core = f.core.clone();
+        let session = client.session.clone();
+        let slow = slow.clone();
+        let run = tokio::spawn(async move { core.sessions.exec_snippet(WINDOW, &session, &slow, "run-slow").await });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let started = std::time::Instant::now();
+        if how == "cancel" {
+            f.core.sessions.close(WINDOW, &client.session).unwrap();
+        } else {
+            f.core.vault.lock().await;
+        }
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), run).await.expect("the run stopped promptly").unwrap();
+        let expected = if how == "cancel" { ErrorCode::Cancelled } else { ErrorCode::VaultLocked };
+        assert_eq!(result.unwrap_err().code, expected, "{how}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        client.until_closed().await;
+        assert_eq!(f.core.sessions.count(), 0, "{how}: the connection was dropped");
+        if how == "lock" {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+    }
+}
+
+/// One snippet on a host with an open terminal session and on a host without one: each runs on
+/// its own connection and reports its own result.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_snippet_runs_on_an_open_session_and_on_a_closed_host_alike() {
+    let f = fixture().await;
+    let _exclusive = SERVER_B.lock().await;
+    let a = f.key_host("a").await;
+    let b = f.key_host("b").await;
+    let snippet = saved_snippet(&f.core, "where", "echo on-$((40+2))").await;
+
+    let mut open = Client::open_ssh(&f.core, &a).await;
+    let (_, prompt) = open.until_not_state().await;
+    open.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    open.until_connected().await;
+    let mut closed = Client::open_exec(&f.core, &b, false).await;
+    let (_, prompt) = closed.until_not_state().await;
+    closed.trust(&trust_prompt_id(&prompt), TrustDecision::Once);
+    closed.until_connected().await;
+
+    for (n, session) in [&open.session, &closed.session].into_iter().enumerate() {
+        let ran = f.core.sessions.exec_snippet(WINDOW, session, &snippet, &format!("run-{n}")).await.unwrap();
+        assert_eq!((ran.exit_status, ran.stdout.as_str()), (Some(0), "on-42\n"));
+    }
+    f.core.sessions.close(WINDOW, &closed.session).unwrap();
+    closed.until_closed().await;
+    f.core.sessions.close(WINDOW, &open.session).unwrap();
+    open.until_closed().await;
 }

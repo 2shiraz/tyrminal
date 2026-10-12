@@ -163,6 +163,7 @@ pub fn run() {
             commands::sessions::session_open_ssh,
             commands::sessions::session_open_local,
             commands::sessions::session_open_files,
+            commands::sessions::session_open_exec,
             commands::sessions::session_write,
             commands::sessions::session_resize,
             commands::sessions::session_ack,
