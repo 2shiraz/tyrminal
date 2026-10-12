@@ -297,6 +297,13 @@ impl TunnelRuns {
 
     /// Stops every forward of a session that ended and waits until their listeners are closed.
     /// Called by the session supervisor on every way a session can end.
+    /// Gives a session's forwards, running or ended, to the window it moved to.
+    pub(crate) fn reassign(&self, session_id: &str, owner: &str) {
+        for run in self.runs().values_mut().filter(|r| r.session_id == session_id) {
+            owner.clone_into(&mut run.owner);
+        }
+    }
+
     pub(crate) async fn session_ended(&self, session_id: &str) {
         let handles: Vec<(String, ForwardHandle)> = {
             let mut runs = self.runs();
@@ -443,12 +450,17 @@ impl Sessions {
         let view = run.view(&run_id);
         {
             let mut runs = self.tunnel_runs.runs();
+            // The session may have moved to another window while the forward was starting.
+            let mut run = run;
+            if let Some(current) = self.session_owner(session_id) {
+                run.owner = current;
+            }
             runs.insert(run_id, run);
             TunnelRuns::prune(&mut runs, self.vault().generation());
         }
         // The session may have ended while the forward was starting; its cleanup has run, so
         // stop this one too rather than leave a listener without a session.
-        if self.connection(owner, session_id).is_err() {
+        if self.session_owner(session_id).is_none() {
             self.tunnel_runs.session_ended(session_id).await;
         }
         Ok(view)
@@ -470,12 +482,13 @@ impl Sessions {
                 self.start_run(owner, session_id, generation, tunnel_id.clone(), rule.clone(), conn).await
             {
                 let Ok(run_id) = random_token() else { return };
+                let owner = self.session_owner(session_id).unwrap_or_else(|| owner.to_owned());
                 let mut runs = self.tunnel_runs.runs();
                 let seq = self.tunnel_runs.next_seq();
                 runs.insert(
                     run_id,
                     Run {
-                        owner: owner.to_owned(),
+                        owner,
                         session_id: session_id.to_owned(),
                         generation,
                         tunnel_id,

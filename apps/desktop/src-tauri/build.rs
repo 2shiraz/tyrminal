@@ -49,6 +49,7 @@ const COMMANDS: &[&str] = &[
     "session_handoff_offer",
     "session_attach",
     "session_diagnostics",
+    "session_open_key_install",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
@@ -108,6 +109,14 @@ const COMMANDS: &[&str] = &[
     "host_connection_get",
     "host_connection_set",
     "host_chain",
+    "recording_settings_get",
+    "recording_settings_set",
+    "session_log_list",
+    "session_log_storage",
+    "session_log_bookmark",
+    "session_log_delete",
+    "session_log_delete_all",
+    "session_log_open",
     // agent C: workspaces
     "layout_list",
     "layout_save",

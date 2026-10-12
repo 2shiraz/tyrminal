@@ -87,7 +87,7 @@ export function HomeView({
         groupId: null,
         tags: [],
         protocol: { type: "ssh" },
-        terminal: { encoding: "utf8", term: "xterm256color" },
+        terminal: { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false },
         forwardAgent: false,
         production: false,
         auth: { kind: "ask_password" },

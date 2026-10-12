@@ -21,6 +21,7 @@ import { diagnostics, hosts as hostsApi, keys as keysApi, knownHosts as knownHos
 import { msg } from "../../lib/messages";
 import { msgProduction } from "../../lib/messages-production";
 import { useAction, useLoaded } from "../../lib/useAsync";
+import { SchemePreview } from "../terminal/SchemePreview";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
@@ -260,16 +261,7 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
                         onClick={() => setTerminal({ scheme: scheme.id })}
                         data-tooltip={low.length ? msg.settings.lowContrast(low.join(", ")) : undefined}
                       >
-                        <span className="scheme-swatch" style={{ background: scheme.background, color: scheme.foreground }}>
-                          {/* Sample text in the scheme's foreground, which every scheme keeps at 4.5:1; the
-                              ANSI colours are the dots below (third-party palettes may be lower). */}
-                          <span>❯ ls src</span>
-                          <span className="scheme-dots">
-                            {[scheme.red, scheme.green, scheme.yellow, scheme.blue, scheme.magenta, scheme.cyan].map((c) => (
-                              <span key={c} style={{ background: c }} />
-                            ))}
-                          </span>
-                        </span>
+                        <SchemePreview scheme={scheme} />
                         <span className="scheme-name">
                           <span className="truncate">{scheme.name}</span>
                           <span className="faint" style={{ fontWeight: 400 }}>

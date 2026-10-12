@@ -39,6 +39,7 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
+  IconHistory,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
@@ -382,6 +383,7 @@ export function CommandPalette({
     });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
+    list.push(nav("recordings", <IconHistory size={16} />));
     // terminal input: contributed actions
     list.push(...(extra ?? []));
     return list;

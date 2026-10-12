@@ -277,7 +277,11 @@ async fn a_host_encoding_and_terminal_type_apply_both_ways() {
         group_id: None,
         tags: Vec::new(),
         protocol: HostProtocol::Telnet,
-        terminal: HostTerminal { encoding: TerminalEncoding::Koi8R, term: TerminalType::Vt100 },
+        terminal: HostTerminal {
+            encoding: TerminalEncoding::Koi8R,
+            term: TerminalType::Vt100,
+            ..HostTerminal::default()
+        },
         forward_agent: false,
         production: false,
     };

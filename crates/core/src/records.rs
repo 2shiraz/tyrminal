@@ -151,6 +151,13 @@ pub(crate) struct StoredConnection {
     /// Absent in older records, where a host that set neither was direct and no group had a route.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub own: bool,
+    /// Post-quantum key exchange; the default (prefer) is not stored.
+    #[serde(default, skip_serializing_if = "is_default_key_exchange")]
+    pub key_exchange: tyrminal_contracts::KeyExchangeMode,
+}
+
+fn is_default_key_exchange(mode: &tyrminal_contracts::KeyExchangeMode) -> bool {
+    *mode == tyrminal_contracts::KeyExchangeMode::default()
 }
 
 /// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.
@@ -305,8 +312,13 @@ impl WorkflowRecord {
             + self.identity_id.as_ref().map_or(0, String::len)
             + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
             + self.startup.as_ref().map_or(0, |ids| ids.iter().map(|id| id.len() + 4).sum())
-            + StoredConnection { jump_host: self.jump_host.clone(), proxy: self.proxy.clone(), own: false }
-                .content_len()
+            + StoredConnection {
+                jump_host: self.jump_host.clone(),
+                proxy: self.proxy.clone(),
+                own: false,
+                ..Default::default()
+            }
+            .content_len()
             + 16
     }
 }
@@ -361,6 +373,50 @@ impl GlanceSettingsRecord {
     pub fn content_len(&self) -> usize {
         self.off_hosts.iter().map(|h| h.len() + 4).sum::<usize>() + 8
     }
+}
+
+// Session recordings
+pub(crate) const KIND_SESSION_LOG: u16 = 101;
+pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;
+
+/// What the vault knows about one session recording. The recording itself is a separate encrypted
+/// file named by this record's id (docs/crypto-format.md §11); everything identifying is here.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct SessionLogRecord {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    pub kind: tyrminal_contracts::SessionLogKind,
+    /// Unix milliseconds.
+    pub started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<u64>,
+    #[serde(default)]
+    pub size_bytes: u64,
+    /// How it ended, once it has (`None` while recording, or if the application stopped first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<LogEnd>,
+    #[serde(default)]
+    pub bookmarked: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LogEnd {
+    Closed,
+    SizeLimit,
+    Locked,
+    Stopped,
+}
+
+/// The vault's recording settings (one record).
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub(crate) struct RecordingSettingsRecord {
+    pub enabled: bool,
+    pub keep_per_host: u32,
+    pub max_log_mib: u32,
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does

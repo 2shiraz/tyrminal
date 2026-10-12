@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { HOST_PANEL, KEYS, saveAndCloseHostPanel } from "./flows.mjs";
+import { chooseKey, HOST_PANEL, KEYS, saveAndCloseHostPanel } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
@@ -121,6 +121,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clear(port);
     await s.type(port, String(forwarder.port));
     await s.fill("User name", lab.user, { within: HOST_PANEL });
+    // A new host asks for the password unless a key is chosen.
+    await chooseKey(s, "lab key");
     await app.screenshot("05-host-editor");
     await saveAndCloseHostPanel(s);
     const hostRow = await hostText();

@@ -23,6 +23,7 @@ import { ServerPanel } from "../features/glance/ServerPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
+import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
@@ -106,7 +107,8 @@ export type Destination =
   | "knownHosts"
   | "settings"
   // agent B: tunnels and history
-  | "tunnels";
+  | "tunnels"
+  | "recordings";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -772,6 +774,7 @@ function Shell() {
               onConnect={connect}
             />
           )}
+          {!terminalVisible && destination === "recordings" && <RecordingsView />}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>

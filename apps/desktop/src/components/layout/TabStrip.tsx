@@ -39,6 +39,7 @@ const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
   settings: IconSettings,
   // agent B: tunnels and history
   tunnels: IconRoute,
+  recordings: IconHistory,
 };
 
 export function TabStrip({

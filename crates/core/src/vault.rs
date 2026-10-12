@@ -40,8 +40,18 @@ use crate::records::{
 };
 use crate::validate;
 // agent B: tunnels and history
-use crate::records::{KIND_TUNNEL, TunnelRecord};
-use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
+use crate::records::{
+    KIND_RECORDING_SETTINGS, KIND_SESSION_LOG, KIND_TUNNEL, LogEnd, RecordingSettingsRecord, SessionLogRecord,
+    TunnelRecord,
+};
+use tyrminal_contracts::{
+    ChainHop, HostConnection, HostConnectionInput, RecordingSettings, TunnelInput, TunnelSummary,
+};
+
+/// Bounds of the recording settings and of a recording's comment.
+const MAX_KEEP_PER_HOST: u32 = 100;
+const MAX_LOG_MIB: u32 = 512;
+pub(crate) const MAX_LOG_COMMENT_LEN: usize = 2000;
 // agent C: workspaces
 use crate::layouts::{self, LayoutRecord};
 use crate::records::KIND_LAYOUT;
@@ -80,6 +90,9 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent B: tunnels and history
     tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
+    session_logs: BTreeMap<Id, Stored<SessionLogRecord>>,
+    /// The one settings record, if the user ever saved settings.
+    recording_settings: Option<(Id, Stored<RecordingSettingsRecord>)>,
     // agent C: workspaces
     layouts: BTreeMap<Id, Stored<LayoutRecord>>,
     // agent D: inventory and snippets
@@ -106,6 +119,8 @@ impl Open {
             groups: BTreeMap::new(),
             // agent B: tunnels and history
             tunnels: BTreeMap::new(),
+            session_logs: BTreeMap::new(),
+            recording_settings: None,
             // agent C: workspaces
             layouts: BTreeMap::new(),
             // agent D: inventory and snippets
@@ -149,6 +164,7 @@ pub(crate) struct ConnectionPlan {
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
     /// The host's saved label.
     pub label: String,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     /// Environment variables to request for the shell (the host's own, with inherited ones).
@@ -166,12 +182,19 @@ pub(crate) struct HopPlan {
     pub auth: PlanAuth,
     /// How to leave this computer when this host is the first hop.
     pub proxy: Option<tyrminal_ssh::ProxySpec>,
+    pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
 }
 
 pub(crate) enum PlanAuth {
     Ask,
     Password(Zeroizing<String>),
-    Key { private_key: Zeroizing<String>, passphrase: Option<Zeroizing<String>> },
+    /// `key_id` and `label` name the key when the server refuses it; neither is secret.
+    Key {
+        private_key: Zeroizing<String>,
+        passphrase: Option<Zeroizing<String>>,
+        key_id: String,
+        label: String,
+    },
 }
 
 pub struct VaultService {
@@ -562,6 +585,15 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
+                KIND_SESSION_LOG => load!(SessionLogRecord, open.session_logs),
+                KIND_RECORDING_SETTINGS => match decode::<RecordingSettingsRecord>(&payload)? {
+                    // There is only ever one: a second live one means the store was altered.
+                    Decoded::Live(record) if !row.deleted && open.recording_settings.is_none() => {
+                        open.recording_settings = Some((row.record_id, Stored { revision: row.revision, record }));
+                    }
+                    Decoded::Tombstone if row.deleted => {}
+                    _ => return Err(damaged()),
+                },
                 // agent C: workspaces
                 KIND_LAYOUT => load!(LayoutRecord, open.layouts),
                 // agent D: inventory and snippets
@@ -1401,7 +1433,12 @@ impl VaultService {
                 forward_agent: false,
                 production: false,
                 // agent B: tunnels and history
-                connection: crate::records::StoredConnection { jump_host, proxy: None, own: false },
+                connection: crate::records::StoredConnection {
+                    jump_host,
+                    proxy: None,
+                    own: false,
+                    ..Default::default()
+                },
             };
             new_hosts.push((id, record));
         }
@@ -1907,6 +1944,7 @@ impl VaultService {
             auth: target.auth,
             proxy: target.proxy,
             label: target.label,
+            key_exchange: target.key_exchange,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -1934,6 +1972,8 @@ impl VaultService {
             Ok(PlanAuth::Key {
                 private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
                 passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                key_id: key_id.to_owned(),
+                label: key.record.label.clone(),
             })
         };
         let auth = match (identity, &effective.auth) {
@@ -1959,6 +1999,16 @@ impl VaultService {
             // agent B: tunnels and history
             // A host without its own route uses its nearest group's (HST-05).
             proxy: Self::effective_route(open, id, host).1.map(|p| crate::tunnels::proxy_spec(&p)),
+            // The key exchange setting is the host's own; groups do not set it.
+            key_exchange: match host.connection.key_exchange {
+                tyrminal_contracts::KeyExchangeMode::PreferPostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::PreferPostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::RequirePostQuantum => {
+                    tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum
+                }
+                tyrminal_contracts::KeyExchangeMode::Classic => tyrminal_ssh::KeyExchangePolicy::Classic,
+            },
         })
     }
 
@@ -2007,6 +2057,7 @@ impl VaultService {
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_summary),
             own: Self::own_route(host),
             inherited: Self::inherited_route(open, &id, host),
+            key_exchange: host.connection.key_exchange,
         })
     }
 
@@ -2037,6 +2088,7 @@ impl VaultService {
         record.connection.jump_host = jump.map(|j| validate::id_text(&j));
         record.connection.proxy = proxy;
         record.connection.own = !input.inherit;
+        record.connection.key_exchange = input.key_exchange;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = if input.inherit {
@@ -3797,6 +3849,180 @@ impl VaultService {
         open.glance_settings.clear();
         open.glance_settings.insert(record_id, Stored { revision, record });
         Ok(enabled)
+    }
+}
+
+// Session recordings
+/// What the recorder needs to write one recording, read under one generation.
+pub(crate) struct RecordingContext {
+    pub logs_key: SecretKey,
+    pub vault_id: Id,
+    pub key_version: u32,
+    pub settings: RecordingSettings,
+}
+
+fn recording_settings_of(open: &Open) -> RecordingSettings {
+    open.recording_settings.as_ref().map_or_else(RecordingSettings::default, |(_, s)| RecordingSettings {
+        enabled: s.record.enabled,
+        keep_per_host: s.record.keep_per_host,
+        max_log_mib: s.record.max_log_mib,
+    })
+}
+
+fn session_log_content_len(record: &SessionLogRecord) -> usize {
+    record.title.len() + record.host_id.as_ref().map_or(0, String::len) + record.comment.len()
+}
+
+impl VaultService {
+    pub async fn recording_settings(&self) -> Result<RecordingSettings, IpcError> {
+        let inner = self.inner.lock().await;
+        Ok(recording_settings_of(inner.open.as_ref().ok_or_else(locked)?))
+    }
+
+    pub async fn set_recording_settings(&self, settings: RecordingSettings) -> Result<RecordingSettings, IpcError> {
+        if !(1..=MAX_KEEP_PER_HOST).contains(&settings.keep_per_host) {
+            return Err(invalid("Keep between 1 and 100 recordings per host."));
+        }
+        if !(1..=MAX_LOG_MIB).contains(&settings.max_log_mib) {
+            return Err(invalid("A recording's size limit must be between 1 and 512 MiB."));
+        }
+        let record = RecordingSettingsRecord {
+            enabled: settings.enabled,
+            keep_per_host: settings.keep_per_host,
+            max_log_mib: settings.max_log_mib,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match &open.recording_settings {
+            Some((id, stored)) => (*id, stored.revision + 1),
+            None => (random_id().map_err(from_vault)?, 1),
+        };
+        self.write(open, id, KIND_RECORDING_SETTINGS, revision, Some((&record, 0))).await?;
+        open.recording_settings = Some((id, Stored { revision, record }));
+        Ok(settings)
+    }
+
+    /// The key and settings for a new recording, or `None` when recording is off.
+    pub(crate) async fn recording_context(&self, generation: u32) -> Result<Option<RecordingContext>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let settings = recording_settings_of(open);
+        if !settings.enabled {
+            return Ok(None);
+        }
+        Ok(Some(RecordingContext {
+            logs_key: open.keys.logs_key().map_err(from_vault)?,
+            vault_id: open.keys.vault_id(),
+            key_version: open.keys.key_version(),
+            settings,
+        }))
+    }
+
+    /// `K_logs` and the identity fields a recording's header must carry, for reading.
+    pub(crate) async fn logs_key(&self) -> Result<(SecretKey, Id, u32), IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok((open.keys.logs_key().map_err(from_vault)?, open.keys.vault_id(), open.keys.key_version()))
+    }
+
+    pub(crate) async fn create_session_log(&self, generation: u32, record: SessionLogRecord) -> Result<Id, IpcError> {
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if open.session_logs.len() >= MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of recordings."));
+        }
+        let id = random_id().map_err(from_vault)?;
+        self.write(open, id, KIND_SESSION_LOG, 1, Some((&record, session_log_content_len(&record)))).await?;
+        open.session_logs.insert(id, Stored { revision: 1, record });
+        Ok(id)
+    }
+
+    /// Records how a recording ended. A no-op when the record is gone (deleted meanwhile).
+    pub(crate) async fn finish_session_log(
+        &self,
+        id: Id,
+        ended_at: u64,
+        size_bytes: u64,
+        end: LogEnd,
+    ) -> Result<(), IpcError> {
+        self.update_session_log(id, |record| {
+            record.ended_at = Some(ended_at);
+            record.size_bytes = size_bytes;
+            record.end = Some(end);
+        })
+        .await
+    }
+
+    pub(crate) async fn update_session_log(
+        &self,
+        id: Id,
+        change: impl FnOnce(&mut SessionLogRecord),
+    ) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let Some(stored) = open.session_logs.get(&id) else {
+            return Ok(());
+        };
+        let mut record = stored.record.clone();
+        change(&mut record);
+        if record.comment.len() > MAX_LOG_COMMENT_LEN {
+            return Err(invalid("A comment can be at most 2,000 characters."));
+        }
+        let revision = stored.revision + 1;
+        self.write(open, id, KIND_SESSION_LOG, revision, Some((&record, session_log_content_len(&record)))).await?;
+        open.session_logs.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    /// Every recording's record, newest first.
+    pub(crate) async fn session_logs(&self) -> Result<Vec<(Id, SessionLogRecord)>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.session_logs.iter().map(|(id, s)| (*id, s.record.clone())).collect();
+        list.sort_by(|a, b| b.1.started_at.cmp(&a.1.started_at).then_with(|| a.0.cmp(&b.0)));
+        Ok(list)
+    }
+
+    pub(crate) async fn session_log(&self, id: Id) -> Result<SessionLogRecord, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(open.session_logs.get(&id).ok_or_else(|| not_found("That recording no longer exists."))?.record.clone())
+    }
+
+    /// Removes recordings' records; the caller deletes their files.
+    pub(crate) async fn delete_session_logs(&self, ids: &[Id]) -> Result<(), IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        for id in ids {
+            let Some(stored) = open.session_logs.get(id) else { continue };
+            let revision = stored.revision + 1;
+            self.write::<SessionLogRecord>(open, *id, KIND_SESSION_LOG, revision, None).await?;
+            open.session_logs.remove(id);
+        }
+        Ok(())
+    }
+
+    /// The unbookmarked recordings of `host_id` (local terminals: `None`) beyond the newest
+    /// `keep`. Bookmarked recordings are kept on top of that; `active` ones are never chosen.
+    pub(crate) async fn session_logs_beyond(
+        &self,
+        host_id: Option<&str>,
+        keep: u32,
+        active: &[Id],
+    ) -> Result<Vec<Id>, IpcError> {
+        let logs = self.session_logs().await?;
+        Ok(logs
+            .into_iter()
+            .filter(|(id, r)| r.host_id.as_deref() == host_id && !r.bookmarked && !active.contains(id))
+            .skip(keep as usize)
+            .map(|(id, _)| id)
+            .collect())
     }
 }
 

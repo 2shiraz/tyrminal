@@ -48,6 +48,12 @@ Pre-release v0.1.0-beta.1 is published; v0.1.0-beta.2 follows once PR #6 and PR 
     WSL side are chosen inside WSL, and `wsl.exe -e` avoids a login shell re-parsing arguments.
 15. macOS: text typed through WebDriver must be ASCII (CJK and emoji never reached the shell);
     after an interrupt zsh continues a `;` list where bash abandons it.
+16. xterm.js 6 `paste()` only turns newlines into CR and wraps the text in `ESC[200~ … ESC[201~`;
+    it does not remove an end marker inside the text, so paste safety (P-25) refuses to send one.
+17. While a shell is not reading (starting up, or running a command) its tty is in canonical mode,
+    and macOS keeps only 1024 bytes of an unfinished line (Linux 4095, keeping the newline). A
+    longer typed line loses its excess and its newline, garbling the lines after it; pacing does
+    not help. Startup snippets therefore refuse lines over 1000 bytes.
 
 ## Next tasks, in order
 

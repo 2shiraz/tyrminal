@@ -7,18 +7,28 @@ import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { SecretField, Switch, TextField } from "../../components/ui/controls";
-import { IconPlus, IconServer, IconX } from "../../components/ui/icons";
+import { IconKeyRound, IconPlus, IconServer, IconX } from "../../components/ui/icons";
 import { hosts as hostsApi, identities as identitiesApi, keysD } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { msgProduction } from "../../lib/messages-production";
 import { useAction } from "../../lib/useAsync";
 import { identityEvents } from "../credentials/IdentitiesSection";
+import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
 // agent B: tunnels and history
 import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 import { OsIcon } from "./OsIcon";
 import { productionReason } from "./production";
-import { AgentForwarding, DEFAULT_SERIAL, DEFAULT_TERMINAL, type ProtocolKind, SerialFields, TelnetWarning, TerminalFields } from "./ProtocolFields";
+import {
+  AgentForwarding,
+  DEFAULT_SERIAL,
+  DEFAULT_TERMINAL,
+  PasteFields,
+  type ProtocolKind,
+  SerialFields,
+  TelnetWarning,
+  TerminalFields,
+} from "./ProtocolFields";
 
 type AuthKind = HostAuthInput["kind"];
 
@@ -77,8 +87,10 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
         ? "inherit"
         : sourceAuth?.kind === "stored_password" && !host
           ? "ask_password"
-          : (sourceAuth?.kind ?? (defaultGroupId ? "inherit" : keys.length > 0 ? "key" : "ask_password"))) as AuthKind,
-      keyId: sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : (keys[0]?.id ?? ""),
+          : // A new host asks for the password unless its group decides: a key is used only
+            // once the user picks one, never because one exists.
+            (sourceAuth?.kind ?? (defaultGroupId ? "inherit" : "ask_password"))) as AuthKind,
+      keyId: sourceAuth?.kind === "key" && !host?.inherited.auth ? sourceAuth.keyId : "",
       identityId: identity?.current ?? "",
       protocol: (host?.protocol.type ?? "ssh") as ProtocolKind,
       serial: host?.protocol.type === "serial" ? host.protocol.settings : DEFAULT_SERIAL,
@@ -174,6 +186,8 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     (protocol === "serial" && JSON.stringify(serial) !== JSON.stringify(start.serial)) ||
     terminal.encoding !== start.terminal.encoding ||
     terminal.term !== start.terminal.term ||
+    terminal.pasteSkipMultiline !== start.terminal.pasteSkipMultiline ||
+    terminal.pasteSkipTrailingNewline !== start.terminal.pasteSkipTrailingNewline ||
     forwardAgent !== start.forwardAgent ||
     production !== start.production ||
     advanced.changed;
@@ -419,6 +433,8 @@ function ProtocolCard({ form }: { form: HostForm }) {
 function CredentialsCard({ form }: { form: HostForm }) {
   const { fields, set, keys, inherited, inheritedKey, certified, identity } = form;
   const [showIdentity, setShowIdentity] = useState(fields.identityId !== "");
+  // Installing the chosen key on this (saved) host, signing in once with its password.
+  const [installing, setInstalling] = useState(false);
   const plainKeys = keys.filter((k) => !certified.has(k.id));
   const certKeys = keys.filter((k) => certified.has(k.id));
   const chosenIdentity = identity?.list.find((i) => i.id === fields.identityId);
@@ -463,6 +479,9 @@ function CredentialsCard({ form }: { form: HostForm }) {
                 value={fields.keyId}
                 onChange={(event) => set.setKeyId(event.target.value)}
               >
+                <option value="" disabled>
+                  {msg.hosts.keyChooseOne}
+                </option>
                 {plainKeys.length > 0 && (
                   <optgroup label={msgD.hostPanel.sshKeys}>
                     {plainKeys.map((key) => (
@@ -483,8 +502,15 @@ function CredentialsCard({ form }: { form: HostForm }) {
                 )}
               </select>
             )}
+            {fields.authKind === "key" && form.host && fields.keyId !== "" && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", marginTop: 4 }} onClick={() => setInstalling(true)}>
+                <IconKeyRound size={14} />
+                {msgD.installKey.fromHost}
+              </button>
+            )}
           </span>
         </label>
+        {installing && form.host && <InstallKeyDialog hostId={form.host.id} keyId={fields.keyId} onClose={() => setInstalling(false)} />}
         <label className="choice">
           <input type="radio" name="auth" checked={fields.authKind === "ask_password"} onChange={() => set.setAuthKind("ask_password")} />
           <span className="choice-body">
@@ -561,6 +587,7 @@ function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
       <div className="stack-sm host-more-body">
         <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />
+        <PasteFields value={form.fields.terminal} onChange={form.set.setTerminal} />
         {form.fields.protocol === "ssh" && form.fields.authKind === "key" && (
           <AgentForwarding checked={form.fields.forwardAgent} onChange={form.set.setForwardAgent} />
         )}

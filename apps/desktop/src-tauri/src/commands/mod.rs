@@ -11,6 +11,7 @@ pub mod settings;
 pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
+pub mod history;
 pub mod tunnels;
 // privilege prompts (KEY-18)
 pub mod privilege;

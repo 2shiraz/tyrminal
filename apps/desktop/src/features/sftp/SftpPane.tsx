@@ -840,7 +840,7 @@ function ConnectionState({
 }
 
 /** Host-key decision for a new server. The safe choice has initial focus. */
-function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
+export function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
   return (
     <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => onAnswer("cancel")}>
       <HopNotice hop={trust.hop} />

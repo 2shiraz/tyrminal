@@ -207,6 +207,15 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_files", { hostId, events });
   },
+  /**
+   * A files-only connection that signs in with a password typed at the prompt, whatever the host
+   * uses, to install a key the server does not accept yet. Trust and prompts arrive as events.
+   */
+  openForKeyInstall(hostId: string, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_key_install", { hostId, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -408,6 +417,27 @@ export const detach = {
   /** Detached window: takes over one handed-over session with this window's own channels. */
   attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
+};
+
+// Session recordings
+type RecordingSettingsDto = import("@tyrminal/contracts").RecordingSettings;
+type SessionLogSummaryDto = import("@tyrminal/contracts").SessionLogSummary;
+type SessionLogStorageDto = import("@tyrminal/contracts").SessionLogStorage;
+type SessionLogPlaybackDto = import("@tyrminal/contracts").SessionLogPlayback;
+
+/** Session recordings: output only, encrypted in the vault, opened read-only. */
+export const recordings = {
+  settings: () => call<RecordingSettingsDto>("recording_settings_get"),
+  /** Turning recording off stops running recordings and keeps existing ones. */
+  setSettings: (settings: RecordingSettingsDto) => call<RecordingSettingsDto>("recording_settings_set", { settings }),
+  list: () => call<SessionLogSummaryDto[]>("session_log_list"),
+  storage: () => call<SessionLogStorageDto>("session_log_storage"),
+  bookmark: (id: string, bookmarked: boolean, comment: string) =>
+    call<SessionLogSummaryDto>("session_log_bookmark", { id, bookmarked, comment }),
+  remove: (id: string) => call<void>("session_log_delete", { id }),
+  /** Deletes every recording that is not running now; separate from turning recording off. */
+  removeAll: () => call<number>("session_log_delete_all"),
+  open: (id: string) => call<SessionLogPlaybackDto>("session_log_open", { id }),
 };
 
 // agent D: inventory and snippets

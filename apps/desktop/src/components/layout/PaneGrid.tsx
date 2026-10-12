@@ -1,9 +1,11 @@
 import type { TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState } from "react";
 
+import { useOptionalVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Tab, type Workspace, activeTab, panesOf, paneRects } from "../../app/workspace";
 import { SftpView } from "../../features/sftp/SftpView";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
+import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
 import { msgC } from "../../lib/messages-c";
@@ -86,6 +88,17 @@ export function PaneGrid({
   const tabOf = new Map<number, Tab>();
   for (const tab of ws.tabs) for (const id of panesOf(tab.layout)) tabOf.set(id, tab);
   const all = [...tabOf.keys()].sort((a, b) => a - b);
+
+  // A detached window has no vault lists: every paste check stays on there.
+  const hosts = useOptionalVaultData()?.hosts.value;
+  // P-25: each SSH pane follows its host's paste settings; anything unknown keeps every check.
+  const pasteChecks = (pane: Pane): PasteChecks | undefined => {
+    if (pane.target.kind !== "ssh") return undefined;
+    const { hostId } = pane.target;
+    const terminal = hosts?.find((h) => h.id === hostId)?.terminal;
+    if (!terminal) return undefined;
+    return { multiline: !terminal.pasteSkipMultiline, trailingNewline: !terminal.pasteSkipTrailingNewline };
+  };
 
   return (
     <div className="workspace" hidden={front === null} role="tabpanel" aria-label={msg.terminal.pane} data-focus-layout={focusLayout || undefined}>
@@ -213,6 +226,7 @@ export function PaneGrid({
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                   pending={pane.pending}
+                  pasteChecks={pasteChecks(pane)}
                   restoreDirectory={pane.target.kind === "ssh" ? pane.restoreDirectory : undefined}
                   onDirectory={(directory) => onPatch(id, { directory })}
                   attachToken={pane.attachToken}
