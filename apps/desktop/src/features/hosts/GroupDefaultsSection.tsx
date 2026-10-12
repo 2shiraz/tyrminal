@@ -6,9 +6,12 @@ import { Notice, SecretField, TextField } from "../../components/ui/controls";
 import { groupDefaults as groupDefaultsApi } from "../../lib/ipc";
 import { msgB } from "../../lib/messages-b";
 import { osNames } from "../../lib/messages-d";
+import { msgAutosave } from "../../lib/messages-autosave";
 import { msgDefaults } from "../../lib/messages-defaults";
 import { routeSummary } from "../tunnels/HostAdvanced";
 import { parsePort } from "../tunnels/rules";
+import { validAddress } from "./fieldRules";
+import { DropSecretNotice, type LiveProxySecret, LiveSecretField } from "./LiveSecret";
 
 type ProxyChoice = "none" | ProxyType;
 const PROXY_CHOICES: ProxyChoice[] = ["none", "http", "socks5"];
@@ -55,7 +58,7 @@ export function useGroupDefaults(groupId: string | null) {
   }, [groupId]);
 
   const port = parsePort(proxyPort, false);
-  const valid = proxyKind === "none" || (proxyHost.trim() !== "" && port !== null);
+  const valid = proxyKind === "none" || (validAddress(proxyHost) && port !== null);
   const input = useCallback(
     (): GroupDefaultsInput => ({
       jumpHostId,
@@ -68,12 +71,45 @@ export function useGroupDefaults(groupId: string | null) {
     [jumpHostId, os, proxyKind, proxyHost, port, proxyUser, proxyPassword],
   );
   const lp = loaded?.proxy ?? null;
-  const changed =
+  /** The route (jump host and proxy) differs from the stored one, a typed proxy password aside. */
+  const routeChanged =
     jumpHostId !== (loaded?.jumpHostId ?? null) ||
-    os !== (loaded?.os ?? null) ||
-    proxyPassword.length > 0 ||
     (proxyKind === "none") !== (lp === null) ||
     (lp !== null && (proxyKind !== lp.kind || proxyHost !== lp.host || port !== lp.port || proxyUser.trim() !== lp.username));
+  const osChanged = os !== (loaded?.os ?? null);
+  const changed = routeChanged || osChanged || proxyPassword.length > 0;
+  /** Saving the route as it stands would drop the stored proxy password. */
+  const dropsPassword = lp?.passwordStored === true && (proxyKind === "none" || proxyUser.trim() !== lp.username);
+  /**
+   * Autosave: the defaults to write, with this editor's route only when `route` (else the stored
+   * one, whose proxy password the core keeps), and a proxy password only when one is being set.
+   */
+  const inputFor = useCallback(
+    (route: boolean, password?: string): GroupDefaultsInput => {
+      if (!route) {
+        return {
+          os,
+          jumpHostId: loaded?.jumpHostId ?? null,
+          proxy: lp === null ? null : { kind: lp.kind, host: lp.host, port: lp.port, username: lp.username, password: null },
+        };
+      }
+      return {
+        jumpHostId,
+        os,
+        proxy: proxyKind === "none" ? null : { kind: proxyKind, host: proxyHost, port: port ?? 0, username: proxyUser, password: password ?? null },
+      };
+    },
+    [os, loaded, lp, jumpHostId, proxyKind, proxyHost, port, proxyUser],
+  );
+  /** Undo: puts the fields back to stored defaults (the next autosave writes them). */
+  const restore = useCallback((d: GroupDefaults | null) => {
+    setJumpHostId(d?.jumpHostId ?? null);
+    setOs(d?.os ?? null);
+    setProxyKind(d?.proxy?.kind ?? "none");
+    setProxyHost(d?.proxy?.host ?? "");
+    setProxyPort(d?.proxy ? String(d.proxy.port) : "");
+    setProxyUser(d?.proxy?.username ?? "");
+  }, []);
 
   const saveBefore = useCallback(async () => {
     if (groupId !== null && changed) setLoaded(await groupDefaultsApi.set(groupId, input()));
@@ -91,6 +127,13 @@ export function useGroupDefaults(groupId: string | null) {
     ready,
     valid,
     loaded,
+    setLoaded,
+    routeChanged,
+    osChanged,
+    dropsPassword,
+    inputFor,
+    restore,
+    proxyHostInvalid: proxyKind !== "none" && !validAddress(proxyHost),
     jumpHostId,
     setJumpHostId,
     os,
@@ -106,7 +149,7 @@ export function useGroupDefaults(groupId: string | null) {
   };
 }
 
-export function GroupDefaultsSection({ state }: { state: ReturnType<typeof useGroupDefaults> }) {
+export function GroupDefaultsSection({ state, live }: { state: ReturnType<typeof useGroupDefaults>; live?: LiveProxySecret | undefined }) {
   const { hosts } = useVaultData();
   const options = hosts.value ?? [];
   const labelOf = (id: string) => options.find((h) => h.id === id)?.label ?? msgB.advanced.missingJump;
@@ -154,7 +197,13 @@ export function GroupDefaultsSection({ state }: { state: ReturnType<typeof useGr
         {p.kind !== "none" && (
           <>
             <div className="split" style={{ gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)" }}>
-              <TextField label={msgB.advanced.proxyHost} value={p.host} onChange={state.setProxyHost} maxLength={253} />
+              <TextField
+                label={msgB.advanced.proxyHost}
+                value={p.host}
+                onChange={state.setProxyHost}
+                maxLength={253}
+                error={live && state.proxyHostInvalid && state.routeChanged ? msgAutosave.proxyHost : undefined}
+              />
               <TextField
                 label={msgB.advanced.proxyPort}
                 value={p.port}
@@ -167,18 +216,34 @@ export function GroupDefaultsSection({ state }: { state: ReturnType<typeof useGr
             </div>
             <div className="split" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
               <TextField label={msgB.advanced.proxyUser} value={p.user} onChange={state.setProxyUser} hint={msgB.advanced.proxyUserHint} maxLength={255} />
-              {p.user.trim() !== "" && (
-                <SecretField
-                  label={msgB.advanced.proxyPassword}
-                  value={p.password}
-                  onChange={state.setProxyPassword}
-                  hint={p.passwordStored ? msgB.advanced.proxyPasswordKeep : undefined}
-                  maxLength={255}
-                />
-              )}
+              {p.user.trim() !== "" &&
+                (live ? (
+                  <LiveSecretField
+                    label={msgB.advanced.proxyPassword}
+                    value={p.password}
+                    onChange={state.setProxyPassword}
+                    stored={p.passwordStored}
+                    maxLength={255}
+                    canSet={live.canSet}
+                    onSet={live.set}
+                    setLabel={msgAutosave.setProxyPassword}
+                  />
+                ) : (
+                  <SecretField
+                    label={msgB.advanced.proxyPassword}
+                    value={p.password}
+                    onChange={state.setProxyPassword}
+                    hint={p.passwordStored ? msgB.advanced.proxyPasswordKeep : undefined}
+                    maxLength={255}
+                  />
+                ))}
             </div>
             {p.kind === "http" && p.user.trim() !== "" && <Notice tone="warning">{msgB.advanced.httpCleartext}</Notice>}
           </>
+        )}
+        {live && state.routeChanged && !state.valid && <p className="hint">{msgAutosave.routeHeld}</p>}
+        {live && state.routeChanged && state.valid && state.dropsPassword && (
+          <DropSecretNotice text={msgAutosave.removesProxyPassword} action={msgAutosave.removeProxyPassword} onRemove={live.remove} />
         )}
         <label className="field">
           <span className="label">{msgDefaults.os}</span>

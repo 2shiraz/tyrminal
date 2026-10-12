@@ -55,7 +55,12 @@ export function useStartup(target: SettingsTarget) {
 
   // What "inherit" currently means for a host: the group the list comes from, if any.
   const inheritedFrom = effective?.origin?.kind === "group" ? effective.origin.name : null;
-  return { ready, mode, setMode, list, setList, save, inheritedFrom, valid: mode !== "list" || list.length <= MAX_STARTUP_SNIPPETS };
+  /** Undo: puts the choice back to a stored list (the next autosave writes it). */
+  const restore = useCallback((ids: string[] | null) => {
+    setMode(ids === null ? "inherit" : ids.length === 0 ? "none" : "list");
+    setList(ids ?? []);
+  }, []);
+  return { ready, mode, setMode, list, setList, save, loaded, changed, value, restore, inheritedFrom, valid: mode !== "list" || list.length <= MAX_STARTUP_SNIPPETS };
 }
 
 export function StartupSection({ target, state }: { target: SettingsTarget; state: ReturnType<typeof useStartup> }) {

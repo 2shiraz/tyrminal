@@ -10,13 +10,15 @@ interface DialogProps {
   icon?: ReactNode;
   tone?: "accent" | "warning" | "danger";
   wide?: boolean;
+  /** Shown at the end of the title row (an autosave status). */
+  aside?: ReactNode;
 }
 
 /**
  * Modal dialog on the native `<dialog>` element: focus is trapped by the platform, and focus
  * returns to the previously focused element when the dialog closes.
  */
-export function Dialog({ title, onDismiss, children, role = "dialog", icon, tone = "accent", wide = false }: DialogProps) {
+export function Dialog({ title, onDismiss, children, role = "dialog", icon, tone = "accent", wide = false, aside }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -58,6 +60,7 @@ export function Dialog({ title, onDismiss, children, role = "dialog", icon, tone
             </span>
           )}
           <h2 id={titleId}>{title}</h2>
+          {aside}
         </div>
         {children}
       </div>
