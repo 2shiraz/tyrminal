@@ -11,7 +11,7 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 | 2 | Layouts: multi-host splits, grid/focus layouts, pane reorder, 16 panes | Done: UI tests and native 16-pane test on Linux |
 | 3 | Named layout templates in the vault, explicit save, unsaved indicator, restore by explicit action | Done: core, UI and native tests on Linux |
 | 4 | Detach a tab into its own window (scoped capability, session handoff bound to the window label) | Done on A's handoff (636f104, cherry-picked); UI, native and lab tests on Linux |
-| 5 | Keyboard customization, encodings/emulation (honest limits), output highlighting, palette/recent polish, broadcast target review (P-13) | Mostly done; palette/recent polish (UX-03/04) next |
+| 5 | Keyboard customization, encodings/emulation (honest limits), output highlighting, palette/recent polish, broadcast target review (P-13) | Done, including palette tab search and recent connections (UX-03/04) |
 
 ## Slice 1 (2026-10-12)
 

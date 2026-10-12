@@ -160,4 +160,11 @@ export const msgC = {
     gone: "The tab for this window is no longer available. Close this window and move the tab again.",
     ended: "Every session in this window has ended. You can close it.",
   },
+  palette: {
+    groupTabs: "Open tabs",
+    groupRecent: "Recent connections",
+  },
+  newTab: {
+    recent: "Recent",
+  },
 };

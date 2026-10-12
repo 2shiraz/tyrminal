@@ -530,6 +530,7 @@ function Shell() {
           onDetach={(id) => void detachTab(id)}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}
+          recent={(data.recent.value ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) }))}
           layout={
             ws.template
               ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
@@ -666,6 +667,10 @@ function Shell() {
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           onLocal={openLocal}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}
+          openTabs={ws.tabs.map((t) => {
+            const p = ws.panes[t.focused];
+            return { id: t.id, title: tabTitle(ws, t), detail: p?.identity ?? "", onSelect: () => setWs((current) => selectTab(current, t.id)) };
+          })}
           layouts={{
             list: savedLayouts.value ?? [],
             current: ws.template?.name ?? null,

@@ -635,3 +635,34 @@ test("detached window: a refused token fails closed, with no way to reconnect fr
   await expect(refused.getByText("To connect again, open the host from the main window.")).toBeVisible();
   expect(await calls(page, "session_open_ssh")).toHaveLength(0);
 });
+
+test("palette and new-tab menu: switch to an open tab by name; reopen a recent connection", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+T");
+  await expect(terminalTabs(page)).toHaveCount(2);
+  const before = (await calls(page, "session_open_ssh")).length;
+  // An open tab is found by its name or destination and selected, not reconnected.
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("10.20.0.11");
+  await expect(page.getByRole("option").first()).toContainText("api-gateway");
+  await expect(page.locator(".palette-group").first()).toHaveText("Open tabs");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { name: /api-gateway/ })).toHaveAttribute("aria-selected", "true");
+  expect(await calls(page, "session_open_ssh")).toHaveLength(before);
+
+  // Recent connections are listed first among hosts, and the new-tab menu reopens them.
+  await page.keyboard.press("Control+Shift+K");
+  await expect(page.locator(".palette-group", { hasText: "Recent connections" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const recent = await page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((c) => c.cmd === "host_recent").length);
+  expect(recent).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "New tab" }).click();
+  const menu = page.getByRole("menu", { name: "New tab" });
+  const first = menu.getByRole("menuitem").nth(2);
+  const label = (await first.textContent())!.trim();
+  await first.click();
+  await expect(terminalTabs(page)).toHaveCount(3);
+  await expect(terminalTabs(page).nth(2)).toHaveText(new RegExp(label));
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(before + 1);
+});

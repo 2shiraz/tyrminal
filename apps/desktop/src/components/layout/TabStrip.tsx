@@ -11,6 +11,7 @@ import {
   IconColumns2,
   IconCopy,
   IconFingerprint,
+  IconHistory,
   IconHouse,
   IconKeyRound,
   IconLayoutTemplate,
@@ -49,6 +50,7 @@ export function TabStrip({
   onNewLocal,
   onOpenPalette,
   layout,
+  recent,
 }: {
   ws: Workspace;
   destination: Destination;
@@ -66,6 +68,8 @@ export function TabStrip({
   onOpenPalette: () => void;
   /** The layout template the open tabs follow, and whether they changed since it was saved. */
   layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
+  /** Recently connected hosts, reopened from the new-tab menu (UX-04). */
+  recent?: { id: string; label: string; detail: string; onSelect: () => void }[] | undefined;
 }) {
   const [layoutMenu, setLayoutMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ id: number; anchor?: HTMLElement; point?: { x: number; y: number } } | null>(null);
@@ -315,6 +319,8 @@ export function TabStrip({
           items={[
             { label: msg.nav.localTerminal, icon: <IconPlus size={15} />, shortcut: <Shortcut action="newLocal" />, onSelect: onNewLocal },
             { label: msg.palette.groupHosts, icon: <IconServer size={15} />, shortcut: <Shortcut action="palette" />, onSelect: onOpenPalette },
+            ...((recent ?? []).length > 0 ? (["separator"] as MenuEntry[]) : []),
+            ...(recent ?? []).slice(0, 5).map((r) => ({ label: r.label, icon: <IconHistory size={15} />, onSelect: r.onSelect })),
           ]}
           onClose={() => setNewMenu(null)}
         />

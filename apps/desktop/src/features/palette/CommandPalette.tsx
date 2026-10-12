@@ -103,6 +103,7 @@ export function CommandPalette({
   workspace,
   layouts,
   pick,
+  openTabs,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -143,13 +144,15 @@ export function CommandPalette({
         onDelete: (layout: LayoutTemplateSummary) => void;
       }
     | undefined;
+  /** Open tabs, so the palette can switch to one by name or destination. */
+  openTabs?: { id: number; title: string; detail: string; onSelect: () => void }[] | undefined;
   /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const { hosts, snippets } = useVaultData();
+  const { hosts, snippets, recent } = useVaultData();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
 
@@ -177,7 +180,33 @@ export function CommandPalette({
       list.push({ id: "local", group: msg.palette.groupActions, label: msg.nav.localTerminal, icon: <IconSquareTerminal size={16} />, run: () => pick.onPick("local") });
       return list;
     }
+    // agent C: workspaces — open tabs first, then recent connections (UX-03, UX-04).
+    for (const t of openTabs ?? []) {
+      list.push({
+        id: `tab-${t.id}`,
+        group: msgC.palette.groupTabs,
+        label: t.title,
+        detail: t.detail,
+        keywords: t.detail,
+        icon: <IconSquareTerminal size={16} />,
+        run: t.onSelect,
+      });
+    }
+    const recentIds = new Set<string>();
+    for (const host of (recent.value ?? []).slice(0, 5)) {
+      recentIds.add(host.id);
+      list.push({
+        id: `recent-${host.id}`,
+        group: msgC.palette.groupRecent,
+        label: host.label,
+        detail: msg.hosts.destination(host.username, host.address, host.port),
+        keywords: `${host.address} ${host.username}`,
+        icon: <Avatar label={host.label} size="sm" />,
+        run: () => onConnect(host),
+      });
+    }
     for (const host of hosts.value ?? []) {
+      if (recentIds.has(host.id)) continue;
       list.push({
         id: `host-${host.id}`,
         group: msg.palette.groupHosts,
@@ -298,7 +327,7 @@ export function CommandPalette({
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs]);
 
   const results = useMemo(() => {
     const scored = items

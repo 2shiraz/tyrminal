@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Slice 4: detach a tab into its own window | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slices 1–3: tab duplicate, status indicators, multi-host splits, grid/focus layouts, pane reorder, 16 panes, layout templates (draft PR #7) | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | — |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
