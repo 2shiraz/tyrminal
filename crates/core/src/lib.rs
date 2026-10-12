@@ -15,6 +15,7 @@ mod vault;
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
+pub use tyrminal_platform::restrict_to_owner;
 pub use vault::VaultService;
 
 use std::path::Path;

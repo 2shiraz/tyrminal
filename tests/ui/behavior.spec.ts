@@ -279,3 +279,14 @@ test("every button has an accessible name and ids are unique", async ({ page }) 
   });
   expect(problems).toEqual([]);
 });
+
+test("a changed host key blocks the session and leads to Known hosts", async ({ page }) => {
+  await openApp(page, { hostKeyChangedFor: "db-primary" });
+  await page.getByRole("button", { name: "Connect to db-primary" }).first().click();
+  const overlay = page.getByRole("alert").filter({ hasText: "This server's identity has changed" });
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toContainText("no password or key was sent");
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  await overlay.getByRole("button", { name: "Open Known hosts" }).click();
+  await expect(page.getByRole("heading", { name: "Known hosts", level: 1 })).toBeVisible();
+});

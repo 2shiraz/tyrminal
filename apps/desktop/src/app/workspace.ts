@@ -174,6 +174,17 @@ export function focusPane(ws: Workspace, pane: number): Workspace {
   return { ...ws, active: tab.id, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) };
 }
 
+/**
+ * Moves keyboard focus to `pane` within its tab, only if that tab is the one in front. Focus
+ * events from a hidden pane (for example one that was just navigated away from) never bring its
+ * tab back.
+ */
+export function focusPaneInActiveTab(ws: Workspace, pane: number): Workspace {
+  const tab = tabOfPane(ws, pane);
+  if (!tab || tab.id !== ws.active || tab.focused === pane) return ws;
+  return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? { ...t, focused: pane } : t)) };
+}
+
 export function patchPane(ws: Workspace, pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>): Workspace {
   const current = ws.panes[pane];
   if (!current) return ws;

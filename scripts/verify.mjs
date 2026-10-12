@@ -41,7 +41,7 @@ const SUITES = {
   fast: [
     { name: "rust format", cmd: cargo("fmt", "--all", "--check") },
     { name: "rust lint", cmd: cargo("clippy", "--workspace", "--all-targets", "--", "-D", "warnings") },
-    { name: "rust unit and property tests", cmd: cargo("test", "--workspace", "--quiet") },
+    { name: "rust unit and property tests", cmd: cargo("test", "--workspace", "--no-fail-fast", "--quiet") },
     { name: "contracts are up to date", cmd: node("scripts/generate-contracts.mjs", "--check") },
     { name: "typescript", cmd: pnpm("--filter", "@tyrminal/desktop", "typecheck") },
     { name: "frontend build", cmd: pnpm("--filter", "@tyrminal/desktop", "build") },

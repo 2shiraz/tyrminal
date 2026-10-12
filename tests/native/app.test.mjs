@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { App, loadLab, startForwarder } from "./harness.mjs";
+import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
 const lab = loadLab();
@@ -42,14 +42,18 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     const input = await s.waitFor(".terminal-pane:not([hidden]) .xterm-helper-textarea");
     await s.type(input, text);
   };
-  const nav = (label) => s.clickButton(label, { within: "nav.sidebar" });
+  const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
+  const nav = async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`));
+  const statusText = async () => s.text(await s.waitFor(".statusbar"));
+  /** Host entries on the Hosts page (cards), as the user reads them. */
+  const hostText = () => s.until(() => s.execute(`return document.querySelector('[data-testid="host-list"] li')?.innerText ?? null`), { describe: "a host entry" });
   // Read in one step in the page, so a re-render cannot invalidate an element handle mid-read.
   const heading = () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" });
   const listItemText = () => s.until(() => s.execute(`return document.querySelector("ul.list li")?.innerText ?? null`), { describe: "a list row" });
 
   before(async () => {
     forwarder = await startForwarder(lab.servers.a.port);
-    app = await App.launch();
+    app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     s = app.session;
   });
 
@@ -82,9 +86,11 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    await s.until(async () => (await heading()) === "Hosts", { describe: "main window" });
+    await s.until(async () => (await heading()) === "Home", { describe: "main window" });
+    assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
+    await app.screenshot("03-home-empty");
+    await nav("Hosts");
     assert.match(await s.execute("return document.body.innerText"), /No hosts yet/);
-    await app.screenshot("03-empty-hosts");
   });
 
   test("imports a key and saves a host; secrets never come back to the UI", async () => {
@@ -111,9 +117,10 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await app.screenshot("05-host-editor");
     await s.clickButton("Save", { within: "dialog" });
     await s.waitGone("dialog");
-    const hostRow = await listItemText();
+    const hostRow = await hostText();
     assert.match(hostRow, /Lab server/);
-    assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port} · Key: lab key`));
+    assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port}`));
+    assert.match(hostRow, /Key: lab key/);
 
     // The renderer holds no private key material anywhere in its document.
     const html = await s.execute("return document.documentElement.outerHTML");
@@ -134,9 +141,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clickButton("Trust and remember", { within: "dialog" });
     await s.waitGone("dialog");
 
-    await s.until(async () => /Connected/.test(await s.text(await s.waitFor(".terminal-pane:not([hidden]) .statusbar"))), {
-      describe: "connected status",
-    });
+    await s.until(async () => /Connected/.test(await statusText()), { describe: "connected status" });
     await typeInTerminal("echo native-$((40+2)) && id -un\n");
     await s.until(async () => /native-42/.test(await terminalText()), { describe: "fixture command output" });
     assert.match(await terminalText(), new RegExp(`\\n${lab.user}\\b`));
@@ -146,9 +151,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   test("terminal survives a tab switch and a local terminal runs alongside", async () => {
     await s.clickButton("Local terminal", { within: "nav.sidebar" });
     await s.until(async () => (await s.findAll(".terminal-pane")).length === 2, { describe: "second terminal" });
-    await s.until(async () => /Connected/.test(await s.text(await s.waitFor(".terminal-pane:not([hidden]) .statusbar"))), {
-      describe: "local shell",
-    });
+    await s.until(async () => /Connected/.test(await statusText()) && /Local terminal/.test(await statusText()), { describe: "local shell" });
     await typeInTerminal("echo local-$((40+2))\n");
     await s.until(async () => /local-42/.test(await terminalText()), { describe: "local command output" });
 
@@ -187,14 +190,15 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
       }
     }
 
-    app = await App.launch({ dataDir });
+    app = await App.launch({ dataDir, prefs: DOM_RENDERER_PREFS });
     s = app.session;
     assert.equal(await heading(), "Unlock your vault");
     await s.clickButton("Use recovery key instead");
     await s.fill("Recovery key", recoveryKey.toLowerCase().replaceAll("-", " "));
     await s.clickButton("Unlock");
-    await s.until(async () => (await heading()) === "Hosts", { describe: "main window after recovery unlock", timeout: 20_000 });
-    assert.match(await listItemText(), /Lab server/);
+    await s.until(async () => (await heading()) === "Home", { describe: "main window after recovery unlock", timeout: 20_000 });
+    await nav("Hosts");
+    assert.match(await hostText(), /Lab server/);
 
     await nav("Known hosts");
     const known = await listItemText();
@@ -226,6 +230,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
 
     // Trust was not replaced: the only known key is still the original one.
     await s.clickButton("Open Known hosts");
+    await s.until(async () => (await heading()) === "Known hosts", { describe: "known hosts page" });
+    await app.screenshot("11-known-hosts-after-change");
     await s.waitFor("ul.list li"); // the list loads asynchronously
     const entries = await s.findAll("ul.list li");
     assert.equal(entries.length, 1);
@@ -260,6 +266,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
         remote: [...scripts, ...links].filter((u) => u && !u.startsWith(location.origin)),
         globalTauri: typeof window.__TAURI__,
         localStorageKeys: Object.keys(localStorage).length,
+        fonts: [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family),
       };`);
     assert.deepEqual(report.remote, [], "every script and stylesheet is bundled");
     assert.equal(report.globalTauri, "undefined", "the global Tauri API object is not exposed");

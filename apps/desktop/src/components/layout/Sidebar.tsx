@@ -78,6 +78,7 @@ export function Sidebar({
       key={entry.id}
       type="button"
       className="nav-item"
+      data-nav={entry.id}
       aria-current={destination === entry.id ? "page" : undefined}
       data-tooltip={collapsed ? msg.nav[entry.id] : undefined}
       data-tooltip-side="right"
@@ -134,12 +135,12 @@ export function Sidebar({
       )}
 
       <div className="sidebar-footer">
-        <button type="button" className="nav-item" onClick={onLocalTerminal} data-tooltip={collapsed ? msg.nav.localTerminal : undefined} data-tooltip-side="right">
+        <button type="button" className="nav-item" data-nav="local" onClick={onLocalTerminal} data-tooltip={collapsed ? msg.nav.localTerminal : undefined} data-tooltip-side="right">
           <IconSquareTerminal size={17} />
           <span className="nav-label">{msg.nav.localTerminal}</span>
         </button>
         {item({ id: "settings", icon: <IconSettings size={17} /> })}
-        <button type="button" className="nav-item" onClick={onLock} data-tooltip={collapsed ? msg.nav.lock : undefined} data-tooltip-side="right">
+        <button type="button" className="nav-item" data-nav="lock" onClick={onLock} data-tooltip={collapsed ? msg.nav.lock : undefined} data-tooltip-side="right">
           <IconLock size={17} />
           <span className="nav-label">{msg.nav.lock}</span>
         </button>

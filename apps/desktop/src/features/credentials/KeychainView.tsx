@@ -6,10 +6,12 @@ import { EmptyState, ErrorNotice, IconButton, SecretField, SkeletonRows, Switch,
 import { IconCheck, IconCopy, IconFileCode, IconKeyRound, IconPlus, IconTrash2 } from "../../components/ui/icons";
 import { keys as keysApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { useAction, useLoaded } from "../../lib/useAsync";
+import { useVaultData } from "../../app/vaultData";
+import { useAction } from "../../lib/useAsync";
 
 export function KeychainView() {
-  const keys = useLoaded(keysApi.list);
+  // The shared list, so host views see a new or deleted key immediately.
+  const { keys, hosts } = useVaultData();
   const [dialog, setDialog] = useState<"generate" | "import" | null>(null);
   const [deleting, setDeleting] = useState<KeySummary | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export function KeychainView() {
   const closeAndReload = () => {
     setDialog(null);
     void keys.reload();
+    void hosts.reload();
   };
 
   return (
@@ -110,6 +113,7 @@ export function KeychainView() {
                 setDeleting(null);
                 await remove.run(() => keysApi.remove(target.id));
                 void keys.reload();
+                void hosts.reload();
               }}
             >
               {msg.common.delete}

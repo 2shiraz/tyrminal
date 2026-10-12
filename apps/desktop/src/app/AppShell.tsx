@@ -31,6 +31,7 @@ import {
   cycleTab,
   emptyWorkspace,
   focusPane,
+  focusPaneInActiveTab,
   moveTab,
   neighbour,
   openTab,
@@ -324,7 +325,7 @@ function Shell() {
                 }
                 onPatch={(paneId, patch) => setWs((current) => patchPane(current, paneId, patch))}
                 onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
-                onFocus={(paneId) => setWs((current) => (activePane(current)?.id === paneId ? current : focusPane(current, paneId)))}
+                onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
                 onClose={(paneId) => {
                   setWs((current) => closePane(current, paneId));
                   setStatuses((current) => {

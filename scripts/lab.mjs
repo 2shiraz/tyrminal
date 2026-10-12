@@ -56,28 +56,33 @@ function fingerprint(pubFile) {
   return run("ssh-keygen", ["-lf", pubFile, "-E", "sha256"]).split(" ")[1];
 }
 
-function waitForBanner(port, timeoutMs = 20_000) {
+/**
+ * Resolves once something on `port` sends an SSH identification string. Every way an attempt can
+ * end (error, timeout, a close without data — Docker's port proxy accepts before sshd is up) leads
+ * to exactly one retry, so the wait always settles.
+ */
+function waitForBanner(port, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const attempt = () => {
+      let done = false;
       const socket = net.connect({ host: "127.0.0.1", port });
-      const retry = () => {
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
         socket.destroy();
-        if (Date.now() > deadline) reject(new Error(`sshd on port ${port} did not become ready`));
+        if (ok) resolve();
+        else if (Date.now() > deadline) reject(new Error(`sshd on port ${port} did not become ready`));
         else setTimeout(attempt, 150);
       };
-      socket.setTimeout(1_000, retry);
-      socket.once("error", retry);
-      socket.once("data", (d) => {
-        socket.destroy();
-        if (d.toString().startsWith("SSH-2.0-")) resolve();
-        else retry();
-      });
+      socket.setTimeout(1_000, () => finish(false));
+      socket.once("error", () => finish(false));
+      socket.once("close", () => finish(false));
+      socket.once("data", (d) => finish(d.toString().startsWith("SSH-2.0-")));
     };
     attempt();
   });
 }
-
 
 // ---------- shared ----------
 

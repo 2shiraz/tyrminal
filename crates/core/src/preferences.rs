@@ -132,8 +132,7 @@ mod tests {
         let store = PreferencesStore::open(&path);
         assert_eq!(store.get(), Preferences::default());
 
-        let mut prefs = Preferences::default();
-        prefs.theme = tyrminal_contracts::ThemePreference::Light;
+        let mut prefs = Preferences { theme: tyrminal_contracts::ThemePreference::Light, ..Preferences::default() };
         prefs.terminal.scheme = "solarized-light".into();
         store.set(prefs.clone()).unwrap();
         assert_eq!(PreferencesStore::open(&path).get(), prefs);

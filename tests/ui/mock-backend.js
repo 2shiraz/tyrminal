@@ -106,9 +106,10 @@ export function installMockBackend(options) {
     const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
     state.sessions.set(sessionId, s);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
+    const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
     const steps =
       kind === "ssh"
-        ? trustPrompt
+        ? trustPrompt || blocked
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -116,6 +117,25 @@ export function installMockBackend(options) {
     for (const step of steps) {
       setTimeout(() => channelSend(s.events, { type: "state", state: step }), delay);
       delay += 15;
+    }
+    if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
+      setTimeout(() => {
+        channelSend(s.events, {
+          type: "host_key_changed",
+          host: host.address,
+          port: host.port,
+          algorithm: "ssh-ed25519",
+          presentedFingerprint: "SHA256:kyaNXVx1Uds2NONuEOTWsUwOsEBQnhhSOOg1h8P/Eng",
+          trustedFingerprints: ["SHA256:71J6v69vG05S8WYY7SBu9DjPz+twOC7FCitOMa8XCzM"],
+        });
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, {
+          type: "closed",
+          error: { code: "HOST_KEY_CHANGED", message: "The server's identity has changed. The connection was blocked." },
+          exitStatus: null,
+        });
+      }, 40);
+      return { sessionId };
     }
     if (trustPrompt) {
       setTimeout(

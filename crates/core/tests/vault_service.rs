@@ -645,8 +645,7 @@ async fn preferences_are_available_while_locked_and_validated() {
     let dir = TempDir::new().unwrap();
     let core = open(&dir);
     assert_eq!(core.preferences.get(), Preferences::default());
-    let mut prefs = Preferences::default();
-    prefs.theme = ThemePreference::Dark;
+    let mut prefs = Preferences { theme: ThemePreference::Dark, ..Preferences::default() };
     prefs.terminal.font_size = 99.0;
     let stored = core.preferences.set(prefs).unwrap();
     assert!((stored.terminal.font_size - 32.0).abs() < f32::EPSILON);

@@ -28,6 +28,39 @@ jobs:
         with:
           cache-key: fast
       - run: pnpm run verify:fast
+      - run: node scripts/check-contrast.mjs
+
+  ui:
+    name: Browser UI and visual regression (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fonts the visual baselines were recorded with
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends fonts-inter fonts-dejavu-core fonts-liberation \
+            fonts-noto-color-emoji fonts-ipafont-gothic fonts-wqy-zenhei
+      - name: Chromium for Playwright 1.56.1
+        run: pnpm --filter @tyrminal/ui-tests exec playwright install --with-deps chromium
+      - run: pnpm run test:ui
+      - name: Keep the report and any screenshot diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-report
+          path: |
+            docs/reports/raw/ui-report/
+            docs/reports/raw/ui-results/
+          retention-days: 14
       - name: Keep evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

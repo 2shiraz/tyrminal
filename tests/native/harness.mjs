@@ -68,12 +68,19 @@ export class App {
     this.port = port;
   }
 
-  /** Starts the application. Reuses `dataDir` when given (to test restarts), else a fresh one. */
-  static async launch({ dataDir } = {}) {
+  /**
+   * Starts the application. Reuses `dataDir` when given (to test restarts), else a fresh one.
+   * `prefs` seeds preferences.json (non-secret settings) before the first launch, for example
+   * the DOM renderer so tests can read terminal text from the document.
+   */
+  static async launch({ dataDir, prefs } = {}) {
     if (!existsSync(appBinary)) {
       throw new Error(`BLOCKED: e2e application binary not found at ${appBinary}. Run \`pnpm build:e2e\`.`);
     }
     const dir = dataDir ?? mkdtempSync(join(tmpdir(), "tyrminal-e2e-"));
+    if (prefs && !existsSync(join(dir, "preferences.json"))) {
+      writeFileSync(join(dir, "preferences.json"), JSON.stringify(prefs));
+    }
     const port = await freePort();
     const child = spawn(appBinary, [], {
       env: { ...process.env, TYRMINAL_DATA_DIR: dir, TAURI_WEBDRIVER_PORT: String(port) },
@@ -118,3 +125,6 @@ export class App {
     if (!keepData) rmSync(this.dataDir, { recursive: true, force: true });
   }
 }
+
+/** Preferences for suites that read terminal text: the DOM renderer keeps text in the document. */
+export const DOM_RENDERER_PREFS = { theme: "dark", terminal: { renderer: "compatibility", cursorBlink: false } };

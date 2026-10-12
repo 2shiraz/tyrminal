@@ -25,11 +25,8 @@ fn storage_error() -> IpcError {
 /// Creates the application data directory with owner-only permissions and returns the vault path.
 fn vault_path(data_dir: &Path) -> Result<PathBuf, IpcError> {
     std::fs::create_dir_all(data_dir).map_err(|_| storage_error())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700)).map_err(|_| storage_error())?;
-    }
+    // Owner-only before anything is written (Unix 0700; Windows a user+SYSTEM DACL).
+    tyrminal_core::restrict_to_owner(data_dir).map_err(|_| storage_error())?;
     Ok(data_dir.join("vault.db"))
 }
 
