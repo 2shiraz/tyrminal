@@ -39,6 +39,7 @@ export type { SessionState } from "./SessionState";
 export type { SnippetInput } from "./SnippetInput";
 export type { SnippetSendMode } from "./SnippetSendMode";
 export type { SnippetSummary } from "./SnippetSummary";
+export type { StreamUpload } from "./StreamUpload";
 export type { TerminalPreferences } from "./TerminalPreferences";
 export type { ThemePreference } from "./ThemePreference";
 export type { TransferDirection } from "./TransferDirection";

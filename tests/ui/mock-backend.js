@@ -256,6 +256,8 @@ export function installMockBackend(options) {
   let nextTransfer = 1;
   window.__mockLocalFiles = new Set();
   window.__mockFs = fs;
+  const streams = new Map();
+  window.__mockDropped = [];
   window.__mockTransfers = new Map();
   /** Completes a running mock transfer (tests drive progress explicitly). */
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
@@ -291,6 +293,32 @@ export function installMockBackend(options) {
         cancel: () => channelSend(a.events, { type: "cancelled" }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
+    },
+    // Dropped-file uploads: content arrives in ordered pieces; only a complete one appears.
+    files_upload_begin: (a) => {
+      const target = childPath(a.dir, a.name);
+      if (fs.has(target) && a.choice === "ask") fsErr("CONFLICT", "Something with that name is already there.");
+      const name = fs.has(target) && a.choice === "keep_both" ? a.name.replace(/(\.[^.]+)?$/, " (1)$1") : a.name;
+      const uploadId = id(9500 + nextTransfer++);
+      streams.set(uploadId, { dir: a.dir, name, size: a.size, written: 0 });
+      return { uploadId, name };
+    },
+    files_upload_chunk: (a, o) => {
+      const s = streams.get(o.headers["x-upload"]);
+      if (!s) fsErr("ACCESS_DENIED", "That upload is not running in this window.");
+      if (Number(o.headers["x-offset"]) !== s.written) fsErr("INVALID_INPUT", "The upload arrived out of order and was stopped.");
+      s.written += a.length ?? a.byteLength ?? 0;
+      window.__mockDropped.push({ name: s.name, bytes: a.length ?? a.byteLength });
+    },
+    files_upload_finish: (a) => {
+      const s = streams.get(a.uploadId);
+      streams.delete(a.uploadId);
+      if (!s || s.written !== s.size) fsErr("INVALID_INPUT", "The upload ended before all of the file arrived.");
+      addNode(childPath(s.dir, s.name), "file", s.size, 0o644);
+      return s.name;
+    },
+    files_upload_abort: (a) => {
+      streams.delete(a.uploadId);
     },
     terminal_choices: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {

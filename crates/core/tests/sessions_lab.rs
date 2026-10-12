@@ -1951,3 +1951,83 @@ async fn a_session_moves_to_another_window_and_only_that_window_can_use_it() {
     new.until_closed().await;
     assert_eq!(s.count(), 0);
 }
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_dropped_file_streams_in_order_and_only_a_complete_upload_appears() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let dir_name = format!("tyr-drop-{}", std::process::id());
+    s.make_dir(WINDOW, &id, &home, &dir_name).await.unwrap();
+    let dir = format!("{}/{dir_name}", home.trim_end_matches('/'));
+    let names = || async {
+        s.list_files(WINDOW, &id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect::<Vec<_>>()
+    };
+
+    // A 5 MiB file in pieces arrives byte for byte under its own name.
+    let data = pattern(5 * 1024 * 1024 + 123, 7);
+    let up = s.upload_begin(WINDOW, &id, &dir, "drop.bin", data.len() as u64, ConflictChoice::Ask).await.unwrap();
+    assert_eq!(up.name, "drop.bin");
+    let mut offset = 0u64;
+    for piece in data.chunks(1024 * 1024) {
+        s.upload_chunk(WINDOW, &up.upload_id, offset, piece).await.unwrap();
+        offset += piece.len() as u64;
+        assert!(!names().await.contains(&"drop.bin".to_owned()), "visible before it was complete");
+    }
+    // Another window cannot finish (or write to) someone else's upload.
+    assert_eq!(s.upload_finish("other", &up.upload_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+    assert_eq!(s.upload_finish(WINDOW, &up.upload_id).await.unwrap(), "drop.bin");
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &dir, "drop.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    transfer_end(&mut rx).await;
+    assert_eq!(std::fs::read(back.path().join("drop.bin")).unwrap(), data);
+
+    // An existing name is refused unless the user chose Replace or Keep both.
+    assert_eq!(
+        s.upload_begin(WINDOW, &id, &dir, "drop.bin", 3, ConflictChoice::Ask).await.unwrap_err().code,
+        ErrorCode::Conflict
+    );
+    let kept = s.upload_begin(WINDOW, &id, &dir, "drop.bin", 3, ConflictChoice::KeepBoth).await.unwrap();
+    assert_eq!(kept.name, "drop (1).bin");
+    s.upload_chunk(WINDOW, &kept.upload_id, 0, b"abc").await.unwrap();
+    s.upload_finish(WINDOW, &kept.upload_id).await.unwrap();
+
+    // Out of order, too long, too short or abandoned: stopped, and nothing is left behind.
+    let gap = s.upload_begin(WINDOW, &id, &dir, "gap.txt", 6, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &gap.upload_id, 0, b"abc").await.unwrap();
+    assert!(s.upload_chunk(WINDOW, &gap.upload_id, 4, b"ef").await.is_err());
+    assert!(s.upload_chunk(WINDOW, &gap.upload_id, 3, b"def").await.is_err(), "a stopped upload stays stopped");
+    let long = s.upload_begin(WINDOW, &id, &dir, "long.txt", 2, ConflictChoice::Ask).await.unwrap();
+    assert!(s.upload_chunk(WINDOW, &long.upload_id, 0, b"abc").await.is_err());
+    let short = s.upload_begin(WINDOW, &id, &dir, "short.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &short.upload_id, 0, b"abc").await.unwrap();
+    assert!(s.upload_finish(WINDOW, &short.upload_id).await.is_err());
+    let left = s.upload_begin(WINDOW, &id, &dir, "left.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &left.upload_id, 0, b"abc").await.unwrap();
+    s.upload_abort(WINDOW, &left.upload_id).await;
+    // A window that closes takes its unfinished uploads with it.
+    let orphan = s.upload_begin(WINDOW, &id, &dir, "orphan.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &orphan.upload_id, 0, b"abc").await.unwrap();
+    s.close_all_for_owner(WINDOW);
+    client.until_closed().await;
+
+    // Check what is left over a fresh session.
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    client.until_connected().await;
+    let id = client.session.clone();
+    let left: Vec<_> =
+        s.list_files(WINDOW, &id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(left, ["drop (1).bin", "drop.bin"], "only complete uploads remain");
+    for name in ["drop (1).bin", "drop.bin"] {
+        s.remove_file(WINDOW, &id, &dir, name).await.unwrap();
+    }
+    s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
+}

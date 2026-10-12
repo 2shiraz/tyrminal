@@ -716,6 +716,16 @@ pub enum TransferDirection {
     Copy,
 }
 
+/// An upload whose content the window sends in pieces (a file dropped from the desktop).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StreamUpload {
+    pub upload_id: String,
+    /// The name it will have on the server (differs from the dropped file's with Keep both).
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

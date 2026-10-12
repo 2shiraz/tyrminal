@@ -36,6 +36,7 @@ import type {
   SnippetInput,
   SnippetSendMode,
   SnippetSummary,
+  StreamUpload,
   TransferEvent,
   TransferStarted,
   TrustDecision,
@@ -235,6 +236,18 @@ export const files = {
   /** Lists a folder inside a local folder the user chose. */
   localList: (token: string, path: string[]) => call<LocalListing>("files_local_list", { token, path }),
   cancel: (transferId: string) => call<void>("files_cancel", { transferId }),
+  /** Uploads of files dropped from the desktop: the page sends the content in ordered pieces. */
+  uploadBegin: (sessionId: string, dir: string, name: string, size: number, choice: ConflictChoice) =>
+    call<StreamUpload>("files_upload_begin", { sessionId, dir, name, size, choice }),
+  async uploadChunk(uploadId: string, offset: number, bytes: Uint8Array): Promise<void> {
+    try {
+      await invoke("files_upload_chunk", bytes, { headers: { "x-upload": uploadId, "x-offset": String(offset) } });
+    } catch (error) {
+      throw toAppError(error);
+    }
+  },
+  uploadFinish: (uploadId: string) => call<string>("files_upload_finish", { uploadId }),
+  uploadAbort: (uploadId: string) => call<void>("files_upload_abort", { uploadId }),
   /** Opens a remote file in the default local application; nothing is uploaded until save. */
   editOpen: (sessionId: string, dir: string, name: string) => call<EditStatus>("files_edit_open", { sessionId, dir, name }),
   editStatus: (editId: string) => call<EditStatus>("files_edit_status", { editId }),

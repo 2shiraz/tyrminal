@@ -40,6 +40,7 @@ use crate::error::{err, from_ssh, internal, invalid, not_found};
 use crate::files::{self, Download, TransferSink, Upload, from_file};
 use crate::folders;
 use crate::handoff::{HANDOFF_TTL, Relay};
+use crate::streams::Streams;
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
 
@@ -111,6 +112,8 @@ pub struct Sessions {
     edits: edits::Edits,
     /// Pending window handoffs by single-use token.
     offers: Mutex<HashMap<String, Offer>>,
+    /// Uploads whose content the window sends (dropped files).
+    streams: Arc<Streams>,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -144,6 +147,7 @@ impl Sessions {
             transfers: Arc::new(Mutex::new(HashMap::new())),
             edits: edits::Edits::default(),
             offers: Mutex::new(HashMap::new()),
+            streams: Arc::new(Streams::default()),
         })
     }
 
@@ -288,6 +292,7 @@ impl Sessions {
         };
         self.entries().remove(session_id);
         *entry.prompts() = Prompts::default();
+        self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
         for folder in self.edits.take_session(session_id) {
             let _ = tokio::fs::remove_dir_all(folder).await;
@@ -552,6 +557,38 @@ impl Sessions {
         Ok(files::started(id, name.to_owned(), TransferDirection::Upload, Some(total)))
     }
 
+    /// Starts an upload of `size` bytes whose content the window sends with `upload_chunk`
+    /// (files dropped from the desktop, whose paths the window never learns).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upload_begin(
+        &self,
+        owner: &str,
+        session_id: &str,
+        dir: &str,
+        name: &str,
+        size: u64,
+        choice: ConflictChoice,
+    ) -> Result<tyrminal_contracts::StreamUpload, IpcError> {
+        let (_, sftp) = self.sftp(owner, session_id).await?;
+        let id = random_token()?;
+        self.streams.begin(owner, session_id, sftp, dir, name, size, choice, id).await
+    }
+
+    /// The next piece of a started upload; `offset` is where the previous piece ended.
+    pub async fn upload_chunk(&self, owner: &str, upload_id: &str, offset: u64, data: &[u8]) -> Result<(), IpcError> {
+        self.streams.chunk(owner, upload_id, offset, data).await
+    }
+
+    /// Completes an upload once every declared byte arrived; returns the name used.
+    pub async fn upload_finish(&self, owner: &str, upload_id: &str) -> Result<String, IpcError> {
+        self.streams.finish(owner, upload_id).await
+    }
+
+    /// Stops an upload and removes its partial file.
+    pub async fn upload_abort(&self, owner: &str, upload_id: &str) {
+        self.streams.abort(owner, upload_id).await;
+    }
+
     /// Opens a remote file for editing: downloads it into its own owner-only folder under
     /// `edit_root` and returns the local path for the adapter to hand to the OS, plus its status.
     pub async fn edit_open(
@@ -790,6 +827,9 @@ impl Sessions {
         for entry in self.entries().values().filter(|e| *e.owner() == owner) {
             entry.close.send_replace(true);
         }
+        let streams = Arc::clone(&self.streams);
+        let window = owner.to_owned();
+        tokio::spawn(async move { streams.abort_where(Some(&window), None).await });
         // Offers to this window lapse now; their sessions stay with the windows that own them.
         let lapsed: Vec<String> = self.offers().iter().filter(|(_, o)| o.to == owner).map(|(t, _)| t.clone()).collect();
         for token in lapsed {

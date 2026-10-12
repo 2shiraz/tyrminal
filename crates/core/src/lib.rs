@@ -17,6 +17,7 @@ mod preferences;
 mod records;
 mod remote_copy;
 mod sessions;
+mod streams;
 mod validate;
 mod vault;
 

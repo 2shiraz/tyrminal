@@ -374,6 +374,8 @@ export const msg = {
     panel: "Files",
     close: "Close files panel",
     noSession: "Files work with a connected SSH session. Select or open one.",
+    dropFolder: "Folders can't be dropped here. Use Upload folder instead.",
+    dropHint: "Drop files here to upload them to this folder.",
     on: (label: string) => `Files on ${label}`,
     path: "Folder on the server",
     up: "Up one folder",
