@@ -430,3 +430,56 @@ async fn a_recording_continues_when_its_session_moves_to_another_window() {
     assert!(text.contains("ready-42") && text.contains("moved-42"), "{text:?}");
     drop(terminal);
 }
+
+/// Size and modification time of a recording's file.
+fn file_state(path: &Path) -> (u64, std::time::SystemTime) {
+    let meta = std::fs::metadata(path).unwrap();
+    (meta.len(), meta.modified().unwrap())
+}
+
+/// Starts output that never stops and returns once it is being recorded.
+async fn printing_forever(f: &Fixture, terminal: &mut Terminal) -> String {
+    terminal.run("n=0; while :; do n=$((n+1)); echo tick-$n; sleep 0.02; done").await;
+    terminal.output_until("tick-20").await;
+    let log = f.only_log().await;
+    // The recording keeps up: it grows while the loop runs.
+    let path = f.log_file(&log.id);
+    let before = file_state(&path).0;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while file_state(&path).0 == before {
+        assert!(tokio::time::Instant::now() < deadline, "the recording never grew");
+        terminal.output_until(&format!("tick-{}", 40)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    log.id
+}
+
+#[tokio::test]
+async fn nothing_more_is_written_once_the_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = Fixture::new().await;
+        f.record(5, 64).await;
+        let mut terminal = Terminal::open(&f.core).await;
+        let id = printing_forever(&f, &mut terminal).await;
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            f.core.sessions.close(WINDOW, &terminal.session).unwrap();
+        }
+        // Output keeps arriving until the session ends, so this is bounded by its own deadline.
+        let closed = tokio::time::timeout(WAIT, terminal.until_closed()).await.expect("the session ended at once");
+        assert_eq!(closed, lock.then_some(ErrorCode::VaultLocked));
+        // The session task has ended; the file is final and stays exactly as it is.
+        let path = f.log_file(&id);
+        let ended = file_state(&path);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(file_state(&path), ended, "written after the session ended (lock: {lock})");
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let playback = f.core.sessions.open_session_log(&id).await.unwrap();
+        assert_eq!(playback.log.state, SessionLogState::Complete, "finalized with its end (lock: {lock})");
+        assert!(played_text(&playback).contains("tick-20"));
+        assert_eq!(file_state(&path), ended, "reading it changes nothing");
+    }
+}

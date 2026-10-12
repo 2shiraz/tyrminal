@@ -978,3 +978,81 @@ async fn forwards_move_with_their_session_to_another_window() {
     f.core.sessions.stop_tunnel(OTHER_WINDOW, &run.run_id).await.unwrap();
     assert!(!echoes(loopback(run.bound_port), b"stopped").await);
 }
+
+/// Passes output on with acknowledgements, like the renderer, so a busy session keeps flowing.
+struct AckingSink {
+    core: Core,
+    session: std::sync::Mutex<Option<String>>,
+    events: mpsc::UnboundedSender<SessionEvent>,
+}
+
+impl SessionSink for AckingSink {
+    fn output(&self, data: Vec<u8>) -> bool {
+        let session = self.session.lock().unwrap().clone();
+        if let Some(session) = session {
+            let core = self.core.clone();
+            let n = data.len() as u32;
+            tokio::spawn(async move { core.sessions.ack(WINDOW, &session, n).await });
+        }
+        true
+    }
+    fn event(&self, event: SessionEvent) -> bool {
+        self.events.send(event).is_ok()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn an_ssh_recording_gets_nothing_more_once_the_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = fixture().await;
+        let settings = tyrminal_core::contracts::RecordingSettings { enabled: true, keep_per_host: 5, max_log_mib: 64 };
+        f.core.sessions.set_recording_settings(settings).await.unwrap();
+        let host = f.host(&f.lab.str("/user")).await;
+        let (tx, mut events) = mpsc::unbounded_channel();
+        let sink = Arc::new(AckingSink { core: f.core.clone(), session: std::sync::Mutex::new(None), events: tx });
+        let opened = f.core.sessions.open_ssh(WINDOW, &host, 80, 24, sink.clone()).await.unwrap();
+        *sink.session.lock().unwrap() = Some(opened.session_id.clone());
+        loop {
+            match tokio::time::timeout(WAIT, events.recv()).await.expect("connects").unwrap() {
+                SessionEvent::TrustPrompt { prompt_id, .. } => {
+                    f.core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
+                }
+                SessionEvent::State { state: SessionState::Connected } => break,
+                SessionEvent::Closed { error, .. } => panic!("closed: {error:?}"),
+                _ => {}
+            }
+        }
+        let log = f.core.sessions.list_session_logs().await.unwrap().remove(0);
+        let line = "n=0; while :; do n=$((n+1)); echo tick-$n; sleep 0.02; done\r";
+        f.core.sessions.write(WINDOW, &opened.session_id, line.as_bytes().to_vec()).await.unwrap();
+        recorded_until(&f, &log.id, "tick-20").await;
+
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            f.core.sessions.close(WINDOW, &opened.session_id).unwrap();
+        }
+        let error = loop {
+            let event = tokio::time::timeout(WAIT, events.recv()).await.expect("the session ended at once").unwrap();
+            if let SessionEvent::Closed { error, .. } = event {
+                break error.map(|e| e.code);
+            }
+        };
+        assert_eq!(error, lock.then_some(ErrorCode::VaultLocked));
+        let path = f._dir.path().join("logs").join(format!("{}.tyrlog", log.id));
+        let state = || {
+            let meta = std::fs::metadata(&path).unwrap();
+            (meta.len(), meta.modified().unwrap())
+        };
+        let ended = state();
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(state(), ended, "written after the session ended (lock: {lock})");
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let playback = f.core.sessions.open_session_log(&log.id).await.unwrap();
+        assert_eq!(playback.log.state, tyrminal_core::contracts::SessionLogState::Complete, "lock: {lock}");
+        assert_eq!(state(), ended);
+    }
+}
