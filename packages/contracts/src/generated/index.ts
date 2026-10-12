@@ -5,6 +5,7 @@ export type { AuthPromptKind } from "./AuthPromptKind";
 export type { BackupCredentialKind } from "./BackupCredentialKind";
 export type { BackupFile } from "./BackupFile";
 export type { BackupPreview } from "./BackupPreview";
+export type { BackupStatus } from "./BackupStatus";
 export type { BulkHostChange } from "./BulkHostChange";
 export type { ChainHop } from "./ChainHop";
 export type { ChainPosition } from "./ChainPosition";

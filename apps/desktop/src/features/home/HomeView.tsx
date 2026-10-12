@@ -1,5 +1,5 @@
 import type { HostSummary, SnippetSummary } from "@tyrminal/contracts";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { useVaultData } from "../../app/vaultData";
@@ -27,7 +27,7 @@ export { parseDestination } from "./QuickConnect";
  * user's own state: open sessions, hosts most recently used first and snippets on the left; the vault,
  * the security review and port forwards on the right. Nothing animates in.
  */
-export function HomeView({
+function HomeViewImpl({
   ws,
   statuses,
   onConnect,
@@ -52,6 +52,8 @@ export function HomeView({
   onNavigate: (d: Destination) => void;
   onSelectTab: (id: number) => void;
   onOpenSettings: (section: SettingsSection) => void;
+  /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
+  shortcuts?: unknown;
 }) {
   const { hosts, keys, groups } = useVaultData();
   const notify = useToast();
@@ -186,3 +188,6 @@ export function HomeView({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const HomeView = memo(HomeViewImpl);

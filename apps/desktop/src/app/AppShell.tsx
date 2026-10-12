@@ -1,5 +1,5 @@
 import type { HostSummary, LayoutTarget, LayoutTemplateSummary, SnippetSummary } from "@tyrminal/contracts";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBar } from "../components/layout/StatusBar";
@@ -137,6 +137,7 @@ function Shell() {
   // The user's shortcuts replace the defaults before anything below reads them.
   applyBindingOverrides(workspacePrefs(prefs.workspace).bindings);
   const data = useVaultData();
+  const reloadRecent = data.recent.reload;
   const notify = useToast();
   useSlowPatternNotice();
   const [destination, setDestination] = useState<Destination>("home");
@@ -163,6 +164,7 @@ function Shell() {
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
   // Named layout templates: listed from the vault, saved only on an explicit request.
   const savedLayouts = useLoaded(layoutsApi.list);
+  const reloadLayouts = savedLayouts.reload;
   const [savingAs, setSavingAs] = useState(false);
   const [choosingEncoding, setChoosingEncoding] = useState<{ paneId: number; current: string; target: string } | null>(null);
   // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
@@ -296,16 +298,22 @@ function Shell() {
     production: number[];
   } | null>(null);
 
-  const relayInput = useCallback(
-    (tabId: number, from: number, bytes: Uint8Array) => {
-      const live = (paneId: number) => {
-        const h = handles.current.get(paneId);
-        return statuses[paneId]?.state === "connected" && h?.broadcastable() === true ? (h.sessionId() ?? null) : null;
-      };
-      for (const id of relayTargets(members, tabId, from, live)) handles.current.get(id)?.receiveBroadcast(bytes);
-    },
-    [members, statuses],
-  );
+  // Stable, so the memoized pane grid never re-renders for it: it reads the committed members and
+  // statuses through refs, the same values the per-render callback used to close over.
+  const membersRef = useRef(members);
+  const statusesRef = useRef(statuses);
+  useLayoutEffect(() => {
+    membersRef.current = members;
+    statusesRef.current = statuses;
+  }, [members, statuses]);
+  const relayInput = useCallback((tabId: number, from: number, bytes: Uint8Array) => {
+    const live = (paneId: number) => {
+      const h = handles.current.get(paneId);
+      return statusesRef.current[paneId]?.state === "connected" && h?.broadcastable() === true ? (h.sessionId() ?? null) : null;
+    };
+    for (const id of relayTargets(membersRef.current, tabId, from, live)) handles.current.get(id)?.receiveBroadcast(bytes);
+  }, []);
+  const broadcastPaneIds = useMemo(() => memberPanes(members), [members]);
 
   // A Settings section to open at (the sidebar's version opens About); any navigation clears it.
   const [settingsAt, setSettingsAt] = useState<{ section: SettingsSection; n: number } | null>(null);
@@ -327,9 +335,9 @@ function Shell() {
     (host: HostSummary) => {
       open({ kind: "ssh", hostId: host.id }, host.label, hostIdentity(host));
       // The recent list updates once the session reaches its shell.
-      window.setTimeout(() => void data.recent.reload(), 3_000);
+      window.setTimeout(() => void reloadRecent(), 3_000);
     },
-    [open, data.recent],
+    [open, reloadRecent],
   );
 
   // Several hosts at once (multi-select on Hosts): one tab each, or one tab split in a grid.
@@ -450,7 +458,7 @@ function Shell() {
       try {
         const saved = await layoutsApi.save({ id: target?.id ?? null, name: target?.name ?? (name as string), tabs: templateTabs(current) });
         setWs((now) => markSaved(now, saved));
-        void savedLayouts.reload();
+        void reloadLayouts();
         notify("success", msgC.layouts.saved(saved.name));
         return null;
       } catch (error) {
@@ -459,7 +467,7 @@ function Shell() {
         return message;
       }
     },
-    [notify, savedLayouts],
+    [notify, reloadLayouts],
   );
 
   const deleteLayout = useCallback(
@@ -467,13 +475,13 @@ function Shell() {
       try {
         await layoutsApi.remove(layout.id);
         setWs((now) => (now.template?.id === layout.id ? { ...now, template: null } : now));
-        void savedLayouts.reload();
+        void reloadLayouts();
         notify("info", msgC.layouts.deleted(layout.name));
       } catch (error) {
         notify("danger", (error as Error).message);
       }
     },
-    [notify, savedLayouts],
+    [notify, reloadLayouts],
   );
 
   /** Moves a tab, with its live sessions, into a new window. Its panes unmount here without closing. */
@@ -789,6 +797,164 @@ function Shell() {
     [connect, sessionsVersion],
   );
 
+  // Stable callbacks and memoized props: the sidebar, tab strip, status bar, pages and the pane
+  // grid are memoized, so state that only one of them shows (the palette, a dialog, the sidebar
+  // collapsing) does not re-render all of them, and every terminal with them.
+  const bindings = workspacePrefs(prefs.workspace).bindings;
+  const selectTabById = useCallback((id: number | null) => setWs((current) => selectTab(current, id)), []);
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const toggleCollapsed = useCallback(() => setCollapsed((v) => !v), []);
+  const lock = useCallback(() => void vault.lock().catch(() => undefined), []);
+  const closeTabById = useCallback((id: number) => setWs((current) => closeTab(current, id)), []);
+  const closeOthers = useCallback((id: number) => setWs((current) => closeOtherTabs(current, id)), []);
+  const renameTabById = useCallback((id: number, title: string) => setWs((current) => renameTab(current, id, title)), []);
+  const moveTabTo = useCallback((from: number, to: number) => setWs((current) => moveTab(current, from, to)), []);
+  const splitTab = useCallback(
+    (id: number, dir: Direction) => {
+      const t = wsRef.current.tabs.find((x) => x.id === id);
+      if (!t) return;
+      setWs((current) => selectTab(current, id));
+      split(dir, undefined, t.focused);
+    },
+    [split],
+  );
+  const detachById = useCallback((id: number) => void detachTab(id), [detachTab]);
+  const saveAs = useCallback(() => setSavingAs(true), []);
+  const saveCurrent = useCallback(() => void saveLayout(), [saveLayout]);
+  const recentValue = data.recent.value;
+  const recentItems = useMemo(
+    () => (recentValue ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) })),
+    [recentValue, connect],
+  );
+  const templateName = ws.template?.name ?? null;
+  const layoutDirty = ws.template ? templateDirty(ws) : false;
+  const layoutInfo = useMemo(
+    () => (templateName !== null ? { name: templateName, dirty: layoutDirty, onSave: saveCurrent, onSaveAs: saveAs } : null),
+    [templateName, layoutDirty, saveCurrent, saveAs],
+  );
+  const toggleTheme = useCallback(() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" })), [update, resolvedTheme]);
+  const toggleSnippets = useCallback(() => runAction("toggleSnippets"), [runAction]);
+  const toggleFiles = useCallback(() => togglePanel("files"), [togglePanel]);
+  const toggleServer = useCallback(() => togglePanel("server"), [togglePanel]);
+  const toggleNotes = useCallback(() => togglePanel("notes"), [togglePanel]);
+  const stopActiveBroadcast = useCallback(() => {
+    const t = activeTab(wsRef.current);
+    if (!t) return;
+    stopBroadcast(t.id);
+  }, [stopBroadcast]);
+  const closeSidePanel = useCallback(() => {
+    setSidePanel(null);
+    focusedHandle()?.focus();
+  }, [focusedHandle]);
+  const openKnownHosts = useCallback(() => navigate("knownHosts"), [navigate]);
+  const onPatch = useCallback(
+    (paneId: number, patch: Parameters<typeof patchPane>[2]) => setWs((current) => patchPane(current, paneId, patch)),
+    [],
+  );
+  const onStatus = useCallback((paneId: number, status: PaneStatus) => setStatuses((current) => ({ ...current, [paneId]: status })), []);
+  const onPaneFocus = useCallback((paneId: number) => setWs((current) => focusPaneInActiveTab(current, paneId)), []);
+  const onPaneUnread = useCallback((paneId: number) => setWs((current) => markUnread(current, paneId)), []);
+  const onSelectPane = useCallback((paneId: number) => setWs((current) => focusPane(current, paneId)), []);
+  const onSwap = useCallback((a: number, b: number) => setWs((current) => swapPanes(current, a, b)), []);
+  const onFocusMode = useCallback((tabId: number, on: boolean) => setWs((current) => setFocusMode(current, tabId, on)), []);
+  const onToNewTab = useCallback((paneId: number) => setWs((current) => paneToNewTab(current, paneId)), []);
+  const onConnectPanes = useCallback((paneIds: number[]) => setWs((current) => connectPanes(current, paneIds)), []);
+  const onClosePane = useCallback((paneId: number) => {
+    setWs((current) => closePane(current, paneId));
+    setStatuses((current) => {
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
+  }, []);
+  const onSplitPane = useCallback((paneId: number, dir: Direction) => split(dir, undefined, paneId), [split]);
+  const onRatio = useCallback(
+    (tabId: number, path: ("a" | "b")[], ratio: number) => setWs((current) => setRatio(current, tabId, path, ratio)),
+    [],
+  );
+  const register = useCallback((paneId: number, handle: PaneHandle | null) => {
+    if (handle) handles.current.set(paneId, handle);
+    else handles.current.delete(paneId);
+  }, []);
+  const zoomFocused = useCallback((step: "in" | "out" | "reset") => focusedHandle()?.zoom(step), [focusedHandle]);
+  // tmux and screen session awareness (P-31): typed into the focused pane only.
+  const attachInFocused = useCallback(
+    (session: Parameters<PaneHandle["attachMultiplexer"]>[0]) => {
+      const handle = focusedHandle();
+      if (handle?.attachMultiplexer(session)) {
+        notify("success", msgMx.attachedNotice(session.name));
+        handle.focus();
+      }
+    },
+    [focusedHandle, notify],
+  );
+  const openSftpForHost = useCallback((host: HostSummary) => openSftpHost(host), [openSftpHost]);
+  const openSftpForHosts = useCallback((list: HostSummary[]) => openSftpHosts(list), [openSftpHosts]);
+  const pasteFocused = useCallback((text: string) => focusedHandle()?.reviewPaste(text), [focusedHandle]);
+  // The files panel's other connected sessions; computed only while that panel shows.
+  const filesOthers = useMemo(
+    () =>
+      showPanel && sidePanel === "files"
+        ? Object.values(ws.panes).flatMap((p) => {
+            const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
+            return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
+          })
+        : [],
+    [showPanel, sidePanel, ws.panes, statuses, filesSession],
+  );
+  // The side panel, rebuilt only when what it shows changes. `bindings`: the panels show shortcut labels.
+  const sidePanelElement = useMemo(() => {
+    if (!showPanel) return null;
+    if (sidePanel === "server") {
+      // server at a glance: SSH sessions only (a negotiated SSH connection; never Telnet or serial).
+      const glance =
+        filesSession && pane?.target.kind === "ssh" && paneStatus?.security
+          ? { sessionId: filesSession, hostId: pane.target.hostId, label: pane.label }
+          : null;
+      return <ServerPanel target={glance} onAttach={attachInFocused} onClose={closeSidePanel} />;
+    }
+    if (sidePanel === "files") {
+      return (
+        <FilesPanel
+          target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
+          onOpenSftp={pane?.target.kind === "ssh" ? (path: string | null) => pane.target.kind === "ssh" && openSftpHost({ id: pane.target.hostId, label: pane.label }, path) : undefined}
+          others={filesOthers}
+          onClose={closeSidePanel}
+        />
+      );
+    }
+    if (sidePanel === "notes") {
+      return (
+        <NotesPanel
+          host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
+          onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? pasteFocused : undefined}
+          onClose={closeSidePanel}
+        />
+      );
+    }
+    return (
+      <ConnectionPanel
+        section={panelSection}
+        onSection={setPanelSection}
+        hostId={pane?.target.kind === "ssh" ? pane.target.hostId : null}
+        onConnect={connect}
+        onZoom={zoomFocused}
+        target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
+        onSend={requestSnippet}
+        onClose={closeSidePanel}
+      />
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPanel, sidePanel, filesSession, pane, paneStatus, filesOthers, panelSection, connect, zoomFocused, pasteFocused, requestSnippet, closeSidePanel, attachInFocused, openSftpHost, bindings]);
+
+  const openSettingsAt = useCallback(
+    (section: SettingsSection) => {
+      navigate("settings");
+      setSettingsAt((current) => ({ section, n: (current?.n ?? 0) + 1 }));
+    },
+    [navigate],
+  );
+
   return (
     // agent D: snippet runs on several sessions read this window's open SSH sessions.
     <SnippetRunContext.Provider value={snippetRunHost}>
@@ -798,13 +964,14 @@ function Shell() {
         collapsed={collapsed}
         ws={ws}
         onNavigate={navigate}
-        onSelectTab={(id) => setWs((current) => selectTab(current, id))}
-        onOpenPalette={() => setPaletteOpen(true)}
+        onSelectTab={selectTabById}
+        onOpenPalette={openPalette}
         onLocalTerminal={openLocal}
         onSftp={openSftp}
-        onToggleCollapsed={() => setCollapsed((v) => !v)}
-        onLock={() => void vault.lock().catch(() => undefined)}
+        onToggleCollapsed={toggleCollapsed}
+        onLock={lock}
         onOpenAbout={openAbout}
+        shortcuts={bindings}
         hostCount={data.hosts.value?.length ?? 0}
         snippetCount={data.snippets.value?.length ?? 0}
       />
@@ -815,30 +982,22 @@ function Shell() {
           destination={destination}
           renaming={renaming}
           onRenaming={setRenaming}
-          onSelect={(id) => setWs((current) => selectTab(current, id))}
-          onClose={(id) => setWs((current) => closeTab(current, id))}
-          onCloseOthers={(id) => setWs((current) => closeOtherTabs(current, id))}
-          onRename={(id, title) => setWs((current) => renameTab(current, id, title))}
-          onMove={(from, to) => setWs((current) => moveTab(current, from, to))}
-          onSplit={(id, dir) => {
-            const t = wsRef.current.tabs.find((x) => x.id === id);
-            if (!t) return;
-            setWs((current) => selectTab(current, id));
-            split(dir, undefined, t.focused);
-          }}
+          onSelect={selectTabById}
+          onClose={closeTabById}
+          onCloseOthers={closeOthers}
+          onRename={renameTabById}
+          onMove={moveTabTo}
+          onSplit={splitTab}
           onDuplicate={duplicate}
-          onDetach={(id) => void detachTab(id)}
+          onDetach={detachById}
           onNewLocal={openLocal}
           onNewSftp={openSftp}
-          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenPalette={openPalette}
           finished={finished}
-          recent={(data.recent.value ?? []).map((h) => ({ id: h.id, label: h.label, detail: hostIdentity(h), onSelect: () => connect(h) }))}
-          layout={
-            ws.template
-              ? { name: ws.template.name, dirty: templateDirty(ws), onSave: () => void saveLayout(), onSaveAs: () => setSavingAs(true) }
-              : null
-          }
+          recent={recentItems}
+          layout={layoutInfo}
           production={productionPanes}
+          shortcuts={bindings}
         />
         {/* terminal notifications (P-23): announced to assistive technology as well */}
         <div className="visually-hidden" role="status" data-testid="command-finished">
@@ -856,14 +1015,12 @@ function Shell() {
               onLocal={openLocal}
               onSftp={openSftp}
               onNavigate={navigate}
-              onSelectTab={(id) => setWs((c) => selectTab(c, id))}
-              onOpenSettings={(section) => {
-                navigate("settings");
-                setSettingsAt((current) => ({ section, n: (current?.n ?? 0) + 1 }));
-              }}
+              onSelectTab={selectTabById}
+              onOpenSettings={openSettingsAt}
+              shortcuts={bindings}
             />
           )}
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={(host) => openSftpHost(host)} onOpenSftpMany={(list) => openSftpHosts(list)} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
@@ -889,87 +1046,23 @@ function Shell() {
                 ws={ws}
                 prefs={prefs.terminal}
                 workspace={workspacePrefs(prefs.workspace)}
-                panel={
-                  showPanel && sidePanel === "server" ? (
-                    <ServerPanel
-                      target={glanceTarget}
-                      // tmux and screen session awareness (P-31): typed into the focused pane only.
-                      onAttach={(session) => {
-                        const handle = focusedHandle();
-                        if (handle?.attachMultiplexer(session)) {
-                          notify("success", msgMx.attachedNotice(session.name));
-                          handle.focus();
-                        }
-                      }}
-                      onClose={() => {
-                        setSidePanel(null);
-                        focusedHandle()?.focus();
-                      }}
-                    />
-                  ) : showPanel && sidePanel === "files" ? (
-                    <FilesPanel
-                      target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
-                      onOpenSftp={pane?.target.kind === "ssh" ? (path: string | null) => pane.target.kind === "ssh" && openSftpHost({ id: pane.target.hostId, label: pane.label }, path) : undefined}
-                      others={Object.values(ws.panes).flatMap((p) => {
-                        const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
-                        return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
-                      })}
-                      onClose={() => {
-                        setSidePanel(null);
-                        focusedHandle()?.focus();
-                      }}
-                    />
-                  ) : showPanel && sidePanel === "notes" ? (
-                    <NotesPanel
-                      host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
-                      onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (text) => focusedHandle()?.reviewPaste(text) : undefined}
-                      onClose={() => {
-                        setSidePanel(null);
-                        focusedHandle()?.focus();
-                      }}
-                    />
-                  ) : showPanel ? (
-                    <ConnectionPanel
-                      section={panelSection}
-                      onSection={setPanelSection}
-                      hostId={pane?.target.kind === "ssh" ? pane.target.hostId : null}
-                      onConnect={connect}
-                      onZoom={(step) => focusedHandle()?.zoom(step)}
-                      target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
-                      onSend={requestSnippet}
-                      onClose={() => {
-                        setSidePanel(null);
-                        focusedHandle()?.focus();
-                      }}
-                    />
-                  ) : null
-                }
-                onPatch={(paneId, patch) => setWs((current) => patchPane(current, paneId, patch))}
-                onStatus={(paneId, status) => setStatuses((current) => ({ ...current, [paneId]: status }))}
-                onFocus={(paneId) => setWs((current) => focusPaneInActiveTab(current, paneId))}
-                onUnread={(paneId) => setWs((current) => markUnread(current, paneId))}
-                onSelectPane={(paneId) => setWs((current) => focusPane(current, paneId))}
-                onSwap={(a, b) => setWs((current) => swapPanes(current, a, b))}
-                onFocusMode={(tabId, on) => setWs((current) => setFocusMode(current, tabId, on))}
-                onToNewTab={(paneId) => setWs((current) => paneToNewTab(current, paneId))}
-                onConnect={(paneIds) => setWs((current) => connectPanes(current, paneIds))}
-                onClose={(paneId) => {
-                  setWs((current) => closePane(current, paneId));
-                  setStatuses((current) => {
-                    const next = { ...current };
-                    delete next[paneId];
-                    return next;
-                  });
-                }}
-                onSplit={(paneId, dir) => split(dir, undefined, paneId)}
-                onRatio={(tabId, path, ratio) => setWs((current) => setRatio(current, tabId, path, ratio))}
-                onOpenKnownHosts={() => navigate("knownHosts")}
-                register={(paneId, handle) => {
-                  if (handle) handles.current.set(paneId, handle);
-                  else handles.current.delete(paneId);
-                }}
+                panel={sidePanelElement}
+                onPatch={onPatch}
+                onStatus={onStatus}
+                onFocus={onPaneFocus}
+                onUnread={onPaneUnread}
+                onSelectPane={onSelectPane}
+                onSwap={onSwap}
+                onFocusMode={onFocusMode}
+                onToNewTab={onToNewTab}
+                onConnect={onConnectPanes}
+                onClose={onClosePane}
+                onSplit={onSplitPane}
+                onRatio={onRatio}
+                onOpenKnownHosts={openKnownHosts}
+                register={register}
                 broadcasting={broadcasting}
-                broadcastPaneIds={memberPanes(members)}
+                broadcastPaneIds={broadcastPaneIds}
                 onUserInput={relayInput}
                 production={productionPanes}
               />
@@ -981,20 +1074,18 @@ function Shell() {
           pane={terminalVisible && !sftpVisible ? pane : null}
           status={terminalVisible && !sftpVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible && !sftpVisible ? () => runAction("toggleSnippets") : undefined}
+          onTogglePanel={terminalVisible && !sftpVisible ? toggleSnippets : undefined}
           filesOpen={sidePanel === "files"}
-          onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
+          onToggleFiles={terminalVisible && !sftpVisible ? toggleFiles : undefined}
           serverOpen={sidePanel === "server"}
-          onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
+          onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? toggleServer : undefined}
           notesOpen={sidePanel === "notes"}
-          onToggleNotes={terminalVisible && !sftpVisible ? () => togglePanel("notes") : undefined}
+          onToggleNotes={terminalVisible && !sftpVisible ? toggleNotes : undefined}
           theme={resolvedTheme}
-          onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
+          onToggleTheme={toggleTheme}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
-          onStopBroadcast={() => {
-            if (!tab) return;
-            stopBroadcast(tab.id);
-          }}
+          onStopBroadcast={stopActiveBroadcast}
+          shortcuts={bindings}
         />
       </div>
 
@@ -1037,7 +1128,7 @@ function Shell() {
           onConnectSplit={connectSplit}
           onNavigate={navigate}
           onAction={runAction}
-          onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
+          onToggleTheme={toggleTheme}
           onLocal={openLocal}
           onSftp={openSftp}
           onSnippet={(snippet) => requestSnippet(snippet, "run")}

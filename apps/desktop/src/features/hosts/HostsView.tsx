@@ -11,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type KeyboardEvent, type MouseEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -30,14 +30,15 @@ import {
   IconKeyRound,
   IconLayoutGrid,
   IconList,
-  IconNetwork,
   IconLock,
+  IconNetwork,
   IconPencil,
   IconPlay,
   IconPlus,
   IconSearch,
   IconServer,
   IconSlidersHorizontal,
+  IconStar,
   IconTextCursorInput,
   IconTrash2,
   IconUpload,
@@ -139,39 +140,30 @@ const DOUBLE_CLICK_MS = 300;
 
 /** Times a host is connected from Hosts by double-click or Enter before the hint stops showing. */
 const HINT_UNTIL = 3;
-const HINT_KEY = "tyrminal.hosts.doubleClickHint";
 
 /**
- * The "Double-click to connect" hint on host names, for the first few connections from Hosts. A
- * per-device convenience in local storage; without storage it simply keeps showing.
+ * Connections made from Hosts by double-click or Enter in this run of the app. Kept in memory only:
+ * app code never uses browser storage (scripts/check-release.mjs), so the hint shows again for the
+ * first few connections after each start.
  */
+let hintUses = 0;
+
+/** The "Double-click to connect" hint on host names, for the first few connections from Hosts. */
 function useDoubleClickHint() {
-  const [count, setCount] = useState(() => {
-    try {
-      return Number(localStorage.getItem(HINT_KEY) ?? 0) || 0;
-    } catch {
-      return 0;
-    }
-  });
+  const [count, setCount] = useState(hintUses);
   return {
     show: count < HINT_UNTIL,
-    used: () =>
-      setCount((n) => {
-        const next = n + 1;
-        try {
-          localStorage.setItem(HINT_KEY, String(next));
-        } catch {
-          // Storage unavailable: the hint keeps showing, nothing else depends on it.
-        }
-        return next;
-      }),
+    used: () => {
+      hintUses += 1;
+      setCount(hintUses);
+    },
   };
 }
 
 /** Ctrl on Windows and Linux, Cmd on macOS: the "add to the selection" modifier. */
 const toggleKey = (event: { ctrlKey: boolean; metaKey: boolean }) => (isMac ? event.metaKey : event.ctrlKey);
 
-export function HostsView({
+function HostsViewImpl({
   ws,
   onConnect,
   onConnectMany,
@@ -548,6 +540,16 @@ export function HostsView({
       notify("success", msg.hosts.duplicated(copy.label));
       reload();
     }
+  }
+
+  async function favourite(host: HostSummary) {
+    const saved = await action.run(() => hostsApi.setFavourite(host.id, !host.favourite));
+    if (!saved) return;
+    // The open panel shows the same host: keep its copy current.
+    setPanel((current) =>
+      current && current.target.kind === "edit" && current.target.host.id === saved.id ? { ...current, target: { kind: "edit", host: saved } } : current,
+    );
+    reload();
   }
 
   const actions = (host: HostSummary, anchor: HTMLElement) => setMenu({ host, anchor });
@@ -940,6 +942,7 @@ export function HostsView({
           onConnect={(host) => guard(() => onConnect(host))}
           onOpenSftp={onOpenSftp}
           onDuplicate={(host) => void duplicate(host)}
+          onFavourite={(host) => void favourite(host)}
           onCopyAddress={(host) => {
             // A user-initiated copy of non-secret data.
             void navigator.clipboard
@@ -976,6 +979,11 @@ export function HostsView({
               ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(menu.host) }]
               : []),
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => openPanel({ kind: "edit", host: menu.host }) },
+            {
+              label: menu.host.favourite ? msg.hosts.unfavourite : msg.hosts.favourite,
+              icon: <IconStar size={15} fill={menu.host.favourite ? "currentColor" : "none"} />,
+              onSelect: () => void favourite(menu.host),
+            },
             {
               label: msg.hosts.duplicate,
               icon: <IconCopy size={15} />,
@@ -1266,6 +1274,9 @@ export function HostsView({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const HostsView = memo(HostsViewImpl);
 
 /** Below this width the list and the Host details panel do not fit side by side. */
 const NARROW_WIDTH = 760;

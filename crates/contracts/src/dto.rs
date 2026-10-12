@@ -49,6 +49,16 @@ pub struct BackupPreview {
     pub snippets: u32,
 }
 
+/// What the vault knows about its backups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupStatus {
+    /// Unix seconds of the last backup saved from this vault; `None` if it was never backed up.
+    #[ts(type = "number | null")]
+    pub last_export_at: Option<u64>,
+}
+
 /// A backup file the user picked in the native dialog. Its bytes stay on the native side.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +139,8 @@ pub struct HostSummary {
     /// Why the host is a production host (P-26), from its own flag or a group above it; `None`
     /// when neither sets it. The production tag (a preference) is applied by the interface.
     pub production: Option<ProductionSource>,
+    /// Starred by the user (shown in Home's favourites).
+    pub favourite: bool,
 }
 
 /// Where a host's production flag comes from (P-26).

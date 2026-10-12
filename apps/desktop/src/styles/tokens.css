@@ -107,18 +107,23 @@
   --duration-fast: 140ms;
   --duration-base: 180ms;
   --duration-slow: 220ms;
-  --duration-pop: 120ms; /* menus, the palette and tooltips, from their anchor */
-  --duration-panel: 160ms; /* side panels, the host panel and drawers */
-  --duration-move: 160ms; /* something sliding to a new place (tab indicator, list rows) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-colour: ease;
-  /* Older names: no overshoot anywhere, and nothing over 220 ms. */
-  --ease-spring: var(--ease-out);
-  --motion-fast: var(--duration-press);
-  --motion-base: var(--duration-fast);
-  --motion-slow: var(--duration-base);
+  --ease-linear: linear; /* progress only */
+  /* Second pass (docs/design/motion.md §2). No overshoot anywhere, and nothing over 220 ms. */
+  --duration-exit: 100ms; /* every exit: fade only, faster than any entrance */
+  --duration-glide: 180ms; /* something moving to a new place: FLIP, nav and tab glides */
+  --duration-progress: 200ms; /* progress bars retargeting between ticks (linear) */
+  --duration-flash: 400ms; /* one-shot "this changed" tint */
+  --stagger: 30ms; /* per item, capped at 8 items */
+  --distance-xs: 2px; /* disclosure, tooltips */
+  --distance-sm: 4px; /* menus, rows entering */
+  --distance-md: 8px; /* panels, toasts, dialogs */
+  --scale-enter: 0.97; /* popovers and tabs entering */
+  --scale-press: 0.98; /* buttons, chips, tabs and nav items while pressed */
+  --scale-press-card: 0.99; /* host cards and tiles: bigger surfaces give less */
 
   /* ---------- elevation: only things that float have a shadow ---------- */
   --shadow-1: none; /* flat surfaces: buttons, cards, settings groups */
@@ -403,9 +408,17 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-press: 0ms;
-    --duration-pop: 0ms;
-    --duration-panel: 0ms;
-    --duration-move: 0ms;
+    --duration-exit: 0ms;
+    --duration-glide: 0ms;
+    --duration-progress: 0ms;
+    --duration-flash: 0ms;
+    --stagger: 0ms;
+    --distance-xs: 0px;
+    --distance-sm: 0px;
+    --distance-md: 0px;
+    --scale-enter: 1;
+    --scale-press: 1;
+    --scale-press-card: 1;
     --duration-fast: 0ms;
     --duration-base: 0ms;
     --duration-slow: 0ms;
@@ -414,9 +427,17 @@
 
 :root[data-reduce-motion="true"] {
   --duration-press: 0ms;
-  --duration-pop: 0ms;
-  --duration-panel: 0ms;
-  --duration-move: 0ms;
+  --duration-exit: 0ms;
+  --duration-glide: 0ms;
+  --duration-progress: 0ms;
+  --duration-flash: 0ms;
+  --stagger: 0ms;
+  --distance-xs: 0px;
+  --distance-sm: 0px;
+  --distance-md: 0px;
+  --scale-enter: 1;
+  --scale-press: 1;
+  --scale-press-card: 1;
   --duration-fast: 0ms;
   --duration-base: 0ms;
   --duration-slow: 0ms;

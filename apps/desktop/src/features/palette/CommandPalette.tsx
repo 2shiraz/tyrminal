@@ -5,6 +5,7 @@ import type { Destination } from "../../app/AppShell";
 import type { Arrangement, Direction } from "../../app/workspace";
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
+import { openedBy } from "../../lib/inputModality";
 import {
   // agent B: tunnels and history
   IconRoute,
@@ -212,6 +213,8 @@ export function CommandPalette({
   onRunAllOpen?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // From the keyboard (Ctrl+K) the palette is simply there; from the sidebar search it enters.
+  const [opened] = useState(openedBy);
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const { hosts, snippets, recent } = useVaultData();
@@ -503,6 +506,7 @@ export function CommandPalette({
     <dialog
       ref={ref}
       className="palette"
+      data-opened-by={opened}
       aria-label={pick?.title ?? msg.palette.label}
       onCancel={(event) => {
         event.preventDefault();

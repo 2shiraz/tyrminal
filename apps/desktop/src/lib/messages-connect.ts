@@ -40,4 +40,7 @@ export const msgConnect = {
   schedule: "Tyrminal waits about 1, 2, 4, 8, 16 and 30 s between attempts, then stops.",
   cancelled: "Connection cancelled",
   cancelledBody: "Nothing more was sent to the server.",
+  // connection track
+  track: { resolve: "Address", connect: "Connect", verify: "Identity", auth: "Sign in", shell: "Shell" },
+  via: (identity: string) => `SSH ${identity}`,
 };

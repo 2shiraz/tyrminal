@@ -1,43 +1,16 @@
-/* Motion tokens and utilities, second edition (docs/design/overhaul.md, "Motion").
-   Not imported by the app yet. Rules the utilities encode:
+/* Motion utilities (docs/design/motion.md). The tokens live in tokens.css. Rules they encode:
    - Motion answers something the user did with the pointer, or shows a state change. Nothing loops
      except a connecting indicator, and nothing moves on its own to decorate.
-   - Only transform and opacity animate. Entrances use @starting-style transitions, so they can be
-     interrupted and need no JavaScript; where @starting-style is missing they simply appear.
+   - Only transform and opacity animate (plus background-color for a one-shot tint). Entrances use
+     @starting-style transitions, so they can be interrupted and need no JavaScript; where
+     @starting-style is missing they simply appear.
    - Exits are faster than entrances and fade only.
    - Never animated: terminal output, the cursor, terminal resize, tab switches, page changes, and
-     anything opened from the keyboard (mark it data-opened-by="keyboard").
-   - Reduced motion (OS setting or the in-app switch) sets every duration to 0. */
+     anything opened from the keyboard (data-opened-by="keyboard").
+   - Reduced motion (OS setting or the in-app switch) sets every duration, distance and scale to
+     zero or one, so the utilities below become instant without rules of their own. */
 
-:root {
-  --duration-press: 100ms; /* press feedback, hover colour */
-  --duration-fast: 140ms; /* tooltips, menus, popovers, exits */
-  --duration-base: 180ms; /* dialogs, side panels, the palette when opened by pointer */
-  --duration-slow: 220ms; /* toasts, first-run sheets; the ceiling for UI motion */
-
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* entering, answering */
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* something moving across the screen */
-  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* side panels */
-  --ease-colour: ease; /* hover and colour changes */
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --duration-press: 0ms;
-    --duration-fast: 0ms;
-    --duration-base: 0ms;
-    --duration-slow: 0ms;
-  }
-}
-
-:root[data-reduce-motion="true"] {
-  --duration-press: 0ms;
-  --duration-fast: 0ms;
-  --duration-base: 0ms;
-  --duration-slow: 0ms;
-}
-
-/* ---------- hover and press: colour changes ease; pressable things give 2% under the finger ---------- */
+/* ---------- hover and press: colour changes ease; pressable things give a little under the finger ---------- */
 .m-hover {
   transition:
     background-color var(--duration-press) var(--ease-colour),
@@ -53,10 +26,10 @@
 }
 
 .m-press:active:not(:disabled, [aria-disabled="true"]) {
-  transform: scale(0.98);
+  transform: scale(var(--scale-press));
 }
 
-/* ---------- popovers and menus: grow from the trigger (set --origin to the trigger side) ---------- */
+/* ---------- popovers and menus: grow from the trigger corner (set --origin) ---------- */
 .m-pop {
   transform-origin: var(--origin, top left);
   transition:
@@ -65,7 +38,7 @@
 
   @starting-style {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(var(--scale-enter));
   }
 }
 
@@ -86,7 +59,7 @@ dialog.m-dialog[open] {
 
   @starting-style {
     opacity: 0;
-    transform: scale(0.98) translateY(4px);
+    transform: scale(0.98) translateY(var(--distance-sm));
   }
 }
 
@@ -106,11 +79,11 @@ dialog.m-dialog[open]::backdrop {
 
   @starting-style {
     opacity: 0;
-    transform: translateX(8px);
+    transform: translateX(var(--distance-md));
   }
 }
 
-/* ---------- toasts: rise into place; leave by fading (add .m-leaving, remove after --duration-fast) ---------- */
+/* ---------- toasts: rise into place from the status bar edge ---------- */
 .m-toast {
   transition:
     opacity var(--duration-slow) var(--ease-out),
@@ -118,14 +91,16 @@ dialog.m-dialog[open]::backdrop {
 
   @starting-style {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(var(--distance-md));
   }
 }
 
-/* ---------- exits, shared: fade only, faster than the entrance ---------- */
+/* ---------- exits, shared: fade only, faster than the entrance (kept mounted by the owner) ---------- */
 .m-leaving {
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition:
+    opacity var(--duration-exit) var(--ease-out),
+    transform var(--duration-exit) var(--ease-out);
   pointer-events: none;
 }
 
@@ -137,7 +112,7 @@ dialog.m-dialog[open]::backdrop {
 
   @starting-style {
     opacity: 0;
-    transform: translateY(-2px);
+    transform: translateY(calc(-1 * var(--distance-xs)));
   }
 }
 
@@ -168,28 +143,26 @@ dialog.m-dialog[open]::backdrop {
   transition: none !important;
 }
 
-/* ---------- reduced motion: no transforms at all, and loops stop ---------- */
+/* ---------- reduced motion: loops stop (durations are already zero) ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .m-press:active {
-    transform: none;
-  }
-
   .m-connecting {
     animation: none;
   }
-}
-
-:root[data-reduce-motion="true"] .m-press:active {
-  transform: none;
 }
 
 :root[data-reduce-motion="true"] .m-connecting {
   animation: none;
 }
 
-/* ---------- the terminal never animates, whatever a utility above says ----------
-   Transitions only: xterm's own cursor blink is a CSS animation and stays the user's setting. */
-.terminal-pane,
-.terminal-pane * {
+/* ---------- the terminal canvas never animates, whatever a rule above says ----------
+   Only the terminal host and its descendants: overlays elsewhere in the pane (the connection
+   sheet, banners, the find bar) may move. xterm's own cursor blink is a CSS animation and stays
+   the user's setting. */
+.terminal-host,
+.terminal-host * {
   transition: none !important;
+}
+
+.terminal-host :not(.xterm-cursor-blink, .xterm-cursor-blink *) {
+  animation: none !important;
 }
