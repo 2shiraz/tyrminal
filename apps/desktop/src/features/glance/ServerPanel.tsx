@@ -7,6 +7,7 @@ import { type AppError, glance, toAppError } from "../../lib/ipc";
 import { msgG } from "../../lib/messages-glance";
 import { MultiplexerSection } from "../multiplexers/MultiplexerSection";
 import { formatSize } from "../sftp/model";
+import { useExit } from "../../lib/exitGhost";
 
 /** The SSH session the panel reads; Telnet, serial and local sessions never get here. */
 export interface GlanceTarget {
@@ -31,6 +32,8 @@ export function ServerPanel({
   onAttach?: ((session: MultiplexerSession) => void) | undefined;
 }) {
   const ref = useRef<HTMLElement>(null);
+  // Closing, the panel fades and drifts back toward its edge (lib/exitGhost).
+  const exitRef = useExit<HTMLElement>({ transform: "translateX(4px)" }, ref);
   const [value, setValue] = useState<ServerGlance | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -97,7 +100,7 @@ export function ServerPanel({
 
   return (
     <aside
-      ref={ref}
+      ref={exitRef}
       className="side-panel"
       aria-label={msgG.panel}
       data-panel-kind="server"
