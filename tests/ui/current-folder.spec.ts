@@ -48,7 +48,7 @@ test("the files panel opens in the shell's folder and can go back to it", async 
   await expect(folderField(page)).toHaveValue("/home/deploy");
   await toShell.click();
   await expect(folderField(page)).toHaveValue("/home/deploy/app");
-  await expect(panel(page).getByRole("list", { name: /^Contents of \// }).getByRole("button")).toHaveText([/config\.yml/]);
+  await expect(panel(page).getByRole("grid", { name: /^Contents of \// }).getByRole("button")).toHaveText([/config\.yml/]);
 });
 
 test("a shell folder the server cannot list falls back to the login folder", async ({ page }) => {

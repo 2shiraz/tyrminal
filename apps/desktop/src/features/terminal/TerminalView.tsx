@@ -1,15 +1,16 @@
 import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
-import { IconButton, Notice } from "../../components/ui/controls";
+import { IconButton, Notice, SecretField, TextField } from "../../components/ui/controls";
 import {
   IconChevronDown,
   IconChevronLeft,
   IconClipboardPaste,
   IconCopy,
   IconExternalLink,
+  IconKeyRound,
   IconSearch,
   IconShieldAlert,
   IconX,
@@ -18,10 +19,14 @@ import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
+import { HopNotice } from "../tunnels/HopNotice";
+import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { ConnectionSheet, type TimelineEntry, timelineEntry } from "./ConnectionSheet";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
+import type { CommandRecord } from "./commandOutput";
 import { schemeById } from "./schemes";
-import { RECONNECT_MAX_ATTEMPTS, checkLink, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
+import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -54,6 +59,14 @@ export interface PaneHandle {
   receiveBroadcast(bytes: Uint8Array): void;
   /** SSH only: environment variables requested on this connection, and those the server refused. */
   environment(): SessionEnvironment | null;
+  /** P-28: matches in this pane's scrollback (in memory only). */
+  searchScrollback(query: string, caseSensitive: boolean): ScrollbackResult;
+  /** P-28: scrolls a match into view and selects it. */
+  revealMatch(match: ScrollbackMatch): void;
+  /** P-29: commands the shell integration marked, newest first (empty without it). */
+  commands(): CommandRecord[];
+  /** P-29: the output of one finished command, or null when it is gone. */
+  commandOutput(id: number): string | null;
 }
 
 export interface SessionEnvironment {
@@ -85,6 +98,21 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
 }
 
+export function Fingerprint({ value }: { value: string }) {
+  const { algorithm, groups } = groupFingerprint(value);
+  return (
+    <div className="fingerprint" aria-label={value}>
+      {algorithm && <span className="fingerprint-alg">{algorithm}</span>}
+      {groups.map((group, index) => (
+        // Position is the identity here: the groups are a fixed split of one string.
+        <span key={`${index}-${group}`} aria-hidden="true">
+          {group}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function TerminalView(props: TerminalViewProps) {
   const { target, identity, label, visible, focused, prefs } = props;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -100,6 +128,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
@@ -189,7 +218,12 @@ export function TerminalView(props: TerminalViewProps) {
             environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
+          case "notice":
+            notify("danger", event.text);
+            break;
           case "negotiated":
+            // Sent for every hop of a jump chain; the status bar shows the destination's.
+            if (event.hop && event.hop.index !== event.hop.total) break;
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
             break;
           case "closed":
@@ -265,6 +299,10 @@ export function TerminalView(props: TerminalViewProps) {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
       environment: () => environment.current,
+      searchScrollback: (query, caseSensitive) => controllerRef.current?.searchScrollback(query, caseSensitive) ?? { matches: [], truncated: false },
+      revealMatch: (match) => controllerRef.current?.revealMatch(match),
+      commands: () => controllerRef.current?.commandOutputs.list() ?? [],
+      commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);
@@ -348,7 +386,6 @@ export function TerminalView(props: TerminalViewProps) {
           autoRetry={autoRetry}
           banner={banner}
           interactive={visible && focused}
-          sessionId={sessionId}
           onTrust={answerTrust}
           onAuth={(secret) => {
             const id = sessionId();
@@ -360,6 +397,7 @@ export function TerminalView(props: TerminalViewProps) {
           onStopRetry={() => setAutoRetry(null)}
           onCloseTab={() => handlers.current.onClose()}
           onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
+          onOpenLog={target.kind === "ssh" ? () => setLogOpen(true) : null}
         />
       )}
 
@@ -392,6 +430,10 @@ export function TerminalView(props: TerminalViewProps) {
             {msg.terminal.clipboardDeny}
           </button>
         </div>
+      )}
+
+      {logOpen && controllerRef.current?.id && (
+        <ConnectionLogDialog sessionId={controllerRef.current.id} title={props.label} onClose={() => setLogOpen(false)} />
       )}
 
       {link !== null && (
@@ -576,6 +618,70 @@ function LinkDialog({ url, onClose, onOpened }: { url: string; onClose: () => vo
           </>
         )}
       </div>
+    </Dialog>
+  );
+}
+
+export function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
+  const [secret, setSecret] = useState("");
+  const isPassword = prompt.kind === "password";
+  const isKbd = prompt.kind === "keyboard_interactive";
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (secret === "") return;
+    const value = secret;
+    setSecret("");
+    onAnswer(value);
+  }
+
+  const title = isKbd ? msg.terminal.kbdTitle(prompt.username) : isPassword ? msg.terminal.passwordTitle(prompt.username) : msg.terminal.passphraseTitle;
+  const body = isKbd ? msg.terminal.kbdBody : isPassword ? msg.terminal.passwordBody : msg.terminal.passphraseBody;
+  const label = isKbd ? msg.terminal.kbdAnswer : isPassword ? msg.hosts.password : msg.keys.passphrase;
+
+  return (
+    <Dialog title={title} icon={<IconKeyRound size={18} />} onDismiss={() => onAnswer(null)}>
+      <form className="stack" onSubmit={submit}>
+        {/* agent B: tunnels and history */}
+        <HopNotice hop={prompt.hop} />
+        <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+          {body}
+        </p>
+        {banner && (isPassword || isKbd) && (
+          <div className="stack-xs">
+            <span className="label">{msg.terminal.banner}</span>
+            {/* Server-supplied text: rendered as plain text, never as markup. */}
+            <pre className="banner-text">{banner}</pre>
+          </div>
+        )}
+        {isKbd && prompt.message && (
+          <div className="stack-xs">
+            <span className="label">{msg.terminal.kbdQuestion}</span>
+            {/* Server-supplied, sanitized by the core, still untrusted: plain text only. */}
+            <pre className="banner-text" data-testid="kbd-question">
+              {prompt.message}
+            </pre>
+          </div>
+        )}
+        {prompt.attempt > 1 && (
+          <Notice tone="warning">
+            {msg.terminal.retryHint} {msg.terminal.attempt(prompt.attempt, prompt.maxAttempts)}
+          </Notice>
+        )}
+        {isKbd && prompt.echo ? (
+          <TextField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} autoComplete="off" spellCheck={false} />
+        ) : (
+          <SecretField label={label} value={secret} onChange={setSecret} autoFocus maxLength={1024} />
+        )}
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={() => onAnswer(null)}>
+            {msg.common.cancel}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={secret === ""}>
+            {msg.terminal.submit}
+          </button>
+        </div>
+      </form>
     </Dialog>
   );
 }

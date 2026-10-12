@@ -5,11 +5,14 @@ import type { Destination } from "../../app/AppShell";
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Keys, Shortcut } from "../../components/ui/controls";
 import {
+  // agent B: tunnels and history
+  IconRoute,
+  IconArrowLeftRight,
   IconColumns2,
   IconCornerDownLeft,
   IconFingerprint,
-  IconHouse,
   IconHardDrive,
+  IconHouse,
   IconKeyRound,
   IconLock,
   IconPlay,
@@ -25,13 +28,13 @@ import {
   IconX,
   IconZoomIn,
   IconZoomOut,
-  // agent B: tunnels and history
-  IconRoute,
 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
+import { msgSftp } from "../sftp/messages";
 
 interface Item {
   id: string;
@@ -87,11 +90,15 @@ export function CommandPalette({
   onAction,
   onToggleTheme,
   onLocal,
+  onSftp,
   onSnippet,
   onDeployKey,
   broadcast,
   onToggleBroadcast,
   onShellIntegration,
+  onConnectionLog,
+  onSearchSessions,
+  onCommandOutput,
 }: {
   hasTerminal: boolean;
   terminalConnected: boolean;
@@ -101,6 +108,8 @@ export function CommandPalette({
   onAction: (a: ActionId) => void;
   onToggleTheme: () => void;
   onLocal: () => void;
+  /** Opens a new SFTP tab. */
+  onSftp?: (() => void) | undefined;
   onSnippet: (s: SnippetSummary) => void;
   /** Present only when the focused pane is a connected SSH session. */
   onDeployKey?: (() => void) | undefined;
@@ -109,6 +118,12 @@ export function CommandPalette({
   onToggleBroadcast?: (() => void) | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  /** The focused SSH pane's connection log; present when it has a session. */
+  onConnectionLog?: (() => void) | undefined;
+  /** P-28: search every open terminal's scrollback; present while any terminal is open. */
+  onSearchSessions?: (() => void) | undefined;
+  /** P-29: copy or save a command's output; present only when the focused pane has command marks. */
+  onCommandOutput?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -159,6 +174,7 @@ export function CommandPalette({
       shortcut,
     });
     list.push(action("local", msg.nav.localTerminal, <IconSquareTerminal size={16} />, onLocal, "newLocal"));
+    if (onSftp) list.push({ ...action("sftp", msgSftp.open, <IconArrowLeftRight size={16} />, onSftp), keywords: `files transfer ${msgSftp.openHint}` });
     if (hasTerminal) {
       list.push(action("split-right", msg.palette.splitRight, <IconColumns2 size={16} />, () => onAction("splitRight"), "splitRight"));
       list.push(action("split-down", msg.palette.splitDown, <IconRows2 size={16} />, () => onAction("splitDown"), "splitDown"));
@@ -172,7 +188,10 @@ export function CommandPalette({
       // agent D: inventory and snippets
       if (terminalConnected) list.push(action("suggest", msgD.suggest.palette, <IconSearch size={16} />, () => onAction("suggest"), "suggest"));
       if (onShellIntegration) list.push(action("shell-integration", msgD.integration.palette, <IconSquareTerminal size={16} />, onShellIntegration));
+      if (onConnectionLog) list.push(action("connection-log", msgD.connectionLog.palette, <IconScrollText size={16} />, onConnectionLog));
+      if (onCommandOutput) list.push(action("command-output", msgOutput.paletteOutput, <IconScrollText size={16} />, onCommandOutput));
     }
+    if (onSearchSessions) list.push(action("search-sessions", msgOutput.paletteSearch, <IconSearch size={16} />, onSearchSessions));
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
@@ -196,7 +215,7 @@ export function CommandPalette({
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onAction, onToggleTheme, onNavigate]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate]);
 
   const results = useMemo(() => {
     const scored = items

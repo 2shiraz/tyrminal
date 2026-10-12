@@ -4,9 +4,9 @@ import { type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode
 import { useWindowFocused } from "../../components/ui/Wordmark";
 import { Notice, SecretField, TextField } from "../../components/ui/controls";
 import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconShieldAlert, IconX } from "../../components/ui/icons";
-import { sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgConnect } from "../../lib/messages-connect";
+import { msgD } from "../../lib/messages-d";
 import { HopNotice } from "../tunnels/HopNotice";
 import { RECONNECT_MAX_ATTEMPTS, groupFingerprint } from "./terminalPolicy";
 
@@ -163,37 +163,6 @@ function Fingerprint({ value, autoFocus }: { value: string; autoFocus?: boolean 
   );
 }
 
-function ConnectionLog({ sessionId, refresh }: { sessionId: () => string | null; refresh: unknown }) {
-  const [open, setOpen] = useState(false);
-  const [lines, setLines] = useState<string[]>([]);
-  useEffect(() => {
-    if (!open) return;
-    const id = sessionId();
-    if (!id) return;
-    let alive = true;
-    sessions.diagnostics(id).then(
-      (l) => alive && setLines(l),
-      () => undefined,
-    );
-    return () => {
-      alive = false;
-    };
-  }, [open, refresh, sessionId]);
-  return (
-    <>
-      <button type="button" className="btn btn-ghost btn-sm" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <IconScrollText size={14} />
-        {open ? msgConnect.hideLog : msgConnect.log}
-      </button>
-      {open && (
-        <pre className="connect-log selectable" data-testid="connection-log">
-          {lines.length ? lines.join("\n") : msgConnect.logEmpty}
-        </pre>
-      )}
-    </>
-  );
-}
-
 function AuthForm({ prompt, banner, onAnswer, autoFocus }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void; autoFocus: boolean }) {
   const [secret, setSecret] = useState("");
   const isPassword = prompt.kind === "password";
@@ -264,7 +233,6 @@ export function ConnectionSheet(props: {
   autoRetry: { attempt: number; dueAt: number } | null;
   banner: string | null;
   interactive: boolean;
-  sessionId: () => string | null;
   onTrust: (decision: "cancel" | "once" | "always") => void;
   onAuth: (secret: string | null) => void;
   onCancel: () => void;
@@ -272,6 +240,7 @@ export function ConnectionSheet(props: {
   onStopRetry: () => void;
   onCloseTab: () => void;
   onOpenKnownHosts: () => void;
+  onOpenLog: (() => void) | null;
 }) {
   const { ssh, label, identity, timeline, startedAt, trust, auth, changed, closed, autoRetry, banner, interactive } = props;
   const [now, setNow] = useState(() => Date.now());
@@ -316,7 +285,13 @@ export function ConnectionSheet(props: {
   let subtitle: ReactNode = <span className="mono">{identity}</span>;
   let body: ReactNode = null;
   let actions: ReactNode;
-  const log = ssh ? <ConnectionLog sessionId={props.sessionId} refresh={`${timeline.length}|${closed !== null}`} /> : null;
+  // The session's connection log (ConnectionLogDialog), for when it is slow, stuck or failed.
+  const log = props.onOpenLog ? (
+    <button type="button" className="btn btn-ghost btn-sm" onClick={props.onOpenLog}>
+      <IconScrollText size={14} />
+      {msgD.connectionLog.open}
+    </button>
+  ) : null;
 
   if (changed) {
     role = "alert";

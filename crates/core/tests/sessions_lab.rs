@@ -148,6 +148,22 @@ impl Client {
         }
     }
 
+    /// A files-only connection (SFTP, no shell).
+    async fn open_files(core: &Core, host_id: &str) -> Self {
+        let (tx, inbox) = mpsc::unbounded_channel();
+        let opened = core.sessions.open_files(WINDOW, host_id, Arc::new(ChannelSink(tx))).await.expect("open files");
+        Self {
+            core: core.clone(),
+            session: opened.session_id,
+            inbox,
+            text: String::new(),
+            received: 0,
+            auto_ack: true,
+            negotiated: None,
+            window: WINDOW,
+        }
+    }
+
     async fn open_local(core: &Core) -> Self {
         let (tx, inbox) = mpsc::unbounded_channel();
         let opened = core.sessions.open_local(WINDOW, 100, 30, Arc::new(ChannelSink(tx))).await.expect("open local");
@@ -194,10 +210,10 @@ impl Client {
         let mut states = Vec::new();
         loop {
             match self.event().await {
-                SessionEvent::State { state } if state != SessionState::Connected => states.push(state),
+                SessionEvent::State { state, .. } if state != SessionState::Connected => states.push(state),
                 event @ SessionEvent::Negotiated { .. } => self.negotiated = Some(event),
                 other => {
-                    if let SessionEvent::State { state } = &other {
+                    if let SessionEvent::State { state, .. } = &other {
                         states.push(*state);
                     }
                     return (states, other);
@@ -208,7 +224,11 @@ impl Client {
 
     async fn until_connected(&mut self) -> Vec<SessionState> {
         let (states, last) = self.until_not_state().await;
-        assert_eq!(last, SessionEvent::State { state: SessionState::Connected }, "states so far: {states:?}");
+        assert_eq!(
+            last,
+            SessionEvent::State { state: SessionState::Connected, hop: None },
+            "states so far: {states:?}"
+        );
         states
     }
 
@@ -373,7 +393,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
 
     let mut client = Client::open_ssh(&f.core, &host_id).await;
     let (states, prompt) = client.until_not_state().await;
-    assert_eq!(states, [SessionState::Connecting, SessionState::VerifyingHost]);
+    assert_eq!(states, [SessionState::Resolving, SessionState::Connecting, SessionState::VerifyingHost]);
     match &prompt {
         SessionEvent::TrustPrompt { host, port, resolved_address, algorithm, fingerprint, .. } => {
             assert_eq!((host.as_str(), *port), ("127.0.0.1", f.lab.port("a")));
@@ -390,7 +410,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(states, [SessionState::Authenticating, SessionState::OpeningChannel, SessionState::Connected]);
     // The negotiated algorithms are reported, and each one is from this client's own offer.
     match client.negotiated.as_ref().expect("negotiated algorithms are reported") {
-        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex } => {
+        SessionEvent::Negotiated { kex, host_key, cipher, mac, strict_kex, .. } => {
             let offer = tyrminal_ssh::negotiation_summary();
             for value in [kex, host_key, cipher] {
                 assert!(offer.contains(value.as_str()), "{value} is not in the offer:\n{offer}");
@@ -431,6 +451,7 @@ async fn first_use_trust_then_key_auth_shell_and_remembered_trust() {
     assert_eq!(
         states,
         [
+            SessionState::Resolving,
             SessionState::Connecting,
             SessionState::VerifyingHost,
             SessionState::Authenticating,
@@ -2241,8 +2262,8 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
     client.send(&format!("{hop}\n")).await;
     let events = output_with_events(&mut client, "HOP-42").await;
     assert!(
-        events.iter().any(|e| matches!(e, SessionEvent::Banner { text } if text.contains("forwarded key"))),
-        "the use is reported: {events:?}"
+        events.iter().any(|e| matches!(e, SessionEvent::Notice { text } if text.contains("forwarded key"))),
+        "the use is reported as a notice the terminal shows (not a server banner): {events:?}"
     );
     // The server cannot change what the agent holds.
     client.send("ssh-add -D; echo REMOVE-EXIT-$?\n").await;
@@ -2274,6 +2295,167 @@ async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_promp
     client.until_connected().await;
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
+}
+
+// ---------- files-only connections (the SFTP tab) ----------
+
+/// sshd log lines written since `before` lines.
+fn new_log_lines(lab: &Lab, server: &str, before: usize) -> Vec<String> {
+    lab.server_log(server).lines().skip(before).map(str::to_owned).collect()
+}
+
+/// A files-only connection signs in, lists, uploads, downloads and copies to another server
+/// over SFTP, and never asks the server for a shell, a command or a terminal.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_transfers_without_a_shell_or_terminal() {
+    let f = fixture().await;
+    let _b = SERVER_B.lock().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f
+        .host("lab b files", f.lab.port("b"), &f.lab.str("/user"), HostAuthInput::Key { key_id: key_id.clone() })
+        .await;
+    let log_before = f.lab.server_log("b").lines().count();
+
+    let mut client = Client::open_files(&f.core, &host).await;
+    let (states, prompt) = client.until_not_state().await;
+    assert!(states.contains(&SessionState::Connecting), "{states:?}");
+    // Trust is asked exactly as for a terminal.
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let s = &f.core.sessions;
+    let id = client.session.clone();
+
+    // No terminal: input, resizing and snippets are refused, not silently dropped.
+    assert_eq!(s.write(WINDOW, &id, b"id\r".to_vec()).await.unwrap_err().code, ErrorCode::InvalidInput);
+    assert_eq!(s.resize(WINDOW, &id, 80, 24).await.unwrap_err().code, ErrorCode::InvalidInput);
+    // Owned by the window that opened it, like any session.
+    assert_eq!(s.list_files("other-window", &id, None).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let home = s.list_files(WINDOW, &id, None).await.unwrap();
+    assert!(home.path.starts_with('/'));
+    let folder = format!("tyr-files-only-{}", std::process::id());
+    let _ = s.remove_file(WINDOW, &id, &home.path, &folder).await;
+    s.make_dir(WINDOW, &id, &home.path, &folder).await.unwrap();
+    let dir = format!("{}/{folder}", home.path.trim_end_matches('/'));
+
+    let local = TempDir::new().unwrap();
+    let data = pattern(3 * 1024 * 1024 + 17, 11);
+    std::fs::write(local.path().join("data.bin"), &data).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, local.path().join("data.bin"), &dir, "data.bin", ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &dir, "data.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    assert_eq!(std::fs::read(down.path().join("data.bin")).unwrap(), data, "byte for byte");
+
+    // Server to server between two files-only connections (remote_copy).
+    let other = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let mut a = Client::open_files(&f.core, &other).await;
+    let (_, prompt) = a.until_not_state().await;
+    a.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    a.until_connected().await;
+    let a_home = s.list_files(WINDOW, &a.session, None).await.unwrap().path;
+    let copied = format!("tyr-files-only-copy-{}.bin", std::process::id());
+    let _ = s.remove_file(WINDOW, &a.session, &a_home, &copied).await;
+    s.rename_file(WINDOW, &id, &dir, "data.bin", &copied).await.unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.copy_between(WINDOW, &id, &dir, &copied, &a.session, &a_home, ConflictChoice::Ask, sink).await.unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(data.len() as u64));
+    let on_a = s.list_files(WINDOW, &a.session, Some(&a_home)).await.unwrap();
+    assert_eq!(on_a.entries.iter().find(|e| e.name == copied).and_then(|e| e.size), Some(data.len() as u64));
+    s.remove_file(WINDOW, &a.session, &a_home, &copied).await.unwrap();
+    s.remove_file(WINDOW, &id, &dir, &copied).await.unwrap();
+    s.remove_file(WINDOW, &id, &home.path, &folder).await.unwrap();
+
+    // Closing the connection ends it; its file operations stop working.
+    s.close(WINDOW, &id).unwrap();
+    assert_eq!(client.until_closed().await.0, None);
+    assert_eq!(s.list_files(WINDOW, &id, None).await.unwrap_err().code, ErrorCode::AccessDenied);
+    s.close(WINDOW, &a.session).unwrap();
+    a.until_closed().await;
+
+    // The server saw the SFTP subsystem and nothing else: no shell, command or terminal.
+    let lines = new_log_lines(&f.lab, "b", log_before);
+    assert!(lines.iter().any(|l| l.contains("subsystem 'sftp'")), "no SFTP subsystem in {lines:#?}");
+    for line in &lines {
+        for asked in ["Starting session: shell", "Starting session: command", "Starting session: forced-command", "pty"]
+        {
+            assert!(!line.contains(asked), "a files-only connection asked for {asked:?}: {line}");
+        }
+    }
+}
+
+/// A files-only connection refuses a changed host key before anything is sent to the server,
+/// exactly as a terminal does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_refuses_a_changed_host_key_before_signing_in() {
+    let f = fixture().await;
+    let _exclusive = SERVER_B.lock().await;
+    let forwarder = Forwarder::start(f.lab.addr("a")).await;
+    let host_id = f
+        .host(
+            "pinned files",
+            forwarder.port,
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some(f.lab.str("/password")) },
+        )
+        .await;
+    let mut client = Client::open_files(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // Same name and port, another server's key.
+    forwarder.retarget(f.lab.addr("b"));
+    let auth_lines_before = f.lab.auth_log_lines("b");
+    let log_before = f.lab.server_log("b").lines().count();
+    let mut client = Client::open_files(&f.core, &host_id).await;
+    let (_, event) = client.until_not_state().await;
+    match &event {
+        SessionEvent::HostKeyChanged { presented_fingerprint, trusted_fingerprints, .. } => {
+            assert_eq!(*presented_fingerprint, f.lab.str("/servers/b/hostKeyEd25519Fingerprint"));
+            assert_eq!(*trusted_fingerprints, [f.lab.str("/servers/a/hostKeyEd25519Fingerprint")]);
+        }
+        other => panic!("expected HostKeyChanged, got {other:?}"),
+    }
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::HostKeyChanged));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(f.lab.auth_log_lines("b"), auth_lines_before, "the stored password reached the impostor");
+    let lines = new_log_lines(&f.lab, "b", log_before);
+    assert!(!lines.iter().any(|l| l.contains("subsystem")), "a channel was opened: {lines:#?}");
+    let known = f.core.vault.list_known_hosts().await.unwrap();
+    assert_eq!(known.len(), 1, "trust was neither replaced nor extended");
+}
+
+/// Files-only connections are for SSH hosts; a Telnet host is refused without connecting.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_files_only_connection_is_refused_for_a_telnet_host() {
+    let f = fixture().await;
+    let input = HostInput {
+        id: None,
+        label: "telnet".into(),
+        address: "127.0.0.1".into(),
+        port: Some(f.lab.port("a")),
+        username: String::new(),
+        auth: HostAuthInput::AskPassword,
+        group_id: None,
+        tags: Vec::new(),
+        protocol: HostProtocol::Telnet,
+        terminal: Default::default(),
+        forward_agent: false,
+    };
+    let host = f.core.vault.save_host(input).await.unwrap().id;
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    let refused = f.core.sessions.open_files(WINDOW, &host, Arc::new(ChannelSink(tx))).await.unwrap_err();
+    assert_eq!(refused.code, ErrorCode::InvalidInput);
+    assert_eq!(f.core.sessions.count(), 0);
 }
 
 /// SNP-08 with SNP-13: a host's startup snippets (inherited from its group) are typed once the
@@ -2387,6 +2569,211 @@ async fn startup_snippets_run_after_trust_with_the_environment_and_are_logged_by
     let shell_at = log.find("shell opened").unwrap();
     assert!(log.find("startup snippet \"Announce\"").unwrap() > shell_at, "startup runs after the shell opens");
     assert!(log.find("host key").unwrap() < log.find("environment:").unwrap(), "environment after trust");
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}
+
+/// A transfer holds its own SFTP handle, but it must not outlive its session: closing the
+/// session, or locking the vault, stops a download at once and leaves no file behind.
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_transfer_stops_when_its_session_closes_or_the_vault_locks() {
+    for lock in [false, true] {
+        let f = fixture().await;
+        let host = f.key_host("a").await;
+        let mut client = Client::open_ssh(&f.core, &host).await;
+        let (_, prompt) = client.until_not_state().await;
+        client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+        client.until_connected().await;
+        let id = client.session.clone();
+        let s = &f.core.sessions;
+        let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+        let name = format!("tyr-stop-{}-{lock}.bin", std::process::id());
+        client.send(&format!("head -c 268435456 /dev/zero > ~/{name} && echo BIG-$((40+2))\n")).await;
+        client.output_until("BIG-42").await;
+
+        let down = TempDir::new().unwrap();
+        let (sink, mut rx) = transfer_sink();
+        s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+        match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
+            Some(TransferEvent::Progress { .. }) => {}
+            other => panic!("transfer ended before the session did: {other:?}"),
+        }
+        let started = std::time::Instant::now();
+        if lock {
+            f.core.vault.lock().await;
+        } else {
+            s.close(WINDOW, &id).unwrap();
+        }
+        let end = transfer_end(&mut rx).await;
+        assert!(matches!(end, TransferEvent::Cancelled), "lock={lock}: {end:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "stopped with the session: {:?}", started.elapsed());
+        let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert!(leftovers.is_empty(), "no partial or temporary file is left: {leftovers:?}");
+
+        if lock {
+            f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+        }
+        let mut again = Client::open_ssh(&f.core, &host).await;
+        again.until_connected().await;
+        again.send(&format!("rm -f ~/{name}; echo RM-$((40+2))\n")).await;
+        again.output_until("RM-42").await;
+    }
+}
+
+/// Names in a local folder, temporary files included.
+fn local_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> =
+        std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
+}
+
+/// A transfer holds its own handle to the connection, so it must not outlive its session:
+/// closing the files-only connection (its tab) or locking the vault cancels it at once, and
+/// nothing partial is left on either side.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn closing_or_locking_stops_a_files_only_transfer_at_once_and_leaves_nothing_partial() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let host = f.host("lab a files", f.lab.port("a"), &f.lab.str("/user"), HostAuthInput::Key { key_id }).await;
+    let s = &f.core.sessions;
+    let open = |trust: bool| {
+        let core = f.core.clone();
+        let host = host.clone();
+        async move {
+            let mut client = Client::open_files(&core, &host).await;
+            if trust {
+                let (_, prompt) = client.until_not_state().await;
+                client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+            }
+            client.until_connected().await;
+            client
+        }
+    };
+
+    // A large file on the server to work with.
+    let mut client = open(true).await;
+    let home = s.list_files(WINDOW, &client.session, None).await.unwrap().path;
+    let folder = format!("tyr-stop-{}", std::process::id());
+    let dir = format!("{}/{folder}", home.trim_end_matches('/'));
+    let _ = s.remove_file(WINDOW, &client.session, &dir, "big.bin").await;
+    let _ = s.remove_file(WINDOW, &client.session, &home, &folder).await;
+    s.make_dir(WINDOW, &client.session, &home, &folder).await.unwrap();
+    let local = TempDir::new().unwrap();
+    let big = pattern(96 * 1024 * 1024, 5);
+    std::fs::write(local.path().join("big.bin"), &big).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &client.session, local.path().join("big.bin"), &dir, "big.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    assert_eq!(transfer_end(&mut rx).await, done(big.len() as u64));
+
+    // Closing the tab during a download: cancelled at once, nothing left locally.
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &client.session, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    s.close(WINDOW, &client.session).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), transfer_end(&mut rx)).await.unwrap(),
+        TransferEvent::Cancelled
+    );
+    assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+    client.until_closed().await;
+    assert_eq!(local_names(down.path()), Vec::<String>::new(), "no partial download");
+    // Nothing more can be started or listed on it.
+    let (sink, _rx) = transfer_sink();
+    let refused = s
+        .download(WINDOW, &client.session, &dir, "big.bin", down.path().to_path_buf(), ConflictChoice::Ask, sink)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::AccessDenied);
+
+    // Locking the vault during an upload: cancelled at once; the server keeps no partial file.
+    let client = open(false).await;
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &client.session, local.path().join("big.bin"), &dir, "up.bin", ConflictChoice::Ask, sink)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    f.core.vault.lock().await;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), transfer_end(&mut rx)).await.unwrap(),
+        TransferEvent::Cancelled
+    );
+    assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+
+    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let client = open(false).await;
+    let names: Vec<String> =
+        s.list_files(WINDOW, &client.session, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["big.bin"], "no partial upload under any name");
+    s.remove_file(WINDOW, &client.session, &dir, "big.bin").await.unwrap();
+    s.remove_file(WINDOW, &client.session, &home, &folder).await.unwrap();
+    s.close(WINDOW, &client.session).unwrap();
+}
+
+/// SNP-08: startup typing ends with its session. Closing the session or locking the vault right
+/// after the shell opens, with a long startup sequence configured, ends the session at once; the
+/// log says the sequence finished or was stopped, nothing keeps the session alive, a locked
+/// session takes no further input, and the next connection runs the sequence from the start.
+///
+/// Typing queues each snippet into the session's input in microseconds, so against a real server
+/// the sequence is normally fully queued before a close lands; the mid-sequence stop itself is
+/// covered deterministically by the `startup_typing_*` unit tests in `sessions.rs`. What makes it
+/// hold is structural: the typing runs inside the session body, which close and lock drop.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn startup_snippets_end_with_their_session_and_run_afresh_next_time() {
+    use tyrminal_core::contracts::{SettingsTarget, SnippetInput};
+    let f = fixture().await;
+    let v = &f.core.vault;
+    let host_id = f.key_host("a").await;
+    let mut ids = Vec::new();
+    for i in 0..16 {
+        // Long enough lines that typing them all takes more than an instant.
+        let text = format!("echo startup-{i}-done # {}", "x".repeat(16 * 1024));
+        let saved = v
+            .save_snippet(SnippetInput { id: None, name: format!("s{i}"), folder: String::new(), text })
+            .await
+            .unwrap();
+        ids.push(saved.id);
+    }
+    v.set_startup_snippets(SettingsTarget::Host { host_id: host_id.clone() }, Some(ids)).await.unwrap();
+
+    let stopped_or_finished =
+        |log: &str| log.contains("startup snippets stopped with ") || log.contains("startup snippet \"s15\" typed");
+
+    // Close as soon as the shell is open.
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    assert_eq!(client.until_closed().await.0, None);
+    assert_eq!(f.core.sessions.count(), 0, "nothing keeps the session alive");
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(stopped_or_finished(&log), "{log}");
+
+    // Lock as soon as the shell is open: the session ends as locked, and no input reaches it after.
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    client.until_connected().await;
+    v.lock().await;
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::VaultLocked));
+    assert_eq!(f.core.sessions.count(), 0);
+    let write = f.core.sessions.write(WINDOW, &client.session, b"echo after-lock\r".to_vec()).await;
+    assert!(write.is_err(), "a locked session takes no input");
+
+    // After unlocking, a new session runs the whole sequence from the start.
+    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let mut client = Client::open_ssh(&f.core, &host_id).await;
+    client.until_connected().await;
+    client.output_until("startup-0-done").await;
+    client.output_until("startup-15-done").await;
     f.core.sessions.close(WINDOW, &client.session).unwrap();
     client.until_closed().await;
 }
