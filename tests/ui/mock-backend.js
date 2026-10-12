@@ -144,7 +144,8 @@ export function installMockBackend(options) {
     let delay = 10;
     for (const step of steps) {
       if (step === "connected" && kind === "ssh") {
-        setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+        // Like the core: only an SSH connection reports what it negotiated (not Telnet or serial).
+        if (host?.protocol?.type !== "telnet" && host?.protocol?.type !== "serial") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
         // Startup snippets are typed once the shell is open (SNP-08).
         setTimeout(() => window.__mockRunStartup?.(s, host), delay + 40);
       }
@@ -303,6 +304,40 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // server at a glance
+    ...(() => {
+      // Values as the core would parse them; a test can replace them with window.__mockGlance.
+      const offHosts = new Set();
+      const sample = {
+        kind: "available",
+        stats: {
+          uptimeSeconds: 93_784,
+          load: [0.15, 0.3, 0.45],
+          memory: { totalKib: 2_048_000, availableKib: 512_000 },
+          disks: [
+            { mount: "/", totalKib: 61_202_244, usedKib: 21_893_584, availableKib: 36_167_700 },
+            { mount: "/srv/<b>data</b>", totalKib: 1_000_000, usedKib: 250_000, availableKib: 750_000 },
+          ],
+        },
+      };
+      return {
+        glance_get: (a) => {
+          const s = state.sessions.get(a.sessionId);
+          if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          const host = state.hosts.find((h) => h.label === s.host);
+          if (!host || host.protocol?.type === "telnet" || host.protocol?.type === "serial")
+            throw { code: "INVALID_INPUT", message: "This works in a connected SSH session only." };
+          if (offHosts.has(host.id)) return { kind: "off" };
+          return window.__mockGlance ?? sample;
+        },
+        glance_host_get: (a) => !offHosts.has(a.hostId),
+        glance_host_set: (a) => {
+          if (a.enabled) offHosts.delete(a.hostId);
+          else offHosts.add(a.hostId);
+          return a.enabled;
+        },
+      };
+    })(),
     // command history
     ...(() => {
       // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).

@@ -150,6 +150,10 @@ const COMMANDS: &[&str] = &[
     "history_list",
     "history_delete",
     "history_clear",
+    // server at a glance
+    "glance_get",
+    "glance_host_get",
+    "glance_host_set",
 ];
 
 fn main() {
