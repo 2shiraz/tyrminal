@@ -1,9 +1,12 @@
-import type { HighlightKeyword, HighlightTone, KeyBindingPreference, WorkspacePreferences } from "@tyrminal/contracts";
+import type { KeyBindingPreference, WorkspacePreferences } from "@tyrminal/contracts";
 import { useEffect, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
-import { Keys, Notice, SettingRow, Switch } from "../../components/ui/controls";
-import { IconPencil, IconRefreshCw, IconTrash2, IconX } from "../../components/ui/icons";
+import { BuiltinKinds } from "../highlight/BuiltinKinds";
+import { HighlightRules } from "../highlight/HighlightRules";
+import { MouseSettings } from "../mouse/MouseSettings";
+import { Keys, Switch } from "../../components/ui/controls";
+import { IconPencil, IconRefreshCw, IconX } from "../../components/ui/icons";
 import { msgC } from "../../lib/messages-c";
 import { isMac, keyLabels } from "../../lib/platform";
 import {
@@ -21,27 +24,30 @@ import {
 } from "../../lib/shortcuts";
 
 export const WORKSPACE_DEFAULTS: WorkspacePreferences = {
-  // On by default, matching the core's default: addresses and a few status words (display only).
+  // On by default, every kind included (TRM-07): only plain output is ever recolored.
   highlight: {
     enabled: true,
     ipAddresses: true,
-    keywords: [
-      { text: "error", tone: "danger", caseSensitive: false },
-      { text: "failed", tone: "danger", caseSensitive: false },
-      { text: "warning", tone: "warning", caseSensitive: false },
-      { text: "success", tone: "success", caseSensitive: false },
-    ],
+    keywords: [],
+    numbers: true,
+    urls: true,
+    macAddresses: true,
+    dates: true,
+    quoted: true,
+    paths: true,
+    hex: true,
+    levels: true,
   },
   bindings: [],
   optionAsMeta: isMac,
   rightClickSelectsWord: isMac,
+  rightClickPaste: false,
+  middleClickPaste: false,
 };
 
 export function workspacePrefs(value: WorkspacePreferences | undefined): WorkspacePreferences {
   return value ?? WORKSPACE_DEFAULTS;
 }
-
-const TONES: HighlightTone[] = ["danger", "warning", "success", "info"];
 
 /** Shortcuts, Option/Alt and mouse, and output highlighting (agent C's settings). */
 export function WorkspaceSettings() {
@@ -73,12 +79,7 @@ export function WorkspaceSettings() {
             {msgC.keys.altAsMeta}
           </p>
         )}
-        <Switch
-          label={msgC.keys.rightClickWord}
-          hint={msgC.keys.rightClickWordHint}
-          checked={ws.rightClickSelectsWord}
-          onChange={(rightClickSelectsWord) => setWs((w) => ({ ...w, rightClickSelectsWord }))}
-        />
+        <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
       </section>
 
       <section id="settings-highlight" className="settings-section" aria-labelledby="settings-highlight-title">
@@ -93,13 +94,8 @@ export function WorkspaceSettings() {
         />
         {ws.highlight.enabled && (
           <>
-            <Switch
-              label={msgC.highlight.ipAddresses}
-              hint={msgC.highlight.ipHint}
-              checked={ws.highlight.ipAddresses}
-              onChange={(ipAddresses) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ipAddresses } }))}
-            />
-            <Keywords
+            <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
+            <HighlightRules
               words={ws.highlight.keywords}
               onChange={(keywords) => setWs((w) => ({ ...w, highlight: { ...w.highlight, keywords } }))}
             />
@@ -148,7 +144,7 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
       "movePaneDown",
     ],
   ],
-  ["terminal", ["find", "copy", "paste", "zoomIn", "zoomOut", "zoomReset", "suggest", "insertPassword"]],
+  ["terminal", ["find", "copy", "paste", "zoomIn", "zoomOut", "zoomReset", "suggest", "previousCommand", "nextCommand", "insertPassword"]],
   ["files", ["toggleFiles"]],
   ["snippets", ["toggleSnippets"]],
   ["navigation", ["palette", "toggleSidebar", "focusTerminal", "focusSidebar", "settings", "lock"]],
@@ -339,74 +335,5 @@ function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference
         </div>
       )}
     </div>
-  );
-}
-
-function Keywords({ words, onChange }: { words: HighlightKeyword[]; onChange: (words: HighlightKeyword[]) => void }) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const text = draft.trim();
-    if (!text || text.length > 64 || words.length >= 32 || words.some((w) => w.text === text)) return;
-    onChange([...words, { text, tone: "danger", caseSensitive: false }]);
-    setDraft("");
-  };
-  return (
-    <SettingRow label={msgC.highlight.words}>
-      <div className="stack-xs">
-        <ul className="highlight-words">
-          {words.map((w, i) => (
-            <li key={w.text}>
-              <span className="highlight-sample mono" data-tone={w.tone}>
-                {w.text}
-              </span>
-              <select
-                className="input input-sm"
-                aria-label={msgC.highlight.tone(w.text)}
-                value={w.tone}
-                onChange={(e) => onChange(words.map((x, j) => (j === i ? { ...x, tone: e.target.value as HighlightTone } : x)))}
-              >
-                {TONES.map((t) => (
-                  <option key={t} value={t}>
-                    {msgC.highlight.tones[t]}
-                  </option>
-                ))}
-              </select>
-              <label className="row-flex" style={{ gap: "var(--space-1)", fontSize: "var(--text-sm)" }}>
-                <input
-                  type="checkbox"
-                  aria-label={msgC.highlight.caseSensitive(w.text)}
-                  checked={w.caseSensitive}
-                  onChange={(e) => onChange(words.map((x, j) => (j === i ? { ...x, caseSensitive: e.target.checked } : x)))}
-                />
-                Aa
-              </label>
-              <button type="button" className="btn btn-ghost btn-sm" aria-label={msgC.highlight.remove(w.text)} onClick={() => onChange(words.filter((_, j) => j !== i))}>
-                <IconTrash2 size={14} />
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="row-flex">
-          <input
-            className="input"
-            aria-label={msgC.highlight.wordLabel}
-            value={draft}
-            maxLength={64}
-            spellCheck={false}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-          />
-          <button type="button" className="btn" onClick={add} disabled={draft.trim() === ""}>
-            {msgC.highlight.add}
-          </button>
-        </div>
-        {words.length >= 32 && <Notice tone="info">32 / 32</Notice>}
-      </div>
-    </SettingRow>
   );
 }

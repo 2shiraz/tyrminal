@@ -10,9 +10,11 @@
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/terminal.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { KEYS, ui } from "./flows.mjs";
+import { KEYS, PASSPHRASE, ui } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -107,6 +109,39 @@ describe("terminal with real applications", { concurrency: false }, () => {
     assert.ok(Math.abs(xs[0] - xs[1]) <= 1, `CJK: ${xs[0]} vs ${xs[1]}`);
     assert.ok(Math.abs(xs[2] - xs[3]) <= 1, `emoji: ${xs[2]} vs ${xs[3]}`);
     assert.ok(Math.abs(xs[4] - xs[5]) <= 1, `combining mark: ${xs[4]} vs ${xs[5]}`);
+  });
+
+  test("text composed through an input method reaches the shell once, as UTF-8 (TRM-11)", async () => {
+    // WebDriver cannot drive the platform IME, so the composition is played as the WebView
+    // delivers it to the page: compositionstart, preedit updates in the input element, then
+    // compositionend. Everything after that (xterm's composition handling, the encoder, IPC,
+    // the core and the real shell) is the production path.
+    // The ordered composition handling is installed on xterm's helper in this WebView too.
+    assert.equal(await s.execute(`return document.querySelector(".pane[data-focused=true] .terminal-host")?.dataset.composition ?? null`), "ordered");
+    // od reads the terminal line itself, so the bytes it prints are exactly what arrived: no
+    // shell expansion or completion in between.
+    await t.type("od -An -tx1; echo IME-DONE\n");
+    await new Promise((r) => setTimeout(r, 300));
+    const composed = await s.execute(`
+      const ta = document.querySelector(".pane[data-focused=true] .xterm-helper-textarea");
+      ta.focus();
+      const at = ta.value.length;
+      ta.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      for (const preedit of ["に", "にほん", "にほんご"]) {
+        ta.value = ta.value.slice(0, at) + preedit;
+        ta.dispatchEvent(new CompositionEvent("compositionupdate", { data: preedit }));
+      }
+      const preview = document.querySelector(".pane[data-focused=true] .composition-view");
+      const shown = preview?.classList.contains("active") ? preview.textContent : null;
+      ta.value = ta.value.slice(0, at) + "日本語";
+      ta.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語" }));
+      return shown;`);
+    assert.equal(composed, "にほんご", "the preedit text is shown while composing");
+    await t.type("\n");
+    await s.chord([KEYS.ctrl, "D"]);
+    const text = await t.waitForText(/^IME-DONE$/m, "od output");
+    // The nine UTF-8 bytes of 日本語 and the newline, once.
+    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
@@ -615,6 +650,241 @@ describe("a tab moved to its own window", { concurrency: false }, () => {
       // the UI test and the core lab test (only the new window may write after the handoff).
       await s.switchToWindow(main);
       assert.equal(await s.execute(`return document.querySelectorAll(".pane").length`), 0, "the main window holds no pane of the moved tab");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("output highlighting patterns in the real WebView (TRM-07)", { concurrency: false }, () => {
+  test("patterns from saved preferences match in a worker; a slow one is switched off and the shell stays usable", async () => {
+    const rule = (text, tone, pattern) => ({ text, tone, caseSensitive: false, pattern });
+    const app = await App.launch({
+      prefs: {
+        ...DOM_RENDERER_PREFS,
+        workspace: {
+          highlight: {
+            enabled: true,
+            ipAddresses: false,
+            keywords: [rule("[a-z]{0,99}[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
+          },
+          bindings: [],
+          optionAsMeta: false,
+          rightClickSelectsWord: false,
+        },
+      },
+    });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      // The lab's POSIX shell on every platform (Windows' local shell is not one).
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      // Lines of letters with no "!": the first pattern backtracks for a long time on them.
+      await t.type("printf 'login user=alice ok\\n'; for i in $(seq 1 30); do printf '%0150d\\n' 0 | tr 0 a; done; echo HL-DONE\n");
+      await t.waitForText(/^HL-DONE$/m, "output");
+      await s
+        .until(() => s.execute(`return document.body.textContent.includes("took too long and was switched off") || null`), {
+          describe: "slow pattern notice",
+          timeout: 15_000,
+        })
+        .catch(async (error) => {
+          const marks = await s.execute(`return [...document.querySelectorAll(".term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+          throw new Error(`${error.message}; decorations: ${marks}`);
+        });
+      // The other rules are drawn (the pattern by the worker, the word on the page).
+      await t.type("clear; printf 'login user=alice ok\\n'\n");
+      const tones = await s.until(
+        () =>
+          s.execute(`const t = [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).sort(); return t.length === 2 ? t : null`),
+        { describe: "highlight decorations" },
+      ).catch(async (error) => {
+        const marks = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+        throw new Error(`${error.message}; decorations: ${marks}; screen: ${(await t.terminalText()).slice(-300)}`);
+      });
+      assert.deepEqual(tones, ["danger", "info"]);
+      await t.type("echo STILL-HERE\n");
+      await t.waitForText(/^STILL-HERE$/m, "shell responsive");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("keyboard and mouse customization through native preferences (TRM-08)", { concurrency: false }, () => {
+  test("a rebound shortcut and the mouse mappings are stored by the core and apply after a restart", async () => {
+    const mod = process.platform === "darwin" ? KEYS.meta : KEYS.ctrl;
+    let app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      let s = app.session;
+      let t = ui(s);
+      await t.createVault();
+      await t.nav("Settings");
+      // Find in terminal → Ctrl+Shift+G (Cmd+Shift+G on macOS), recorded from real key events.
+      await s.click(await s.waitFor('.shortcut-list li[data-action="find"] button[aria-label="Change shortcut for Find in terminal"]'));
+      await s.until(() => s.execute(`return document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent.includes("Press") || null`), {
+        describe: "recording",
+      });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.until(() => s.execute(`return /G/.test(document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "") || null`), {
+        describe: "new shortcut shown",
+      });
+      // Right click pastes; middle click pastes.
+      await s.click(await s.waitFor('[role="radiogroup"][aria-label="Right click"] label:nth-child(2)'));
+      const middle = await s.execute(`return [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.htmlFor ?? null`);
+      await s.click(await s.waitFor(`[id="${middle}"]`));
+
+      // The core wrote them to preferences.json (validated natively on the way).
+      const file = join(app.dataDir, "preferences.json");
+      const stored = await s.until(
+        () => {
+          try {
+            const w = JSON.parse(readFileSync(file, "utf8")).workspace;
+            return w?.rightClickPaste && w.middleClickPaste && w.bindings?.some((b) => b.action === "find" && b.key === "g" && b.shift) ? w : null;
+          } catch {
+            return null;
+          }
+        },
+        { describe: "preferences.json updated" },
+      );
+      assert.equal(stored.rightClickSelectsWord, false);
+
+      const dataDir = app.dataDir;
+      await app.quit({ keepData: true });
+      app = await App.launch({ dataDir });
+      s = app.session;
+      t = ui(s);
+      await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen", timeout: 20_000 });
+      await s.fill("Passphrase", PASSPHRASE);
+      await s.clickButton("Unlock");
+      await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+
+      await t.nav("Settings");
+      const shown = await s.until(
+        () =>
+          s.execute(`const r = document.querySelector('[role="radiogroup"][aria-label="Right click"] label:nth-child(2) input');
+            const m = [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.querySelector("input");
+            const k = document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "";
+            return r && m ? { right: r.checked, middle: m.checked, keys: k } : null;`),
+        { describe: "settings after restart" },
+      );
+      assert.equal(shown.right, true);
+      assert.equal(shown.middle, true);
+      assert.match(shown.keys, /G/);
+
+      // The rebound shortcut works in a terminal after the restart.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.waitFor(".pane:not([hidden]) .find-bar");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
+  test("a host connected once is offered on Home and in the new-tab menu, and both reconnect", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      const trustOnce = async () => {
+        await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+        await s.clickButton("Trust once", { within: "dialog" });
+        await s.waitGone("dialog");
+        await s.until(async () => /Connected/.test(await t.statusText()), { describe: "connected" });
+      };
+      const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+
+      // Home lists it under Recent once the core has recorded the connection.
+      await t.nav("Home");
+      const tile = await s.until(() => s.find('section[aria-labelledby="home-recent"] button[aria-label="Connect to Lab"]'), {
+        describe: "Lab under Recent on Home",
+        timeout: 20_000,
+      });
+      await s.click(tile);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
+
+      // The new-tab menu offers it too.
+      await s.click(await s.waitFor(".tabstrip button.tab-new"));
+      const item = await s.until(
+        async () => {
+          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
+            if ((await s.text(candidate)).trim() === "Lab") return candidate;
+          }
+          return null;
+        },
+        { describe: "Lab in the new-tab menu" },
+      );
+      await s.click(item);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the menu" });
+      await t.type("echo REOPENED-$((2+2))\n");
+      await t.waitForText("REOPENED-4");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("broadcast with a pane left out, on real shells (P-13)", { concurrency: false }, () => {
+  test("only the confirmed panes receive typed input; the one left out keeps its own", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      const runCommand = async (name) => {
+        await s.chord(PALETTE);
+        const input = await s.waitFor("dialog.palette input");
+        await s.type(input, name);
+        await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+        await s.chord([KEYS.enter]);
+        await s.waitGone("dialog.palette");
+      };
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await runCommand("Split pane right");
+      await runCommand("Split pane right");
+      await runCommand("Arrange panes in a grid");
+      await s.until(() => s.execute(`return [...document.querySelectorAll(".pane .status-dot")].filter((d) => d.dataset.tone === "ok").length === 3 || null`), {
+        describe: "three connected panes",
+        timeout: 30_000,
+      });
+      await runCommand("Type into every pane");
+      await s.waitFor('dialog[role="alertdialog"] input[type="checkbox"]');
+      const boxes = await s.findAll('dialog[role="alertdialog"] input[type="checkbox"]');
+      assert.equal(boxes.length, 3, "every pane is listed");
+      // Leave out the second pane.
+      await s.click(boxes[1]);
+      await s.clickButton("Type into 2 panes", { within: 'dialog[role="alertdialog"]' });
+      await s.waitGone('dialog[role="alertdialog"]');
+      await s.until(() => s.execute(`return document.querySelectorAll('.pane[data-broadcast="true"]').length === 2 && document.querySelectorAll('.pane[data-broadcast="excluded"]').length === 1 || null`), {
+        describe: "two receiving panes, one left out",
+      });
+
+      // Typed in a confirmed pane once every shell shows a prompt. A literal token: the local
+      // shell differs per platform; the point is where the input goes.
+      await s.until(
+        () => s.execute(`return [...document.querySelectorAll(".pane .xterm-rows")].every((e) => /[$%#>]\\s*$/m.test(e.innerText.replaceAll("\\u00a0", " "))) || null`),
+        { describe: "prompts in all panes", timeout: 30_000 },
+      );
+      const focusedReceiving = await s.execute(`return document.querySelector('.pane[data-focused="true"]')?.dataset.broadcast ?? null`);
+      assert.equal(focusedReceiving, "true", "typing from a confirmed pane");
+      await s.type(await s.waitFor('.pane[data-focused="true"] .xterm-helper-textarea'), "echo BCAST-TOKEN-7\n");
+      const where = () =>
+        s.execute(`return [...document.querySelectorAll(".pane")].map((p) => (p.dataset.broadcast ?? "") + ":" + (p.querySelector(".xterm-rows")?.textContent.includes("BCAST-TOKEN-7") ? "yes" : "no"))`);
+      await s.until(async () => ((await where()).filter((x) => x.endsWith("yes")).length === 2 ? true : null), { describe: "token in two panes" });
+      await new Promise((r) => setTimeout(r, 500));
+      assert.deepEqual((await where()).sort(), ["excluded:no", "true:yes", "true:yes"]);
     } finally {
       await app.quit();
     }
