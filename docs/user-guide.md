@@ -27,8 +27,31 @@ only network traffic is the SSH connections you start.
 Download the installer for your platform from the
 [releases page](https://github.com/2shiraz/tyrminal/releases) and check it against
 `SHA256SUMS.txt` (`shasum -a 256 <file>` on macOS, `Get-FileHash <file>` on Windows,
-`sha256sum <file>` on Linux). The release notes explain how to open an unsigned build on
-macOS and Windows.
+`sha256sum <file>` on Linux).
+
+### Opening a pre-release build
+
+Pre-releases are not yet signed with an Apple Developer ID or a Windows code-signing
+certificate, so macOS and Windows warn that they cannot check who made the file. Check the
+SHA-256 first; then:
+
+- **macOS 15 and later:** opening the app shows "Apple could not verify 'Tyrminal' is free of
+  malware" with **Move to Bin** and **Done**. Click **Done** (not Move to Bin). Open
+  System Settings → Privacy & Security, scroll to "Tyrminal was blocked to protect your Mac" and
+  click **Open Anyway**, confirm with your password, then click **Open Anyway** once more.
+  macOS remembers the choice. Right-click → Open no longer skips this on macOS 15.
+  If macOS says the app "is damaged", the download is still quarantined: after checking the
+  SHA-256, run `xattr -dr com.apple.quarantine /Applications/Tyrminal.app` in Terminal and
+  open it again.
+- **Windows (Edge):** Edge may say the file "isn't commonly downloaded" or "could harm your
+  device". In the downloads list, choose **…** → **Keep** → **Show more** → **Keep anyway**.
+  When you run the installer, SmartScreen shows "Windows protected your PC": click
+  **More info** → **Run anyway**.
+- **Linux:** `sudo apt install ./tyrminal-<version>-linux-x64.deb`, or make the AppImage
+  executable (`chmod +x`) and run it.
+
+Signed and notarized builds remove these steps. The release workflow signs automatically once
+the project's signing certificates are added as repository secrets.
 
 Tyrminal never checks for or installs updates by itself. To update, download the newer version
 and install it over the old one. Your vault and settings stay where they are. Settings → Privacy
