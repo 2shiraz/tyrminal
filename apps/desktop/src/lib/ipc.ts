@@ -636,6 +636,13 @@ export const glance = {
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
 };
 
+// OS auto-detection: read once per connection unless turned off; the result shows in host appearances.
+export const osDetection = {
+  enabled: () => call<boolean>("os_detection_get"),
+  /** Turning it off also forgets every detected OS. */
+  setEnabled: (enabled: boolean) => call<boolean>("os_detection_set", { enabled }),
+};
+
 // tmux and screen session awareness (P-31)
 export const multiplexers = {
   /** The server's tmux and screen sessions, listed with a fixed command; nothing is typed. */

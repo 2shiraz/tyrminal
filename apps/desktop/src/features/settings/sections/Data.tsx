@@ -9,6 +9,8 @@ import { useAction } from "../../../lib/useAsync";
 import { ExportBackupButton, RestoreBackupDialog } from "../../vault/BackupRestore";
 import { msgSettings } from "../messages";
 import { SettingsGroup } from "../SettingsGroup";
+// OS auto-detection
+import { OsDetectionSetting } from "../../os-detection/OsDetectionSetting";
 
 export function BackupSection() {
   const [restoring, setRestoring] = useState(false);
@@ -61,6 +63,8 @@ export function PrivacySection() {
           checked={!prefs.noPortSuggestions}
           onChange={(on) => update((p) => ({ ...p, noPortSuggestions: !on }))}
         />
+        {/* OS auto-detection */}
+        <OsDetectionSetting />
       </SettingsGroup>
       <SettingsGroup title={msgSettings.updates}>
         <SettingRow label={msg.settings.updates} hint={msg.settings.updatesBody(__APP_VERSION__)} id="updates" variant="link">
