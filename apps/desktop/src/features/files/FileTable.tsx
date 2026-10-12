@@ -124,9 +124,12 @@ export function FileTable({
     const target = event.target as HTMLElement;
     if (target.closest("input, thead")) return;
     const mod = toggleKey(event);
-    // The row the keyboard is on: the focused one, else the selection's cursor.
+    // The row the keyboard is on: the selection's cursor, else the focused row. The cursor comes
+    // first because type-ahead moves it at once but moves focus a frame later: Enter typed right
+    // after a name must open that name, not the row focused before it.
     const focusedName = target.closest<HTMLElement>("tbody tr")?.dataset.name;
-    const cursorEntry = entries.find((e) => e.name === (focusedName ?? selection.cursor ?? selection.names[0]));
+    const cursorEntry =
+      entries.find((e) => e.name === selection.cursor) ?? entries.find((e) => e.name === (focusedName ?? selection.names[0]));
     const act = (key: TableKey) => {
       event.preventDefault();
       onKey?.(key);
