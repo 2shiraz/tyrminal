@@ -60,6 +60,7 @@ function TabStripImpl({
   onDetach,
   onNewLocal,
   onNewSftp,
+  onNewTab,
   onOpenPalette,
   finished,
   layout,
@@ -81,6 +82,8 @@ function TabStripImpl({
   onNewLocal: () => void;
   /** Opens a new SFTP tab. */
   onNewSftp?: () => void;
+  /** "+" opens the new-tab page (in place of the small menu). */
+  onNewTab?: () => void;
   onOpenPalette: () => void;
   /** Tabs whose long command finished while out of view, with its exit status (P-23). */
   finished?: ReadonlyMap<number, number | null> | undefined;
@@ -415,8 +418,17 @@ function TabStripImpl({
         // vertically); the native one is drawn outside it.
         data-tooltip={undefined}
         title={msg.nav.newTab}
-        aria-haspopup="menu"
-        onClick={(event) => setNewMenu(event.currentTarget)}
+        // With a new-tab page, "+" opens it (its menu stays on right click); otherwise the menu.
+        aria-haspopup={onNewTab ? undefined : "menu"}
+        onClick={(event) => (onNewTab ? onNewTab() : setNewMenu(event.currentTarget))}
+        onContextMenu={
+          onNewTab
+            ? (event) => {
+                event.preventDefault();
+                setNewMenu(event.currentTarget);
+              }
+            : undefined
+        }
       >
         <IconPlus size={16} />
       </IconButton>

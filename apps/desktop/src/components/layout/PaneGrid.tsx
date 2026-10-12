@@ -4,6 +4,8 @@ import { type ReactNode, useRef, useState, memo } from "react";
 import { useOptionalVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Tab, type Workspace, activeTab, panesOf, paneRects } from "../../app/workspace";
 import { SftpView } from "../../features/sftp/SftpView";
+import { StartPage } from "../../features/start/StartPage";
+import type { QuickTarget } from "../../lib/quickConnect";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
 import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
@@ -32,6 +34,7 @@ function PaneGridImpl({
   onUnread,
   onClose,
   onQuickSaved,
+  start,
   onSplit,
   onRatio,
   onSwap,
@@ -59,6 +62,8 @@ function PaneGridImpl({
   onClose: (pane: number) => void;
   /** Quick connect saved its host: the pane becomes that host's. */
   onQuickSaved?: (pane: number, host: HostSummary) => void;
+  /** The new-tab page: what it opens, in its own pane. */
+  start?: StartHandlers;
   onSplit: (pane: number, dir: Direction) => void;
   onRatio: (tab: number, path: ("a" | "b")[], ratio: number) => void;
   onSwap: (a: number, b: number) => void;
@@ -204,7 +209,21 @@ function PaneGridImpl({
                 </div>
               )}
               <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-                {pane.target.kind === "sftp" ? (
+                {pane.target.kind === "start" ? (
+                  start && (
+                    <StartPage
+                      interactive={visible && focused}
+                      hostIdentity={start.hostIdentity}
+                      onHost={(host) => start.onHost(id, host)}
+                      onQuick={(target) => start.onQuick(id, target)}
+                      onLocal={() => start.onLocal(id)}
+                      onSftp={() => start.onSftp(id)}
+                      onHosts={() => start.onHosts(id)}
+                      onSerial={() => start.onSerial(id)}
+                      onClose={() => onClose(id)}
+                    />
+                  )
+                ) : pane.target.kind === "sftp" ? (
                   <SftpView
                     visible={visible}
                     onIndicator={(indicator) => onPatch(id, { indicator })}
@@ -299,6 +318,18 @@ function PaneGridImpl({
 }
 
 /** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+/** What the new-tab page opens in its pane (the pane is retargeted in place). */
+export interface StartHandlers {
+  hostIdentity: (host: HostSummary) => string;
+  onHost: (pane: number, host: HostSummary) => void;
+  onQuick: (pane: number, target: QuickTarget) => void;
+  onLocal: (pane: number) => void;
+  onSftp: (pane: number) => void;
+  onHosts: (pane: number) => void;
+  /** Serial devices are hosts: a new serial host on the Hosts page. */
+  onSerial: (pane: number) => void;
+}
+
 export const PaneGrid = memo(PaneGridImpl);
 
 function Splitters({

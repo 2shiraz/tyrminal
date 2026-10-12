@@ -154,6 +154,7 @@ function HostsViewImpl({
   onOpenSftp,
   onOpenSftpMany,
   onLocal,
+  newSerial,
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
@@ -169,6 +170,8 @@ function HostsViewImpl({
   onOpenSftpMany?: (hosts: HostSummary[]) => void;
   /** "Terminal": a terminal on this computer. */
   onLocal?: () => void;
+  /** The new-tab page's Serial tile: open a new serial host, once per change of this number. */
+  newSerial?: number;
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
@@ -703,6 +706,14 @@ function HostsViewImpl({
     if (active instanceof HTMLElement && active !== document.body && !active.closest(".host-panel")) opener.current = active;
     guard(() => show(target, takeFocus));
   };
+  // The new-tab page's Serial tile: the same new serial host as the toolbar's Serial button.
+  const servedSerial = useRef(0);
+  useEffect(() => {
+    if (!newSerial || newSerial === servedSerial.current) return;
+    servedSerial.current = newSerial;
+    openPanel({ kind: "new", initial: { address: "", port: 0, username: "", protocol: "serial" } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newSerial]);
   /** Closes the panel and puts focus back where it was opened from (or on "Add host"). */
   const closePanel = useCallback(() => {
     const back = opener.current;

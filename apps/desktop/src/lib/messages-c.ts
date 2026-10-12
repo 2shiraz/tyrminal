@@ -132,6 +132,7 @@ export const msgC = {
     actions: {
       palette: "Command palette",
       newLocal: "New local terminal",
+      newTabPage: "New tab page",
       closePane: "Close pane",
       splitRight: "Split pane right",
       splitDown: "Split pane down",

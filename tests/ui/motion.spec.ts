@@ -36,13 +36,15 @@ async function allowMotion(page: Page) {
   });
 }
 
-const newTabMenu = (page: Page) => page.getByRole("menu", { name: "New tab" });
+// A menu to open and close: Sort on Hosts ("+" in the tab strip opens the new tab page now).
+const menuButton = (page: Page) => page.getByRole("button", { name: "Sort", exact: true });
+const newTabMenu = (page: Page) => page.getByRole("menu", { name: "Sort" });
 
 test.describe("motion allowed", () => {
   test("a menu opened by the pointer grows from its trigger's corner, briefly", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     const menu = newTabMenu(page);
     await expect(menu).toBeVisible();
     const style = await menu.evaluate((el) => {
@@ -64,13 +66,13 @@ test.describe("motion allowed", () => {
   test("a menu opened from the keyboard is simply there, with focus on its first item", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).focus();
+    await menuButton(page).focus();
     await page.keyboard.press("Enter");
     const menu = newTabMenu(page);
     await expect(menu).toBeVisible();
     await expect(menu).toHaveAttribute("data-opened-by", "keyboard");
     expect(await menu.evaluate((el) => el.getAnimations().length)).toBe(0);
-    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
   });
 
   test("the palette from the keyboard does not animate and takes typing at once", async ({ page }) => {
@@ -117,7 +119,7 @@ for (const mode of ["system setting", "in-app switch"] as const) {
     const still = async () => expect(await liveAnimations(page)).toEqual([]);
     const primary = page.getByRole("navigation", { name: "Primary" });
 
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await still();
     await page.keyboard.press("Escape");
@@ -162,7 +164,7 @@ test.describe("exits", () => {
   test("a menu closed with the pointer fades out as an inert copy; the menu itself is gone at once", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await page.mouse.click(5, 400);
     await expect(newTabMenu(page)).toHaveCount(0);
@@ -178,7 +180,7 @@ test.describe("exits", () => {
   test("closed from the keyboard, or under reduced motion, nothing lingers", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await expect(newTabMenu(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(newTabMenu(page)).toHaveCount(0);
@@ -187,7 +189,7 @@ test.describe("exits", () => {
     await page.evaluate(() => {
       document.documentElement.dataset.reduceMotion = "true";
     });
-    await page.getByRole("button", { name: "New tab" }).click();
+    await menuButton(page).click();
     await page.mouse.click(5, 400);
     await expect(newTabMenu(page)).toHaveCount(0);
     expect(await ghosts(page).count()).toBe(0);
