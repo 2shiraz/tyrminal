@@ -4,6 +4,7 @@ use crate::{Id, SecretKey, VaultError};
 pub(crate) const LABEL_RECORDS: &[u8] = b"tyrminal.subkey.v1.records";
 pub(crate) const LABEL_HEADER_MAC: &[u8] = b"tyrminal.subkey.v1.header-mac";
 pub(crate) const LABEL_BACKUP: &[u8] = b"tyrminal.subkey.v1.backup";
+pub(crate) const LABEL_LOGS: &[u8] = b"tyrminal.subkey.v1.logs";
 pub(crate) const LABEL_KEK_RECOVERY: &[u8] = b"tyrminal.kek.recovery.v1";
 pub(crate) const LABEL_KEK_DEVICE: &[u8] = b"tyrminal.kek.device.v1";
 
@@ -27,6 +28,9 @@ mod tests {
         assert_ne!(records.expose(), mac.expose());
         assert_ne!(records.expose(), other_vault.expose());
         assert_ne!(records.expose(), root.expose());
+        let logs = subkey(&root, &v1, LABEL_LOGS).unwrap();
+        assert_ne!(logs.expose(), records.expose());
+        assert_ne!(logs.expose(), subkey(&root, &v1, LABEL_BACKUP).unwrap().expose());
         // Deterministic for the same inputs.
         assert_eq!(records.expose(), subkey(&root, &v1, LABEL_RECORDS).unwrap().expose());
     }

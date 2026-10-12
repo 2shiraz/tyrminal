@@ -859,6 +859,7 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
             proxy: None,
             jump_host_id: Some(bastion.id.clone()),
             inherit: false,
+            key_exchange: Default::default(),
         },
     )
     .await

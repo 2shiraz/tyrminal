@@ -454,3 +454,32 @@ pub async fn group_defaults_set(
 ) -> Result<tyrminal_core::contracts::GroupDefaults, IpcError> {
     state.core()?.vault.set_group_defaults(&group_id, defaults).await
 }
+
+// Notes on hosts and groups (P-30): stored encrypted in the vault, shown as text only.
+
+#[tauri::command]
+pub async fn note_get(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+) -> Result<Option<tyrminal_core::contracts::Note>, IpcError> {
+    state.core()?.vault.note(target).await
+}
+
+/// Replaces a host's or group's note; empty text or `null` deletes it.
+#[tauri::command]
+pub async fn note_set(
+    state: State<'_, AppState>,
+    target: tyrminal_core::contracts::SettingsTarget,
+    note: Option<tyrminal_core::contracts::NoteInput>,
+) -> Result<Option<tyrminal_core::contracts::Note>, IpcError> {
+    state.core()?.vault.set_note(target, note).await
+}
+
+/// The notes that apply to a host: its own, then its groups' (nearest first).
+#[tauri::command]
+pub async fn note_for_host(
+    state: State<'_, AppState>,
+    host_id: String,
+) -> Result<Vec<tyrminal_core::contracts::HostNote>, IpcError> {
+    state.core()?.vault.host_notes(&host_id).await
+}

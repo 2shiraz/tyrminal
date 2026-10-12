@@ -30,6 +30,8 @@ pub struct ConnectOptions {
     /// Limit for each authentication round trip and channel request.
     pub request_timeout: Duration,
     pub keepalive_interval: Option<Duration>,
+    /// Post-quantum key exchange: preferred unless the host says otherwise.
+    pub key_exchange: crate::algorithms::KeyExchangePolicy,
 }
 
 impl ConnectOptions {
@@ -40,6 +42,7 @@ impl ConnectOptions {
             handshake_timeout: Duration::from_secs(15),
             request_timeout: Duration::from_secs(20),
             keepalive_interval: Some(Duration::from_secs(30)),
+            key_exchange: crate::algorithms::KeyExchangePolicy::default(),
         }
     }
 }
@@ -153,7 +156,7 @@ impl<V: HostKeyVerifier> Handler<V> {
 
 fn config(options: &ConnectOptions) -> Arc<client::Config> {
     Arc::new(client::Config {
-        preferred: algorithms::preferred(),
+        preferred: algorithms::preferred(options.key_exchange),
         keepalive_interval: options.keepalive_interval,
         keepalive_max: 3,
         nodelay: true,
@@ -544,6 +547,30 @@ impl VerifiedConnection {
         let with_alg = PrivateKeyWithHashAlg::new(Arc::new(key.private_key().clone()), hash);
         let timeout = self.request_timeout;
         let fut = self.handle.authenticate_publickey(username, with_alg);
+        let result = match tokio::time::timeout(timeout, fut).await {
+            Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
+            Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
+            Ok(Ok(result)) => result,
+        };
+        self.outcome(result)
+    }
+
+    /// Public-key authentication with an OpenSSH user certificate for `key`
+    /// (`<type>-cert-v01@openssh.com <base64> [comment]`). The server decides whether it trusts
+    /// the certificate's CA, principals and validity; a certificate for a different key is
+    /// refused here without contacting the server.
+    pub async fn authenticate_key_with_certificate(
+        &mut self,
+        username: &str,
+        key: &ClientKey,
+        certificate: &str,
+    ) -> Result<AuthOutcome, SshError> {
+        let cert = russh::keys::Certificate::from_openssh(certificate.trim()).map_err(|_| SshError::Protocol)?;
+        if cert.public_key() != key.private_key().public_key().key_data() {
+            return Err(SshError::Protocol);
+        }
+        let timeout = self.request_timeout;
+        let fut = self.handle.authenticate_openssh_cert(username, Arc::new(key.private_key().clone()), cert);
         let result = match tokio::time::timeout(timeout, fut).await {
             Err(_) => return Err(SshError::Timeout(Stage::Authenticating)),
             Ok(Err(err)) => return Err(SshError::from_russh(&err, Stage::Authenticating)),
