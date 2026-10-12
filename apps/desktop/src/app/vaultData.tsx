@@ -2,7 +2,7 @@
 // under AppShell, which is keyed by the vault generation, so a lock discards all of them.
 
 import type { GroupSummary, HostSummary, KeySummary, SnippetSummary } from "@tyrminal/contracts";
-import { type ReactNode, createContext, useContext, useMemo } from "react";
+import { type ReactNode, createContext, useContext, useMemo, useRef } from "react";
 
 import { groups as groupsApi, hosts as hostsApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
@@ -15,6 +15,8 @@ interface VaultData {
   keys: Loaded<KeySummary[]>;
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
+  /** Derived, non-secret results computed once per unlock (Home's security review counts). */
+  memo: Map<string, unknown>;
 }
 
 const Context = createContext<VaultData | null>(null);
@@ -25,7 +27,8 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   const keys = useLoaded(keysApi.list);
   const snippets = useLoaded(snippetsApi.list);
   const groups = useLoaded(groupsApi.list);
-  const value = useMemo(() => ({ hosts, recent, keys, snippets, groups }), [hosts, recent, keys, snippets, groups]);
+  const memo = useRef(new Map<string, unknown>()).current;
+  const value = useMemo(() => ({ hosts, recent, keys, snippets, groups, memo }), [hosts, recent, keys, snippets, groups, memo]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
