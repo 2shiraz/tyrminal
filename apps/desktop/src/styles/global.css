@@ -1981,7 +1981,7 @@ kbd,
   align-content: start;
 }
 
-.panel-body > .setting-row {
+.panel-body > .setting-row:not([data-variant="switch"]) {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-2) 0;
@@ -1991,9 +1991,22 @@ kbd,
   border-top: var(--box-rule);
 }
 
-.panel-body > .setting-row .setting-control,
-.panel-body > .setting-row .setting-control > * {
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control,
+.panel-body > .setting-row:not([data-variant="switch"]) .setting-control > * {
   width: 100%;
+}
+
+/* A switch keeps its own size: label and hint on the left, the switch on the right. */
+.panel-body .setting-row[data-variant="switch"] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.panel-body .setting-row[data-variant="switch"] .setting-control {
+  flex: none;
+  width: auto;
 }
 
 .panel-target {
