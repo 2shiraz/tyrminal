@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   schedule:
     - cron: "17 5 * * 1"
   workflow_dispatch:
@@ -56,6 +57,8 @@ jobs:
 
   fuzz:
     name: Fuzz smoke (60 s per target)
+    # Main, schedules and releases only; pull requests get the quick checks.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

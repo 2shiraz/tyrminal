@@ -1,0 +1,19 @@
+{
+  "theme": "light",
+  "reduceMotion": false,
+  "terminal": {
+    "scheme": "tyrminal-night",
+    "fontFamily": "jetbrains-mono",
+    "fontSize": 15.0,
+    "lineHeight": 1.2,
+    "letterSpacing": 0.0,
+    "cursorStyle": "block",
+    "cursorBlink": true,
+    "padding": 10,
+    "scrollback": 5000,
+    "ligatures": false,
+    "renderer": "auto",
+    "confirmMultilinePaste": true,
+    "copyOnSelect": false
+  }
+}

@@ -17,8 +17,8 @@ use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState,
-    TransferEvent, TrustDecision, VaultState,
+    AuthPromptKind, ConflictChoice, ErrorCode, HostAuthInput, HostInput, HostProtocol, KeyImportInput, SessionEvent,
+    SessionState, TransferEvent, TrustDecision, VaultState,
 };
 use tyrminal_core::{Core, SessionSink, TransferSink};
 
@@ -128,6 +128,8 @@ struct Client {
     auto_ack: bool,
     /// The last `Negotiated` event, which arrives just before `Connected`.
     negotiated: Option<SessionEvent>,
+    /// The window this stand-in plays.
+    window: &'static str,
 }
 
 impl Client {
@@ -142,6 +144,7 @@ impl Client {
             received: 0,
             auto_ack: true,
             negotiated: None,
+            window: WINDOW,
         }
     }
 
@@ -156,6 +159,7 @@ impl Client {
             received: 0,
             auto_ack: true,
             negotiated: None,
+            window: WINDOW,
         }
     }
 
@@ -178,10 +182,10 @@ impl Client {
         // app, xterm.js answers it.)
         let queries = bytes.windows(4).filter(|w| *w == b"\x1b[6n").count();
         for _ in 0..queries {
-            let _ = self.core.sessions.write(WINDOW, &self.session, b"\x1b[1;1R".to_vec()).await;
+            let _ = self.core.sessions.write(self.window, &self.session, b"\x1b[1;1R".to_vec()).await;
         }
         if self.auto_ack {
-            let _ = self.core.sessions.ack(WINDOW, &self.session, bytes.len() as u32).await;
+            let _ = self.core.sessions.ack(self.window, &self.session, bytes.len() as u32).await;
         }
     }
 
@@ -233,15 +237,18 @@ impl Client {
     /// ConPTY submits only on CR; Unix terminal drivers turn CR into NL).
     async fn send(&self, text: &str) {
         let keys = text.replace('\n', "\r");
-        self.core.sessions.write(WINDOW, &self.session, keys.into_bytes()).await.expect("write");
+        self.core.sessions.write(self.window, &self.session, keys.into_bytes()).await.expect("write");
     }
 
     fn trust(&self, prompt_id: &str, decision: TrustDecision) {
-        self.core.sessions.answer_trust(WINDOW, &self.session, prompt_id, decision).expect("answer trust");
+        self.core.sessions.answer_trust(self.window, &self.session, prompt_id, decision).expect("answer trust");
     }
 
     fn answer(&self, prompt_id: &str, secret: Option<&str>) {
-        self.core.sessions.answer_auth(WINDOW, &self.session, prompt_id, secret.map(Into::into)).expect("answer auth");
+        self.core
+            .sessions
+            .answer_auth(self.window, &self.session, prompt_id, secret.map(Into::into))
+            .expect("answer auth");
     }
 }
 
@@ -331,6 +338,9 @@ impl Fixture {
             auth,
             group_id: None,
             tags: Vec::new(),
+            protocol: HostProtocol::Ssh,
+            terminal: Default::default(),
+            forward_agent: false,
         };
         self.core.vault.save_host(input).await.unwrap().id
     }
@@ -1687,6 +1697,7 @@ async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_e
         received: 0,
         auto_ack: true,
         negotiated: None,
+        window: WINDOW,
     };
     client.until_connected().await;
     client.send("echo \"SHELL-[$0]\"\n").await;
@@ -1713,6 +1724,7 @@ async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_e
         received: 0,
         auto_ack: true,
         negotiated: None,
+        window: WINDOW,
     };
     client.until_connected().await;
     client.send("echo LOGIN-$((40+2))\n").await;
@@ -1849,4 +1861,375 @@ async fn copying_between_two_servers_streams_files_and_folders_without_partial_r
         }
         s.remove_file(WINDOW, session, base, name).await.unwrap();
     }
+}
+
+/// A stand-in for another window that has just accepted a session.
+fn attached(f: &Fixture, window: &'static str, session: String, inbox: mpsc::UnboundedReceiver<Message>) -> Client {
+    Client {
+        core: f.core.clone(),
+        session,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+        window,
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_session_moves_to_another_window_and_only_that_window_can_use_it() {
+    const NEW: &str = "detached-1";
+    const THIRD: &str = "detached-2";
+    let f = fixture().await;
+    let s = &f.core.sessions;
+    let mut old = Client::open_local(&f.core).await;
+    old.until_connected().await;
+    old.send("echo BEFORE-$((1+1))\n").await;
+    old.output_until("BEFORE-2").await;
+    let id = old.session.clone();
+
+    // Only the owner may offer, only to another window, one offer at a time.
+    assert!(s.offer_handoff(THIRD, &id, NEW).is_err());
+    assert!(s.offer_handoff(WINDOW, &id, WINDOW).is_err());
+    let token = s.offer_handoff(WINDOW, &id, NEW).unwrap();
+    assert!(s.offer_handoff(WINDOW, &id, THIRD).is_err());
+
+    // Until it is accepted the owner keeps the session; its output is held for the new window.
+    old.send("echo HELD-$((2+2))\n").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A third window cannot take it (and does not use up the token).
+    let (tx3, _inbox3) = mpsc::unbounded_channel();
+    assert_eq!(s.accept_handoff(THIRD, &token, Arc::new(ChannelSink(tx3))).unwrap_err().code, ErrorCode::AccessDenied);
+
+    let (tx, inbox) = mpsc::unbounded_channel();
+    assert_eq!(s.accept_handoff(NEW, &token, Arc::new(ChannelSink(tx))).unwrap(), id);
+    let mut new = attached(&f, NEW, id.clone(), inbox);
+    new.output_until("HELD-4").await;
+    // Nothing produced after the offer reached the old window.
+    while let Ok(message) = old.inbox.try_recv() {
+        if let Message::Output(bytes) = message {
+            assert!(!String::from_utf8_lossy(&bytes).contains("HELD"), "held output leaked to the old window");
+        }
+    }
+
+    // The token is single-use.
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    assert!(s.accept_handoff(NEW, &token, Arc::new(ChannelSink(tx))).is_err());
+
+    // The old window is denied everything from now on.
+    let denied =
+        |r: Result<(), tyrminal_core::contracts::IpcError>| assert_eq!(r.unwrap_err().code, ErrorCode::AccessDenied);
+    denied(s.write(WINDOW, &id, b"echo NO\r".to_vec()).await);
+    denied(s.resize(WINDOW, &id, 80, 24).await);
+    denied(s.ack(WINDOW, &id, 1).await);
+    denied(s.close(WINDOW, &id));
+    assert!(s.offer_handoff(WINDOW, &id, THIRD).is_err());
+
+    // The new window uses it, and closing the old window ends nothing it no longer owns.
+    new.send("echo AFTER-$((3+3))\n").await;
+    new.output_until("AFTER-6").await;
+    s.close_all_for_owner(WINDOW);
+    new.send("echo STILL-$((4+4))\n").await;
+    new.output_until("STILL-8").await;
+
+    // An offer that is not accepted in time lapses: the token is refused and what was held
+    // goes to the owner after all.
+    let late = s.offer_handoff_within(NEW, &id, THIRD, Duration::from_millis(300)).unwrap();
+    new.send("echo LAPSED-$((5+5))\n").await;
+    new.output_until("LAPSED-10").await;
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    assert!(s.accept_handoff(THIRD, &late, Arc::new(ChannelSink(tx))).is_err());
+
+    // An offer whose target window closes lapses at once.
+    let _gone = s.offer_handoff(NEW, &id, THIRD).unwrap();
+    new.send("echo CLOSED-$((6+6))\n").await;
+    s.close_all_for_owner(THIRD);
+    new.output_until("CLOSED-12").await;
+
+    // Closing the window that now owns it ends the session.
+    s.close_all_for_owner(NEW);
+    new.until_closed().await;
+    assert_eq!(s.count(), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_dropped_file_streams_in_order_and_only_a_complete_upload_appears() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let dir_name = format!("tyr-drop-{}", std::process::id());
+    s.make_dir(WINDOW, &id, &home, &dir_name).await.unwrap();
+    let dir = format!("{}/{dir_name}", home.trim_end_matches('/'));
+    let names = || async {
+        s.list_files(WINDOW, &id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect::<Vec<_>>()
+    };
+
+    // A 5 MiB file in pieces arrives byte for byte under its own name.
+    let data = pattern(5 * 1024 * 1024 + 123, 7);
+    let up = s.upload_begin(WINDOW, &id, &dir, "drop.bin", data.len() as u64, ConflictChoice::Ask).await.unwrap();
+    assert_eq!(up.name, "drop.bin");
+    let mut offset = 0u64;
+    for piece in data.chunks(1024 * 1024) {
+        s.upload_chunk(WINDOW, &up.upload_id, offset, piece).await.unwrap();
+        offset += piece.len() as u64;
+        assert!(!names().await.contains(&"drop.bin".to_owned()), "visible before it was complete");
+    }
+    // Another window cannot finish (or write to) someone else's upload.
+    assert_eq!(s.upload_finish("other", &up.upload_id).await.unwrap_err().code, ErrorCode::AccessDenied);
+    assert_eq!(s.upload_finish(WINDOW, &up.upload_id).await.unwrap(), "drop.bin");
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &dir, "drop.bin", back.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    transfer_end(&mut rx).await;
+    assert_eq!(std::fs::read(back.path().join("drop.bin")).unwrap(), data);
+
+    // An existing name is refused unless the user chose Replace or Keep both.
+    assert_eq!(
+        s.upload_begin(WINDOW, &id, &dir, "drop.bin", 3, ConflictChoice::Ask).await.unwrap_err().code,
+        ErrorCode::Conflict
+    );
+    let kept = s.upload_begin(WINDOW, &id, &dir, "drop.bin", 3, ConflictChoice::KeepBoth).await.unwrap();
+    assert_eq!(kept.name, "drop (1).bin");
+    s.upload_chunk(WINDOW, &kept.upload_id, 0, b"abc").await.unwrap();
+    s.upload_finish(WINDOW, &kept.upload_id).await.unwrap();
+
+    // Out of order, too long, too short or abandoned: stopped, and nothing is left behind.
+    let gap = s.upload_begin(WINDOW, &id, &dir, "gap.txt", 6, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &gap.upload_id, 0, b"abc").await.unwrap();
+    assert!(s.upload_chunk(WINDOW, &gap.upload_id, 4, b"ef").await.is_err());
+    assert!(s.upload_chunk(WINDOW, &gap.upload_id, 3, b"def").await.is_err(), "a stopped upload stays stopped");
+    let long = s.upload_begin(WINDOW, &id, &dir, "long.txt", 2, ConflictChoice::Ask).await.unwrap();
+    assert!(s.upload_chunk(WINDOW, &long.upload_id, 0, b"abc").await.is_err());
+    let short = s.upload_begin(WINDOW, &id, &dir, "short.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &short.upload_id, 0, b"abc").await.unwrap();
+    assert!(s.upload_finish(WINDOW, &short.upload_id).await.is_err());
+    let left = s.upload_begin(WINDOW, &id, &dir, "left.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &left.upload_id, 0, b"abc").await.unwrap();
+    s.upload_abort(WINDOW, &left.upload_id).await;
+    // A window that closes takes its unfinished uploads with it.
+    let orphan = s.upload_begin(WINDOW, &id, &dir, "orphan.txt", 10, ConflictChoice::Ask).await.unwrap();
+    s.upload_chunk(WINDOW, &orphan.upload_id, 0, b"abc").await.unwrap();
+    s.close_all_for_owner(WINDOW);
+    client.until_closed().await;
+
+    // Check what is left over a fresh session.
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    client.until_connected().await;
+    let id = client.session.clone();
+    let left: Vec<_> =
+        s.list_files(WINDOW, &id, Some(&dir)).await.unwrap().entries.into_iter().map(|e| e.name).collect();
+    assert_eq!(left, ["drop (1).bin", "drop.bin"], "only complete uploads remain");
+    for name in ["drop (1).bin", "drop.bin"] {
+        s.remove_file(WINDOW, &id, &dir, name).await.unwrap();
+    }
+    s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
+}
+
+/// Opt-in: `TYRMINAL_SMALL_FS` names an empty folder on a filesystem of at most 4 MiB (CI mounts
+/// a tmpfs on Linux and a disk image on macOS).
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn full_disk_download_fails_cleanly_and_leaves_nothing_behind() {
+    // Never a silent pass: the runner reports this test BLOCKED unless it is opted in.
+    let small = std::path::PathBuf::from(
+        std::env::var_os("TYRMINAL_SMALL_FS").expect("set TYRMINAL_SMALL_FS to a folder on a tiny filesystem"),
+    );
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let local = TempDir::new().unwrap();
+    let name = format!("tyr-full-{}.bin", std::process::id());
+    std::fs::write(local.path().join(&name), pattern(8 * 1024 * 1024, 3)).unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, local.path().join(&name), &home, &name, ConflictChoice::Ask, sink).await.unwrap();
+    transfer_end(&mut rx).await;
+
+    // Something already there must survive the failure untouched.
+    let target = TempDir::new_in(&small).unwrap();
+    std::fs::write(target.path().join("keep.txt"), b"keep\n").unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &home, &name, target.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+    match transfer_end(&mut rx).await {
+        TransferEvent::Failed { error } => assert_eq!(error.code, ErrorCode::StorageFull, "{error:?}"),
+        other => panic!("a download larger than the disk must fail, got {other:?}"),
+    }
+    let mut left: Vec<_> = std::fs::read_dir(target.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, ["keep.txt"], "no partial or temporary file is left");
+    assert_eq!(std::fs::read(target.path().join("keep.txt")).unwrap(), b"keep\n");
+    s.remove_file(WINDOW, &id, &home, &name).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn the_connection_log_shows_each_step_and_never_a_secret() {
+    let f = fixture().await;
+    let password = f.lab.str("/password");
+    let host = f
+        .host(
+            "diag",
+            f.lab.port("a"),
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some(password.clone()) },
+        )
+        .await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let lines = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap();
+    let text = lines.join("\n");
+    for step in [
+        "connecting to 127.0.0.1:",
+        "directly",
+        "key exchange ",
+        "host key SHA256:",
+        "signing in as ",
+        "the stored password",
+        "signed in",
+        "shell opened (xterm-256color, 100x30)",
+    ] {
+        assert!(text.contains(step), "missing {step:?} in:\n{text}");
+    }
+    assert!(!text.contains(&password), "the password must never be logged");
+    // Only the window that owns the session can read its log.
+    assert_eq!(f.core.sessions.diagnostics("other", &client.session).unwrap_err().code, ErrorCode::AccessDenied);
+    // A failed sign-in says why, still without the secret.
+    let wrong = f
+        .host(
+            "diag-wrong",
+            f.lab.port("a"),
+            &f.lab.str("/user"),
+            HostAuthInput::StoredPassword { password: Some("not-the-password-9".into()) },
+        )
+        .await;
+    let mut client = Client::open_ssh(&f.core, &wrong).await;
+    // A refused stored password falls back to asking; the user cancels.
+    let (_, prompt) = client.until_not_state().await;
+    let (prompt_id, _, _) = auth_prompt(&prompt);
+    client.answer(&prompt_id, None);
+    let (error, _) = client.until_closed().await;
+    assert!(error.is_some());
+    let text = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(text.contains("refused the stored password"), "{text}");
+    assert!(text.contains("sign-in failed: "), "{text}");
+    assert!(text.contains("ended: "), "{text}");
+    assert!(!text.contains("not-the-password-9"));
+    assert!(f.core.sessions.diagnostics("other", &client.session).is_err());
+}
+
+/// Reads output until `needle`, collecting (not failing on) events such as notices.
+async fn output_with_events(client: &mut Client, needle: &str) -> Vec<SessionEvent> {
+    let mut events = Vec::new();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !strip_escapes(&client.text).contains(needle) {
+        match tokio::time::timeout_at(deadline, client.inbox.recv()).await {
+            Ok(Some(Message::Output(bytes))) => client.absorb(bytes).await,
+            Ok(Some(Message::Event(event))) => events.push(event),
+            Ok(None) => panic!("closed while waiting for {needle:?}"),
+            Err(_) => panic!("timed out waiting for {needle:?}; got {:?}", client.text),
+        }
+    }
+    events
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on() {
+    // The hop signs in to server B, whose authentication log another test asserts on.
+    let _b = SERVER_B.lock().await;
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let user = f.lab.str("/user");
+    let save = |label: &str, forward_agent: bool| HostInput {
+        id: None,
+        label: label.into(),
+        address: "127.0.0.1".into(),
+        port: Some(f.lab.port("a")),
+        username: user.clone(),
+        auth: HostAuthInput::Key { key_id: key_id.clone() },
+        group_id: None,
+        tags: Vec::new(),
+        protocol: HostProtocol::Ssh,
+        terminal: Default::default(),
+        forward_agent,
+    };
+    let hop = format!(
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {} {user}@127.0.0.1 echo HOP-$((40+2))",
+        f.lab.port("b")
+    );
+
+    // Off (the default): the server gets no agent at all.
+    let off = f.core.vault.save_host(save("no agent", false)).await.unwrap().id;
+    let mut client = Client::open_ssh(&f.core, &off).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    client.send("ssh-add -l; echo AGENT-EXIT-$?\n").await;
+    client.output_until("AGENT-EXIT-2").await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // On: exactly the host's key is listed, the server can use it to reach another server, and
+    // each use is reported.
+    let on = f.core.vault.save_host(save("with agent", true)).await.unwrap();
+    assert!(on.forward_agent);
+    let mut client = Client::open_ssh(&f.core, &on.id).await;
+    client.until_connected().await;
+    client.send("ssh-add -l; echo LISTED-$((1+1))\n").await;
+    client.output_until("LISTED-2").await;
+    assert!(client.text.contains("tyrminal forwarded key"), "{}", client.text);
+    assert_eq!(client.text.matches("SHA256:").count(), 1, "only one key is offered: {}", client.text);
+    client.send(&format!("{hop}\n")).await;
+    let events = output_with_events(&mut client, "HOP-42").await;
+    assert!(
+        events.iter().any(|e| matches!(e, SessionEvent::Banner { text } if text.contains("forwarded key"))),
+        "the use is reported: {events:?}"
+    );
+    // The server cannot change what the agent holds.
+    client.send("ssh-add -D; echo REMOVE-EXIT-$?\n").await;
+    output_with_events(&mut client, "REMOVE-EXIT-1").await;
+    let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
+    assert!(log.contains("agent forwarding is on") && log.contains("used your forwarded key"), "{log}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_prompt() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let user = f.lab.str("/user");
+    let first = f.host("first", f.lab.port("a"), &user, HostAuthInput::Key { key_id: key_id.clone() }).await;
+    let mut client = Client::open_ssh(&f.core, &first).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // What Known hosts → Create host does: a new host for the trusted record's address and port.
+    let known = f.core.vault.list_known_hosts().await.unwrap();
+    let record = known.iter().find(|k| k.port == f.lab.port("a")).expect("trusted record");
+    let created = f.host("from known host", record.port, &user, HostAuthInput::Key { key_id }).await;
+    assert_eq!(f.core.vault.list_known_hosts().await.unwrap().len(), known.len(), "creating a host adds no trust");
+    let mut client = Client::open_ssh(&f.core, &created).await;
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
 }

@@ -251,6 +251,59 @@ pub async fn files_cancel(
     state.core()?.sessions.cancel_transfer(window.label(), &transfer_id)
 }
 
+/// Starts an upload of a file dropped from the desktop: the window sends its content with
+/// `files_upload_chunk` because a webview never reveals a dropped file's path.
+#[tauri::command]
+pub async fn files_upload_begin(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+    dir: String,
+    name: String,
+    size: u64,
+    choice: ConflictChoice,
+) -> Result<tyrminal_core::contracts::StreamUpload, IpcError> {
+    state.core()?.sessions.upload_begin(window.label(), &session_id, &dir, &name, size, choice).await
+}
+
+/// One piece of a started upload. The body is the raw bytes; the upload id and the offset the
+/// piece starts at travel in headers because a raw body has no other fields.
+#[tauri::command]
+pub async fn files_upload_chunk(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), IpcError> {
+    let bad = || IpcError::new(ErrorCode::InvalidInput, "The upload was not in the expected form.");
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok());
+    let upload_id = header("x-upload").ok_or_else(bad)?.to_owned();
+    let offset: u64 = header("x-offset").and_then(|v| v.parse().ok()).ok_or_else(bad)?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(bad());
+    };
+    state.core()?.sessions.upload_chunk(window.label(), &upload_id, offset, bytes).await
+}
+
+/// Completes a dropped-file upload; returns the name it has on the server.
+#[tauri::command]
+pub async fn files_upload_finish(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    upload_id: String,
+) -> Result<String, IpcError> {
+    state.core()?.sessions.upload_finish(window.label(), &upload_id).await
+}
+
+#[tauri::command]
+pub async fn files_upload_abort(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    upload_id: String,
+) -> Result<(), IpcError> {
+    state.core()?.sessions.upload_abort(window.label(), &upload_id).await;
+    Ok(())
+}
+
 /// Starts the application the user chose for this file type with the file as its only argument
 /// (no shell). macOS application bundles go through `open -a`.
 #[cfg(not(feature = "e2e"))]
