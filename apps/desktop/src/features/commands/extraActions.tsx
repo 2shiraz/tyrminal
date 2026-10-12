@@ -11,7 +11,9 @@ import {
   IconChevronRight,
   IconClipboardPaste,
   IconCopy,
+  IconHistory,
   IconInfo,
+  IconPalette,
   IconPencil,
   IconX,
 } from "../../components/ui/icons";
@@ -31,6 +33,8 @@ export interface ExtraContext {
   onCloseOtherTabs: () => void;
   onCopy: () => void;
   onPaste: () => void;
+  /** Opens the side panel at a section. */
+  onShowSection: (section: "history" | "appearance") => void;
   /** Present when the focused pane is an SSH session that has a session id. */
   onDetails?: (() => void) | undefined;
 }
@@ -43,6 +47,8 @@ export function extraPaletteItems(c: ExtraContext): PaletteItem[] {
   if (c.onDetails) add("details", msgI.details.action, <IconInfo size={16} />, c.onDetails);
   add("copy", msgI.palette.copy, <IconCopy size={16} />, c.onCopy, "copy");
   add("paste", msgI.palette.paste, <IconClipboardPaste size={16} />, c.onPaste, "paste");
+  add("show-history", msgI.panel.showHistory, <IconHistory size={16} />, () => c.onShowSection("history"));
+  add("show-appearance", msgI.panel.showAppearance, <IconPalette size={16} />, () => c.onShowSection("appearance"));
   add("rename-tab", msgI.palette.renameTab, <IconPencil size={16} />, () => c.onAction("renameTab"), "renameTab");
   add("close-tab", msgI.palette.closeTab, <IconX size={16} />, c.onCloseTab);
   if (c.tabCount > 1) {

@@ -277,3 +277,6 @@ Never merge these by hand; regenerate them after resolving the sources:
   on `PaneHandle`, a "Show connection details" button on the failure notice and its dialog (marked);
   `lib/ipc.ts`: `connectionDetails` at the end (marked); `tests/ui/mock-backend.js`: `session_diagnostics`.
 - `features/terminal/TerminalController.ts`: installs `features/terminal/composition.ts` after `open()`.
+- `app/AppShell.tsx`: the snippets side panel renders `features/sidepanel/ConnectionPanel.tsx` (sections:
+  snippets, history, appearance); `SnippetsPanel.tsx` is no longer used. Visual baselines
+  `*-09-terminal-snippets.png` re-recorded in the pinned container.

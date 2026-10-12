@@ -13,7 +13,6 @@ import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
 import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel } from "../features/files/FilesPanel";
-import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -27,6 +26,7 @@ import { type BroadcastTarget, BroadcastReview } from "../features/layouts/Broad
 import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
 import { extraPaletteItems } from "../features/commands/extraActions";
 import { ConnectionDetails } from "../features/connection/ConnectionDetails";
+import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
 import { EncodingDialog } from "../features/terminal/EncodingDialog";
 import { msg } from "../lib/messages";
@@ -114,6 +114,16 @@ function Shell() {
   const [sidePanel, setSidePanel] = useState<"snippets" | "files" | null>(null);
   const panelOpen = sidePanel === "snippets";
   const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
+  // terminal input: the side panel's section (snippets, history, appearance; TRM-14)
+  const [panelSection, setPanelSection] = useState<PanelSection>("snippets");
+  const panelSectionRef = useRef(panelSection);
+  const sidePanelRef = useRef(sidePanel);
+  sidePanelRef.current = sidePanel;
+  panelSectionRef.current = panelSection;
+  const showSection = useCallback((section: PanelSection) => {
+    setPanelSection(section);
+    setSidePanel("snippets");
+  }, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
@@ -437,7 +447,12 @@ function Shell() {
           moveFocus("down");
           break;
         case "toggleSnippets":
-          togglePanel("snippets");
+          // From another section of the open panel, the snippets shortcut shows snippets.
+          if (sidePanelRef.current === "snippets" && panelSectionRef.current !== "snippets") setPanelSection("snippets");
+          else {
+            setPanelSection("snippets");
+            togglePanel("snippets");
+          }
           break;
         case "toggleFiles":
           togglePanel("files");
@@ -600,7 +615,12 @@ function Shell() {
                       }}
                     />
                   ) : showPanel ? (
-                    <SnippetsPanel
+                    <ConnectionPanel
+                      section={panelSection}
+                      onSection={setPanelSection}
+                      hostId={pane?.target.kind === "ssh" ? pane.target.hostId : null}
+                      onConnect={connect}
+                      onZoom={(step) => focusedHandle()?.zoom(step)}
                       target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
                       onSend={requestSnippet}
                       onClose={() => {
@@ -646,7 +666,7 @@ function Shell() {
           pane={terminalVisible ? pane : null}
           status={terminalVisible ? paneStatus : undefined}
           panelOpen={panelOpen}
-          onTogglePanel={terminalVisible ? () => togglePanel("snippets") : undefined}
+          onTogglePanel={terminalVisible ? () => runAction("toggleSnippets") : undefined}
           filesOpen={sidePanel === "files"}
           onToggleFiles={terminalVisible ? () => togglePanel("files") : undefined}
           theme={resolvedTheme}
@@ -707,6 +727,7 @@ function Shell() {
             onCloseOtherTabs: () => tab && setWs((current) => closeOtherTabs(current, tab.id)),
             onCopy: () => void focusedHandle()?.copy(),
             onPaste: () => focusedHandle()?.paste(),
+            onShowSection: showSection,
             onDetails:
               pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
                 ? () => {

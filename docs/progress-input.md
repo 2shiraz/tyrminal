@@ -14,6 +14,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 | 3 | Highlight patterns with bounded matching (TRM-07) | Done: core, UI and native tests on Linux |
 | 4 | Ordered IME commits (TRM-11 fix) | Done: UI stress tests; native check on Linux |
 | 5 | Palette completeness (UX-03), Connection details view (CON-15) | Done: UI tests; native waits for `session_diagnostics` |
+| 6 | Connection side panel: snippets, history, appearance (TRM-14) | Done: UI tests; visual baselines updated in the pinned container |
 
 ## Slice 1: IME composition (TRM-11)
 
@@ -75,6 +76,17 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
   `session_diagnostics` (the core command arrives with PR #8; until then the native call fails
   and the dialog shows the error). UI tests use a mock handler; no native test until the command exists.
 
+## Slice 6: connection side panel (TRM-14)
+
+- The panel beside the terminal has three sections (tabs, arrow keys move between them):
+  Snippets (unchanged), History (recent connections with when, the current host marked, Open
+  starts a new tab; connections only, nothing typed is recorded) and Appearance (scheme, font
+  size, line height, cursor for every terminal; zoom for this pane only, not saved).
+- The snippets shortcut and status-bar button show Snippets from another section and close the
+  panel from Snippets; the palette has "Show connection history" and "Show terminal appearance".
+- `SnippetsPanel.tsx` is no longer rendered (its content is the Snippets section).
+- Visual baselines `*-09-terminal-snippets.png` re-recorded with `node scripts/ui-container.mjs`.
+
 ## User guide text (to merge into `docs/user-guide.md`, which arrives with PR #8)
 
 - Broadcast: "Before broadcast starts, Tyrminal lists every pane of the tab. Clear the box next to
@@ -92,3 +104,7 @@ New code lives in `apps/desktop/src/features/{broadcast,...}/` and `apps/desktop
 - Connection details: "To see what happened while connecting, choose Connection details… in the
   palette, or Show connection details on a failed connection. Copy puts the lines on the
   clipboard; they never contain passwords, passphrases or keys."
+- Side panel: "The panel beside the terminal (Ctrl+Shift+S, ⌘⇧S on macOS) has Snippets, History
+  and Appearance. History lists the hosts you connected to and when; Tyrminal never records what
+  you type. Appearance changes the scheme, font and cursor of every terminal, and zooms only the
+  pane you are in."
