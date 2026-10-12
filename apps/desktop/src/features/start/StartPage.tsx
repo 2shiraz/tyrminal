@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Avatar, Shortcut } from "../../components/ui/controls";
-import { IconArrowLeftRight, IconSearch, IconServer, IconTerminal } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconPlug, IconSearch, IconServer, IconTerminal } from "../../components/ui/icons";
 import { appearance as appearanceApi, hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgStart } from "../../lib/messages-start";
@@ -27,6 +27,7 @@ export function StartPage({
   onLocal,
   onSftp,
   onHosts,
+  onSerial,
   onClose,
 }: {
   /** The pane is in front and focused: the connect box takes focus. */
@@ -38,6 +39,8 @@ export function StartPage({
   onLocal: () => void;
   onSftp: () => void;
   onHosts: () => void;
+  /** A new serial host (serial devices are saved as hosts). */
+  onSerial: () => void;
   onClose: () => void;
 }) {
   const { recent } = useVaultData();
@@ -174,6 +177,10 @@ export function StartPage({
           <button type="button" className="start-tile" onClick={onSftp}>
             <IconArrowLeftRight size={18} />
             <span>{msgStart.sftp}</span>
+          </button>
+          <button type="button" className="start-tile" onClick={onSerial} title={msgStart.serialHint}>
+            <IconPlug size={18} />
+            <span>{msgStart.serial}</span>
           </button>
           <button type="button" className="start-tile" onClick={onHosts}>
             <IconServer size={18} />

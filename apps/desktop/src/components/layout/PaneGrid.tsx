@@ -219,6 +219,7 @@ function PaneGridImpl({
                       onLocal={() => start.onLocal(id)}
                       onSftp={() => start.onSftp(id)}
                       onHosts={() => start.onHosts(id)}
+                      onSerial={() => start.onSerial(id)}
                       onClose={() => onClose(id)}
                     />
                   )
@@ -325,6 +326,8 @@ export interface StartHandlers {
   onLocal: (pane: number) => void;
   onSftp: (pane: number) => void;
   onHosts: (pane: number) => void;
+  /** Serial devices are hosts: a new serial host on the Hosts page. */
+  onSerial: (pane: number) => void;
 }
 
 export const PaneGrid = memo(PaneGridImpl);

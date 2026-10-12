@@ -400,6 +400,8 @@ function Shell() {
   const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
   // The new-tab page: what is picked in it opens in that same tab, in place of the page.
   const openStart = useCallback(() => open({ kind: "start" }, msgStart.tabTitle, msgStart.identity), [open]);
+  // Serial from the new-tab page: Hosts opens a new serial host (counted, so each pick opens one).
+  const [newSerial, setNewSerial] = useState(0);
   const startHandlers = useMemo<StartHandlers>(() => {
     const replace = (paneId: number, seed: { target: PaneTarget; label: string; identity: string }) => setWs((current) => retargetPane(current, paneId, seed));
     return {
@@ -414,6 +416,11 @@ function Shell() {
       onHosts: (paneId) => {
         setWs((current) => closePane(current, paneId));
         navigate("hosts");
+      },
+      onSerial: (paneId) => {
+        setWs((current) => closePane(current, paneId));
+        navigate("hosts");
+        setNewSerial((n) => n + 1);
       },
     };
   }, [reloadRecent, navigate]);
@@ -1069,7 +1076,7 @@ function Shell() {
         </div>
 
         <main className="content" aria-label={terminalVisible && tab ? tabTitle(ws, tab) : msg.nav[destination]}>
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} onLocal={openLocal} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onQuickConnect={quickConnect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} onLocal={openLocal} newSerial={newSerial} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}

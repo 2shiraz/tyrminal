@@ -15,6 +15,8 @@ export const msgStart = {
   actions: "Open",
   local: "Local terminal",
   sftp: "SFTP",
+  serial: "Serial",
+  serialHint: "A new host for a serial device",
   hosts: "Hosts",
   recent: "Recent connections",
   noRecent: "Hosts you connect to appear here.",

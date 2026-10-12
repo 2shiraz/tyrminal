@@ -29,7 +29,7 @@ test("+ opens a new tab page: a focused connect box, what a tab can open, recent
   await expect(box(page)).toBeFocused();
   await expect(box(page)).toHaveAttribute("placeholder", "Find a host or ssh user@hostname…");
   const actions = startPage(page).getByRole("group", { name: "Open" });
-  await expect(actions.getByRole("button")).toHaveText([/Local terminal/, "SFTP", "Hosts"]);
+  await expect(actions.getByRole("button")).toHaveText([/Local terminal/, "SFTP", "Serial", "Hosts"]);
   // Most recent first; never-connected hosts are not listed.
   await expect(startPage(page).getByRole("list", { name: "Recent connections" }).getByRole("button")).toHaveText([/api-gateway/, /build-runner-03/, /db-primary/, /Home lab/]);
   expect(await calls(page, "session_open_ssh")).toHaveLength(0);
@@ -85,6 +85,16 @@ test("the tiles open in this tab: Local terminal, and Hosts closes the page", as
   await startPage(page).getByRole("button", { name: "Hosts", exact: true }).click();
   await expect(sessionTabs(page)).toHaveCount(1);
   await expect(page.getByRole("heading", { level: 1, name: "Hosts" })).toBeVisible();
+});
+
+test("Serial opens a new serial host on Hosts, like the Hosts toolbar's Serial", async ({ page }) => {
+  await openApp(page);
+  await plus(page).click();
+  await startPage(page).getByRole("button", { name: "Serial", exact: true }).click();
+  await expect(sessionTabs(page)).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1, name: "Hosts" })).toBeVisible();
+  await expect(page.locator(".host-panel")).toBeVisible();
+  await expect(page.locator(".host-panel")).toContainText(/serial/i);
 });
 
 test("Escape clears the box first, then closes an untouched page", async ({ page }) => {
