@@ -71,7 +71,19 @@ describe("snippets in the real application", { concurrency: false }, () => {
     await t.waitForText(/(^|\$ )second-4\s*$/m, "second line ran");
 
     // Paste: the text is inserted at the prompt but does not run until Enter.
-    await s.click(await s.waitFor('.side-panel button[aria-label="Paste Echo answer into the terminal"]'));
+    // In the side panel Paste is in the snippet's menu.
+    await s.click(await s.waitFor('.side-panel button[aria-label="More actions for Echo answer"]'));
+    await s.click(
+      await s.until(
+        async () => {
+          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
+            if ((await s.text(candidate)).includes("Paste Echo answer into the terminal")) return candidate;
+          }
+          return null;
+        },
+        { describe: "Paste in the snippet menu" },
+      ),
+    );
     await t.waitForText(/tyr\$ echo snippet-\$\(\(40\+2\)\)\s*$/m, "pasted at the prompt");
     await new Promise((r) => setTimeout(r, 500));
     assert.equal(((await t.terminalText()).match(/^snippet-42$/gm) ?? []).length, 1, "Paste did not execute the command");
