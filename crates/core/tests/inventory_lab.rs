@@ -13,8 +13,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    EnvVar, ErrorCode, GroupInput, HostAuthInput, HostInput, IdentityInput, KeyImportInput, SecretChange, SessionEvent,
-    SessionState, SettingsTarget, SnippetInput, TrustDecision,
+    EnvVar, ErrorCode, GroupInput, HostAuthInput, HostInput, HostProtocol, IdentityInput, KeyImportInput, SecretChange,
+    SessionEvent, SessionState, SettingsTarget, SnippetInput, TrustDecision,
 };
 use tyrminal_core::{Core, SessionSink};
 
@@ -80,7 +80,7 @@ fn host(label: &str, port: u16) -> HostInput {
         auth: HostAuthInput::AskPassword,
         group_id: None,
         tags: Vec::new(),
-        protocol: tyrminal_core::contracts::HostProtocol::Ssh,
+        protocol: HostProtocol::Ssh,
         terminal: Default::default(),
         forward_agent: false,
     }
