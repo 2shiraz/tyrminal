@@ -20,6 +20,9 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  // compromised-password check (SEC-11)
+  /** Pretend the build can make range requests (the real build cannot yet). */
+  passwordCheckAvailable?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

@@ -34,6 +34,8 @@ mod tunnels;
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// compromised-password check (SEC-11)
+pub mod password_check;
 // command history
 mod command_history;
 // server at a glance
@@ -117,6 +119,32 @@ impl Core {
     ) -> Result<tyrminal_contracts::DiscoveryStatus, IpcError> {
         self.vault.require_unlocked().await?;
         self.discovery.start(owner, network_id)
+    }
+}
+
+// compromised-password check (SEC-11)
+impl Core {
+    /// Whether the check is on, where it would send prefixes, and whether this build can.
+    pub async fn password_check_status(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckStatus, IpcError> {
+        let secrets = self.vault.stored_secrets().await?;
+        Ok(password_check::status(&self.preferences.get().password_check, source, &secrets))
+    }
+
+    /// Checks every stored password against `source` (an explicit request; refused while the
+    /// preference is off).
+    pub async fn check_stored_passwords(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckReport, IpcError> {
+        let prefs = self.preferences.get().password_check;
+        if !prefs.enabled {
+            return password_check::run(&prefs, source, Vec::new()).await;
+        }
+        let secrets = self.vault.stored_secrets().await?;
+        password_check::run(&prefs, source, secrets).await
     }
 }
 

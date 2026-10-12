@@ -519,6 +519,9 @@ pub struct Preferences {
     /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
     /// separate from session recording and command history.
     pub diagnostics: bool,
+    // compromised-password check (SEC-11)
+    /// Off by default; see `PasswordCheckPreferences`.
+    pub password_check: crate::PasswordCheckPreferences,
 }
 
 /// Static facts about this build and the computer it runs on, for Settings → About and bug
