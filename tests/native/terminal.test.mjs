@@ -721,7 +721,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
       let s = app.session;
       let t = ui(s);
       await t.createVault();
-      await t.nav("Settings");
+      await t.settings("Keyboard shortcuts");
       // Find in terminal → Ctrl+Shift+G (Cmd+Shift+G on macOS), recorded from real key events.
       await s.click(await s.waitFor('.shortcut-list li[data-action="find"] button[aria-label="Change shortcut for Find in terminal"]'));
       await s.until(() => s.execute(`return document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent.includes("Press") || null`), {
@@ -761,7 +761,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
       await s.clickButton("Unlock");
       await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
 
-      await t.nav("Settings");
+      await t.settings("Keyboard shortcuts");
       const shown = await s.until(
         () =>
           s.execute(`const r = document.querySelector('[role="radiogroup"][aria-label="Right click"] label:nth-child(2) input');
@@ -805,11 +805,11 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
 
       // Home lists it under Recent once the core has recorded the connection.
       await t.nav("Home");
-      const tile = await s.until(() => s.find('section[aria-labelledby="home-recent"] button[aria-label="Connect to Lab"]'), {
-        describe: "Lab under Recent on Home",
+      await s.until(() => s.execute(`return [...document.querySelectorAll("table.home-hosts .home-host")].some((b) => b.textContent.trim() === "Lab")`), {
+        describe: "Lab among the hosts on Home",
         timeout: 20_000,
       });
-      await s.click(tile);
+      await s.openHost("table.home-hosts", "Lab");
       await trustOnce();
       await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
 

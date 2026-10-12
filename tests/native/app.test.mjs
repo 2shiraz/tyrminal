@@ -320,6 +320,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
 
   test("quick unlock uses the OS secret store, or refuses plainly when there is none", async (t) => {
     await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    await s.clickButton("Vault and unlock", { within: "nav.settings-nav" });
     const setting = await s.waitFor('[data-testid="quick-unlock"]');
     await s.until(async () => /Quick unlock is (on|off)/.test(await s.text(setting)), { describe: "quick unlock state" });
     await s.clickButton("Turn on quick unlock…");
@@ -344,6 +345,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
     // Turn it off again so the test leaves no keychain item behind.
     await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
+    await s.clickButton("Vault and unlock", { within: "nav.settings-nav" });
     await s.clickButton("Turn off quick unlock");
     await s.until(async () => /Quick unlock is off/.test(await s.text(await s.waitFor('[data-testid="quick-unlock"]'))), { describe: "off" });
   });

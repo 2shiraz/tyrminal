@@ -22,6 +22,7 @@ export type PanelTarget = { kind: "new"; initial?: HostFormOptions["initial"] } 
 
 export function HostPanel({
   target,
+  takeFocus = true,
   keys,
   groups,
   defaultGroupId,
@@ -38,6 +39,8 @@ export function HostPanel({
   onEnvironment,
 }: {
   target: PanelTarget;
+  /** False when opened by moving through the list with the arrow keys: focus stays in the list. */
+  takeFocus?: boolean;
   keys: KeySummary[];
   groups: GroupSummary[];
   defaultGroupId: string | null;
@@ -73,7 +76,7 @@ export function HostPanel({
   // inside the panel.
   const focusHeading = host?.protocol.type === "serial";
   useEffect(() => {
-    if (focusHeading) heading.current?.focus();
+    if (focusHeading && takeFocus) heading.current?.focus();
     // On mount only: the panel is remounted for every host.
   }, []);
 
@@ -145,7 +148,7 @@ export function HostPanel({
           <HostFormCards
             form={{ ...form, live }}
             os={os}
-            autoFocus={!focusHeading}
+            autoFocus={!focusHeading && takeFocus}
             extra={
               host && (
                 <button type="button" className="btn btn-sm" onClick={() => onEnvironment(host)}>

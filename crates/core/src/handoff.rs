@@ -41,11 +41,27 @@ struct State {
 
 pub(crate) struct Relay {
     state: Mutex<State>,
+    /// Counts the batches of terminal output the session produced, so startup typing can wait
+    /// for the shell (see `sessions::settle`).
+    activity: tokio::sync::watch::Sender<u64>,
 }
 
 impl Relay {
     pub(crate) fn new(sink: Arc<dyn SessionSink>) -> Arc<Self> {
-        Arc::new(Self { state: Mutex::new(State { sink, epoch: 0, unacked: 0, held: None, held_events: 0 }) })
+        Arc::new(Self {
+            state: Mutex::new(State { sink, epoch: 0, unacked: 0, held: None, held_events: 0 }),
+            activity: tokio::sync::watch::Sender::new(0),
+        })
+    }
+
+    /// Notes that the session produced terminal output.
+    pub(crate) fn note_output(&self) {
+        self.activity.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// Changes whenever the session produces terminal output.
+    pub(crate) fn output_activity(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.activity.subscribe()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {

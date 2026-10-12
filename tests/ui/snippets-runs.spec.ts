@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -14,7 +14,7 @@ const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" }
 async function connect(page: Page, ...labels: string[]) {
   for (const label of labels) {
     await primary(page).getByRole("button", { name: /^Hosts/ }).click();
-    await page.getByRole("button", { name: `Connect to ${label}` }).click();
+    await connectHost(page, label);
   }
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(labels.length);
 }

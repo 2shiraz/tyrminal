@@ -3,12 +3,12 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 import { marksOnRow } from "./highlight-helpers";
 
-async function openSettings(page: Page) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "Output highlighting" })).toBeVisible();
+async function openHighlighting(page: Page) {
+  await openSettings(page, "Highlighting");
+  await expect(page.getByRole("heading", { name: "Highlighting" })).toBeVisible();
   const on = page.getByLabel("Highlight output").first();
   if (!(await on.isChecked())) await on.check();
   // Only patterns in these tests.
@@ -33,7 +33,7 @@ const output = (page: Page, text: string) => page.evaluate((t) => (window as unk
 
 test("patterns: a match is drawn over exactly its cells; earlier rules win; the text is unchanged", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
-  await openSettings(page);
+  await openHighlighting(page);
   await addRule(page, "Pattern", "user=\\w+");
   await addRule(page, "Word", "ok");
   // A later rule overlapping an earlier one loses.
@@ -56,7 +56,7 @@ test("patterns: a match is drawn over exactly its cells; earlier rules win; the 
 
 test("patterns: shapes that could run without bound are refused before they are saved", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
-  await openSettings(page);
+  await openHighlighting(page);
   await page.getByLabel("Match as").selectOption({ label: "Pattern" });
   const input = page.getByLabel("Pattern to highlight");
   const add = page.getByRole("button", { name: "Add", exact: true });
@@ -90,7 +90,7 @@ test("patterns: shapes that could run without bound are refused before they are 
 test("patterns: one that takes too long is switched off, the others keep working and the terminal stays responsive", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await openSettings(page);
+  await openHighlighting(page);
   // Polynomial backtracking within the static limits: four variable runs before a ! that never comes.
   await addRule(page, "Pattern", "[a-z]{0,99}[a-z]*[a-z]*[a-z]*!");
   await addRule(page, "Pattern", "id=\\d+");
@@ -107,7 +107,7 @@ test("patterns: one that takes too long is switched off, the others keep working
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("echo hi: synthetic output");
 
   // Settings show it as off; changing the rules gives it another chance.
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Highlighting");
   const slowRow = page.locator(".highlight-words li").first();
   await expect(slowRow.getByRole("status")).toHaveText("Off: took too long. Edit the rules to try again.");
   await slowRow.getByRole("button", { name: /Remove/ }).click();

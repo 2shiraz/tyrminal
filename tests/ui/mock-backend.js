@@ -1984,7 +1984,14 @@ export function installMockBackend(options) {
       }
       const handler = handlers[cmd];
       if (!handler) throw { code: "INTERNAL", message: `mock: unhandled ${cmd}` };
-      // Tests can make a command answer late (window.__mockDelay[cmd] = ms) to see loading states.
+      // Tests can make the next call of a command fail (window.__mockFailNext[cmd] = error), or
+      // answer late (window.__mockDelay[cmd] = ms), to see rollbacks and loading states.
+      const failure = window.__mockFailNext?.[cmd];
+      if (failure) {
+        delete window.__mockFailNext[cmd];
+        if (window.__mockDelay?.[cmd]) await new Promise((r) => setTimeout(r, window.__mockDelay[cmd]));
+        throw failure;
+      }
       if (window.__mockDelay?.[cmd]) await new Promise((r) => setTimeout(r, window.__mockDelay[cmd]));
       return handler(args, opts);
     },

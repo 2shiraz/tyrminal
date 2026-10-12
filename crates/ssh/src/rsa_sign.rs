@@ -145,6 +145,30 @@ mod tests {
         }
     }
 
+    /// Host-key signatures are checked by the same verifier (russh's key exchange calls
+    /// `Verifier::verify` on the server's `PublicKey`). An OpenSSH server sends exactly the
+    /// modulus length, so odd sizes verify too, including a signature whose first byte is zero.
+    #[test]
+    fn exact_length_signatures_of_an_odd_sized_key_verify_even_with_a_leading_zero_byte() {
+        let key = odd_sized_key();
+        let mut leading_zero = false;
+        for i in 0..4000u32 {
+            let message = format!("exchange hash {i}").into_bytes();
+            let out = sign_appended(&key, Some(HashAlg::Sha256), message.clone()).unwrap();
+            let mut rest = &out[message.len()..];
+            let blob = Vec::<u8>::decode(&mut rest).unwrap();
+            let signature = Signature::decode(&mut &blob[..]).unwrap();
+            if signature.as_bytes()[0] != 0 {
+                continue;
+            }
+            leading_zero = true;
+            russh::keys::signature::Verifier::verify(key.public_key(), &message, &signature)
+                .expect("an exact-length signature starting with a zero byte verifies");
+            break;
+        }
+        assert!(leading_zero, "no signature with a leading zero byte in 4000 tries");
+    }
+
     #[test]
     fn sha1_and_non_rsa_keys_are_refused() {
         let key = odd_sized_key();

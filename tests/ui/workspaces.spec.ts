@@ -2,7 +2,7 @@
 // UI evidence only; it never moves a feature to VERIFIED.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 import { marksOnRow } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
@@ -437,14 +437,14 @@ test("broadcast target review: a pane that changes during the review blocks the 
   await expect(page.locator(".pane[data-broadcast]")).toHaveCount(0);
 });
 
-async function openSettings(page: Page) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+async function openShortcuts(page: Page) {
+  await openSettings(page, "Keyboard shortcuts");
   await expect(page.getByRole("heading", { level: 2, name: "Keyboard shortcuts" })).toBeVisible();
 }
 
 test("keyboard customization: rebinding, terminal keys refused, removal, reset all", async ({ page }) => {
   await openApp(page);
-  await openSettings(page);
+  await openShortcuts(page);
   const list = page.getByRole("group", { name: "Application shortcuts" });
   const row = (action: string) => list.locator(`li[data-action="${action}"]`);
 
@@ -576,7 +576,7 @@ test("navigation shortcuts: cycle panes, go to a tab, focus terminal or sidebar,
   await expect(focusedPane).toHaveAttribute("aria-label", "api-gateway");
 
   // Go to tab N, last tab and the focus actions start without a shortcut and can be given one.
-  await openSettings(page);
+  await openShortcuts(page);
   const list = page.getByRole("group", { name: "Application shortcuts" });
   const row = (action: string) => list.locator(`li[data-action="${action}"]`);
   for (const action of ["goToTab1", "goToTab8", "goToLastTab", "focusTerminal", "focusSidebar"]) {
@@ -633,7 +633,7 @@ test("navigation shortcuts: cycle panes, go to a tab, focus terminal or sidebar,
 
 test("highlighting: words and IP addresses are colored on screen; the text and input are unchanged", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
-  await openSettings(page);
+  await openSettings(page, "Highlighting");
   await page.getByRole("switch", { name: "Highlight output" }).or(page.getByLabel("Highlight output")).first().check();
   await page.getByLabel("Word to highlight").fill("error");
   await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -659,7 +659,7 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   expect(await calls(page, "session_write")).toHaveLength(writesBefore);
 
   // Turned off: the decorations go away.
-  await openSettings(page);
+  await openSettings(page, "Highlighting");
   await page.getByLabel("Highlight output").first().uncheck();
   await page.getByRole("tab", { name: /api-gateway/ }).click();
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);

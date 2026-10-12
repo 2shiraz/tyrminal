@@ -20,6 +20,8 @@ export interface LocationRequest {
   seq: number;
 }
 
+const NO_REQUESTS: readonly LocationRequest[] = [];
+
 interface Location {
   id: number;
   initial: Source;
@@ -43,7 +45,7 @@ export function SftpPane({
   active,
   refreshKey,
   transfers,
-  request = null,
+  requests = NO_REQUESTS,
   onFocusIn,
   onEndpoint,
   onHealth,
@@ -59,8 +61,8 @@ export function SftpPane({
   active: boolean;
   refreshKey: number;
   transfers: PaneTransfers;
-  /** Open in SFTP: show this host (focusing a location already on it). */
-  request?: LocationRequest | null;
+  /** Open in SFTP, oldest first: show each host (focusing a location already on it). */
+  requests?: readonly LocationRequest[];
   onFocusIn: () => void;
   /** The shown location's folder, for copying to and from the other pane. */
   onEndpoint: (endpoint: Endpoint | null) => void;
@@ -110,9 +112,12 @@ export function SftpPane({
 
   // Open in SFTP: a location already on that host is shown (and goes to the folder), else a new one.
   const seen = useRef(0);
+  // One request per render, so each sees the locations the one before it opened (several hosts
+  // opened at once each get a location).
   // biome-ignore lint/correctness/useExhaustiveDependencies: each request is handled once.
   useEffect(() => {
-    if (!request || request.seq === seen.current) return;
+    const request = requests.find((r) => r.seq > seen.current);
+    if (!request) return;
     seen.current = request.seq;
     const { source, path } = request;
     const open = source.kind === "host" ? locations.find((l) => status[l.id]?.hostId === source.hostId) : undefined;
@@ -124,7 +129,7 @@ export function SftpPane({
       const empty = locations.find((l) => (status[l.id]?.kind ?? l.initial.kind) === "none");
       if (!add(source, path, empty?.id ?? null)) onFull();
     }
-  }, [request]);
+  }, [requests, locations]);
 
   const shownEndpoint = endpoints[shown] ?? null;
   useEffect(() => onEndpoint(shownEndpoint), [shownEndpoint, onEndpoint]);

@@ -213,25 +213,34 @@ export function Keys({ caps }: { caps: string[] }) {
   );
 }
 
+/**
+ * A setting that is on or off: the settings row's switch variant (label and hint on the left, the
+ * switch in the control column; the whole row is the label).
+ */
 export function Switch({
   label,
   hint,
   checked,
   onChange,
+  id,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** Anchor for Settings search. */
+  id?: string;
 }) {
-  const id = useId();
+  const inputId = useId();
   return (
-    <label className="switch-row" htmlFor={id}>
+    <label className="switch-row setting-row" data-variant="switch" htmlFor={inputId} data-setting={id}>
       <span className="setting-label">
         <span>{label}</span>
         {hint && <span className="hint">{hint}</span>}
       </span>
-      <input id={id} type="checkbox" role="switch" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="setting-control">
+        <input id={inputId} type="checkbox" role="switch" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      </span>
     </label>
   );
 }
@@ -301,14 +310,32 @@ export function RangeField({
   );
 }
 
-export function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/**
+ * One settings row: label and hint on the left, the control in a fixed column on the right.
+ * `control` holds a select, range or segmented control; `action` a button ("Change passphrase…");
+ * `link` a button that goes somewhere else. On/off settings use `Switch`, the same row.
+ */
+export function SettingRow({
+  label,
+  hint,
+  id,
+  variant = "control",
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  /** Anchor for Settings search. */
+  id?: string;
+  variant?: "control" | "action" | "link";
+  children: ReactNode;
+}) {
   return (
-    <div className="setting-row">
+    <div className="setting-row" data-variant={variant} data-setting={id}>
       <div className="setting-label">
         <span>{label}</span>
         {hint && <span className="hint">{hint}</span>}
       </div>
-      <div>{children}</div>
+      <div className="setting-control">{children}</div>
     </div>
   );
 }

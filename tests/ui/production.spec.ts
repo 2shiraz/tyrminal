@@ -7,7 +7,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp, openSettings } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -23,7 +23,7 @@ async function openHosts(page: Page) {
 
 async function connect(page: Page, label: string) {
   await openHosts(page);
-  await page.getByRole("button", { name: `Connect to ${label}` }).click();
+  await connectHost(page, label);
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
 }
 
@@ -65,7 +65,7 @@ test("hosts are production through their flag, a group above them or the product
 
 test("the production tag is a setting; empty leaves only the switches", async ({ page }) => {
   await openApp(page);
-  await primary(page).getByRole("button", { name: /^Settings/ }).click();
+  await openSettings(page, "Vault and unlock");
   const field = page.getByRole("textbox", { name: "Production tag" });
   await expect(field).toHaveValue("prod");
   await field.fill("ci");
@@ -75,7 +75,7 @@ test("the production tag is a setting; empty leaves only the switches", async ({
   await expect(badge(page, "build-runner-03")).toBeVisible();
   await expect(badge(page, "api-gateway")).toHaveCount(0);
 
-  await primary(page).getByRole("button", { name: /^Settings/ }).click();
+  await openSettings(page, "Vault and unlock");
   await page.getByRole("textbox", { name: "Production tag" }).fill("");
   await page.getByRole("textbox", { name: "Production tag" }).blur();
   await expect.poll(async () => (await calls(page, "prefs_set")).at(-1)?.args.prefs).toMatchObject({ productionTag: "" });

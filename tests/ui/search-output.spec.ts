@@ -4,7 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { searchLines } from "../../apps/desktop/src/features/terminal/scrollbackSearch";
-import { openApp, waitForTerminalText } from "./fixtures";
+import { openApp, openSettings, waitForTerminalText } from "./fixtures";
 
 const output = (page: Page, text: string) => page.evaluate((t) => (window as unknown as { __mockOutput: (s: string) => void }).__mockOutput(t), text);
 const calls = (page: Page, cmd: string) =>
@@ -125,7 +125,7 @@ test("search: its shortcut opens it, terminals only, and the query is never logg
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0, { timeout: 500 });
   }).toPass();
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Keyboard shortcuts");
   await expect(page.locator("#settings-shortcuts").getByText("Search all sessions", { exact: true })).toBeVisible();
 });
 

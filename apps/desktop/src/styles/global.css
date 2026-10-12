@@ -1078,7 +1078,6 @@ kbd,
 
 .dialog::backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(3px);
   animation: fade-in var(--motion-base) var(--ease-out);
 }
 
@@ -1095,41 +1094,42 @@ kbd,
   }
 }
 
+/* Boxy dialogs (revamp §7): a 44 px title strip, a 16 px body, a footer strip for the actions. */
 .dialog-body {
   display: grid;
   gap: var(--space-4);
-  padding: var(--space-5);
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 .dialog-head {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--strip-height-pane);
+  margin: 0 calc(-1 * var(--space-4));
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
+/* The icon is a tinted glyph in the strip, not a tile. */
 .dialog-icon {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--accent-soft);
   color: var(--accent-text);
 }
 
 .dialog-icon[data-tone="danger"] {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 
 .dialog-icon[data-tone="warning"] {
-  background: var(--warning-soft);
   color: var(--warning);
 }
 
 .dialog-head h2 {
-  padding-top: 6px;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .dialog-actions {
@@ -1140,23 +1140,24 @@ kbd,
   margin-top: var(--space-1);
 }
 
-/* In a dialog taller than the window, the actions stay in view while the content scrolls. */
+/* The actions sit in a footer strip, which stays in view while a tall dialog's content scrolls. */
 .dialog .dialog-actions {
   position: sticky;
-  bottom: calc(-1 * var(--space-5));
-  margin-inline: calc(-1 * var(--space-5));
-  margin-bottom: calc(-1 * var(--space-5));
-  padding: var(--space-3) var(--space-5) var(--space-5);
-  background: var(--bg-overlay);
+  bottom: calc(-1 * var(--space-4));
+  margin-inline: calc(-1 * var(--space-4));
+  margin-bottom: calc(-1 * var(--space-4));
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .menu {
   position: fixed;
   z-index: 60;
   min-width: 200px;
-  padding: 5px;
+  padding: var(--space-1);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
   transform-origin: top left;
@@ -1176,10 +1177,10 @@ kbd,
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 32px;
+  height: var(--row-dense);
   padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-inner);
   background: transparent;
   color: var(--text);
   font-size: var(--text-sm);
@@ -1234,9 +1235,12 @@ kbd,
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-dialog);
   background: var(--bg-overlay);
-  box-shadow: var(--shadow-3);
+  /* A 2 px status edge on the left, as notices. */
+  box-shadow:
+    inset 2px 0 0 var(--toast-edge, var(--accent)),
+    var(--shadow-3);
   font-size: var(--text-sm);
   animation: toast-in var(--duration-fast) var(--ease-out);
 }
@@ -1247,8 +1251,16 @@ kbd,
   color: var(--accent-text);
 }
 
+.toast[data-tone="success"] {
+  --toast-edge: var(--success);
+}
+
 .toast[data-tone="success"] > svg {
   color: var(--success);
+}
+
+.toast[data-tone="danger"] {
+  --toast-edge: var(--danger);
 }
 
 .toast[data-tone="danger"] > svg {
@@ -1281,9 +1293,9 @@ kbd,
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
   background: color-mix(in srgb, var(--bg-sidebar) 88%, transparent);
   border-right: 1px solid var(--border-subtle);
   overflow: hidden auto;
@@ -1294,7 +1306,7 @@ kbd,
   align-items: center;
   gap: 10px;
   height: 36px;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-3);
   margin-bottom: var(--space-2);
 }
 
@@ -1312,9 +1324,9 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  height: 34px;
-  margin-bottom: var(--space-3);
+  width: calc(100% - 2 * var(--space-2));
+  height: var(--control-height);
+  margin: 0 var(--space-2) var(--space-3);
   padding: 0 var(--space-2) 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -1334,8 +1346,13 @@ kbd,
   margin-left: auto;
 }
 
+/* Group labels are 28 px strips. */
 .nav-group-label {
-  padding: var(--space-3) var(--space-2) 6px;
+  display: flex;
+  align-items: center;
+  height: var(--row-dense);
+  margin-top: var(--space-2);
+  padding: 0 var(--space-3);
 }
 
 .nav-item {
@@ -1344,10 +1361,10 @@ kbd,
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 34px;
-  padding: 0 var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -1364,20 +1381,15 @@ kbd,
   color: var(--text);
 }
 
+/* The current page: the active fill and a 2 px accent edge on the left, as a selected row. */
 .nav-item[aria-current="page"] {
   background: var(--bg-active);
+  box-shadow: var(--edge-select);
   color: var(--text);
 }
 
-.nav-item[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
+.nav-item:focus-visible {
+  outline-offset: -2px;
 }
 
 .nav-item svg {
@@ -1400,13 +1412,14 @@ kbd,
   display: grid;
   gap: 2px;
   margin-top: auto;
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+  border-top: var(--box-rule);
 }
 
 /* The version, small and muted under the footer actions; it opens Settings → About. */
 .sidebar-version {
   justify-self: start;
+  margin-left: var(--space-1);
   padding: 2px var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
@@ -1433,6 +1446,11 @@ kbd,
 
 .shell[data-sidebar="collapsed"] .nav-item,
 .shell[data-sidebar="collapsed"] .sidebar-search {
+  justify-content: center;
+  padding: 0;
+}
+
+.shell[data-sidebar="collapsed"] .brand {
   justify-content: center;
   padding: 0;
 }
@@ -1788,6 +1806,27 @@ kbd,
   padding: var(--space-3);
 }
 
+/* Setting rows in a narrow side panel (terminal Appearance): label above the control, full width,
+   packed at the top instead of stretched over the panel's height. */
+.panel-body:has(> .setting-row) {
+  align-content: start;
+}
+
+.panel-body > .setting-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+
+.panel-body > .setting-row + .setting-row {
+  border-top: var(--box-rule);
+}
+
+.panel-body > .setting-row .setting-control,
+.panel-body > .setting-row .setting-control > * {
+  width: 100%;
+}
+
 .panel-target {
   display: flex;
   align-items: center;
@@ -1889,7 +1928,7 @@ kbd,
   gap: var(--space-3);
   min-width: 0;
   padding: 0 var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  border-top: var(--box-rule);
   background: var(--bg-sidebar);
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -1903,10 +1942,11 @@ kbd,
   min-width: 0;
 }
 
+/* Items are separated by full-height 1 px rules, as cells in a strip. */
 .status-sep {
+  align-self: stretch;
   width: 1px;
-  height: 12px;
-  background: var(--border);
+  background: var(--border-subtle);
 }
 
 .status-button {
@@ -1953,16 +1993,15 @@ kbd,
 
 .palette::backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(2px);
 }
 
 .palette-input {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: 54px;
-  padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  height: var(--strip-height-pane);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
   color: var(--text-faint);
 }
 
@@ -1972,7 +2011,7 @@ kbd,
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   user-select: text;
 }
 
@@ -1983,20 +2022,29 @@ kbd,
 .palette-list {
   max-height: min(420px, 55vh);
   overflow: auto;
-  padding: 6px;
+  padding: 0 0 var(--space-1);
 }
 
+/* Groups are 28 px strips; items are square 28 px rows with the selection edge. */
 .palette-group {
-  padding: 10px 10px 4px;
+  display: flex;
+  align-items: center;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+}
+
+.palette-group:not(:first-child) {
+  border-top: var(--box-rule);
 }
 
 .palette-item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-height: 40px;
-  padding: 6px 10px;
-  border-radius: var(--radius-control);
+  gap: var(--space-2);
+  min-height: var(--row-dense);
+  padding: 2px var(--space-3);
   color: var(--text);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -2009,6 +2057,7 @@ kbd,
 
 .palette-item[aria-selected="true"] {
   background: var(--bg-selected);
+  box-shadow: var(--edge-select);
 }
 
 .palette-item[aria-selected="true"] > svg {
@@ -2032,12 +2081,12 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  height: 36px;
-  padding: 0 var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-sidebar);
+  height: var(--strip-height);
+  padding: 0 var(--space-3);
+  border-top: var(--box-rule);
+  background: var(--bg-strip);
   color: var(--text-faint);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
 }
 
 .palette-foot span {
@@ -2054,25 +2103,33 @@ mark {
 
 /* ===================================================================== home and hosts */
 
-.quick-connect {
+/* ===================================================================== home (revamp §5) */
+
+.home {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.quick-wrap {
   position: relative;
+}
+
+/* Quick connect: a 36 px strip input. */
+.quick-connect {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  height: 54px;
-  padding: 0 var(--space-2) 0 var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-2);
-  transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out);
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: var(--box-border);
+  border-radius: var(--radius-control);
+  background: var(--bg-box);
+  transition: border-color var(--motion-fast) var(--ease-out);
 }
 
 .quick-connect:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--glow-accent), var(--shadow-2);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .quick-connect > svg {
@@ -2086,7 +2143,7 @@ mark {
   height: 100%;
   border: 0;
   background: transparent;
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   user-select: text;
 }
 
@@ -2100,21 +2157,47 @@ mark {
 
 .quick-results {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 20;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
 }
 
+.quick-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.quick-option[aria-selected="true"] {
+  background: var(--bg-selected);
+  box-shadow: var(--edge-select);
+}
+
+.quick-option-detail {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-4);
   align-items: start;
 }
 
@@ -2122,6 +2205,170 @@ mark {
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.home-first {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 720px;
+}
+
+/* Rows inside Home boxes: 36 px, hairlines between, content touching the box edges. */
+.home-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-rows > li + li {
+  border-top: var(--box-rule);
+}
+
+.home-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+button.home-row {
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+button.home-row:hover {
+  background: var(--bg-hover);
+}
+
+button.home-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.home-row-title {
+  flex: none;
+  max-width: 45%;
+  font-weight: var(--weight-medium);
+}
+
+.home-row-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.home-row-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-findings .home-row {
+  padding-left: var(--space-3);
+  color: var(--text-muted);
+}
+
+.home-findings .home-row[data-tone="danger"] {
+  box-shadow: var(--edge-danger);
+  color: var(--text);
+}
+
+.home-findings .home-row[data-tone="warning"] {
+  box-shadow: inset 2px 0 0 var(--warning);
+  color: var(--text);
+}
+
+.home-facts {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.home-facts p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-box-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--box-rule);
+}
+
+.home-box-foot .btn {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.home-box-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--box-rule);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.home-host {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--weight-medium);
+  text-align: start;
+  cursor: default;
+}
+
+.home-host:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.home-hosts td:first-child {
+  max-width: 220px;
+}
+
+.home-start-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.home-start .home-row-title {
+  max-width: none;
+}
+
+.box-scroll {
+  overflow-x: auto;
+}
+
+.dt .dt-action {
+  width: 1%;
+  padding-right: var(--space-2);
+  text-align: right;
 }
 
 .tile-grid {
@@ -2261,20 +2508,6 @@ mark {
   color: var(--accent-text);
 }
 
-.tips {
-  display: grid;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.tips li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
 .toolbar {
   display: flex;
   align-items: center;
@@ -2284,118 +2517,6 @@ mark {
 
 .toolbar .input-with-icon {
   width: 280px;
-}
-
-/* ===================================================================== settings */
-
-.settings-layout {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: start;
-}
-
-.settings-nav {
-  position: sticky;
-  top: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.settings-section {
-  display: grid;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-1);
-}
-
-.settings-section > header {
-  display: grid;
-  gap: 4px;
-}
-
-.settings-section > header p {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-.setting-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.setting-row + .setting-row {
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.setting-label {
-  display: grid;
-  gap: 2px;
-}
-
-.setting-label span:first-child {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
-.scheme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--space-2);
-}
-
-.scheme-card {
-  position: relative;
-  display: grid;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg-inset);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out);
-}
-
-.scheme-card:hover {
-  border-color: var(--border-strong);
-}
-
-.scheme-card[aria-checked="true"] {
-  border-color: var(--accent);
-  box-shadow: var(--glow-accent);
-}
-
-.scheme-preview {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: var(--radius-sm);
-}
-
-.scheme-name {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-}
-
-.terminal-preview {
-  height: 220px;
-  padding: 0;
-  border-radius: var(--radius-panel);
-  border: 1px solid var(--border);
-  overflow: hidden;
 }
 
 /* ===================================================================== terminal chrome */
@@ -2950,7 +3071,7 @@ button[data-tooltip]::after {
   top: calc(100% + 6px);
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-inner);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-2);
   color: var(--text);
@@ -3079,26 +3200,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
-.host-select {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 1;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-out);
-}
-
-.host-card:hover .host-select,
-.host-card:focus-within .host-select,
-.host-select:checked,
-.host-select[data-visible="true"] {
-  opacity: 1;
-}
-
 .host-card-tags {
   display: flex;
   flex-wrap: wrap;
@@ -3139,8 +3240,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip,
-  .host-select {
+  .chip {
     transition: none;
   }
 }
@@ -3762,13 +3862,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .os-icon {
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.toolbar .select-all {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
 }
 
 .connect-all-list {
@@ -4706,4 +4799,54 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 /* Space held for a list that is still loading, before its skeleton shows (after 150 ms). */
 .skeleton-space {
   border-radius: var(--radius-sm);
+}
+
+/* ---------- optimistic edits (interaction-polish §1) ---------- */
+/* A local edit shown before the vault confirmed it. */
+.host-card[data-pending],
+.list > li[data-pending] {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+/* Multi-select on Hosts: selected rows and cards take the accent fill; the active (details)
+   host keeps its own marker on top. */
+.host-card[data-selected="true"],
+.tile[data-selected="true"],
+.list > li[data-selected="true"] {
+  /* The row tint plus the accent edge on the left: selection reads without any checkbox. */
+  background: var(--bg-selected);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: var(--edge-select);
+}
+
+.list > li[data-selected="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* The selection strip (two or more hosts): one compact line above the list. */
+.bulk-bar.box-strip {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: var(--space-2);
+  padding-block: var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-radius: var(--radius-panel);
+  background: var(--bg-selected);
+  font-size: var(--text-sm);
+}
+
+.bulk-bar > strong {
+  flex: none;
+  padding-inline: var(--space-1);
+}
+
+.bulk-bar .btn {
+  flex: none;
+}
+
+.host-open:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

@@ -102,3 +102,27 @@ test("side panel appearance: scheme, font and cursor apply live and persist; zoo
   await side.getByRole("button", { name: "Reset zoom" }).click();
   await expect.poll(fontSizes).toEqual(before);
 });
+
+test("side panel appearance: rows sit at the top, each label above its full-width control", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connect(page, "api-gateway");
+  await paletteRun(page, "Show terminal appearance");
+  const side = page.getByRole("complementary", { name: "Appearance" });
+  const rows = side.locator(".setting-row");
+  await expect(rows.first()).toBeVisible();
+  const boxes = await rows.evaluateAll((els) =>
+    els.map((el) => {
+      const label = el.querySelector(".setting-label")?.getBoundingClientRect();
+      const control = el.querySelector(".setting-control")?.getBoundingClientRect();
+      return { top: el.getBoundingClientRect().top, height: el.getBoundingClientRect().height, labelBottom: label?.bottom ?? 0, labelWidth: label?.width ?? 0, controlTop: control?.top ?? 0 };
+    }),
+  );
+  for (const [i, b] of boxes.entries()) {
+    // The label is above the control and has room for its words.
+    expect(b.labelBottom).toBeLessThanOrEqual(b.controlTop + 1);
+    expect(b.labelWidth).toBeGreaterThan(120);
+    // Rows are packed, not stretched over the panel's height.
+    expect(b.height).toBeLessThan(90);
+    if (i > 0) expect(b.top - (boxes[i - 1]?.top ?? 0)).toBeLessThan(100);
+  }
+});
