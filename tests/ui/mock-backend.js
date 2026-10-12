@@ -1562,7 +1562,17 @@ export function installMockBackend(options) {
           }
         }
       }
+      // OS auto-detection: what the server reported, when nobody chose an OS for the host.
+      for (const [hostId, os] of Object.entries(state.detectedOs ?? {})) {
+        if (!own.some((a) => a.hostId === hostId)) own.push({ hostId, os, inherited: false, detected: true });
+      }
       return own;
+    },
+    os_detection_get: () => state.osDetection !== false,
+    os_detection_set: (a) => {
+      state.osDetection = a.enabled;
+      if (!a.enabled) state.detectedOs = {};
+      return a.enabled;
     },
     group_defaults_get: (a) => groupDefaultsView(a.groupId),
     group_defaults_set: (a) => {

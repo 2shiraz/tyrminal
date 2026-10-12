@@ -1822,8 +1822,19 @@ async fn run_ssh(
             // database commit and the in-memory revision update, the next edit of the host would
             // see a false conflict.
             let vault = Arc::clone(&ctx.vault);
+            let recent_host = host_id.clone();
             tokio::spawn(async move {
-                let _ = vault.mark_connected(generation, &host_id).await;
+                let _ = vault.mark_connected(generation, &recent_host).await;
+            });
+            // OS auto-detection: one fixed read on its own exec channel, only when detection is
+            // on and nobody chose an OS for the host. Best effort and in the background.
+            let (vault, detect_conn, detect_host) = (Arc::clone(&ctx.vault), Arc::clone(&conn), host_id.clone());
+            tokio::spawn(async move {
+                if vault.wants_os_detection(generation, &detect_host).await.unwrap_or(false)
+                    && let Some(os) = crate::os_detect::detect(&detect_conn).await
+                {
+                    let _ = vault.record_detected_os(generation, &detect_host, os).await;
+                }
             });
             // Saved tunnels that start with every connection to this host. Their own task, so
             // the shell is usable at once; it holds the connection only while starting them.
