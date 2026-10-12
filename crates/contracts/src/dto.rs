@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::IpcError;
+use crate::{ErrorCode, IpcError};
 
 // ---------- vault ----------
 
@@ -469,6 +469,21 @@ pub struct Preferences {
     pub local_shell: Option<String>,
     /// Applications chosen (in a native dialog) for editing remote files, by extension.
     pub editor_apps: Vec<EditorApp>,
+    /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
+    /// separate from session recording and command history.
+    pub diagnostics: bool,
+}
+
+/// One failure for a diagnostic report: which command failed and how, never with what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DiagnosticEntry {
+    pub command: String,
+    pub code: ErrorCode,
+    /// Unix seconds.
+    #[ts(type = "number")]
+    pub at: u64,
 }
 
 /// An application used to edit remote files with a given extension. Added only through the

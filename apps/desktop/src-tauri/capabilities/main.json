@@ -78,6 +78,7 @@
     "allow-prefs-set",
     "allow-terminal-choices",
     "allow-editor-pick-app",
+    "allow-diagnostics-report",
     "allow-host-recent",
     "allow-link-open",
     "allow-backup-export",

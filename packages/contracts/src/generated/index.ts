@@ -6,6 +6,7 @@ export type { BackupPreview } from "./BackupPreview";
 export type { BulkHostChange } from "./BulkHostChange";
 export type { ConflictChoice } from "./ConflictChoice";
 export type { CursorStyle } from "./CursorStyle";
+export type { DiagnosticEntry } from "./DiagnosticEntry";
 export type { EditStatus } from "./EditStatus";
 export type { EditorApp } from "./EditorApp";
 export type { ErrorCode } from "./ErrorCode";

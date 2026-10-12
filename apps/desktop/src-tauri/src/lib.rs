@@ -196,6 +196,7 @@ pub fn run() {
             commands::settings::prefs_set,
             commands::settings::terminal_choices,
             commands::settings::editor_pick_app,
+            commands::settings::diagnostics_report,
             commands::settings::host_recent,
             commands::settings::link_open,
             commands::backup::backup_export,

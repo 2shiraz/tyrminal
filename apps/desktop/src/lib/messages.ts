@@ -365,7 +365,18 @@ export const msg = {
     autoLock: "The vault locks after 5 minutes without activity and when you close Tyrminal. Locking ends open sessions.",
     privacy: "Privacy",
     privacyBody:
-      "Tyrminal makes no network connections of its own. The only traffic is the SSH connections you start. There is no account, telemetry, crash upload or update check in this build.",
+      "Tyrminal makes no network connections of its own. The only traffic is the SSH connections you start. There is no account, telemetry, crash upload or automatic update check.",
+    diagnostics: "Keep a list of recent failures for diagnostics",
+    diagnosticsHint:
+      "Off by default. Only which action failed and its error code are kept, in memory, never host names, paths, commands, output or secrets. Nothing is sent: you can save a report to a file and decide what to do with it. Session recording and command history are separate settings.",
+    diagnosticsCount: (n: number) => (n === 1 ? "1 failure kept" : `${n} failures kept`),
+    diagnosticsSave: "Save diagnostic report…",
+    diagnosticsSaved: (name: string) => `Saved ${name}.`,
+    updates: "Updates",
+    updatesBody: (version: string) =>
+      `You are using Tyrminal ${version}, a pre-release. Tyrminal never checks for or installs updates by itself. To update, download a newer version from the releases page and install it over this one; your vault stays where it is.`,
+    updatesOpen: "Open the releases page",
+    releasesUrl: "https://github.com/2shiraz/tyrminal/releases",
     status: "Project status",
     statusBody:
       "This is an early development build. It has not been security reviewed. Do not rely on it for credentials you cannot rotate.",

@@ -12,6 +12,7 @@ import type {
   BackupPreview,
   BulkHostChange,
   ConflictChoice,
+  DiagnosticEntry,
   EditStatus,
   ErrorCode,
   GroupInput,
@@ -70,13 +71,40 @@ export function toAppError(error: unknown): AppError {
   return new AppError({ code: "INTERNAL", message: "Something went wrong inside Tyrminal. Your data has not been changed." });
 }
 
+/**
+ * Recent failures for a diagnostic report: command name and error code only, kept in memory
+ * while the user has diagnostics on (P-22). Never sent anywhere; saved to a file on request.
+ */
+const failures: DiagnosticEntry[] = [];
+let keepFailures = false;
+const MAX_FAILURES = 200;
+
+function recordFailure(command: string, error: AppError) {
+  if (!keepFailures) return;
+  failures.push({ command, code: error.code, at: Math.floor(Date.now() / 1000) });
+  if (failures.length > MAX_FAILURES) failures.splice(0, failures.length - MAX_FAILURES);
+}
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    throw toAppError(error);
+    const appError = toAppError(error);
+    recordFailure(command, appError);
+    throw appError;
   }
 }
+
+export const diagnostics = {
+  /** Turning diagnostics off forgets everything kept so far. */
+  setEnabled(enabled: boolean) {
+    keepFailures = enabled;
+    if (!enabled) failures.length = 0;
+  },
+  count: () => failures.length,
+  /** Saves a report (a native save dialog); returns the file name, or null if cancelled. */
+  saveReport: () => call<string | null>("diagnostics_report", { entries: [...failures] }),
+};
 
 export const vault = {
   status: () => call<VaultStatus>("vault_status"),

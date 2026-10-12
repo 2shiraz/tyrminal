@@ -17,7 +17,7 @@ import {
   relativeTime,
 } from "../../components/ui/controls";
 import { IconFingerprint, IconMonitor, IconMoon, IconShieldAlert, IconSun, IconTrash2 } from "../../components/ui/icons";
-import { knownHosts as knownHostsApi, preferences as preferencesApi, vault } from "../../lib/ipc";
+import { diagnostics, knownHosts as knownHostsApi, links as linksApi, preferences as preferencesApi, vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
@@ -390,6 +390,16 @@ export function SettingsView() {
                 <h2 id="settings-privacy-title">{msg.settings.privacy}</h2>
                 <p>{msg.settings.privacyBody}</p>
               </header>
+              <DiagnosticsSetting enabled={prefs.diagnostics} onChange={(diagnostics) => update((p) => ({ ...p, diagnostics }))} />
+              <div className="settings-row">
+                <div>
+                  <h3>{msg.settings.updates}</h3>
+                  <p className="muted">{msg.settings.updatesBody(__APP_VERSION__)}</p>
+                </div>
+                <button type="button" className="btn" onClick={() => void linksApi.open(msg.settings.releasesUrl).catch(() => undefined)}>
+                  {msg.settings.updatesOpen}
+                </button>
+              </div>
               <Notice tone="warning">
                 <strong>{msg.settings.status}.</strong> {msg.settings.statusBody}
               </Notice>
@@ -419,6 +429,40 @@ export function SettingsView() {
       )}
       {/* After a restore the vault locks and the app shows the unlock screen on its own. */}
       {dialog === "restore" && <RestoreBackupDialog vaultExists onClose={() => setDialog(null)} onRestored={() => setDialog(null)} />}
+    </div>
+  );
+}
+
+/** P-22: local diagnostics, off by default; a report is only ever saved on request. */
+function DiagnosticsSetting({ enabled, onChange }: { enabled: boolean; onChange: (enabled: boolean) => void }) {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [count, setCount] = useState(diagnostics.count);
+  const { pending, error, run } = useAction();
+  useEffect(() => {
+    const timer = window.setInterval(() => setCount(diagnostics.count()), 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="settings-row">
+      <div>
+        <Switch label={msg.settings.diagnostics} checked={enabled} onChange={(checked) => onChange(checked)} />
+        <p className="muted">{msg.settings.diagnosticsHint}</p>
+        {enabled && <p className="muted">{msg.settings.diagnosticsCount(count)}</p>}
+        <ErrorNotice error={error} />
+        {saved && <Notice tone="success">{msg.settings.diagnosticsSaved(saved)}</Notice>}
+      </div>
+      <button
+        type="button"
+        className="btn"
+        disabled={pending}
+        onClick={async () => {
+          setSaved(null);
+          const name = await run(() => diagnostics.saveReport());
+          if (name) setSaved(name);
+        }}
+      >
+        {msg.settings.diagnosticsSave}
+      </button>
     </div>
   );
 }

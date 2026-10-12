@@ -73,6 +73,8 @@ pub const MAX_DIR_ENTRIES: usize = 20_000;
 pub const MAX_TRANSFERS: usize = 8;
 /// Largest piece of a file the window sends at once for a dropped-file upload.
 pub const MAX_STREAM_CHUNK: usize = 4 * 1024 * 1024;
+/// Failures kept for a diagnostic report (in memory only, while diagnostics are on).
+pub const MAX_DIAGNOSTIC_ENTRIES: usize = 200;
 /// Entries (files and folders) and nesting depth of one folder transfer.
 pub const MAX_TREE_ENTRIES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 32;

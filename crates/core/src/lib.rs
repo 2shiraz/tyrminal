@@ -6,6 +6,7 @@
 //! adapter crate supplies a [`SessionSink`] and calls these services.
 
 mod deploy;
+mod diagnostics;
 mod edits;
 mod error;
 mod files;
@@ -21,6 +22,7 @@ mod streams;
 mod validate;
 mod vault;
 
+pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;
 pub use sessions::{SessionSink, Sessions};

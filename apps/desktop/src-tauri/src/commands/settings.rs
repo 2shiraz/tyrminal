@@ -72,3 +72,52 @@ pub async fn link_open(url: String) -> Result<(), IpcError> {
         })
     }
 }
+
+/// Saves a diagnostic report to a file the user chooses (test builds read
+/// `TYRMINAL_E2E_REPORT_PATH`). Nothing is sent anywhere. `None`: the dialog was cancelled.
+#[tauri::command]
+pub async fn diagnostics_report(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    entries: Vec<tyrminal_core::contracts::DiagnosticEntry>,
+) -> Result<Option<String>, IpcError> {
+    use tyrminal_core::contracts::{ErrorCode, VaultState};
+    let core = state.core()?;
+    let unlocked = core.vault.status().await.is_ok_and(|s| s.state == VaultState::Unlocked);
+    let info = tyrminal_core::ReportInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        vault_unlocked: unlocked,
+        sessions: core.sessions.count(),
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let text = tyrminal_core::diagnostic_report(&info, &entries, now)?;
+    let io = || IpcError::new(ErrorCode::IoError, "The report could not be written there. Choose another location.");
+    #[cfg(feature = "e2e")]
+    let path = {
+        let _ = &app;
+        std::env::var_os("TYRMINAL_E2E_REPORT_PATH").map(std::path::PathBuf::from)
+    };
+    #[cfg(not(feature = "e2e"))]
+    let path = {
+        use tauri_plugin_dialog::DialogExt;
+        let dialog = app
+            .dialog()
+            .file()
+            .add_filter("Text", &["txt"])
+            .set_file_name(format!("tyrminal-diagnostics-{}.txt", crate::commands::backup::today()));
+        tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+            .await
+            .map_err(|_| io())?
+            .map(|p| p.into_path().map_err(|_| io()))
+            .transpose()?
+    };
+    let Some(path) = path else { return Ok(None) };
+    let target = path.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::commands::backup::write_private(&target, text.as_bytes()))
+        .await
+        .map_err(|_| io())?
+        .map_err(|_| io())?;
+    Ok(Some(crate::commands::backup::file_name(&path)))
+}

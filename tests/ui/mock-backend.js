@@ -258,6 +258,7 @@ export function installMockBackend(options) {
   window.__mockFs = fs;
   const streams = new Map();
   window.__mockDropped = [];
+  window.__mockReports = [];
   window.__mockTransfers = new Map();
   /** Completes a running mock transfer (tests drive progress explicitly). */
   window.__mockFinishTransfer = (transferId) => window.__mockTransfers.get(transferId)?.finish();
@@ -319,6 +320,10 @@ export function installMockBackend(options) {
     },
     files_upload_abort: (a) => {
       streams.delete(a.uploadId);
+    },
+    diagnostics_report: (a) => {
+      window.__mockReports.push(a.entries);
+      return "tyrminal-diagnostics-2026-10-12.txt";
     },
     terminal_choices: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
     editor_pick_app: (a) => {
