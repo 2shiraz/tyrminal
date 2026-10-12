@@ -20,3 +20,19 @@ test("the WebView's own context menu never opens on app chrome; text fields keep
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   expect(await nativeMenuAllowed(page, "input.input")).toBe(true);
 });
+
+test("app chrome is never selectable (WebKit needs the prefixed property) and host names are not underlined", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+  const styles = await page.evaluate(() => {
+    const body = getComputedStyle(document.body);
+    const link = document.querySelector(".host-open");
+    return {
+      body: body.getPropertyValue("-webkit-user-select") || body.userSelect,
+      underline: link ? getComputedStyle(link).textDecorationLine : "none",
+    };
+  });
+  expect(styles.body).toBe("none");
+  await page.locator(".host-open").first().hover();
+  expect(await page.locator(".host-open").first().evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe("none");
+});
