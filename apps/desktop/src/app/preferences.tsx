@@ -7,6 +7,7 @@ const DEFAULTS: Preferences = {
   theme: "system",
   reduceMotion: false,
   localShell: null,
+  editorApps: [],
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

@@ -188,6 +188,7 @@ pub fn run() {
             commands::settings::prefs_get,
             commands::settings::prefs_set,
             commands::settings::shells_list,
+            commands::settings::editor_pick_app,
             commands::settings::host_recent,
             commands::settings::link_open,
             commands::backup::backup_export,

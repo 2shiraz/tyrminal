@@ -252,6 +252,13 @@ export function SettingsView() {
                   ))}
                 </select>
               </SettingRow>
+              <SettingRow label={msg.settings.editors} hint={msg.settings.editorsHint}>
+                <EditorChoices
+                  apps={prefs.editorApps ?? []}
+                  onRemove={(ext) => update((p) => ({ ...p, editorApps: (p.editorApps ?? []).filter((e) => e.extension !== ext) }))}
+                  onAdded={(next) => update(() => next)}
+                />
+              </SettingRow>
               <SettingRow label={msg.settings.font}>
                 <select
                   className="select"
@@ -594,5 +601,58 @@ function RotateRecoveryDialog({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function EditorChoices({
+  apps,
+  onRemove,
+  onAdded,
+}: {
+  apps: { extension: string; app: string }[];
+  onRemove: (extension: string) => void;
+  onAdded: (prefs: Preferences) => void;
+}) {
+  const [ext, setExt] = useState("");
+  const { pending, error, run } = useAction();
+  const valid = /^\.?[A-Za-z0-9]{1,16}$/.test(ext.trim());
+  return (
+    <div className="stack-sm">
+      {apps.length === 0 ? (
+        <span className="muted">{msg.settings.editorNone}</span>
+      ) : (
+        <ul className="editor-choices" aria-label={msg.settings.editors}>
+          {apps.map((e) => (
+            <li key={e.extension}>
+              <span className="mono">.{e.extension}</span>
+              <span className="muted" title={e.app}>
+                {e.app.split(/[\\/]/).pop()}
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" aria-label={msg.settings.editorRemove(e.extension)} onClick={() => onRemove(e.extension)}>
+                <IconTrash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="editor-add">
+        <input className="input mono" aria-label={msg.settings.editorExtension} placeholder="conf" value={ext} onChange={(event) => setExt(event.target.value)} />
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={!valid || pending}
+          onClick={async () => {
+            const next = await run(() => preferencesApi.pickEditor(ext.trim()));
+            if (next) {
+              onAdded(next);
+              setExt("");
+            }
+          }}
+        >
+          {msg.settings.editorAdd}
+        </button>
+      </div>
+      <ErrorNotice error={error} />
+    </div>
   );
 }

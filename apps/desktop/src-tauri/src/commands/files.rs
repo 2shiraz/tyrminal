@@ -251,6 +251,34 @@ pub async fn files_cancel(
     state.core()?.sessions.cancel_transfer(window.label(), &transfer_id)
 }
 
+/// Starts the application the user chose for this file type with the file as its only argument
+/// (no shell). macOS application bundles go through `open -a`.
+#[cfg(not(feature = "e2e"))]
+fn launch_with(app: &std::path::Path, file: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = if app.extension().is_some_and(|e| e == "app") {
+        let mut c = std::process::Command::new("/usr/bin/open");
+        c.arg("-a").arg(app).arg(file);
+        c
+    } else {
+        let mut c = std::process::Command::new(app);
+        c.arg(file);
+        c
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut command = {
+        let mut c = std::process::Command::new(app);
+        c.arg(file);
+        c
+    };
+    let mut child = command.stdin(std::process::Stdio::null()).spawn()?;
+    // Reap it when it exits so no zombie process is left behind.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// Opens a remote file in the default local application for its type. The core downloads it into
 /// an owner-only folder; nothing is uploaded until `files_edit_save`.
 #[tauri::command]
@@ -268,9 +296,16 @@ pub async fn files_edit_open(
         state.core()?.sessions.edit_open(window.label(), &session_id, &dir, &name, &state.edit_root).await?;
     // Test builds do not launch other applications; the test edits the file directly.
     #[cfg(not(feature = "e2e"))]
-    open::that_detached(&path).map_err(|_| {
-        IpcError::new(ErrorCode::IoError, "No application could open that file. It is still open for editing.")
-    })?;
+    {
+        let chosen = state.core()?.preferences.editor_for(&name);
+        let launched = match chosen {
+            Some(app) => launch_with(&app, &path),
+            None => open::that_detached(&path),
+        };
+        launched.map_err(|_| {
+            IpcError::new(ErrorCode::IoError, "No application could open that file. It is still open for editing.")
+        })?;
+    }
     #[cfg(feature = "e2e")]
     let _ = path;
     Ok(status)

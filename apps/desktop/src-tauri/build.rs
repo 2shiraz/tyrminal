@@ -71,6 +71,7 @@ const COMMANDS: &[&str] = &[
     "prefs_get",
     "prefs_set",
     "shells_list",
+    "editor_pick_app",
     "host_recent",
     "link_open",
     // backup and restore

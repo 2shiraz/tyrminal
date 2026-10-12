@@ -467,6 +467,20 @@ pub struct Preferences {
     pub terminal: TerminalPreferences,
     /// Program for local terminals; one of the shells the system lists. `None`: the login shell.
     pub local_shell: Option<String>,
+    /// Applications chosen (in a native dialog) for editing remote files, by extension.
+    pub editor_apps: Vec<EditorApp>,
+}
+
+/// An application used to edit remote files with a given extension. Added only through the
+/// native app picker; the renderer can keep or remove entries but never add or change one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditorApp {
+    /// Lower-case, without the dot (`conf`, `yml`).
+    pub extension: String,
+    /// Absolute path of the application (an `.app` bundle on macOS).
+    pub app: String,
 }
 
 // ---------- sessions ----------

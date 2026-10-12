@@ -21,6 +21,7 @@ export function installMockBackend(options) {
       theme: options.theme ?? "dark",
       reduceMotion: true,
       localShell: null,
+      editorApps: [],
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -278,6 +279,14 @@ export function installMockBackend(options) {
 
   const handlers = {
     shells_list: () => ["/bin/bash", "/bin/zsh", "/usr/bin/fish"],
+    editor_pick_app: (a) => {
+      const extension = a.extension.replace(/^\./, "").toLowerCase();
+      state.prefs = {
+        ...state.prefs,
+        editorApps: [...state.prefs.editorApps.filter((e) => e.extension !== extension), { extension, app: "/Applications/Text Editor.app" }],
+      };
+      return structuredClone(state.prefs);
+    },
     files_local_list: (a) => {
       if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
       if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");

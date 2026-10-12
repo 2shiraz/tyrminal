@@ -70,6 +70,7 @@
     "allow-prefs-get",
     "allow-prefs-set",
     "allow-shells-list",
+    "allow-editor-pick-app",
     "allow-host-recent",
     "allow-link-open",
     "allow-backup-export",

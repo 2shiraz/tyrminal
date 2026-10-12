@@ -22,3 +22,21 @@ test("settings: the local terminal shell is chosen from the installed shells", a
   await shell.selectOption("");
   await expect.poll(async () => (await prefsSets(page)).at(-1)).toBeNull();
 });
+
+test("settings: editors for remote files are added with the app picker and can be removed", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByText("No editors chosen.")).toBeVisible();
+  const ext = page.getByRole("textbox", { name: "File extension" });
+  const add = page.getByRole("button", { name: "Choose app…" });
+  await ext.fill("a.b");
+  await expect(add).toBeDisabled();
+  await ext.fill(".YML");
+  await add.click();
+  const list = page.getByRole("list", { name: "Editors for remote files" });
+  await expect(list).toContainText(".yml");
+  await expect(list).toContainText("Text Editor.app");
+  await expect(ext).toHaveValue("");
+  await list.getByRole("button", { name: "Remove the editor for .yml files" }).click();
+  await expect(page.getByText("No editors chosen.")).toBeVisible();
+});
