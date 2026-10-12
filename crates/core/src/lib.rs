@@ -21,6 +21,8 @@ mod remote_copy;
 mod sessions;
 mod validate;
 mod vault;
+// agent B: tunnels and history
+mod tunnels;
 
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;

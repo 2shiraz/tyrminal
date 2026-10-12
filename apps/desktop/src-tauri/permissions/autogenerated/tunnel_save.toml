@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tunnel-save"
+description = "Enables the tunnel_save command without any pre-configured scope."
+commands.allow = ["tunnel_save"]
+
+[[permission]]
+identifier = "deny-tunnel-save"
+description = "Denies the tunnel_save command without any pre-configured scope."
+commands.deny = ["tunnel_save"]

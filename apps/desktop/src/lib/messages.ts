@@ -62,6 +62,8 @@ export const msg = {
     keychain: "Keychain",
     knownHosts: "Known hosts",
     settings: "Settings",
+    // agent B: tunnels and history
+    tunnels: "Tunnels",
     lock: "Lock vault",
     localTerminal: "Local terminal",
     primary: "Primary",

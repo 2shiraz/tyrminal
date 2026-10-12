@@ -75,6 +75,16 @@ pub const MAX_TRANSFERS: usize = 8;
 pub const MAX_TREE_ENTRIES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 32;
 
+// agent B: tunnels and history
+/// Simultaneous connections through one forward; further ones are refused and counted.
+pub const MAX_TUNNEL_CONNECTIONS: u32 = 64;
+/// Forwards running at once across all sessions.
+pub const MAX_ACTIVE_TUNNELS: usize = 32;
+/// Ended forwards kept in the active list so their outcome stays visible.
+pub const MAX_ENDED_TUNNELS: usize = 32;
+/// Hosts in one connection chain, the destination included.
+pub const MAX_CHAIN_HOPS: usize = 8;
+
 // agent C: workspaces
 /// Panes in one layout template (the same limit as open panes).
 pub const MAX_LAYOUT_PANES: usize = 16;

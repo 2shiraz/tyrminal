@@ -16,6 +16,8 @@ import {
   IconSettings,
   IconSidebar,
   IconSquareTerminal,
+  // agent B: tunnels and history
+  IconRoute,
 } from "../ui/icons";
 
 /** The Tyrminal mark: a prompt chevron and cursor in a rounded tile. Original artwork. */
@@ -40,6 +42,8 @@ const PRIMARY: { id: Destination; icon: ReactNode }[] = [
   { id: "home", icon: <IconHouse size={17} /> },
   { id: "hosts", icon: <IconServer size={17} /> },
   { id: "snippets", icon: <IconScrollText size={17} /> },
+  // agent B: tunnels and history
+  { id: "tunnels", icon: <IconRoute size={17} /> },
 ];
 
 const VAULT: { id: Destination; icon: ReactNode }[] = [

@@ -15,6 +15,8 @@ import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/S
 import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
+// agent B: tunnels and history
+import { TunnelsView } from "../features/tunnels/TunnelsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
@@ -69,7 +71,15 @@ import {
   templateTabs,
 } from "./workspace";
 
-export type Destination = "home" | "hosts" | "snippets" | "keychain" | "knownHosts" | "settings";
+export type Destination =
+  | "home"
+  | "hosts"
+  | "snippets"
+  | "keychain"
+  | "knownHosts"
+  | "settings"
+  // agent B: tunnels and history
+  | "tunnels";
 
 // The terminal emulator is the largest module and is not needed until a session opens.
 const PaneGrid = lazy(() => import("../components/layout/PaneGrid").then((m) => ({ default: m.PaneGrid })));
@@ -547,6 +557,18 @@ function Shell() {
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
           {!terminalVisible && destination === "settings" && <SettingsView />}
+          {/* agent B: tunnels and history */}
+          {!terminalVisible && destination === "tunnels" && (
+            <TunnelsView
+              sessions={Object.values(ws.panes).flatMap((p) => {
+                const sessionId = handles.current.get(p.id)?.sessionId();
+                return p.target.kind === "ssh" && statuses[p.id]?.state === "connected" && sessionId
+                  ? [{ sessionId, hostId: p.target.hostId, label: p.label }]
+                  : [];
+              })}
+              onConnect={connect}
+            />
+          )}
 
           {/* Terminals stay mounted while hidden so their screen state and session survive tab switches. */}
           <Suspense fallback={null}>

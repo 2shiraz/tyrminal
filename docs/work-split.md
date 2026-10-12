@@ -149,8 +149,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Phase 07 forwarding | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | — |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | — | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | — |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | — |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | — |
 | Blocked | — | — | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
@@ -169,6 +169,41 @@ Never merge these by hand; regenerate them after resolving the sources:
   (it used to be stored after), so a file or key-install call made right after "connected" no
   longer fails with "works in a connected SSH session only". Three lines moved; nothing else in the
   connection path changed. If B restructures `run_ssh`, keep this ordering.
+
+**From agent B (notices of small additive edits in agent A's files, each in a block marked
+`agent B: tunnels and history`; please keep them when you touch these files):**
+
+1. `crates/ssh/src/client.rs`: `VerifiedConnection` fields `handle` and `request_timeout` are
+   `pub(crate)` and it gains a `routes` field; the handler refuses server-opened channels except
+   `forwarded-tcpip` for requested ports (ADR 0004 §3). No behaviour change for shells/SFTP.
+2. `crates/core/src/vault.rs`: an `Open.tunnels` map, one `load!` line for `KIND_TUNNEL`, and one
+   `impl VaultService` block (tunnel CRUD) placed just before the first test module.
+   `crates/core/src/records.rs`: `KIND_TUNNEL = 100` and `TunnelRecord`. B's kinds start at 100.
+3. `crates/core/src/sessions.rs` outside `run_ssh`: `Entry` gains `host_id`, `register` takes it,
+   `connection()` is `pub(crate)`, `supervise` calls `tunnel_runs.session_ended(..)`, and
+   `TaskContext` carries the session id and `Sessions`.
+4. `apps/desktop/src/lib/messages.ts`: `nav.tunnels`; `apps/desktop/src/components/layout/TabStrip.tsx`:
+   `tunnels` in `PAGE_ICONS` (both needed because `Destination` gained `"tunnels"`).
+5. `crates/core/src/vault.rs` host paths: `HostRecord` gained `connection` (jump host);
+   `save_host` keeps the stored value, `copy_host` copies it, CSV/OpenSSH import sets the default.
+   `connection_plan` now builds a hop chain through a new `hop_plan` helper (same per-host rules).
+6. **Done by B (A delegated it):** `SessionEvent::TrustPrompt`, `HostKeyChanged` and `AuthPrompt` gained
+   `hop: Option<ChainPosition>` (`dto.rs`, marked block), and `TerminalView.tsx` renders it with
+   one marked `<HopNotice>` line per dialog. Original request: add an optional hop description to `SessionEvent::TrustPrompt` / `HostKeyChanged`
+   (for example `via: Option<String>`, the saved label of the hop) and show it in the trust dialog,
+   so the prompt names the specific jump-chain hop (BUILD_SPEC §4.5). B will fill it in
+   `run_ssh`. Until then the prompt shows the hop's own address and port.
+7. **Observation (A's tests):** `sessions_lab::deploying_a_public_key_appends_one_line_and_keeps_the_others`
+   passes only on a fresh lab account: it ends with `authorized_keys` at mode 600 and its next run
+   writes the file with `printf >`, which keeps that mode, so the `-rw-r--r--` assertion fails.
+   Setting the mode explicitly (`chmod 644`) after the `printf` would make it re-runnable. Also,
+   `behavior.spec.ts` "broadcast: typed input reaches every pane…" failed once in 3 full UI runs
+   on this branch (passed in isolation 3/3 and in the other two full runs); no log was kept.
+8. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
+   `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`),
+   `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
+   `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
+   loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
 - **C → A (already done by C, keep it when merging):** in `tests/ui/behavior.spec.ts`, the broadcast
   test now waits for the terminal's reply to its `ESC[6n` query to be sent before typing (one
   `expect.poll` on the focused pane's `data-tx`). C fixed keyboard focus after a split (it used to

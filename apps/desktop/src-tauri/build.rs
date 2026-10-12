@@ -82,6 +82,18 @@ const COMMANDS: &[&str] = &[
     "backup_choose",
     "backup_preview",
     "backup_restore",
+    // agent B: tunnels and history
+    "tunnel_list",
+    "tunnel_save",
+    "tunnel_duplicate",
+    "tunnel_delete",
+    "tunnel_start",
+    "tunnel_stop",
+    "tunnel_active",
+    "tunnel_clear_ended",
+    "host_connection_get",
+    "host_connection_set",
+    "host_chain",
     // agent C: workspaces
     "layout_list",
     "layout_save",

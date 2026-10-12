@@ -276,7 +276,10 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(await s.waitFor("dialog textarea"), "lab server rebuilt for the test");
     await s.clickButton("Remove trust", { within: "dialog" });
     await s.waitGone("dialog");
-    assert.match(await s.execute("return document.body.innerText"), /No trusted servers yet/);
+    // The dialog closes before the list has reloaded, so wait for the reloaded (empty) list.
+    await s.until(async () => /No trusted servers yet/.test(await s.execute("return document.body.innerText")), {
+      describe: "empty known hosts list",
+    });
 
     await nav("Hosts");
     await s.clickButton("Connect");

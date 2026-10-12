@@ -123,6 +123,8 @@ pub fn run() {
                 && let Ok(core) = window.state::<AppState>().core()
             {
                 core.sessions.close_all_for_owner(window.label());
+                // agent B: tunnels and history
+                core.sessions.stop_tunnels_for_owner(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -198,6 +200,18 @@ pub fn run() {
             commands::backup::backup_choose,
             commands::backup::backup_preview,
             commands::backup::backup_restore,
+            // agent B: tunnels and history
+            commands::tunnels::tunnel_list,
+            commands::tunnels::tunnel_save,
+            commands::tunnels::tunnel_duplicate,
+            commands::tunnels::tunnel_delete,
+            commands::tunnels::tunnel_start,
+            commands::tunnels::tunnel_stop,
+            commands::tunnels::tunnel_active,
+            commands::tunnels::tunnel_clear_ended,
+            commands::tunnels::host_connection_get,
+            commands::tunnels::host_connection_set,
+            commands::tunnels::host_chain,
             // agent C: workspaces
             commands::layouts::layout_list,
             commands::layouts::layout_save,
