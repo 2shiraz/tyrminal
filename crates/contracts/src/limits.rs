@@ -98,3 +98,9 @@ pub const MAX_CHAIN_HOPS: usize = 8;
 pub const MAX_LAYOUT_PANES: usize = 16;
 /// A custom tab name in a layout template, in characters.
 pub const MAX_TAB_TITLE_LEN: usize = 80;
+// command history
+/// Commands kept per host (and for local terminals), and the length of one command in bytes.
+pub const MAX_HISTORY_ENTRIES: usize = 1_000;
+pub const MAX_HISTORY_COMMAND_LEN: usize = 1_024;
+/// Suggestions returned for one query.
+pub const MAX_HISTORY_SUGGESTIONS: usize = 8;

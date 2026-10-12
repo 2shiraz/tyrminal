@@ -32,6 +32,8 @@ export type { GroupSummary } from "./GroupSummary";
 export type { HighlightKeyword } from "./HighlightKeyword";
 export type { HighlightPreferences } from "./HighlightPreferences";
 export type { HighlightTone } from "./HighlightTone";
+export type { HistoryEntry } from "./HistoryEntry";
+export type { HistorySettings } from "./HistorySettings";
 export type { HostAppearance } from "./HostAppearance";
 export type { HostAuth } from "./HostAuth";
 export type { HostAuthInput } from "./HostAuthInput";
