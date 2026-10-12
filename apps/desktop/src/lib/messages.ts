@@ -415,6 +415,7 @@ export const msg = {
     on: (label: string) => `Files on ${label}`,
     path: "Folder on the server",
     up: "Up one folder",
+    shellFolder: (path: string) => `Go to the shell's folder (${path})`,
     refresh: "Refresh",
     newFolder: "New folder",
     upload: "Upload…",

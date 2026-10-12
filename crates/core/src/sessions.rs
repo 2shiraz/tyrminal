@@ -356,7 +356,23 @@ impl Sessions {
         shell: Option<String>,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        self.open_local_in(owner, cols, rows, shell, None, sink).await
+    }
+
+    /// As [`Self::open_local_with`], starting in `start_in` (a duplicated tab's folder) when it is
+    /// an absolute path to an existing folder; otherwise in the home folder. The renderer learns
+    /// the folder from the shell's own marks, so it is checked here like any other input.
+    pub async fn open_local_in(
+        self: &Arc<Self>,
+        owner: &str,
+        cols: u16,
+        rows: u16,
+        shell: Option<String>,
+        start_in: Option<String>,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
         let generation = self.vault.require_unlocked().await?;
+        let start_in = start_in.and_then(|dir| start_folder(&dir));
         let shell = shell
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
@@ -366,7 +382,7 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let body = run_local(&sink, &relay, cols, rows, shell, input_rx);
+            let body = run_local(&sink, &relay, cols, rows, shell, start_in, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -1591,23 +1607,38 @@ async fn connect_ssh(
     Ok((Linked { conn, hops: chain }, reader, writer))
 }
 
+/// Longest starting folder accepted for a local terminal.
+const MAX_START_FOLDER: usize = 4096;
+
+/// `dir` as a starting folder: absolute, bounded, free of control characters, an existing folder.
+pub(crate) fn start_folder(dir: &str) -> Option<std::path::PathBuf> {
+    if dir.is_empty() || dir.len() > MAX_START_FOLDER || dir.chars().any(char::is_control) {
+        return None;
+    }
+    let path = std::path::PathBuf::from(dir);
+    (path.is_absolute() && path.is_dir()).then_some(path)
+}
+
 async fn run_local(
     sink: &Arc<dyn SessionSink>,
     relay: &Relay,
     cols: u16,
     rows: u16,
     shell: Option<std::path::PathBuf>,
+    start_in: Option<std::path::PathBuf>,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
     let program = shell.unwrap_or_else(tyrminal_pty::default_shell);
     let mut spec = ShellSpec::new(&program);
     spec.cols = cols;
     spec.rows = rows;
-    // Start in the user's home directory when it is known and valid.
-    spec.cwd = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(Into::into)
-        .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir());
+    // Start in the requested folder, else the user's home directory, when it is known and valid.
+    spec.cwd = start_in.or_else(|| {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(Into::into)
+            .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir())
+    });
     // A login shell, as terminal applications conventionally start (where the shell has one).
     spec.args = tyrminal_pty::login_args(&program);
     match tyrminal_pty::spawn(&spec) {
@@ -1928,6 +1959,31 @@ impl Sessions {
     ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
         let (_, conn) = self.connection(owner, session_id)?;
         crate::shell_integration::remote_remove(&conn).await
+    }
+}
+
+#[cfg(test)]
+mod start_folder_tests {
+    use super::*;
+
+    #[test]
+    fn a_start_folder_must_be_an_existing_absolute_folder_without_controls() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = dir.path().to_string_lossy().into_owned();
+        assert_eq!(start_folder(&ok).as_deref(), Some(dir.path()));
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"x").unwrap();
+        for bad in [
+            String::new(),
+            "relative/dir".to_owned(),
+            file.to_string_lossy().into_owned(),
+            dir.path().join("missing").to_string_lossy().into_owned(),
+            format!("{ok}\n"),
+            format!("{ok}\u{1b}]0;x"),
+            format!("/{}", "a".repeat(MAX_START_FOLDER)),
+        ] {
+            assert_eq!(start_folder(&bad), None, "{bad:?}");
+        }
     }
 }
 
