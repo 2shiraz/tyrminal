@@ -125,7 +125,8 @@ function Steps({ rows }: { rows: Row[] }) {
             {row.label}
           </li>
         ) : (
-          <li key={`r${index}`} data-kind={row.kind} aria-current={row.kind === "now" ? "step" : undefined}>
+          // Keyed by state too, so a step that changes (pending, now, done) appears afresh.
+          <li key={`r${index}-${row.kind}`} data-kind={row.kind} aria-current={row.kind === "now" ? "step" : undefined}>
             <span className="connect-marker" aria-hidden="true">
               {row.kind === "done" && <IconCheck size={14} />}
               {row.kind === "fail" && <IconX size={14} />}

@@ -4,6 +4,7 @@ import type { Destination } from "../../app/AppShell";
 import { msgN } from "../../lib/messages-notify";
 import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { animateOut, useFlip } from "../../lib/motion";
 import { msgC } from "../../lib/messages-c";
 import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -105,6 +106,12 @@ export function TabStrip({
   });
   const PageIcon = PAGE_ICONS[destination];
 
+  // Tabs slide aside when one opens, closes or moves, and a new one fades in (lib/motion.ts).
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useFlip(tabsRef);
+  /** A tab closed with the pointer shrinks out first; from the keyboard it closes at once. */
+  const closeWithPointer = (id: number) => animateOut(tabRefs.current.get(id), () => onClose(id), "scale(0.94)");
+
   function focusTab(index: number) {
     const id = index < 0 ? null : ws.tabs[index]?.id;
     const element = id === null || id === undefined ? tabRefs.current.get(-1) : tabRefs.current.get(id);
@@ -162,7 +169,7 @@ export function TabStrip({
   return (
     <div className="tabstrip">
       {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
-      <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions}>
+      <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions} ref={tabsRef}>
         <div
           ref={(el) => {
             if (el) tabRefs.current.set(-1, el);
@@ -188,6 +195,7 @@ export function TabStrip({
           return (
             <div
               key={tab.id}
+              data-flip-key={tab.id}
               ref={(el) => {
                 if (el) tabRefs.current.set(tab.id, el);
                 else tabRefs.current.delete(tab.id);
@@ -205,7 +213,7 @@ export function TabStrip({
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => onRenaming(tab.id)}
               onAuxClick={(event) => {
-                if (event.button === 1) onClose(tab.id);
+                if (event.button === 1) closeWithPointer(tab.id);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -279,7 +287,7 @@ export function TabStrip({
                 title={msg.nav.closeTab(title)}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onClose(tab.id);
+                  closeWithPointer(tab.id);
                 }}
               >
                 <IconX size={14} />

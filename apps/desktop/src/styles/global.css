@@ -1178,13 +1178,15 @@ kbd,
   border-radius: var(--radius-control);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
-  animation: menu-in var(--motion-base) var(--ease-out);
+  transform-origin: top left;
+  animation: menu-in var(--duration-pop) var(--ease-out);
 }
 
+/* Menus, the palette and tooltips: scale 0.98 to 1 with a fade, from their anchor. */
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    transform: scale(0.98);
   }
 }
 
@@ -1255,7 +1257,7 @@ kbd,
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
-  animation: toast-in var(--motion-slow) var(--ease-spring);
+  animation: toast-in var(--duration-fast) var(--ease-out);
 }
 
 .toast > svg {
@@ -1272,10 +1274,11 @@ kbd,
   color: var(--danger);
 }
 
+/* Toasts rise from the status bar edge. */
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.97);
+    transform: translateY(8px);
   }
 }
 
@@ -1631,14 +1634,6 @@ kbd,
   max-width: 1120px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-6) var(--space-7);
-  animation: page-in var(--motion-slow) var(--ease-out);
-}
-
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
 }
 
 .page-header {
@@ -1780,13 +1775,14 @@ kbd,
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--motion-slow) var(--ease-out);
+  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
+/* Side panels, the host panel and drawers slide 8 px in from their edge. */
 @keyframes panel-in {
   from {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(8px);
   }
 }
 
@@ -1970,7 +1966,8 @@ kbd,
 }
 
 .palette[open] {
-  animation: dialog-in var(--motion-base) var(--ease-out);
+  transform-origin: top center;
+  animation: menu-in var(--duration-pop) var(--ease-out);
 }
 
 .palette::backdrop {
@@ -2598,6 +2595,11 @@ mark {
   border-radius: 50%;
 }
 
+/* A step appears as its event arrives (ConnectionSheet keys rows by their state). */
+.connect-steps li {
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
 .connect-steps li[data-kind="now"] {
   font-weight: var(--weight-medium);
 }
@@ -2724,7 +2726,15 @@ mark {
   box-shadow: var(--shadow-3);
   font-size: var(--text-sm);
   transform: translateX(-50%);
-  animation: toast-in var(--motion-slow) var(--ease-spring);
+  animation: banner-in var(--duration-fast) var(--ease-out);
+}
+
+/* Centred with translateX(-50%), so it rises with its own keyframes. */
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
 }
 
 .term-banner > svg {
@@ -2969,8 +2979,8 @@ button[data-tooltip]::after {
   opacity: 0;
   transform: translate(-50%, -2px);
   transition:
-    opacity var(--motion-fast) var(--ease-out) 0s,
-    transform var(--motion-fast) var(--ease-out) 0s;
+    opacity var(--duration-pop) var(--ease-out) 0s,
+    transform var(--duration-pop) var(--ease-out) 0s;
 }
 
 button[data-tooltip][data-tooltip-side="right"]::after {
@@ -3528,11 +3538,38 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .tabstrip-tabs {
+  position: relative;
   display: flex;
   flex: none;
   align-items: flex-end;
   gap: 2px;
   align-self: stretch;
+}
+
+
+/* A row that was just saved: one 400 ms tint (lib/motion.ts flashSaved). */
+[data-saved-flash] {
+  position: relative;
+}
+
+[data-saved-flash]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent-soft);
+  pointer-events: none;
+  animation: saved-flash 400ms var(--ease-out) forwards;
+}
+
+@keyframes saved-flash {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
 }
 
 .detached-shell {
@@ -3958,7 +3995,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   min-width: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  animation: panel-in var(--motion-base) var(--ease-out);
+  animation: panel-in var(--duration-panel) var(--ease-out);
 }
 
 /* Too narrow for the list and the panel side by side: the panel covers the list (made inert). */

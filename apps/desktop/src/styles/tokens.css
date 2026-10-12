@@ -90,6 +90,9 @@
   --duration-fast: 140ms;
   --duration-base: 180ms;
   --duration-slow: 220ms;
+  --duration-pop: 120ms; /* menus, the palette and tooltips, from their anchor */
+  --duration-panel: 160ms; /* side panels, the host panel and drawers */
+  --duration-move: 160ms; /* something sliding to a new place (tab indicator, list rows) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -383,6 +386,9 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-press: 0ms;
+    --duration-pop: 0ms;
+    --duration-panel: 0ms;
+    --duration-move: 0ms;
     --duration-fast: 0ms;
     --duration-base: 0ms;
     --duration-slow: 0ms;
@@ -391,6 +397,9 @@
 
 :root[data-reduce-motion="true"] {
   --duration-press: 0ms;
+  --duration-pop: 0ms;
+  --duration-panel: 0ms;
+  --duration-move: 0ms;
   --duration-fast: 0ms;
   --duration-base: 0ms;
   --duration-slow: 0ms;
