@@ -24,6 +24,8 @@ import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { HostEditor } from "../hosts/HostEditor";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
+// compromised-password check (SEC-11)
+import { PasswordCheckSetting } from "../password-check/PasswordCheckSetting";
 import { AboutSection } from "./AboutSection";
 import { WorkspaceSettings } from "../layouts/WorkspaceSettings"; // agent C: workspaces
 import { msgC } from "../../lib/messages-c";
@@ -411,6 +413,8 @@ export function SettingsView({ initialSection }: { initialSection?: Section | un
                 </button>
               </div>
               <QuickUnlockSetting key={quickKey} onEnable={() => setDialog("quick")} />
+              {/* compromised-password check (SEC-11) */}
+              <PasswordCheckSetting />
             </section>
 
             <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">

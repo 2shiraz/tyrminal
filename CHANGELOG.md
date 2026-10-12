@@ -28,3 +28,10 @@ pre-releases are not stable and have not been independently security reviewed.
 - Test layers: Rust unit/property/known-answer tests, OpenSSH lab (Docker or local sshd),
   native end-to-end tests driving the real application, browser UI and visual regression tests
   in a pinned container, contrast checks, fuzz targets, cargo-deny, secret scanning.
+- On request, the password of the identity a host uses can be typed into an SSH session at a
+  sudo prompt, after a confirmation that names the identity (never automatically, never with
+  Enter).
+- Deleting an identity that hosts or groups use asks whether to move them to another identity or
+  remove it from them, and shows how each host signs in afterwards.
+- Settings for a compromised-password check (off by default; only a 5-character hash prefix
+  would be sent). This build cannot make the request yet.

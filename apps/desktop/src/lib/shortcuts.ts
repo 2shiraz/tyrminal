@@ -55,7 +55,9 @@ export type ActionId =
   | "focusTerminal"
   | "focusSidebar"
   // agent D: inventory and snippets
-  | "suggest";
+  | "suggest"
+  // privilege prompts (KEY-18)
+  | "insertPassword";
 
 export interface Binding {
   key: string;
@@ -122,6 +124,8 @@ const mac: Record<ActionId, Binding> = {
   focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", mod: true, shift: true },
+  // privilege prompts (KEY-18)
+  insertPassword: { key: "p", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -165,6 +169,8 @@ const other: Record<ActionId, Binding> = {
   focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", ctrl: true, shift: true },
+  // privilege prompts (KEY-18)
+  insertPassword: { key: "p", ctrl: true, shift: true },
 };
 
 /** The current bindings: the platform defaults with the user's replacements applied (see below). */

@@ -176,6 +176,7 @@ export const msgC = {
       focusTerminal: "Focus terminal",
       focusSidebar: "Focus sidebar",
       suggest: "Command suggestions",
+      insertPassword: "Type identity password",
     } as Record<string, string>,
   },
   highlight: {

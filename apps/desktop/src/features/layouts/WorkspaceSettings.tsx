@@ -144,7 +144,7 @@ const GROUPS: [group: string, actions: ActionId[]][] = [
       "movePaneDown",
     ],
   ],
-  ["terminal", ["find", "copy", "paste", "zoomIn", "zoomOut", "zoomReset", "suggest", "previousCommand", "nextCommand"]],
+  ["terminal", ["find", "copy", "paste", "zoomIn", "zoomOut", "zoomReset", "suggest", "previousCommand", "nextCommand", "insertPassword"]],
   ["files", ["toggleFiles"]],
   ["snippets", ["toggleSnippets"]],
   ["navigation", ["palette", "toggleSidebar", "focusTerminal", "focusSidebar", "settings", "lock"]],
