@@ -66,10 +66,10 @@ struct Prompts {
     auth: Option<(String, oneshot::Sender<Option<Zeroizing<String>>>)>,
 }
 
-struct Entry {
+pub(crate) struct Entry {
     /// The window that may use the session; changes only by an accepted handoff.
     owner: Mutex<String>,
-    generation: u32,
+    pub(crate) generation: u32,
     /// Where output and events go, with the flow-control count (see `handoff`).
     relay: Arc<Relay>,
     input: mpsc::Sender<Input>,
@@ -80,6 +80,9 @@ struct Entry {
     connection: Mutex<Option<Arc<VerifiedConnection>>>,
     /// The session's SFTP channel, opened on first use.
     sftp: Mutex<Option<Arc<Sftp>>>,
+    // agent B: tunnels and history
+    /// The saved host an SSH session was opened for (`None` for local terminals).
+    pub(crate) host_id: Option<String>,
 }
 
 impl Entry {
@@ -114,6 +117,8 @@ pub struct Sessions {
     offers: Mutex<HashMap<String, Offer>>,
     /// Uploads whose content the window sends (dropped files).
     streams: Arc<Streams>,
+    // agent B: tunnels and history
+    pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -148,7 +153,14 @@ impl Sessions {
             edits: edits::Edits::default(),
             offers: Mutex::new(HashMap::new()),
             streams: Arc::new(Streams::default()),
+            // agent B: tunnels and history
+            tunnel_runs: crate::tunnels::TunnelRuns::default(),
         })
+    }
+
+    // agent B: tunnels and history
+    pub(crate) fn vault(&self) -> &Arc<VaultService> {
+        &self.vault
     }
 
     fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Entry>>> {
@@ -183,6 +195,7 @@ impl Sessions {
         owner: &str,
         generation: u32,
         sink: Arc<dyn SessionSink>,
+        host_id: Option<String>,
     ) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
         let id = random_token()?;
         let (input, input_rx) = mpsc::channel(64);
@@ -196,6 +209,7 @@ impl Sessions {
             prompts: Mutex::new(Prompts::default()),
             connection: Mutex::new(None),
             sftp: Mutex::new(None),
+            host_id,
         });
         let mut entries = self.entries();
         if entries.len() >= MAX_SESSIONS {
@@ -231,12 +245,12 @@ impl Sessions {
             }
         }
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation, sink)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()))?;
         let sink: Arc<dyn SessionSink> = entry.relay.clone();
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let ctx = TaskContext { terminal, ..TaskContext::new(&this, &entry, &sink) };
+            let ctx = TaskContext { terminal, ..TaskContext::new(&this, &session_id, &entry, &sink) };
             let body = run_ssh(&ctx, plan, cols, rows, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
@@ -253,7 +267,7 @@ impl Sessions {
         rows: u16,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
-        let (id, entry, input_rx) = self.register(owner, endpoint.generation, sink)?;
+        let (id, entry, input_rx) = self.register(owner, endpoint.generation, sink, None)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -274,7 +288,7 @@ impl Sessions {
         encoding: tyrminal_contracts::TerminalEncoding,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
-        let (id, entry, input_rx) = self.register(owner, generation, sink)?;
+        let (id, entry, input_rx) = self.register(owner, generation, sink, None)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -321,7 +335,7 @@ impl Sessions {
         let shell = shell
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
-        let (id, entry, input_rx) = self.register(owner, generation, sink)?;
+        let (id, entry, input_rx) = self.register(owner, generation, sink, None)?;
         let relay = Arc::clone(&entry.relay);
         let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
@@ -354,6 +368,8 @@ impl Sessions {
             )),
         };
         self.entries().remove(session_id);
+        // agent B: tunnels and history
+        self.tunnel_runs.session_ended(session_id).await;
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
@@ -367,7 +383,11 @@ impl Sessions {
     }
 
     /// The connected SSH link of a session the caller owns.
-    fn connection(&self, owner: &str, session_id: &str) -> Result<(Arc<Entry>, Arc<VerifiedConnection>), IpcError> {
+    pub(crate) fn connection(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<(Arc<Entry>, Arc<VerifiedConnection>), IpcError> {
         let entry = self.authorize(owner, session_id)?;
         let conn = entry
             .connection
@@ -1078,16 +1098,23 @@ struct TaskContext {
     sink: Arc<dyn SessionSink>,
     /// Encoding and terminal type of the host (UTF-8 and xterm-256color by default).
     terminal: tyrminal_contracts::HostTerminal,
+    sessions: Arc<Sessions>,
+    session_id: String,
+    /// The jump-chain hop being connected, for prompts (`None` for a direct connection).
+    hop: Mutex<Option<tyrminal_contracts::ChainPosition>>,
 }
 
 impl TaskContext {
-    fn new(sessions: &Arc<Sessions>, entry: &Arc<Entry>, sink: &Arc<dyn SessionSink>) -> Self {
+    fn new(sessions: &Arc<Sessions>, session_id: &str, entry: &Arc<Entry>, sink: &Arc<dyn SessionSink>) -> Self {
         Self {
             vault: Arc::clone(&sessions.vault),
             connect_slots: Arc::clone(&sessions.connect_slots),
             entry: Arc::clone(entry),
             sink: Arc::clone(sink),
             terminal: tyrminal_contracts::HostTerminal::default(),
+            sessions: Arc::clone(sessions),
+            session_id: session_id.to_owned(),
+            hop: Mutex::new(None),
         }
     }
 
@@ -1120,6 +1147,7 @@ impl TaskContext {
             max_attempts: MAX_AUTH_ATTEMPTS,
             message,
             echo,
+            hop: self.hop.lock().unwrap_or_else(|p| p.into_inner()).clone(),
         });
         let result = tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), answer).await;
         self.entry.prompts().auth = None;
@@ -1130,6 +1158,8 @@ impl TaskContext {
 /// The application's host-key policy: known keys pass, changed keys are refused outright, and an
 /// unknown key waits for an explicit decision. Pressing "connect" is never implicit trust.
 struct PromptingVerifier {
+    /// Which hop of a jump-host chain this verifier decides for, if any.
+    hop: Option<tyrminal_contracts::ChainPosition>,
     known: Vec<(KnownHost, String)>,
     generation: u32,
     vault: Arc<VaultService>,
@@ -1156,6 +1186,7 @@ impl HostKeyVerifier for PromptingVerifier {
                     algorithm: request.key.algorithm.clone(),
                     presented_fingerprint: request.key.fingerprint.clone(),
                     trusted_fingerprints,
+                    hop: self.hop.clone(),
                 });
                 TrustVerdict::Reject(RejectReason::Changed)
             }
@@ -1172,6 +1203,7 @@ impl HostKeyVerifier for PromptingVerifier {
                     resolved_address: request.resolved.map(|a| a.ip().to_string()),
                     algorithm: request.key.algorithm.clone(),
                     fingerprint: request.key.fingerprint.clone(),
+                    hop: self.hop.clone(),
                 });
                 let decision = tokio::time::timeout(Duration::from_secs(TRUST_PROMPT_TIMEOUT_SECS), answer).await;
                 self.entry.prompts().trust = None;
@@ -1306,8 +1338,9 @@ async fn run_ssh(
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
+    let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
-        Ok((conn, reader, writer)) => {
+        Ok((Linked { conn, hops }, reader, writer)) => {
             if let Some(n) = conn.negotiated() {
                 ctx.sink.event(SessionEvent::Negotiated {
                     kex: n.kex,
@@ -1331,6 +1364,14 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
+            // Saved tunnels that start with every connection to this host. Their own task, so
+            // the shell is usable at once; it holds the connection only while starting them.
+            let (sessions, owner, session_id) =
+                (Arc::clone(&ctx.sessions), ctx.entry.owner().clone(), ctx.session_id.clone());
+            let (tunnel_conn, tunnel_host) = (Arc::clone(&conn), plan_host.clone());
+            tokio::spawn(async move {
+                sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
+            });
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -1338,9 +1379,30 @@ async fn run_ssh(
             if let Ok(conn) = Arc::try_unwrap(conn) {
                 conn.disconnect().await;
             }
+            // Then the jump hosts, innermost first.
+            for hop in hops.into_iter().rev() {
+                hop.disconnect().await;
+            }
             outcome
         }
         Err(error) => Outcome::failed(error),
+    }
+}
+
+/// A session's transport: the connection to the host and, for a jump-host chain, the hops it
+/// runs through (first hop first). The hops must stay alive as long as the connection.
+struct Linked {
+    conn: VerifiedConnection,
+    hops: Vec<VerifiedConnection>,
+}
+
+fn hop_error(e: &SshError) -> IpcError {
+    match e {
+        SshError::ChannelDenied => {
+            err(ErrorCode::ChannelDenied, "A jump host refused to connect to the next host in the chain.")
+        }
+        SshError::Unreachable => err(ErrorCode::Unreachable, "A jump host could not reach the next host in the chain."),
+        other => from_ssh(other),
     }
 }
 
@@ -1349,31 +1411,66 @@ async fn connect_ssh(
     plan: ConnectionPlan,
     cols: u16,
     rows: u16,
-) -> Result<(VerifiedConnection, ShellReader, ShellWriter), IpcError> {
+) -> Result<(Linked, ShellReader, ShellWriter), IpcError> {
     ctx.state(SessionState::Connecting);
     // Bounds simultaneous connection attempts; released when this function returns.
     let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
 
-    let verifier = PromptingVerifier {
-        known: plan.known_hosts,
-        generation: plan.generation,
-        vault: Arc::clone(&ctx.vault),
-        entry: Arc::clone(&ctx.entry),
-        sink: Arc::clone(&ctx.sink),
-    };
-    let options = ConnectOptions::new(plan.endpoint);
-    let mut conn = tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?;
-
-    if let Some(text) = conn.banner() {
-        ctx.sink.event(SessionEvent::Banner { text });
+    // Jump hosts first, then the host. Every hop gets its own key exchange, host-key decision and
+    // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
+    // is sent to the next hop before the previous one is (INV-02 for every hop).
+    // A proxy applies to the connection that leaves this computer: the first hop's own setting.
+    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
+    let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
+    let mut chain: Vec<VerifiedConnection> = Vec::new();
+    for (index, (label, endpoint, username, auth, proxy)) in hops.chain(std::iter::once(first)).enumerate() {
+        // Prompts name the hop when there is more than one, so a jump host's trust or password
+        // prompt cannot be mistaken for the destination's.
+        let hop = (total > 1).then(|| tyrminal_contracts::ChainPosition {
+            index: u32::try_from(index + 1).unwrap_or(u32::MAX),
+            total,
+            label,
+        });
+        *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = hop.clone();
+        if !chain.is_empty() {
+            ctx.state(SessionState::Connecting);
+        }
+        let verifier = PromptingVerifier {
+            hop,
+            known: plan.known_hosts.clone(),
+            generation: plan.generation,
+            vault: Arc::clone(&ctx.vault),
+            entry: Arc::clone(&ctx.entry),
+            sink: Arc::clone(&ctx.sink),
+        };
+        let options = ConnectOptions::new(endpoint.clone());
+        let mut conn = match (chain.last(), proxy) {
+            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
+            (None, Some(proxy)) => {
+                let stream = tyrminal_ssh::connect_via_proxy(&proxy, &endpoint.host, endpoint.port)
+                    .await
+                    .map_err(crate::tunnels::proxy_error)?;
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+            }
+            (Some(via), _) => {
+                let stream = via.open_hop(&endpoint.host, endpoint.port).await.map_err(|e| hop_error(&e))?;
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+            }
+        };
+        if let Some(text) = conn.banner() {
+            ctx.sink.event(SessionEvent::Banner { text });
+        }
+        ctx.state(SessionState::Authenticating);
+        authenticate(ctx, &mut conn, &username, auth).await?;
+        chain.push(conn);
     }
-    ctx.state(SessionState::Authenticating);
-    authenticate(ctx, &mut conn, &plan.username, plan.auth).await?;
+    let conn = chain.pop().ok_or_else(internal)?;
 
     ctx.state(SessionState::OpeningChannel);
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
-    Ok((conn, reader, writer))
+    Ok((Linked { conn, hops: chain }, reader, writer))
 }
 
 async fn run_local(

@@ -170,6 +170,8 @@ export function installMockBackend(options) {
             resolvedAddress: "198.51.100.7",
             algorithm: "ssh-ed25519",
             fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8",
+            // agent B: tunnels and history
+            hop: options.trustPromptHop ?? null,
           }),
         30,
       );
@@ -192,6 +194,8 @@ export function installMockBackend(options) {
     const s = state.sessions.get(sessionId);
     if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
     const text = new TextDecoder().decode(bytes);
+    // Everything the UI sent to any session, so a test can wait for a terminal reply to arrive.
+    window.__mockReceived = (window.__mockReceived ?? "") + text;
     let out = "";
     for (const ch of text) {
       if (ch === "\r") {
@@ -283,6 +287,130 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // agent B: tunnels and history
+    ...(() => {
+      // Synthetic rules and runs. Exposure is checked the way the native side does it, so the
+      // approval dialog is exercised; nothing here binds a socket.
+      const rules = [];
+      const runs = new Map();
+      const jumps = new Map();
+      const proxies = new Map();
+      window.__mockJumps = jumps;
+      window.__mockProxies = proxies;
+      let nextRule = 1;
+      let nextRun = 1;
+      const loopback = (h) => /^(localhost|::1|\[::1\]|127\.\d+\.\d+\.\d+)$/i.test(h.trim());
+      const exposed = (t) => t.bindHost.trim() !== "" && (t.bindHost.trim() === "*" || !loopback(t.bindHost));
+      const hostLabel = (hostId) => state.hosts.find((h) => h.id === hostId)?.label ?? null;
+      const summary = (t) => ({ ...t, hostLabel: hostLabel(t.hostId) });
+      const view = (r) => ({ ...r.view });
+      window.__mockTunnelRuns = runs;
+      return {
+        tunnel_list: () => rules.map(summary),
+        tunnel_save: (a) => {
+          const t = a.tunnel;
+          if (!t.name.trim()) throw { code: "INVALID_INPUT", message: "Enter a name." };
+          if (exposed(t) && !t.allowExternal) {
+            throw { code: "INVALID_INPUT", message: "This listener would be reachable from other computers. Confirm that exposure to save it." };
+          }
+          const bindHost = t.bindHost.trim() || (t.kind === "remote" ? "localhost" : "127.0.0.1");
+          const saved = { ...t, id: t.id ?? id(800 + nextRule++), bindHost, allowExternal: exposed(t), updatedAt: now };
+          delete saved.hostLabel;
+          const at = rules.findIndex((r) => r.id === saved.id);
+          if (at >= 0) rules[at] = saved;
+          else rules.push(saved);
+          return summary(saved);
+        },
+        tunnel_duplicate: (a) => {
+          const source = rules.find((r) => r.id === a.id);
+          if (!source) throw { code: "NOT_FOUND", message: "That tunnel no longer exists." };
+          const copy = { ...source, id: id(800 + nextRule++), name: `${source.name} (copy)`, autoStart: false };
+          rules.push(copy);
+          return summary(copy);
+        },
+        tunnel_delete: (a) => {
+          const at = rules.findIndex((r) => r.id === a.id);
+          if (at >= 0) rules.splice(at, 1);
+        },
+        tunnel_start: (a) => {
+          const session = state.sessions.get(a.sessionId);
+          const rule = rules.find((r) => r.id === a.tunnelId);
+          if (!session) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+          if (!rule) throw { code: "NOT_FOUND", message: "That tunnel no longer exists." };
+          if (hostLabel(rule.hostId) !== session.host) throw { code: "INVALID_INPUT", message: "That tunnel belongs to a different host than this session." };
+          if ([...runs.values()].some((r) => r.view.state === "running" && r.view.tunnelId === rule.id && r.view.sessionId === a.sessionId)) {
+            throw { code: "CONFLICT", message: "That tunnel is already running on this session." };
+          }
+          if (rule.bindPort === 8080) {
+            throw { code: "IN_USE", message: "The listen port could not be opened. It may be in use, or need administrator rights." };
+          }
+          const runId = `${nextRun++}`.padStart(32, "c");
+          const run = {
+            view: {
+              runId,
+              tunnelId: rule.id,
+              sessionId: a.sessionId,
+              name: rule.name,
+              kind: rule.kind,
+              bindHost: rule.bindHost,
+              boundPort: rule.bindPort || 40000 + nextRun,
+              destHost: rule.destHost,
+              destPort: rule.destPort,
+              state: "running",
+              activeConnections: 0,
+              totalConnections: 0,
+              refusedConnections: 0,
+              failedConnections: 0,
+              bytesOut: 0,
+              bytesIn: 0,
+              error: null,
+            },
+          };
+          runs.set(runId, run);
+          return view(run);
+        },
+        tunnel_stop: (a) => {
+          const run = runs.get(a.runId);
+          if (!run || run.view.state !== "running") throw { code: "NOT_FOUND", message: "That tunnel is not running." };
+          run.view.state = "stopped";
+          run.view.activeConnections = 0;
+        },
+        tunnel_active: () => {
+          for (const run of runs.values()) {
+            if (run.view.state === "running" && !state.sessions.has(run.view.sessionId)) {
+              run.view.state = "session_ended";
+              run.view.activeConnections = 0;
+            }
+          }
+          return [...runs.values()].map(view).sort((x, y) => (x.state === "running" ? 0 : 1) - (y.state === "running" ? 0 : 1));
+        },
+        tunnel_clear_ended: () => {
+          for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
+        },
+        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null, proxy: proxies.get(a.hostId) ?? null }),
+        host_connection_set: (a) => {
+          // Loops are refused as natively; the chain is returned first hop first.
+          const next = a.connection.jumpHostId;
+          for (let at = next, n = 0; at; at = jumps.get(at), n += 1) {
+            if (at === a.hostId || n > 8) throw { code: "INVALID_INPUT", message: "These jump hosts would form a loop. Choose a different jump host." };
+          }
+          if (next) jumps.set(a.hostId, next);
+          else jumps.delete(a.hostId);
+          const p = a.connection.proxy;
+          if (p) {
+            const before = proxies.get(a.hostId);
+            const keep = p.password === null && before?.passwordStored && before.username === p.username.trim();
+            proxies.set(a.hostId, { kind: p.kind, host: p.host, port: p.port, username: p.username.trim(), passwordStored: p.username.trim() !== "" && (keep || !!p.password) });
+          } else proxies.delete(a.hostId);
+          const chain = [];
+          for (let at = a.hostId; at; at = jumps.get(at)) chain.unshift(at);
+          return chain.map((hostId) => {
+            const h = state.hosts.find((x) => x.id === hostId);
+            return { hostId, label: h?.label ?? "", address: h?.address ?? "", port: h?.port ?? 22 };
+          });
+        },
+      };
+    })(),
     files_copy: (a) => {
       if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
       const node = fs.get(childPath(a.srcDir, a.name));

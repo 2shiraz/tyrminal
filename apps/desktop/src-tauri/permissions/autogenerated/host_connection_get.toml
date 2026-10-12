@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-connection-get"
+description = "Enables the host_connection_get command without any pre-configured scope."
+commands.allow = ["host_connection_get"]
+
+[[permission]]
+identifier = "deny-host-connection-get"
+description = "Denies the host_connection_get command without any pre-configured scope."
+commands.deny = ["host_connection_get"]

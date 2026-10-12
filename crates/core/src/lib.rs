@@ -24,6 +24,8 @@ mod telnet;
 mod transcode;
 mod validate;
 mod vault;
+// agent B: tunnels and history
+mod tunnels;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use files::{TransferSink, list_local, local_within};

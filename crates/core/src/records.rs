@@ -67,6 +67,10 @@ pub(crate) struct HostRecord {
     /// Encoding and terminal type. Absent (UTF-8, xterm-256color) in older records.
     #[serde(default, skip_serializing_if = "tyrminal_contracts::HostTerminal::is_default")]
     pub terminal: tyrminal_contracts::HostTerminal,
+    // agent B: tunnels and history
+    /// Jump host and other advanced connection settings. Absent in older records.
+    #[serde(default, skip_serializing_if = "StoredConnection::is_default")]
+    pub connection: StoredConnection,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -119,6 +123,66 @@ pub(crate) struct TrustEventRecord {
     pub removed_fingerprint: String,
     pub reason: String,
     pub at: u64,
+}
+
+// agent B: tunnels and history
+/// How a host is reached beyond address and credentials (`tunnels.rs` validates it).
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StoredConnection {
+    /// Host id of the jump host (`ProxyJump`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<StoredProxy>,
+}
+
+/// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub(crate) struct StoredProxy {
+    pub kind: tyrminal_contracts::ProxyType,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+}
+
+impl StoredConnection {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Bytes of strings this adds to a host record (for the record's size reservation).
+    pub fn content_len(&self) -> usize {
+        self.jump_host.as_ref().map_or(0, String::len)
+            + self
+                .proxy
+                .as_ref()
+                .map_or(0, |p| p.host.len() + p.username.len() + p.password.as_ref().map_or(0, |s| s.len()))
+    }
+}
+
+// Agent B's record kinds start at 100 so the two parallel branches never pick the same number.
+pub(crate) const KIND_TUNNEL: u16 = 100;
+
+/// A saved port-forwarding rule (`tunnels.rs` validates every field before it is stored).
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct TunnelRecord {
+    pub name: String,
+    pub host_id: String,
+    pub kind: tyrminal_contracts::TunnelKind,
+    pub bind_host: String,
+    pub bind_port: u16,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub dest_host: String,
+    #[serde(default)]
+    pub dest_port: u16,
+    #[serde(default)]
+    pub allow_external: bool,
+    #[serde(default)]
+    pub auto_start: bool,
+    pub updated_at: u64,
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does
@@ -192,6 +256,7 @@ mod tests {
             last_connected_at: None,
             protocol: tyrminal_contracts::HostProtocol::Ssh,
             terminal: tyrminal_contracts::HostTerminal::default(),
+            connection: StoredConnection::default(),
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);

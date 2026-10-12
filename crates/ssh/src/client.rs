@@ -163,11 +163,14 @@ fn config(options: &ConnectOptions) -> Arc<client::Config> {
 ///
 /// This is the only type with authentication methods (INV-02). It holds no credential.
 pub struct VerifiedConnection {
-    handle: Handle<ErasedHandler>,
+    pub(crate) handle: Handle<ErasedHandler>,
     host_key: PresentedHostKey,
     record: Arc<Mutex<TrustRecord>>,
-    request_timeout: Duration,
+    pub(crate) request_timeout: Duration,
     authenticated: bool,
+    // agent B: tunnels and history
+    /// Server-side listeners this connection asked for (`forward.rs`).
+    pub(crate) routes: Arc<crate::forward::Routes>,
 }
 
 impl core::fmt::Debug for VerifiedConnection {
@@ -180,7 +183,7 @@ impl core::fmt::Debug for VerifiedConnection {
 }
 
 /// Type-erased handler so `VerifiedConnection` is not generic over the verifier.
-struct ErasedHandler(Box<dyn ErasedCheck>);
+pub(crate) struct ErasedHandler(Box<dyn ErasedCheck>, Arc<crate::forward::Routes>);
 
 trait ErasedCheck: Send {
     fn check<'a>(
@@ -227,6 +230,87 @@ impl client::Handler for ErasedHandler {
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         self.0.negotiated(names);
+        Ok(())
+    }
+
+    // agent B: tunnels and history
+    // russh accepts every server-opened channel by default. Only `forwarded-tcpip` channels for a
+    // port this connection asked the server to forward are accepted; everything else (agent,
+    // X11, session, direct-tcpip, stream-local) is refused, so a server cannot open channels
+    // the user never enabled.
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        if self.1.deliver(connected_port, channel) {
+            reply.accept().await;
+        } else {
+            reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        }
+        Ok(())
+    }
+
+    async fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        _channel: russh::Channel<client::Msg>,
+        _socket_path: &str,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        _channel: russh::Channel<client::Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_x11(
+        &mut self,
+        _channel: russh::Channel<client::Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_session(
+        &mut self,
+        _channel: russh::Channel<client::Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_direct_tcpip(
+        &mut self,
+        _channel: russh::Channel<client::Msg>,
+        _host_to_connect: &str,
+        _port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
         Ok(())
     }
 }
@@ -289,7 +373,9 @@ where
         phase: phase_tx,
     };
 
-    let handshake = client::connect_stream(config(options), stream, ErasedHandler(Box::new(handler)));
+    let routes = Arc::new(crate::forward::Routes::default());
+    let handshake =
+        client::connect_stream(config(options), stream, ErasedHandler(Box::new(handler), Arc::clone(&routes)));
     tokio::pin!(handshake);
 
     // The handshake deadline restarts on each phase change and is suspended while the verifier
@@ -320,6 +406,7 @@ where
             record,
             request_timeout: options.request_timeout,
             authenticated: false,
+            routes,
         }),
         // A handle without a recorded acceptance must never be usable.
         (Ok(handle), _, _) => {

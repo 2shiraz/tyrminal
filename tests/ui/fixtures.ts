@@ -8,6 +8,9 @@ export interface MockOptions {
   scheme?: string;
   renderer?: "auto" | "compatibility";
   trustPromptFor?: string;
+  // agent B: tunnels and history
+  /** Name the jump-chain hop in that trust prompt. */
+  trustPromptHop?: { index: number; total: number; label: string };
   hostKeyChangedFor?: string;
   /** Simulate a WebView without WebGL (the GPU renderer must fall back). */
   noWebgl?: boolean;

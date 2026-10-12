@@ -8,3 +8,5 @@ pub mod sessions;
 pub mod settings;
 pub mod snippets;
 pub mod vault;
+// agent B: tunnels and history
+pub mod tunnels;

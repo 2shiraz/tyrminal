@@ -7,6 +7,8 @@ import { IconServer } from "../../components/ui/icons";
 import { hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+// agent B: tunnels and history
+import { HostAdvancedSection, useHostAdvanced } from "../tunnels/HostAdvanced";
 import {
   DEFAULT_SERIAL,
   DEFAULT_TERMINAL,
@@ -65,6 +67,8 @@ export function HostEditor({
   onSaved: (saved: HostSummary) => void;
 }) {
   const source = host ?? initial;
+  // agent B: tunnels and history
+  const advanced = useHostAdvanced(host?.id ?? null);
   const [groupId, setGroupId] = useState<string | null>(host ? host.groupId : defaultGroupId);
   const [label, setLabel] = useState(host?.label ?? initial?.label ?? initial?.address ?? "");
   const [address, setAddress] = useState(source?.address ?? "");
@@ -122,23 +126,40 @@ export function HostEditor({
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t !== "");
-    // Telnet and serial hosts sign in at the device's own prompt: no stored credentials.
-    const saved = await run(() =>
-      protocol === "ssh"
-        ? hostsApi.save({ id: host?.id ?? null, label, address, port: portNumber, username, auth, groupId, tags: tagList, protocol: { type: "ssh" }, terminal })
-        : hostsApi.save({
-            id: host?.id ?? null,
-            label,
-            address: protocol === "serial" ? serial.path : address,
-            port: protocol === "serial" ? null : portNumber,
-            username: "",
-            auth: { kind: "ask_password" },
-            groupId,
-            tags: tagList,
-            protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
-            terminal,
-          }),
-    );
+    // Telnet and serial hosts sign in at the device's own prompt: no stored credentials, and the
+    // advanced connection settings (jump host, proxy) apply to SSH only.
+    const saved = await run(async () => {
+      if (protocol !== "ssh") {
+        return hostsApi.save({
+          id: host?.id ?? null,
+          label,
+          address: protocol === "serial" ? serial.path : address,
+          port: protocol === "serial" ? null : portNumber,
+          username: "",
+          auth: { kind: "ask_password" },
+          groupId,
+          tags: tagList,
+          protocol: protocol === "serial" ? { type: "serial", settings: serial } : { type: "telnet" },
+          terminal,
+        });
+      }
+      // agent B: tunnels and history (advanced settings: see HostAdvanced.tsx for the order)
+      await advanced.saveBefore();
+      const result = await hostsApi.save({
+        id: host?.id ?? null,
+        label,
+        address,
+        port: portNumber,
+        username,
+        auth,
+        groupId,
+        tags: tagList,
+        protocol: { type: "ssh" },
+        terminal,
+      });
+      await advanced.saveAfter(result.id);
+      return result;
+    });
     setPassword("");
     if (saved) onSaved(saved);
   }
@@ -274,6 +295,9 @@ export function HostEditor({
           )}
         </fieldset>
         )}
+
+        {/* agent B: tunnels and history */}
+        {protocol === "ssh" && <HostAdvancedSection host={host} state={advanced} />}
 
         {ready && protocol === "ssh" && (
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
