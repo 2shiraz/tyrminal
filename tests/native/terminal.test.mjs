@@ -530,6 +530,50 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     await t.waitForText("NOW-/tmp/tyr-osc7-END");
     await app.screenshot("w06-directory-restored");
   });
+
+  test("focus layout and the unsaved-layout indicator with real sessions", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await runCommand("Split pane right");
+    await runCommand("Split pane down");
+    const visible = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes" });
+    await s.until(() => s.execute(`return document.querySelectorAll('.pane .status-dot[data-tone="ok"]').length === 3 || null`), { describe: "three shells" });
+
+    await runCommand("Focus layout");
+    await s.until(async () => ((await visible()) === 1 ? true : null), { describe: "one pane in focus layout" });
+    const items = await s.findAll('nav[aria-label="Panes in this tab"] .focus-item');
+    assert.equal(items.length, 3);
+    await s.click(items[0]);
+    await s.until(() => s.execute(`return document.querySelector('nav[aria-label="Panes in this tab"] .focus-item[aria-current="true"]') === document.querySelectorAll('nav[aria-label="Panes in this tab"] .focus-item')[0] || null`), { describe: "first pane shown" });
+    // The shown pane is a live shell (its session kept running while it was listed).
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo FOCUS-OK\n");
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden]) .xterm-rows')?.textContent?.includes("FOCUS-OK") || null`), { describe: "input in the focused pane" });
+    await runCommand("Leave focus layout");
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes again" });
+
+    // Saved as a layout: clean; rearranged: marked unsaved; saved again: clean.
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Three", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    const dirty = () => s.execute(`return document.querySelector(".tab-layout")?.dataset.dirty ?? null`);
+    await s.until(async () => ((await s.find(".tab-layout")) ? true : null), { describe: "layout indicator" });
+    assert.equal(await dirty(), null);
+    await runCommand("Arrange panes side by side");
+    await s.until(async () => ((await dirty()) === "true" ? true : null), { describe: "unsaved marker" });
+    await runCommand("Save layout Three", "Three");
+    await s.until(async () => ((await dirty()) === null ? true : null), { describe: "saved again" });
+    await app.screenshot("w07-focus-and-unsaved");
+  });
 });
 
 describe("a tab moved to its own window", { concurrency: false }, () => {
