@@ -1385,3 +1385,134 @@ async fn sftp_folders_copy_whole_trees_skip_links_and_never_leave_partial_folder
     client.send(&format!("rm -rf {base} && echo RM-$((40+2))\n")).await;
     client.output_until("RM-42").await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_link_lost_mid_transfer_fails_promptly_and_leaves_no_partial_file() {
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let name = format!("tyr-lost-{}.bin", std::process::id());
+    client.send(&format!("head -c 268435456 /dev/zero > ~/{name} && echo BIG-$((40+2))\n")).await;
+    client.output_until("BIG-42").await;
+
+    let down = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &home, &name, down.path().to_path_buf(), false, sink).await.unwrap();
+    // Wait until bytes are flowing, then kill this connection's server process.
+    loop {
+        match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.unwrap() {
+            Some(TransferEvent::Progress { .. }) => break,
+            Some(other) => panic!("transfer ended before the link was cut: {other:?}"),
+            None => panic!("closed"),
+        }
+    }
+    client.send("kill -9 $PPID\n").await;
+    let started = std::time::Instant::now();
+    let end = transfer_end(&mut rx).await;
+    let TransferEvent::Failed { error } = end else { panic!("expected a failure, got {end:?}") };
+    assert!(matches!(error.code, ErrorCode::Disconnected | ErrorCode::Timeout), "{error:?}");
+    assert!(started.elapsed() < Duration::from_secs(40), "the failure was reported promptly");
+    let leftovers: Vec<_> = std::fs::read_dir(down.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert!(leftovers.is_empty(), "no partial or temporary file is left: {leftovers:?}");
+    assert_eq!(client.until_closed().await.0, Some(ErrorCode::Disconnected));
+
+    // Clean up through a new session.
+    let mut again = Client::open_ssh(&f.core, &host).await;
+    again.until_connected().await;
+    again.send(&format!("rm -f ~/{name}; echo RM-$((40+2))\n")).await;
+    again.output_until("RM-42").await;
+}
+
+/// Peak resident memory of this process, in KiB (Linux only).
+fn peak_rss_kib() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmHWM:"))?;
+    line.split_whitespace().nth(1)?.parse().ok()
+}
+
+fn sha256_file(path: &std::path::Path) -> Vec<u8> {
+    use sha2::Digest;
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).unwrap();
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf).unwrap();
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    hasher.finalize().to_vec()
+}
+
+/// The Phase 06 gate: a 2 GiB file survives a round trip byte for byte with bounded memory.
+/// Opt-in (it moves 4 GiB): `TYRMINAL_BIG_TRANSFER=1`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn two_gib_round_trip_is_byte_for_byte_with_bounded_memory() {
+    // Never a silent pass: the runner reports this test BLOCKED unless it is opted in.
+    assert!(std::env::var_os("TYRMINAL_BIG_TRANSFER").is_some(), "set TYRMINAL_BIG_TRANSFER=1 (moves 2 GiB each way)");
+    let f = fixture().await;
+    let host = f.key_host("a").await;
+    let mut client = Client::open_ssh(&f.core, &host).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    let id = client.session.clone();
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &id, None).await.unwrap().path;
+    let dir_name = format!("tyr-big-{}", std::process::id());
+    s.make_dir(WINDOW, &id, &home, &dir_name).await.unwrap();
+    let dir = format!("{}/{dir_name}", home.trim_end_matches('/'));
+
+    // 2 GiB of pseudo-random data, written in 1 MiB blocks.
+    let local = TempDir::new().unwrap();
+    let source = local.path().join("big.bin");
+    {
+        use std::io::Write;
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&source).unwrap());
+        for i in 0..2048u64 {
+            file.write_all(&pattern(1 << 20, i + 1)).unwrap();
+        }
+        file.flush().unwrap();
+    }
+    let size = 2u64 << 30;
+    let before = peak_rss_kib();
+
+    let (sink, mut rx) = transfer_sink();
+    s.upload(WINDOW, &id, source.clone(), &dir, "big.bin", false, sink).await.unwrap();
+    assert_eq!(wait_long(&mut rx).await, done(size));
+    let back = TempDir::new().unwrap();
+    let (sink, mut rx) = transfer_sink();
+    s.download(WINDOW, &id, &dir, "big.bin", back.path().to_path_buf(), false, sink).await.unwrap();
+    assert_eq!(wait_long(&mut rx).await, done(size));
+    assert_eq!(sha256_file(&source), sha256_file(&back.path().join("big.bin")), "round trip changed bytes");
+
+    // Bounded memory: the transfers themselves add far less than the file size.
+    if let (Some(before), Some(after)) = (before, peak_rss_kib()) {
+        let grown_mib = after.saturating_sub(before) / 1024;
+        eprintln!("peak RSS grew by {grown_mib} MiB over 4 GiB transferred");
+        assert!(grown_mib < 256, "peak memory grew by {grown_mib} MiB");
+    }
+    s.remove_file(WINDOW, &id, &dir, "big.bin").await.unwrap();
+    s.remove_file(WINDOW, &id, &home, &dir_name).await.unwrap();
+}
+
+/// Like `transfer_end`, for transfers that take minutes.
+async fn wait_long(rx: &mut mpsc::UnboundedReceiver<TransferEvent>) -> TransferEvent {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(900), rx.recv()).await.expect("transfer timed out") {
+            Some(TransferEvent::Progress { .. }) => {}
+            Some(other) => return other,
+            None => panic!("transfer channel closed"),
+        }
+    }
+}
