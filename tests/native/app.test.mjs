@@ -56,6 +56,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   const hostText = () => s.until(() => s.execute(`return document.querySelector('[data-testid="host-list"] li')?.innerText ?? null`), { describe: "a host entry" });
   // Read in one step in the page, so a re-render cannot invalidate an element handle mid-read.
   const heading = () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" });
+  // The host's own Connect button: other buttons on the page may also read "Connect".
+  const connectHost = async (label) => s.click(await s.waitFor(`[data-testid="host-list"] button[aria-label="Connect to ${label}"]`));
   const listItemText = () => s.until(() => s.execute(`return document.querySelector("ul.list li")?.innerText ?? null`), { describe: "a list row" });
 
   before(async () => {
@@ -93,7 +95,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    await s.until(async () => (await heading()) === "Home", { describe: "main window" });
+    // A new vault is empty, so Home settles on its welcome heading ("Home" shows only while loading).
+    await s.until(async () => (await heading()) === "Welcome to Tyrminal", { describe: "main window" });
     assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
     await app.screenshot("03-home-empty");
     await nav("Hosts");
@@ -136,7 +139,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   });
 
   test("first connection asks to verify the server, then runs a fixture command", async () => {
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => (await s.find("dialog")) && /Verify this server/.test(await s.text(await s.find("dialog h2"))), {
       describe: "trust prompt",
     });
@@ -243,14 +246,15 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     const before = authLogLines("b");
 
     await nav("Hosts");
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => /identity has changed/.test(await s.execute("return document.body.innerText")), {
       describe: "changed-key warning",
     });
-    const overlay = await s.text(await s.waitFor(".terminal-overlay"));
+    // The pane's connection sheet says why it stopped; it is not a dialog (asserted below).
+    const overlay = await s.text(await s.waitFor(".connection-sheet"));
     assert.match(overlay, /no password or key was sent/);
     const shown = [];
-    for (const element of await s.findAll(".terminal-overlay .fingerprint")) shown.push(await s.attribute(element, "aria-label"));
+    for (const element of await s.findAll(".connection-sheet .fingerprint")) shown.push(await s.attribute(element, "aria-label"));
     assert.deepEqual(shown, [lab.servers.b.hostKeyEd25519Fingerprint, lab.servers.a.hostKeyEd25519Fingerprint]);
     assert.equal(await s.find("dialog"), null, "no trust prompt is offered for a changed key");
     await app.screenshot("10-host-key-changed");
@@ -283,7 +287,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     });
 
     await nav("Hosts");
-    await s.clickButton("Connect");
+    await connectHost("Lab server");
     await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "new trust prompt" });
     assert.equal(await s.attribute(await s.find("dialog .fingerprint"), "aria-label"), lab.servers.b.hostKeyEd25519Fingerprint);
     await s.clickButton("Do not connect", { within: "dialog" });

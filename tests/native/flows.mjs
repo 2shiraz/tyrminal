@@ -103,7 +103,8 @@ export function ui(s) {
       const group = Number(/group (\d+)/.exec(prompt)[1]);
       await s.fill(prompt, key[group - 1]);
       await s.clickButton("I have saved it");
-      await s.until(async () => (await api.heading()) === "Home", { describe: "home" });
+      // A new vault is empty, so Home settles on its welcome heading ("Home" shows only while loading).
+      await s.until(async () => (await api.heading()) === "Welcome to Tyrminal", { describe: "home" });
       return key.join("-");
     },
     async importKey(path, label = "lab key") {
