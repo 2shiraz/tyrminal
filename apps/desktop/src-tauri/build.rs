@@ -136,6 +136,11 @@ const COMMANDS: &[&str] = &[
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    // LAN discovery
+    "discovery_networks",
+    "discovery_start",
+    "discovery_status",
+    "discovery_stop",
     // command history
     "history_settings_get",
     "history_settings_set",

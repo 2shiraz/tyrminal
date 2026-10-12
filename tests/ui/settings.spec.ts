@@ -47,6 +47,9 @@ test("settings: diagnostics are off by default, keep only command and code, and 
   await settings();
   const toggle = page.getByRole("switch", { name: "Keep a list of recent failures for diagnostics" });
   await expect(toggle).not.toBeChecked();
+  // Regression: the hint pointed to "separate settings" for session recording and command
+  // history, which do not exist.
+  await expect(page.getByText(/Session recording and command history/)).toHaveCount(0);
   await toggle.check();
   await expect(page.getByText("0 failures kept")).toBeVisible();
 
