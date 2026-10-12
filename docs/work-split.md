@@ -145,6 +145,25 @@ Never merge these by hand; regenerate them after resolving the sources:
 - Anything else: keep both behaviours, run the tests of both sides, and record what was done in
   the merge commit message.
 
+## Host details panel (branch `claude/host-panel`)
+
+The Hosts view edits hosts in a side panel instead of a dialog (`features/hosts/HostPanel.tsx`,
+form state and cards in `features/hosts/hostForm.tsx`; `HostEditor.tsx` stays as the dialog that
+Home's quick connect uses). Edits outside `features/hosts`:
+
+- `apps/desktop/src/features/tunnels/HostAdvanced.tsx`: `useHostAdvanced` also returns `changed`
+  (for the unsaved-changes guard), and `HostAdvancedSection` takes `embedded` (fields without
+  their own `<details>`, inside the panel's "Show more"). No behaviour change otherwise.
+- `apps/desktop/src/lib/messages-d.ts`: a `hostPanel` block at the end.
+- `apps/desktop/src/styles/global.css`: one block at the end for the panel, plus one rule that
+  gives a hint inside the selected `.choice` muted text (AA contrast on the accent tint).
+- Tests: `tests/ui/{inventory,tunnels,accessibility,visual}.spec.ts` drive the panel; new
+  `tests/ui/host-panel.spec.ts`; the two `08-host-editor` baselines re-recorded;
+  `tests/native/{app,backup}.test.mjs` and `flows.mjs` save through the panel.
+- PR #8's fields live in the panel: the protocol select (SSH, Telnet, serial device) and the
+  serial line settings in the Protocol card; encoding, terminal type and agent forwarding under
+  "Show more". `tests/ui/protocols.spec.ts` drives the panel.
+
 ## Status (each agent edits only its own column)
 
 | | Agent A | Agent B | Agent C | Agent D |
@@ -304,3 +323,23 @@ Never merge these by hand; regenerate them after resolving the sources:
 - **C → B (done by C, keep it when merging):** `tests/ui/tunnels.spec.ts` line ~103 closes the tab
   through `.tab-close` inside the tab instead of a "Close …" button: after the axe fix the close
   control is no longer a focusable button nested in the tab (keyboard: Delete or the tab menu).
+
+## SFTP tab hook-up (branch `claude/sftp-tab`)
+
+The SFTP tab lives in `apps/desktop/src/features/sftp/` (own messages and stylesheet). Its
+hook-up into files other branches own is kept to the minimum, for C (#7, tabs/workspaces) and
+the terminal-input branch (#9) to keep when they merge:
+
+- `app/workspace.ts`: `PaneTarget = TerminalTarget | { kind: "sftp" }` and `Pane.target: PaneTarget`.
+  An SFTP tab has one pane and is never split (AppShell ignores split requests for it).
+- `components/layout/PaneGrid.tsx`: a pane whose target is `sftp` renders `SftpView` instead of
+  `TerminalView`; it stays mounted while hidden like a terminal.
+- `components/layout/TabStrip.tsx`: one optional `onNewSftp` item in the **+** menu.
+- `features/terminal/TerminalView.tsx`: `AuthDialog` and `Fingerprint` are exported (no other change).
+- `Sidebar.tsx`, `HomeView.tsx`, `CommandPalette.tsx`: one optional `onSftp` entry each.
+- `AppShell.tsx`: `openSftp`; the side panels and status-bar session details are hidden on an SFTP tab.
+- **C → SFTP tab (done by C when merging #18 into #7):** SFTP tabs are left out of layout templates
+  (`templateTabs`) and cannot be split through C's `split()` (pane-limit path); detach refuses
+  them (no live terminal session). `tests/ui/sftp.spec.ts` closes the tab through `.tab-close`
+  inside the tab, as `tunnels.spec.ts` does, since the close control is no longer a focusable
+  button; `workspaces.spec.ts` picks the first recent connection by label instead of menu index.

@@ -121,26 +121,27 @@ test("hosts: the editor's Advanced section sets a jump host and refuses loops", 
     await page.getByRole("menuitem", { name: "Edit" }).click();
   };
   await edit("db-primary");
-  const dialog = page.getByRole("dialog", { name: /Edit host/ });
-  await dialog.getByText("Advanced").click();
+  const dialog = page.getByRole("complementary", { name: "Host details" });
+  await dialog.getByText("Show more").click();
   await dialog.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
   await expect(dialog).toContainText("Connects through api-gateway first");
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog.getByTestId("host-panel-status")).toHaveText("Saved");
   expect(await page.evaluate(() => [...(window as unknown as { __mockJumps: Map<string, string> }).__mockJumps.entries()])).toHaveLength(1);
 
   // Pointing api-gateway back through db-primary would loop: refused, and the host is unchanged.
   await edit("api-gateway");
-  const again = page.getByRole("dialog", { name: /Edit host/ });
-  await again.getByText("Advanced").click();
+  const again = page.getByRole("complementary", { name: "Host details" });
+  await expect(again.getByLabel("Address")).toHaveValue("10.20.0.11");
+  await again.getByText("Show more").click();
   await again.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "db-primary" });
-  await again.getByRole("button", { name: "Save" }).click();
+  await again.getByRole("button", { name: "Save", exact: true }).click();
   await expect(again.getByRole("alert")).toContainText("would form a loop");
   await again.getByRole("button", { name: "Cancel" }).click();
 
   // Reopening shows the saved jump host.
   await edit("db-primary");
-  await expect(page.getByRole("dialog", { name: /Edit host/ }).getByRole("combobox", { name: "Jump host" })).toHaveValue(/.+/);
+  await expect(page.getByRole("complementary", { name: "Host details" }).getByRole("combobox", { name: "Jump host" })).toHaveValue(/.+/);
 });
 
 test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials come with a warning", async ({ page }) => {
@@ -149,17 +150,19 @@ test("hosts: a proxy with a sign-in is saved write-only, and HTTP credentials co
   const edit = async () => {
     await page.getByRole("button", { name: "More actions for staging-web" }).click();
     await page.getByRole("menuitem", { name: "Edit" }).click();
-    return page.getByRole("dialog", { name: /Edit host/ });
+    return page.getByRole("complementary", { name: "Host details" });
   };
   let dialog = await edit();
-  await dialog.getByText("Advanced").click();
+  await dialog.getByText("Show more").click();
   await dialog.getByRole("combobox", { name: "Proxy" }).selectOption("http");
   await dialog.getByLabel("Proxy host").fill("proxy.lab.example");
   await dialog.getByLabel("Proxy port").fill("3128");
   await dialog.getByLabel("Proxy user name").fill("ops");
   await expect(dialog.getByText(/receives the user name and password unencrypted/)).toBeVisible();
   await dialog.getByLabel("Proxy password").fill("canary-ui-proxy-secret");
-  await dialog.getByRole("button", { name: "Save" }).click();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog.getByTestId("host-panel-status")).toHaveText("Saved");
+  await dialog.getByRole("button", { name: "Close host details" }).click();
   await expect(dialog).toHaveCount(0);
 
   // Reopened: settings shown, the password field empty with a "kept" hint, never prefilled.

@@ -18,7 +18,7 @@ async function editGroup(page: Page, name: string) {
 async function editHost(page: Page, label: string) {
   await page.getByRole("button", { name: `More actions for ${label}` }).first().click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  return page.getByRole("dialog", { name: /Edit host/ });
+  return page.getByRole("complementary", { name: "Host details" });
 }
 
 test("a group's jump host and icon reach its hosts and subgroups; a host can set its own route", async ({ page }) => {
@@ -48,15 +48,16 @@ test("a group's jump host and icon reach its hosts and subgroups; a host can set
   // Setting its own route (directly) is saved before the host's basics.
   await host.getByRole("radio", { name: /Set a route for this host/ }).check();
   await expect(host.getByRole("combobox", { name: "Jump host" })).toHaveValue("");
-  await host.getByRole("button", { name: "Save" }).click();
-  await expect(host).toHaveCount(0);
+  await host.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(host.getByTestId("host-panel-status")).toHaveText("Saved");
   expect((await calls(page, "host_connection_set")).at(-1)!.args).toMatchObject({ connection: { inherit: false, jumpHostId: null } });
 
   host = await editHost(page, "api-gateway");
   await expect(host.getByRole("radio", { name: /Set a route for this host/ })).toBeChecked();
   // And back to the group's.
   await host.getByRole("radio", { name: /Use the group's route/ }).check();
-  await host.getByRole("button", { name: "Save" }).click();
+  await host.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(host.getByTestId("host-panel-status")).toHaveText("Saved");
   expect((await calls(page, "host_connection_set")).at(-1)!.args).toMatchObject({ connection: { inherit: true } });
 
   // The icon of a host in the subgroup is the inherited Debian one.

@@ -8,6 +8,9 @@ import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
 import {
   IconAppWindow,
+  // agent B: tunnels and history
+  IconRoute,
+  IconArrowLeftRight,
   IconColumns2,
   IconCopy,
   IconFingerprint,
@@ -23,9 +26,8 @@ import {
   IconServer,
   IconSettings,
   IconX,
-  // agent B: tunnels and history
-  IconRoute,
 } from "../ui/icons";
+import { msgSftp } from "../../features/sftp/messages";
 
 const PAGE_ICONS: Record<Destination, typeof IconHouse> = {
   home: IconHouse,
@@ -52,6 +54,7 @@ export function TabStrip({
   onDuplicate,
   onDetach,
   onNewLocal,
+  onNewSftp,
   onOpenPalette,
   layout,
   recent,
@@ -69,6 +72,8 @@ export function TabStrip({
   onDuplicate: (id: number) => void;
   onDetach?: ((id: number) => void) | undefined;
   onNewLocal: () => void;
+  /** Opens a new SFTP tab. */
+  onNewSftp?: () => void;
   onOpenPalette: () => void;
   /** The layout template the open tabs follow, and whether they changed since it was saved. */
   layout?: { name: string; dirty: boolean; onSave: () => void; onSaveAs: () => void } | null | undefined;
@@ -322,6 +327,7 @@ export function TabStrip({
           anchor={newMenu}
           items={[
             { label: msg.nav.localTerminal, icon: <IconPlus size={15} />, shortcut: <Shortcut action="newLocal" />, onSelect: onNewLocal },
+            ...(onNewSftp ? [{ label: msgSftp.open, icon: <IconArrowLeftRight size={15} />, onSelect: onNewSftp }] : []),
             { label: msg.palette.groupHosts, icon: <IconServer size={15} />, shortcut: <Shortcut action="palette" />, onSelect: onOpenPalette },
             ...((recent ?? []).length > 0 ? (["separator"] as MenuEntry[]) : []),
             ...(recent ?? []).slice(0, 5).map((r) => ({ label: r.label, icon: <IconHistory size={15} />, onSelect: r.onSelect })),

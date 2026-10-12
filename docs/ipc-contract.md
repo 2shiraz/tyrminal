@@ -57,6 +57,8 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |
 | `session_open_ssh` | host id, size, output channel, event channel | session id | Host-key trust and auth prompts arrive as events |
 | `session_open_local` | size, optional `startIn` folder, channels | session id | Local PTY; `startIn` used only if absolute, existing and free of control characters, else home |
+| `session_open_files` | host id, event channel | session id | SSH hosts only: same trust and auth prompts, then the SFTP subsystem and no shell or PTY; `session_write`/`session_resize` refuse it; `files_*` commands take its id; `session_close` ends it |
+| `files_local_mkdir` / `files_local_rename` / `files_local_remove` / `files_local_chmod` | grant token, names below it, name(s) / mode | — | Inside a folder the user chose natively only: single-component names, no link in any step, rename never replaces, delete removes files, links (not their targets) and empty folders only |
 | `session_write` | session id, bytes | — | Chunked; at most `MAX_TERMINAL_INPUT_CHUNK` per call |
 | `session_resize` / `session_ack` / `session_close` | session id, … | — | `ack` is output flow control |
 | `session_trust_answer` | prompt id, `TrustDecision` | — | `once`, `always`, `cancel` |

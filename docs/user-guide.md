@@ -173,6 +173,11 @@ Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH ses
 - **Copy to another server** between two connected sessions, without saving anything on this
   computer.
 
+Click an item to select it (it stays highlighted); Shift+click selects a range and Ctrl+click
+(⌘+click on macOS) adds or removes one. The arrow keys, Home and End move the selection, Space
+toggles the current item, and Enter or a double-click opens a folder. The line under the list
+shows how many items are selected and their size.
+
 A session opens in its shell's current folder when the shell integration reports one, otherwise
 in the login folder. The terminal-folder button returns to the shell's folder.
 
@@ -184,6 +189,33 @@ Every transfer is written under a temporary name and renamed into place only whe
 a cancelled, failed or interrupted transfer never leaves a half-written file. If the name
 exists, Tyrminal asks: **Replace** or **Keep both** (which adds " (1)" and so on). Folders are
 never merged or replaced. Symbolic links inside folders are skipped and counted, never followed.
+
+### The SFTP tab
+
+Open an **SFTP** tab from the sidebar, the **+** menu of the tab strip, the Home page or the
+command palette. It shows two panes side by side: this computer on the left and **Connect to
+host** on the right. Either pane can show this computer or any saved SSH host; pick one from the
+list, or later from the pane's name at the top.
+
+- A host opens with file access only: Tyrminal checks the host key and signs in exactly as for
+  a terminal (same trust and password prompts, and a changed host key is refused), then opens
+  SFTP and nothing else. No shell or terminal is started on the server. Closing the tab, or
+  choosing another location for the pane, disconnects it.
+- On this computer, a pane shows a folder you choose and what is inside it, never anything
+  outside it.
+- Selecting works as in the Files panel (click, Shift, Ctrl/⌘, arrow keys, Space, Enter or
+  double-click to open); a folder being opened shows that it is loading. Copy to, dragging and
+  Delete act on everything selected.
+- Each pane has back and forward, **Up one folder**, clickable folder names (breadcrumbs), a
+  filter and columns **Name**, **Date Modified**, **Size** and **Kind** that sort when clicked;
+  the permissions appear under each name.
+- **Actions** (⋯) has New folder, Rename, Permissions, Delete (always asks first; a folder must
+  be empty), Refresh, hidden files and, with something selected, **Copy to** the other pane.
+  Delete and F2 also work on the selected item.
+- Drag an item onto the other pane to copy it there: this computer to a host, a host to this
+  computer, or one host to another (streamed through Tyrminal; nothing is saved locally).
+  Transfers appear in the queue at the bottom with progress and Cancel, and an existing name
+  asks for **Replace** or **Keep both** as everywhere else.
 
 **Edit** opens a remote file in a local application (Settings → Terminal → editors per file
 type, chosen with the system app picker). Nothing is uploaded until you click **Save**, and

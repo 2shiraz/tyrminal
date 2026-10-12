@@ -5,6 +5,19 @@ import { readFileSync } from "node:fs";
 export const PASSPHRASE = "native e2e passphrase 42";
 export const KEYS = { ctrl: "", shift: "", alt: "", meta: "", enter: "", escape: "", f10: "" };
 
+/** The Host details panel on the Hosts view. */
+export const HOST_PANEL = '[data-testid="host-panel"]';
+
+/** Saves the Host details panel, waits for the save to land, and closes the panel. */
+export async function saveAndCloseHostPanel(s) {
+  await s.clickButton("Save", { within: HOST_PANEL });
+  await s.until(async () => (await s.text(await s.waitFor(`${HOST_PANEL} [data-testid="host-panel-status"]`))).trim() === "Saved", {
+    describe: "host saved",
+  });
+  await s.click(await s.waitFor(`${HOST_PANEL} button[aria-label="Close host details"]`));
+  await s.waitGone(HOST_PANEL);
+}
+
 export function ui(s) {
   const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const api = {
@@ -64,14 +77,13 @@ export function ui(s) {
     async addHost({ label, port, user }) {
       await api.nav("Hosts");
       await s.clickButton("Add host");
-      await s.fill("Name", label, { within: "dialog" });
-      await s.fill("Address", "127.0.0.1", { within: "dialog" });
-      const portField = await s.fill("Port", "", { within: "dialog" });
+      await s.fill("Name", label, { within: HOST_PANEL });
+      await s.fill("Address", "127.0.0.1", { within: HOST_PANEL });
+      const portField = await s.fill("Port", "", { within: HOST_PANEL });
       await s.clear(portField);
       await s.type(portField, String(port));
-      await s.fill("User name", user, { within: "dialog" });
-      await s.clickButton("Save", { within: "dialog" });
-      await s.waitGone("dialog");
+      await s.fill("User name", user, { within: HOST_PANEL });
+      await saveAndCloseHostPanel(s);
     },
     /** Connects to the host card labelled `label`, trusting the server once. */
     async connect(label) {

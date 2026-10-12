@@ -736,7 +736,8 @@ test("palette and new-tab menu: switch to an open tab by name; reopen a recent c
   expect(recent).toBeGreaterThan(0);
   await page.getByRole("button", { name: "New tab" }).click();
   const menu = page.getByRole("menu", { name: "New tab" });
-  const first = menu.getByRole("menuitem").nth(2);
+  // The first recent connection, after the fixed entries (local terminal, SFTP, connect).
+  const first = menu.getByRole("menuitem").filter({ hasNotText: /^(Local terminal|SFTP|Connect)/ }).first();
   const label = (await first.textContent())!.trim();
   await first.click();
   await expect(terminalTabs(page)).toHaveCount(3);

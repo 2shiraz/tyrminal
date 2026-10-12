@@ -7,6 +7,7 @@ import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { useToast } from "../../components/ui/Toasts";
 import { Avatar, EmptyState, Keys, Shortcut, SkeletonRows, relativeTime } from "../../components/ui/controls";
 import {
+  IconArrowLeftRight,
   IconArrowRight,
   IconCornerDownLeft,
   IconKeyRound,
@@ -21,6 +22,7 @@ import { msg } from "../../lib/messages";
 import { msgC } from "../../lib/messages-c";
 import { HostEditor } from "../hosts/HostEditor";
 import type { PaneStatus } from "../terminal/TerminalView";
+import { msgSftp } from "../sftp/messages";
 
 /** `user@host[:port]` typed into quick connect. Only shape is checked here; the core validates. */
 export function parseDestination(text: string): { username: string; address: string; port: number } | null {
@@ -36,6 +38,7 @@ export function HomeView({
   statuses,
   onConnect,
   onLocal,
+  onSftp,
   onNavigate,
   onSelectTab,
 }: {
@@ -43,6 +46,8 @@ export function HomeView({
   statuses: Record<number, PaneStatus>;
   onConnect: (host: HostSummary) => void;
   onLocal: () => void;
+  /** Opens a new SFTP tab. */
+  onSftp?: () => void;
   onNavigate: (d: Destination) => void;
   onSelectTab: (id: number) => void;
 }) {
@@ -304,6 +309,17 @@ export function HomeView({
                     <span className="row-sub">{msg.home.localBody}</span>
                   </span>
                 </button>
+                {onSftp && (
+                  <button type="button" className="tile" onClick={onSftp}>
+                    <span className="tile-icon">
+                      <IconArrowLeftRight size={17} />
+                    </span>
+                    <span className="row-main">
+                      <span className="row-title">{msgSftp.open}</span>
+                      <span className="row-sub">{msgSftp.openHint}</span>
+                    </span>
+                  </button>
+                )}
                 <button type="button" className="tile" onClick={() => setEditing("new")}>
                   <span className="tile-icon">
                     <IconServer size={17} />

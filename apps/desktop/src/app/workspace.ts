@@ -8,6 +8,9 @@ import type { TerminalTarget } from "../features/terminal/TerminalController";
 
 export const MAX_PANES = 16;
 
+/** What a pane shows: a terminal, or the SFTP file manager (one pane per SFTP tab, never split). */
+export type PaneTarget = TerminalTarget | { kind: "sftp" };
+
 export type Direction = "row" | "column";
 
 export type Layout =
@@ -16,7 +19,7 @@ export type Layout =
 
 export interface Pane {
   id: number;
-  target: TerminalTarget;
+  target: PaneTarget;
   /** The user's own name for the destination (host label or "Local terminal"). */
   label: string;
   /** `user@host port N`, from the saved host, never from the server. */
@@ -475,13 +478,15 @@ function toTarget(target: TerminalTarget): LayoutTarget {
  * session, output, command or directory is part of a template.
  */
 export function templateTabs(ws: Workspace): LayoutTab[] {
-  return ws.tabs.map((tab) => {
+  // SFTP tabs hold no terminal destination and are not part of a template.
+  const terminalOnly = (tab: Tab) => panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp");
+  return ws.tabs.filter(terminalOnly).map((tab) => {
     const ids = panesOf(tab.layout);
     const index = new Map(ids.map((id, i) => [id, i]));
     const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
     return {
       title: tab.customTitle,
-      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target)),
+      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target as TerminalTarget)),
       layout: toNode(tab.layout, index),
       focused: index.get(tab.focused) ?? 0,
       focusMode: tab.focusMode,
@@ -565,7 +570,8 @@ export function detachInput(ws: Workspace, tab: Tab, sessionOf: (pane: number) =
     layout: toNode(tab.layout, index),
     panes: ids.map((id) => {
       const p = ws.panes[id] as Pane;
-      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(p.target) };
+      // Only tabs whose every pane has a live terminal session are detached.
+      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(p.target as TerminalTarget) };
     }),
     focused: index.get(tab.focused) ?? 0,
   };
