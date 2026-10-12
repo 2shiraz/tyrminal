@@ -1,5 +1,5 @@
 import type { KnownHostSummary } from "@tyrminal/contracts";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
@@ -9,10 +9,14 @@ import { knownHosts as knownHostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction, useLoaded } from "../../lib/useAsync";
 import { HostEditor } from "../hosts/HostEditor";
+import { useFlip } from "../../lib/motion";
 
 export function KnownHostsView() {
   const list = useLoaded(knownHostsApi.list);
   const [removing, setRemoving] = useState<KnownHostSummary | null>(null);
+  // Rows rise in on arrival and close up when one is removed (lib/motion.ts).
+  const listRef = useRef<HTMLUListElement>(null);
+  useFlip(listRef);
   // Creating a host from a trusted record (SEC-03): the key is already trusted, so the first
   // connection goes straight to sign-in.
   const { hosts: savedHosts, keys: keyList } = useVaultData();
@@ -33,9 +37,9 @@ export function KnownHostsView() {
         {list.value === null && !list.error && <SkeletonRows count={2} />}
         {list.value?.length === 0 && <EmptyState icon={<IconFingerprint size={28} />} title={msg.knownHosts.emptyTitle} body={msg.knownHosts.emptyBody} />}
         {(list.value?.length ?? 0) > 0 && (
-          <ul className="list">
+          <ul className="list" ref={listRef}>
             {(list.value ?? []).map((entry) => (
-              <li key={entry.id}>
+              <li key={entry.id} data-flip-key={entry.id}>
                 <span className="tile-icon" aria-hidden="true">
                   <IconFingerprint size={17} />
                 </span>

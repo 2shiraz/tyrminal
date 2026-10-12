@@ -153,3 +153,52 @@ test("the terminal canvas never animates", async ({ page }) => {
   expect(report.transitions).toBe(0);
   expect(report.duration.split(",").every((d) => d.trim() === "0s")).toBe(true);
 });
+
+// Glides and lists (motion.md PR 3).
+test.describe("glides and lists", () => {
+  const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" });
+
+  test("the current page marker glides to a clicked nav item, and rests as the item's own", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await primary(page).getByRole("button", { name: /^Snippets/ }).click();
+    const glide = primary(page).locator(".nav-glide");
+    await expect(glide).toHaveCount(1);
+    expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([180]);
+    await expect(primary(page)).toHaveAttribute("data-gliding", "");
+    // Settled: no copy left, and the item carries its own marker again.
+    await expect(glide).toHaveCount(0);
+    await expect(primary(page)).not.toHaveAttribute("data-gliding", /.*/);
+    await expect(primary(page).getByRole("button", { name: /^Snippets/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("from the keyboard, or under reduced motion, the marker simply moves", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await primary(page).getByRole("button", { name: /^Snippets/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect(primary(page).getByRole("button", { name: /^Snippets/ })).toHaveAttribute("aria-current", "page");
+    expect(await primary(page).locator(".nav-glide").count()).toBe(0);
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await primary(page).getByRole("button", { name: /^Hosts/ }).click();
+    await expect(primary(page).getByRole("button", { name: /^Hosts/ })).toHaveAttribute("aria-current", "page");
+    expect(await primary(page).locator(".nav-glide").count()).toBe(0);
+  });
+
+  test("arriving by click, a list's first rows rise in one after another; typing never moves rows", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    await primary(page).getByRole("button", { name: /^Snippets/ }).click();
+    const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
+    await expect(rows.first()).toBeVisible();
+    const delays = await rows.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().delay))[0] ?? null));
+    expect(delays).toEqual([0, 30, 60]);
+    // Filtering from the keyboard re-orders at once.
+    await page.getByRole("searchbox").first().click();
+    await page.keyboard.type("di");
+    expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+  });
+});

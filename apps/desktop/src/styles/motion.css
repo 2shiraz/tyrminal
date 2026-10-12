@@ -166,3 +166,24 @@ dialog.m-dialog[open]::backdrop {
 .terminal-host :not(.xterm-cursor-blink, .xterm-cursor-blink *) {
   animation: none !important;
 }
+
+/* ---------- nav glides (lib/useGlide.ts): a transient copy of the current marker slides ---------- */
+.sidebar,
+.settings-nav,
+.settings-nav-item {
+  position: relative;
+}
+
+.nav-glide {
+  position: absolute;
+  z-index: 0;
+  background: var(--bg-active);
+  box-shadow: var(--edge-select);
+  pointer-events: none;
+}
+
+/* While it slides, the new item's own marker waits (its text stays above the glide). */
+[data-gliding] [aria-current="page"] {
+  background: transparent;
+  box-shadow: none;
+}
