@@ -50,10 +50,11 @@ export function isPathQuery(query: string): boolean {
 }
 
 /**
- * Splits a path query into the folder to list and the name prefix to match. `~` and relative
- * paths resolve against the login folder (`home`); the shell's current directory is not known.
+ * Splits a path query into the folder to list and the name prefix to match. `~` resolves against
+ * the login folder (`home`); relative paths against `cwd`, the shell's folder when shell
+ * integration reports it and the login folder otherwise.
  */
-export function splitPathQuery(query: string, home: string): { dir: string; prefix: string; shown: string } {
+export function splitPathQuery(query: string, home: string, cwd = home): { dir: string; prefix: string; shown: string } {
   let q = query.trim();
   if (q === "~") q = "~/";
   const cut = q.lastIndexOf("/");
@@ -61,8 +62,8 @@ export function splitPathQuery(query: string, home: string): { dir: string; pref
   const prefix = q.slice(cut + 1);
   let dir = shown;
   if (dir.startsWith("~/")) dir = `${home}/${dir.slice(2)}`;
-  else if (dir.startsWith("./")) dir = `${home}/${dir.slice(2)}`;
-  else if (!dir.startsWith("/")) dir = `${home}/${dir}`;
+  else if (dir.startsWith("./")) dir = `${cwd}/${dir.slice(2)}`;
+  else if (!dir.startsWith("/")) dir = `${cwd}/${dir}`;
   dir = dir.replace(/\/+$/, "") || "/";
   return { dir, prefix, shown };
 }

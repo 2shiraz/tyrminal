@@ -1333,6 +1333,36 @@ impl Sessions {
     pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
         self.snippet_runs.cancel(owner, run_id);
     }
+
+    /// Shell integration on the server of a session the caller owns: what `~/.bashrc` holds.
+    pub async fn integration_status(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_status(&conn).await
+    }
+
+    /// Writes the shell integration block into the server's `~/.bashrc` (explicit user action).
+    pub async fn integration_install(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_install(&conn).await
+    }
+
+    /// Removes the shell integration block from the server's `~/.bashrc`.
+    pub async fn integration_remove(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_remove(&conn).await
+    }
 }
 
 #[cfg(test)]

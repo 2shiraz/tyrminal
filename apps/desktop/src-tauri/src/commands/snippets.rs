@@ -1,5 +1,8 @@
 use tauri::{State, WebviewWindow};
 use tyrminal_core::contracts::{IpcError, SnippetInput, SnippetSendMode, SnippetSummary};
+// Shell integration (AUT-07).
+use tyrminal_core::contracts::{ErrorCode, IntegrationStatus, IntegrationTarget};
+use tyrminal_core::shell_integration;
 
 use crate::state::AppState;
 
@@ -91,4 +94,82 @@ pub async fn snippet_move(
 #[tauri::command]
 pub async fn snippet_folder_rename(state: State<'_, AppState>, from: String, to: String) -> Result<u32, IpcError> {
     state.core()?.vault.rename_snippet_folder(&from, &to).await
+}
+
+/// The home folder whose startup files local shell integration edits. Test builds use a
+/// disposable folder named by `TYRMINAL_E2E_HOME`, never the real one.
+fn integration_home() -> Result<std::path::PathBuf, IpcError> {
+    let unavailable = || {
+        IpcError::new(
+            ErrorCode::InvalidInput,
+            "Shell integration on this computer is available for Bash and Zsh on macOS and Linux.",
+        )
+    };
+    if cfg!(windows) {
+        return Err(unavailable());
+    }
+    let var = if cfg!(feature = "e2e") { "TYRMINAL_E2E_HOME" } else { "HOME" };
+    std::env::var_os(var).filter(|h| !h.is_empty()).map(std::path::PathBuf::from).ok_or_else(unavailable)
+}
+
+/// What installing shell integration at `target` would write. Reads only.
+#[tauri::command]
+pub async fn prompt_marks_status(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    target: IntegrationTarget,
+) -> Result<IntegrationStatus, IpcError> {
+    match target {
+        IntegrationTarget::Session { session_id } => {
+            state.core()?.sessions.integration_status(window.label(), &session_id).await
+        }
+        IntegrationTarget::Local { shell } => {
+            let home = integration_home()?;
+            blocking(move || shell_integration::local_status(&home, shell)).await
+        }
+    }
+}
+
+/// Writes the shell integration block at `target`. Only ever called from the user's Install
+/// button, after the exact block was shown.
+#[tauri::command]
+pub async fn prompt_marks_install(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    target: IntegrationTarget,
+) -> Result<IntegrationStatus, IpcError> {
+    match target {
+        IntegrationTarget::Session { session_id } => {
+            state.core()?.sessions.integration_install(window.label(), &session_id).await
+        }
+        IntegrationTarget::Local { shell } => {
+            let home = integration_home()?;
+            blocking(move || shell_integration::local_install(&home, shell)).await
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn prompt_marks_remove(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    target: IntegrationTarget,
+) -> Result<IntegrationStatus, IpcError> {
+    match target {
+        IntegrationTarget::Session { session_id } => {
+            state.core()?.sessions.integration_remove(window.label(), &session_id).await
+        }
+        IntegrationTarget::Local { shell } => {
+            let home = integration_home()?;
+            blocking(move || shell_integration::local_remove(&home, shell)).await
+        }
+    }
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, IpcError> + Send + 'static,
+) -> Result<T, IpcError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|_| Err(IpcError::new(ErrorCode::Internal, "The change did not finish.")))
 }

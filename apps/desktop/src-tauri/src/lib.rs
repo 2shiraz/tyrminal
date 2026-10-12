@@ -215,6 +215,9 @@ pub fn run() {
             commands::inventory::key_import_pick_clear,
             commands::inventory::known_hosts_import_preview,
             commands::inventory::known_hosts_import,
+            commands::snippets::prompt_marks_status,
+            commands::snippets::prompt_marks_install,
+            commands::snippets::prompt_marks_remove,
         ])
         .build(tauri::generate_context!());
 

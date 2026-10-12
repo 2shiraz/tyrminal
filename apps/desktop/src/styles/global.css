@@ -3198,3 +3198,32 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.integration-target {
+  justify-content: space-between;
+}
+
+.integration-shell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.integration-script {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.suggest-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: 12px;
+}

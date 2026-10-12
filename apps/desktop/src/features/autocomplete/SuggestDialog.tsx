@@ -1,5 +1,5 @@
 import type { RemoteListing, SnippetSummary } from "@tyrminal/contracts";
-import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
@@ -7,6 +7,7 @@ import { IconFolder, IconScrollText, IconSearch, IconSquareTerminal, IconFile } 
 import { files } from "../../lib/ipc";
 import { msgD } from "../../lib/messages-d";
 import { pause } from "./pause";
+import { shellContexts } from "./shellContext";
 import { type PathSuggestion, isPathQuery, matchCommands, matchPaths, matchSnippets, splitPathQuery } from "./suggest";
 
 type Item =
@@ -25,11 +26,14 @@ export function SuggestDialog({
   sessionId,
   onInsert,
   onSnippet,
+  onIntegration,
   onClose,
 }: {
   sessionId: string;
   onInsert: (text: string) => void;
   onSnippet: (snippet: SnippetSummary) => void;
+  /** Opens the shell integration setup for this session. */
+  onIntegration: () => void;
   onClose: () => void;
 }) {
   const { snippets } = useVaultData();
@@ -38,6 +42,9 @@ export function SuggestDialog({
   const [home, setHome] = useState<string | null>(null);
   const [listing, setListing] = useState<{ dir: string; result: RemoteListing | null } | null>(null);
   const [pausedState, setPausedState] = useState(() => pause.state(sessionId));
+  // With shell integration, the shell's own folder anchors relative paths (AUT-06).
+  const context = useSyncExternalStore(shellContexts.subscribe, () => shellContexts.get(sessionId));
+  const cwd = context?.cwd ?? null;
 
   // The login folder anchors ~ and relative paths.
   useEffect(() => {
@@ -51,7 +58,7 @@ export function SuggestDialog({
     };
   }, [sessionId]);
 
-  const pathQuery = isPathQuery(query) && home !== null ? splitPathQuery(query, home) : null;
+  const pathQuery = isPathQuery(query) && home !== null ? splitPathQuery(query, home, cwd ?? home) : null;
   useEffect(() => {
     if (!pathQuery) return;
     const dir = pathQuery.dir;
@@ -133,6 +140,21 @@ export function SuggestDialog({
   return (
     <Dialog title={msgD.suggest.title} icon={<IconSearch size={18} />} wide onDismiss={onClose}>
       <div className="stack">
+        {context && (cwd || context.command) && (
+          <div className="suggest-context faint" data-testid="shell-context" aria-label={msgD.suggest.context}>
+            {cwd && (
+              <span>
+                {msgD.suggest.folder}: <span className="mono">{cwd}</span>
+              </span>
+            )}
+            {context.command && (
+              <span>
+                {msgD.suggest.lastCommand}: <span className="mono">{context.command}</span>
+                {context.exitStatus !== null && ` (${msgD.suggest.exit(context.exitStatus)})`}
+              </span>
+            )}
+          </div>
+        )}
         <div className="input-with-icon">
           <IconSearch size={15} />
           <input
@@ -205,9 +227,12 @@ export function SuggestDialog({
             );
           })}
         </div>
-        {pathQuery && <p className="hint">{msgD.suggest.pathsNote}</p>}
+        {pathQuery && <p className="hint">{cwd ? msgD.suggest.pathsFromFolder(cwd) : msgD.suggest.pathsNote}</p>}
         <p className="hint">{msgD.suggest.hint}</p>
         <div className="dialog-actions">
+          <button type="button" className="btn btn-sm" onClick={onIntegration}>
+            {msgD.suggest.integration}
+          </button>
           <button
             type="button"
             className="btn btn-sm"

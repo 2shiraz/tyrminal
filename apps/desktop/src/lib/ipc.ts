@@ -330,3 +330,13 @@ export const knownHostsFile = {
   preview: (text: string) => call<import("@tyrminal/contracts").KnownHostImportPreview>("known_hosts_import_preview", { text }),
   run: (entries: import("@tyrminal/contracts").KnownHostImportEntry[]) => call<number>("known_hosts_import", { entries }),
 };
+
+/** Opt-in shell integration: status, and install/remove only on the user's explicit action. */
+export const promptMarks = {
+  status: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_status", { target }),
+  install: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_install", { target }),
+  remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
+};

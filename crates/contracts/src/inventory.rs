@@ -154,3 +154,50 @@ pub struct KnownHostImportPreview {
     pub entries: Vec<KnownHostImportEntry>,
     pub skipped: Vec<crate::ImportSkipped>,
 }
+
+/// Shells the opt-in shell integration supports (AUT-07): Bash locally and over SSH, Zsh locally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum IntegrationShell {
+    Bash,
+    Zsh,
+}
+
+/// Where shell integration is installed: the server of a connected SSH session (its Bash
+/// startup file) or this computer (the chosen shell's startup file).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum IntegrationTarget {
+    Session {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+    },
+    Local {
+        shell: IntegrationShell,
+    },
+}
+
+/// What installing shell integration at a target would do. `script` is the exact block written
+/// to `path`; nothing is written until the user asks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct IntegrationStatus {
+    pub shell: IntegrationShell,
+    /// The startup file, as shown to the user (`~/.bashrc`).
+    pub path: String,
+    pub file_exists: bool,
+    /// The version this build installs.
+    pub version: u32,
+    /// The version found in the startup file, if any.
+    pub installed_version: Option<u32>,
+    /// The exact block that installing writes, markers included.
+    pub script: String,
+    /// Where the previous file is kept on install or removal.
+    pub backup_path: String,
+    /// The account's login shell on a server (`sh`, `bash`), when it reported one. Integration
+    /// takes effect where Bash starts interactively and reads `~/.bashrc`.
+    pub login_shell: Option<String>,
+}

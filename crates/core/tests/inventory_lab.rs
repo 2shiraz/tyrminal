@@ -385,3 +385,87 @@ async fn a_known_hosts_file_imports_trust_that_a_real_connection_accepts() {
     assert!(matches!(next_prompt(&mut inbox).await, SessionEvent::AuthPrompt { .. }), "no trust prompt expected");
     core.sessions.close(WINDOW, &opened.session_id).unwrap();
 }
+
+/// AUT-06/07: shell integration is written into the server's `~/.bashrc` only by the explicit
+/// install call, inside one marked block, keeping the user's own lines; a real interactive Bash
+/// on the server then reports its folder, prompt and command boundaries; removing it restores the
+/// file. A block someone edited by hand is never rewritten.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn shell_integration_is_installed_on_request_and_a_real_bash_reports_its_context() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let session = connected_session(&core, &lab, "a", &key.id).await;
+    let counter = std::sync::atomic::AtomicU32::new(0);
+    let run = async |text: &str| {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let saved = v
+            .save_snippet(SnippetInput { id: None, name: format!("si-{n}"), folder: String::new(), text: text.into() })
+            .await
+            .unwrap();
+        core.sessions.exec_snippet(WINDOW, &session, &saved.id, &format!("si-{n}")).await.unwrap()
+    };
+
+    // The lab account's own startup file (kept aside and put back at the end).
+    let saved = run("[ -e ~/.bashrc ] && mv ~/.bashrc ~/.bashrc.tyrminal-test; printf 'export KEEP_ME=1\\n' > ~/.bashrc; chmod 640 ~/.bashrc").await;
+    assert_eq!(saved.exit_status, Some(0), "{}", saved.stderr);
+
+    let before = core.sessions.integration_status(WINDOW, &session).await.unwrap();
+    assert_eq!((before.installed_version, before.file_exists, before.path.as_str()), (None, true, "~/.bashrc"));
+    assert!(before.login_shell.is_some(), "the login shell is reported");
+    // Looking changed nothing; another window cannot look or install.
+    assert_eq!(run("cat ~/.bashrc").await.stdout, "export KEEP_ME=1\n");
+    assert_eq!(core.sessions.integration_install("other", &session).await.unwrap_err().code, ErrorCode::AccessDenied);
+
+    let installed = core.sessions.integration_install(WINDOW, &session).await.unwrap();
+    assert_eq!(installed.installed_version, Some(installed.version));
+    let file = run("cat ~/.bashrc; stat -c %a ~/.bashrc 2>/dev/null || stat -f %Lp ~/.bashrc").await.stdout;
+    assert!(file.starts_with("export KEEP_ME=1\n# >>> tyrminal shell integration v"), "{file}");
+    assert!(file.contains(&installed.script), "exactly the reviewed block is written");
+    assert!(file.ends_with("# <<< tyrminal shell integration <<<\n640\n"), "mode kept: {file}");
+    assert_eq!(run("cat ~/.bashrc.tyrminal-backup").await.stdout, "export KEEP_ME=1\n");
+    // Installing again leaves exactly one block.
+    core.sessions.integration_install(WINDOW, &session).await.unwrap();
+    assert_eq!(run("grep -c '^# >>> tyrminal shell integration' ~/.bashrc").await.stdout, "1\n");
+
+    // A real interactive Bash reads it. (Run output has escape characters removed, so the marks
+    // appear without their ESC bytes.)
+    let out = run("cd /tmp && mkdir -p 'tyr si' && printf 'cd \"tyr si\"\\nfalse\\nexit\\n' | TERM=xterm bash -i 2>&1; rmdir 'tyr si'; echo; bash -c 'echo \"bash=${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}\"'").await.stdout;
+    assert!(out.contains("]7;file://"), "{out}");
+    assert!(out.contains("/tmp/tyr%20si\\"), "folder reported, percent-encoded: {out}");
+    assert!(out.contains("]133;A\\") && out.contains("]133;B\\"), "prompt marks: {out}");
+    assert!(out.contains("]133;D;1\\"), "the failed command's status: {out}");
+    let bash = out.lines().find_map(|l| l.strip_prefix("bash=")).unwrap().to_owned();
+    let (major, minor) =
+        bash.split_once('.').map(|(a, b)| (a.parse::<u32>().unwrap(), b.parse::<u32>().unwrap())).unwrap();
+    if (major, minor) >= (4, 4) {
+        assert!(out.contains("]133;C\\"), "command start (PS0) on bash {bash}: {out}");
+    }
+
+    // Removal restores the user's lines; the previous file stays as the backup.
+    let removed = core.sessions.integration_remove(WINDOW, &session).await.unwrap();
+    assert_eq!(removed.installed_version, None);
+    assert_eq!(run("cat ~/.bashrc").await.stdout, "export KEEP_ME=1\n");
+    assert!(run("cat ~/.bashrc.tyrminal-backup").await.stdout.contains("# <<< tyrminal shell integration <<<"));
+
+    // A block edited by hand (closing line gone) is reported and the file is left alone.
+    run("printf '# >>> tyrminal shell integration v1 >>>\\nmine\\n' >> ~/.bashrc").await;
+    assert_eq!(core.sessions.integration_install(WINDOW, &session).await.unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(core.sessions.integration_remove(WINDOW, &session).await.unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(run("cat ~/.bashrc").await.stdout, "export KEEP_ME=1\n# >>> tyrminal shell integration v1 >>>\nmine\n");
+
+    let restore = run("rm -f ~/.bashrc ~/.bashrc.tyrminal-backup; [ ! -e ~/.bashrc.tyrminal-test ] || mv ~/.bashrc.tyrminal-test ~/.bashrc").await;
+    assert_eq!(restore.exit_status, Some(0));
+    core.sessions.close(WINDOW, &session).unwrap();
+}

@@ -16,6 +16,7 @@ import { FilesPanel } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 import { SnippetRunContext } from "../features/snippets/runContext";
+import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
@@ -87,6 +88,7 @@ function Shell() {
   const [runRequest, setRunRequest] = useState<SnippetRunRequest | null>(null);
   // agent D: suggestions for the focused SSH pane.
   const [suggesting, setSuggesting] = useState<{ paneId: number; sessionId: string } | null>(null);
+  const [integrating, setIntegrating] = useState<{ kind: "ssh"; sessionId: string } | { kind: "local" } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const handles = useRef(new Map<number, PaneHandle>());
   const wsRef = useRef(ws);
@@ -503,6 +505,15 @@ function Shell() {
                 }
               : undefined
           }
+          onShellIntegration={
+            pane && paneStatus?.state === "connected"
+              ? () => {
+                  const sessionId = focusedHandle()?.sessionId();
+                  if (pane.target.kind === "local") setIntegrating({ kind: "local" });
+                  else if (sessionId) setIntegrating({ kind: "ssh", sessionId });
+                }
+              : undefined
+          }
         />
       )}
 
@@ -533,6 +544,11 @@ function Shell() {
             setSuggesting(null);
             requestSnippet(snippet, "paste");
           }}
+          onIntegration={() => {
+            const target = suggesting;
+            setSuggesting(null);
+            setIntegrating({ kind: "ssh", sessionId: target.sessionId });
+          }}
           onInsert={(text) => {
             const target = suggesting;
             setSuggesting(null);
@@ -543,6 +559,16 @@ function Shell() {
               .write(target.sessionId, insertionBytes(text, handle.bracketedPaste()))
               .then(() => handle.focus())
               .catch((error: Error) => notify("danger", error.message));
+          }}
+        />
+      )}
+
+      {integrating && (
+        <IntegrationDialog
+          target={integrating}
+          onClose={() => {
+            setIntegrating(null);
+            focusedHandle()?.focus();
           }}
         />
       )}

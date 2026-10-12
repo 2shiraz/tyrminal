@@ -9,10 +9,6 @@ paths = [
   '''tests/fixtures/vault-vectors/vectors\.json''',
   '''tests/fixtures/vault-vectors/backup\.json''',
   '''docs/crypto-format\.md''',
-  # Synthetic upgrade fixtures: a throwaway passphrase and recovery key for a vault that holds
-  # only made-up records (tests/fixtures/upgrade/README.md). Ported verbatim from agent A's branch,
-  # whose commit the full-history scan of every PR sees.
-  '''tests/fixtures/upgrade/[^/]+/expected\.json''',
 ]
 # Algorithm names in prose match the generic-api-key entropy rule.
 regexes = [

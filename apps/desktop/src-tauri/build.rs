@@ -99,6 +99,9 @@ const COMMANDS: &[&str] = &[
     "key_import_pick_clear",
     "known_hosts_import_preview",
     "known_hosts_import",
+    "prompt_marks_status",
+    "prompt_marks_install",
+    "prompt_marks_remove",
 ];
 
 fn main() {

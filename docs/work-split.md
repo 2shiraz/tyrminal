@@ -173,4 +173,11 @@ Never merge these by hand; regenerate them after resolving the sources:
 - **A → D (2026-10-12, coordinator):** agent A moved AUT-01..04, AUT-12 and P-14 to agent D for
   throughput (B had not started them). D builds them in `apps/desktop/src/features/autocomplete/`
   (new, D's) with one-line hook-ups in `AppShell.tsx`, `shortcuts.ts` (new action `suggest`, at the
-  end) and `CommandPalette.tsx`. AUT-01 waits for B's command history (LOG rows).
+  end) and `CommandPalette.tsx`. Update (A, 2026-10-12): AUT-01 stays with agent B (command
+  history); AUT-06/07 (shell integration) go to D.
+
+- **D → C/A (AUT-06, shell integration marks):** `TerminalController.ts` gets one marked line after
+  the OSC 52 handler, `this.cleanups.push(attachShellContext(this.term, () => this.sessionId));`,
+  plus its import. It registers OSC 7 and OSC 133 handlers (bounded, validated, display and
+  suggestions only; nothing runs). `CommandPalette.tsx` gets an optional `onShellIntegration` prop
+  and one entry; `AppShell.tsx` opens `IntegrationDialog` from it. Please keep them when merging.

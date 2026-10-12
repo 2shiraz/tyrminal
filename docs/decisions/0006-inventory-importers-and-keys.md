@@ -119,4 +119,35 @@ sandbox. Nothing is stubbed in the UI.
   overrides cannot be inserted at all (an embedded newline would otherwise run a command in a
   shell without bracketed paste).
 - Command knowledge is a static bundled list (`commands.ts`); nothing is fetched or learned.
-- AUT-01 (history suggestions) waits for the encrypted command history (agent B's LOG rows).
+- AUT-01 (history suggestions) stays with agent B, with the encrypted command history (LOG rows).
+
+## Shell integration (AUT-06, AUT-07) — assigned to agent D by agent A
+
+- **Opt-in, versioned, reviewed:** the scripts live in `crates/core/shell-integration/`
+  (`tyrminal.bash`, `tyrminal.zsh`, version 1). The setup dialog shows the exact block (markers
+  included) before anything is written; only its Install button writes. Remove takes the block
+  out again. Startup files are never edited otherwise (spec §4.7).
+- **What the script does:** prints OSC 133 marks (A prompt start, B prompt end, C command start,
+  D;status command end) and OSC 7 (`file://host/percent-encoded-folder`) from `PROMPT_COMMAND`,
+  `PS1`/`PS0` (Bash) or `precmd`/`preexec` hooks (Zsh). No `eval`, no command substitution, nothing
+  sourced or downloaded; a unit test keeps it that way. Command boundaries need Bash 4.4+ (`PS0`);
+  older Bash (macOS's 3.2) still reports the prompt and folder.
+- **Where it goes:** a server's `~/.bashrc` over the session's verified connection (exec channels
+  with fixed command text; the new content travels on standard input, as in key deployment), or
+  `~/.bashrc` / `~/.zshrc` on this computer (macOS and Linux; not offered on Windows). The block
+  sits between `# >>> tyrminal shell integration v<N> >>>` and `# <<< tyrminal shell integration
+  <<<`; every other line is kept byte for byte, an older block is replaced, and a begin marker
+  without its end (edited by hand) makes Tyrminal refuse to touch the file. The previous content
+  is copied to `<file>.tyrminal-backup` (mode 0600) first; the file is rewritten in place so its
+  mode, owner and any symlink stay; a new file is created 0600. Files over 1 MiB or not UTF-8 are
+  not edited. The status reports the server account's login shell, since a login shell other than
+  Bash only picks the block up where Bash starts interactively.
+- **Reading the marks:** OSC 7/133 are untrusted terminal output. The renderer bounds them
+  (4 KiB), accepts only absolute, well-formed UTF-8 folders without control or bidi characters,
+  reads the command text from the screen between the B and C marks (2 KiB at most), and keeps all
+  of it as plain text. The folder anchors relative path suggestions (still insert-only and
+  reviewed); the last command and its status are shown in Suggestions. A server without the
+  integration can print the same sequences; at worst relative path suggestions start elsewhere.
+- **Command names** avoid the release policy's forbidden words: `prompt_marks_status`,
+  `prompt_marks_install`, `prompt_marks_remove`. Test builds edit `TYRMINAL_E2E_HOME`, never the
+  real home folder.

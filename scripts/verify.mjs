@@ -78,6 +78,7 @@ const SUITES = {
     { name: "backup and restore through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/backup.test.mjs")), blockedBy: () => needsE2e() },
     // agent D: inventory and snippets
     { name: "key files through the real application", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/keys.test.mjs")), blockedBy: () => needsE2e() },
+    { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],
 };
 

@@ -12,10 +12,11 @@ Updated: 2026-10-12.
 |---|---|
 | 1. Inventory presentation (HST-13) and group-wide connection (HST-06) | Done, tested (core + UI mock) |
 | 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Done, tested (core, lab, UI mock); cloud discovery IMP-07..13 BLOCKED (third-party APIs) |
-| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Done except certificate sign-in and the per-host PQ switch (after B); hardware keys and SEC-09 BLOCKED |
+| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Done; certificate sign-in (KEY-07) and SEC-08/10 moved to the tunnels owner on 2026-10-12; hardware keys and SEC-09 BLOCKED |
 | 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Done, tested (lab, real vault, UI mock) |
-| 6. Suggestions (AUT-02/03/04/12) and paste/snippet review (P-14), reassigned by agent A | Done, tested (UI mock); AUT-01 waits for B's command history |
-| 5. After agent B merges: identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), IMP-02, HST-05 | Waiting on B |
+| 6. Suggestions (AUT-02/03/04/12) and paste/snippet review (P-14), reassigned by agent A | Done, tested (UI mock); AUT-01 stays with agent B (command history) |
+| 7. Shell integration (AUT-06/07), assigned by agent A | Done, tested (core, lab, local Bash/Zsh, UI mock, native test) |
+| 5. Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18 | Next (B's PR #6 merged); IMP-02 and HST-05 moved to the tunnels owner |
 
 ## Design notes
 
@@ -79,12 +80,19 @@ Updated: 2026-10-12.
   skipped with reasons. Lab test: the imported key lets a real connection skip the trust prompt.
 - **HST-01** moved to agent A (protocols with Telnet/Serial), per A's message.
 
+- **Shell integration (AUT-06/07, ADR 0006):** opt-in versioned Bash/Zsh block shown in full and
+  written only by Install (server `~/.bashrc` over the session; local `~/.bashrc`/`~/.zshrc`),
+  with a backup and refusal of hand-edited blocks. The terminal reads OSC 133/OSC 7 (bounded,
+  validated) into a per-session context: Suggestions start relative paths from the shell's folder
+  and show the last command and its status. Opened from Suggestions or the palette.
+
 ## Evidence
 
 - `cargo test -p tyrminal-core --test inventory` — includes
   `host_os_is_set_in_bulk_follows_duplicates_and_goes_with_deleted_hosts` (real vault, reopened
   from disk).
-- `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion, PQ check, snippet runs.
+- `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion, PQ check, snippet runs, shell integration on the server's real Bash.
+- `cargo test -p tyrminal-core --test shell_integration`: local install in a temporary home; real Bash 5.2 and Zsh processes report folder, prompt and command marks.
 - `pnpm build:e2e` then `node --test tests/native/keys.test.mjs tests/native/snippets.test.mjs` under xvfb: 4/4.
 - `node scripts/ui-container.mjs` — full suite green, including `inventory-presentation.spec.ts`.
 - `pnpm verify:fast` 7/7; `cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib` 20/20 against the local lab (OpenSSH 9.6p1).

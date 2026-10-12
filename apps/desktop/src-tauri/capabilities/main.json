@@ -95,6 +95,9 @@
     "allow-key-import-picked",
     "allow-key-import-pick-clear",
     "allow-known-hosts-import-preview",
-    "allow-known-hosts-import"
+    "allow-known-hosts-import",
+    "allow-prompt-marks-status",
+    "allow-prompt-marks-install",
+    "allow-prompt-marks-remove"
   ]
 }

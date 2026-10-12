@@ -791,6 +791,15 @@ export function installMockBackend(options) {
         .map((k) => ({ label: k.port === 22 ? k.host : `${k.host}:${k.port}`, address: k.host, port: k.port, username: "", group: "", tags: [], notes: [`Trusted ${k.algorithm} key ${k.fingerprint}`] }));
       return { hosts, skipped: [], duplicates: [] };
     },
+    prompt_marks_status: (a) => integrationStatus(a.target),
+    prompt_marks_install: (a) => {
+      integration.set(integrationKey(a.target), 1);
+      return integrationStatus(a.target);
+    },
+    prompt_marks_remove: (a) => {
+      integration.delete(integrationKey(a.target));
+      return integrationStatus(a.target);
+    },
   };
 
   /** Writes raw terminal output (escape sequences included) to the most recent session. */
@@ -808,6 +817,25 @@ export function installMockBackend(options) {
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);
+  /** Shell integration in the mock: per target, installed or not (the block text is fixed). */
+  const integration = new Map();
+  function integrationKey(target) {
+    return target.kind === "session" ? "server" : `local:${target.shell}`;
+  }
+  function integrationStatus(target) {
+    const shell = target.kind === "session" ? "bash" : target.shell;
+    const path = shell === "zsh" ? "~/.zshrc" : "~/.bashrc";
+    return {
+      shell,
+      path,
+      fileExists: true,
+      version: 1,
+      installedVersion: integration.get(integrationKey(target)) ?? null,
+      script: `# >>> tyrminal shell integration v1 >>>\n# (${shell} script)\n# <<< tyrminal shell integration <<<\n`,
+      backupPath: `${path}.tyrminal-backup`,
+      loginShell: target.kind === "session" ? "sh" : null,
+    };
+  }
   window.__mockCalls = calls;
   window.__mockOpenedLinks = [];
   window.__mockState = state;

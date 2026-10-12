@@ -20,6 +20,7 @@ mod validate;
 mod vault;
 // agent D: inventory and snippets
 mod importers;
+pub mod shell_integration;
 mod snippet_runs;
 
 pub use files::{TransferSink, list_local, local_within};
