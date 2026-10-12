@@ -138,6 +138,11 @@ const COMMANDS: &[&str] = &[
     "group_defaults_set",
     // terminal notifications (P-23)
     "notify_command_finished",
+    // LAN discovery
+    "discovery_networks",
+    "discovery_start",
+    "discovery_status",
+    "discovery_stop",
 ];
 
 fn main() {
