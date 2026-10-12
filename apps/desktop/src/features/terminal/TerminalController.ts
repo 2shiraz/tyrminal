@@ -539,7 +539,13 @@ export class TerminalController {
   /** Offers text for pasting, always through the paste review (a note's code block, P-30). */
   reviewPaste(text: string): void {
     if (!text || this.disposed) return;
-    this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, () => this.term.paste(text));
+    // Always reviewed, with the same hidden-character and end-marker checks as any paste (P-25).
+    const check = { ...checkPaste(text, { multiline: true, trailingNewline: true }), review: true };
+    const send = (final: string) => {
+      if (this.disposed || hasBracketEnd(final)) return;
+      this.term.paste(final);
+    };
+    this.callbacks.onPasteReview(text, check, this.term.modes.bracketedPasteMode, send);
   }
 
   /** Scrolls to the previous or next command (shell integration marks); false without one. */
