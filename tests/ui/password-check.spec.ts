@@ -4,15 +4,14 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
 
 async function openSecurity(page: Page) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Password check");
   const section = page.getByTestId("password-check");
-  await section.scrollIntoViewIfNeeded();
   return section;
 }
 

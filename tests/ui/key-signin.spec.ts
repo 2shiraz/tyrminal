@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -75,7 +75,7 @@ async function signInToInstall(page: Page) {
 test("a refused key is named, and installing it from the notice lets it sign in", async ({ page }) => {
   await openApp(page, { keyRejectedFor: "build-runner-03", renderer: "compatibility" });
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByRole("button", { name: "Connect to build-runner-03" }).click();
+  await connectHost(page, "build-runner-03");
   await expect(page.getByText('The server did not accept the key "Deploy key". Its public key may not be installed on this server.')).toBeVisible();
 
   await page.getByRole("button", { name: "Install this key on the server…" }).click();

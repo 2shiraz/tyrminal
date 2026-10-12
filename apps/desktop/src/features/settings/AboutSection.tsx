@@ -1,12 +1,13 @@
 import type { AppInfo } from "@tyrminal/contracts";
 import { useEffect, useState } from "react";
 
+import { Notice } from "../../components/ui/controls";
 import { IconCopy, IconExternalLink } from "../../components/ui/icons";
 import { app, links } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { channelName, versionLabel, versionReport } from "../../lib/version";
 
-/** Settings → About: which build this is, a copyable block for bug reports, and links. */
+/** Settings → About: which build this is, a copyable block for bug reports, links and the project status. */
 export function AboutSection() {
   const version = __APP_VERSION__;
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -27,12 +28,8 @@ export function AboutSection() {
   const value = (text: string | undefined) => text ?? msg.about.unavailable;
 
   return (
-    <section id="settings-about" className="settings-section" aria-labelledby="settings-about-title">
-      <header>
-        <h2 id="settings-about-title">{msg.about.title}</h2>
-        <p>{msg.about.body}</p>
-      </header>
-      <dl className="kv" aria-label={msg.about.title}>
+    <div className="stack">
+      <dl className="kv" aria-label={msg.about.title} data-setting="version">
         <dt>{msg.about.version}</dt>
         <dd className="mono selectable">
           {msg.app.name} {versionLabel(version)}
@@ -83,6 +80,9 @@ export function AboutSection() {
         </div>
         <span className="hint">{msg.about.releasesHint}</span>
       </div>
-    </section>
+      <Notice tone="warning">
+        <strong>{msg.settings.status}.</strong> {msg.settings.statusBody}
+      </Notice>
+    </div>
   );
 }

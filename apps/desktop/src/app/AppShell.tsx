@@ -60,6 +60,7 @@ import { msgC } from "../lib/messages-c";
 import { actionFor, applyBindingOverrides, tabIndexFor } from "../lib/shortcuts";
 import { workspacePrefs } from "../features/layouts/WorkspaceSettings";
 import { useCommandFinished } from "../features/notify/useCommandFinished";
+import { type OpenLayout, openBeside, openMany } from "./multiOpen";
 import { usePreferences } from "./preferences";
 import { VaultDataProvider, useVaultData } from "./vaultData";
 import {
@@ -339,6 +340,29 @@ function Shell() {
     [open, reloadRecent],
   );
 
+  // Several hosts at once (multi-select on Hosts): one tab each, or one tab split in a grid.
+  const connectMany = useCallback(
+    (list: HostSummary[], layout: OpenLayout) => {
+      const seeds = list.map((host) => ({ target: { kind: "ssh" as const, hostId: host.id }, label: host.label, identity: hostIdentity(host) }));
+      setWs((current) => openMany(current, seeds, layout));
+      window.setTimeout(() => void data.recent.reload(), 3_000);
+    },
+    [data.recent],
+  );
+
+  // Connect in split: the host beside the focused pane of the terminal tab in front.
+  const connectSplit = useCallback(
+    (host: HostSummary) => {
+      if (paneCount(wsRef.current) >= MAX_PANES) {
+        notify("danger", msgC.panes.full);
+        return;
+      }
+      setWs((current) => openBeside(current, { target: { kind: "ssh", hostId: host.id }, label: host.label, identity: hostIdentity(host) }));
+      window.setTimeout(() => void data.recent.reload(), 3_000);
+    },
+    [notify, data.recent],
+  );
+
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
   // An SFTP tab: two file panes (this computer and a host picker); never split.
   const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
@@ -346,17 +370,19 @@ function Shell() {
    * Open in SFTP: focuses the SFTP tab in front (or the first one; a new one when there is none)
    * and shows `host` in its right pane, at `path` when given.
    */
-  const openSftpHost = useCallback(
-    (host: { id: string; label: string }, path: string | null = null) => {
+  const openSftpHosts = useCallback(
+    (hosts: { id: string; label: string }[], path: string | null = null) => {
       const current = wsRef.current;
       const isSftp = (t: { focused: number }) => current.panes[t.focused]?.target.kind === "sftp";
       const front = current.tabs.find((t) => t.id === current.active && isSftp(t)) ?? current.tabs.find(isSftp);
       if (front) setWs((c) => selectTab(c, front.id));
       else openSftp();
-      sftpRequests.push({ source: { kind: "host", hostId: host.id, label: host.label }, path });
+      // One tab for all of them: each host becomes a location of its right pane.
+      for (const host of hosts) sftpRequests.push({ source: { kind: "host", hostId: host.id, label: host.label }, path });
     },
     [openSftp],
   );
+  const openSftpHost = useCallback((host: { id: string; label: string }, path: string | null = null) => openSftpHosts([host], path), [openSftpHosts]);
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -863,6 +889,7 @@ function Shell() {
     [focusedHandle, notify],
   );
   const openSftpForHost = useCallback((host: HostSummary) => openSftpHost(host), [openSftpHost]);
+  const openSftpForHosts = useCallback((list: HostSummary[]) => openSftpHosts(list), [openSftpHosts]);
   const pasteFocused = useCallback((text: string) => focusedHandle()?.reviewPaste(text), [focusedHandle]);
   // The files panel's other connected sessions; computed only while that panel shows.
   const filesOthers = useMemo(
@@ -983,6 +1010,8 @@ function Shell() {
               ws={ws}
               statuses={statuses}
               onConnect={connect}
+              onConnectSplit={connectSplit}
+              onSftpHost={(host) => openSftpHost(host)}
               onLocal={openLocal}
               onSftp={openSftp}
               onNavigate={navigate}
@@ -991,7 +1020,7 @@ function Shell() {
               shortcuts={bindings}
             />
           )}
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onOpenSftp={openSftpForHost} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onConnectMany={connectMany} onConnectSplit={connectSplit} onOpenSftp={openSftpForHost} onOpenSftpMany={openSftpForHosts} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
@@ -1096,6 +1125,7 @@ function Shell() {
             if (terminalVisible) focusedHandle()?.focus();
           }}
           onConnect={connect}
+          onConnectSplit={connectSplit}
           onNavigate={navigate}
           onAction={runAction}
           onToggleTheme={toggleTheme}

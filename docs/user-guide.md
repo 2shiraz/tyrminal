@@ -139,6 +139,38 @@ imported without a jump host, and the preview says why. An OpenSSH `known_hosts`
 imported too: after a review, its keys become trusted server identities, and a key that differs
 from one you already trust is never replaced.
 
+### Selecting and opening hosts
+
+Hosts have no Connect button: **double-click** a host, or press **Enter** on it, to connect. The
+host menu (**…** or right-click) keeps **Connect**, **Connect in split** and **Open in SFTP**, and
+the Host details panel keeps its Connect button. A "Double-click to connect" hint shows on host
+names the first few times.
+
+Hosts select like files in Finder or Explorer, in both the list and cards:
+
+- **Click** a host to select only it (its details show in the side panel).
+- **Ctrl-click** (**⌘-click** on macOS) or **Space** adds or removes one host; **Shift-click**
+  selects the range from the last host clicked, and **Shift+Ctrl/⌘-click** adds that range.
+- **Ctrl/⌘+A** selects every host shown (the search narrows what is shown); **Esc** clears.
+- **Arrow keys** move through the hosts and Host details follow; **Home** and **End** jump to the
+  ends; **Shift+arrow** extends the selection; **Ctrl/⌘+arrow** moves without changing it (then
+  **Space** adds the host). Typing a letter goes to the search field.
+- **Enter** connects, **Ctrl/⌘+Enter** opens in a split, **Shift+Enter** opens in SFTP. On a
+  selection of several hosts, these act on all of them after a short review: **In separate
+  tabs** (the default) or **In one tab, split**. A window holds at most 16 sessions; more than fit
+  is refused, never cut short.
+
+Selected hosts are tinted with an accent edge on the left; there are no checkboxes. With two or
+more hosts selected, a one-line strip above the list shows the count and offers **Connect**,
+**Open in SFTP**, **Move to group**, **Set OS**, tags, **Delete** (after a confirmation) and
+**Clear**. Every host still asks for
+its own host-key and sign-in decisions in its own pane, and production hosts are confirmed first
+(below).
+
+Home's recent and saved hosts work the same way: a click selects, double-click or Enter connects.
+In the command palette, Enter connects a host, Ctrl/⌘+Enter opens it in a split and Shift+Enter
+opens it in SFTP.
+
 ### Production hosts
 
 Mark a host as a **production host** with the switch in its editor, mark a whole group (every

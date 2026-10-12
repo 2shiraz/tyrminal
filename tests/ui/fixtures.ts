@@ -73,6 +73,12 @@ export async function openApp(page: Page, options: MockOptions = {}) {
 }
 
 /** Visible terminal text. Requires the DOM renderer (the GPU renderer draws to a canvas). */
+/** Opens Settings, and with `section` that section (Settings shows one section at a time). */
+export async function openSettings(page: Page, section?: string) {
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Settings/ }).click();
+  if (section) await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: section, exact: true }).click();
+}
+
 export function terminalText(page: Page): Promise<string> {
   return page.evaluate(() =>
     [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows")].map((e) => (e as HTMLElement).innerText.replaceAll("\u00a0", " ")).join("\n"),
@@ -84,4 +90,16 @@ export async function waitForTerminalText(page: Page, text: string) {
     (needle) => [...document.querySelectorAll(".terminal-pane:not([hidden]) .xterm-rows")].some((e) => (e as HTMLElement).innerText.replaceAll("\u00a0", " ").includes(needle)),
     text,
   );
+}
+
+/**
+ * Connects to a saved host the way a user does: double-click its row on Home or its row or card on
+ * Hosts (there is no Connect button on them).
+ */
+export async function connectHost(page: Page, label: string) {
+  await page
+    .locator('[data-testid="host-list"], table.home-hosts')
+    .getByRole("button", { name: label, exact: true })
+    .first()
+    .dblclick();
 }

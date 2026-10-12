@@ -5,13 +5,12 @@
 
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 
 const calls = (page: Page) => page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.map((x) => x.cmd));
 
 async function openReview(page: Page): Promise<Locator> {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Security review" }).click();
+  await openSettings(page, "Security review");
   const section = page.getByTestId("security-review");
   await expect(section.getByRole("list", { name: "Security review" })).toBeVisible();
   return section;
@@ -120,5 +119,6 @@ test("the command palette opens the review", async ({ page }) => {
   await page.getByRole("button", { name: "Search or run a command" }).click();
   await page.getByRole("combobox", { name: /Type a command/ }).fill("security review");
   await page.getByRole("option", { name: /Security review/ }).click();
-  await expect(page.getByTestId("security-review").getByRole("heading", { name: "Security review" })).toBeInViewport();
+  await expect(page.locator("#settings-review").getByRole("heading", { name: "Security review" })).toBeInViewport();
+  await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Security review" })).toHaveAttribute("aria-current", "page");
 });

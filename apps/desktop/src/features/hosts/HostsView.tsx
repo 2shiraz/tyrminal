@@ -11,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -22,6 +22,7 @@ import { useToast } from "../../components/ui/Toasts";
 import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
 import {
   IconArrowLeftRight,
+  IconColumns2,
   IconCopy,
   IconEllipsis,
   IconFolder,
@@ -52,6 +53,9 @@ import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
 import { msgProduction } from "../../lib/messages-production";
 import { flashSaved, useFlip } from "../../lib/motion";
+import { msgSelect } from "../../lib/messages-select";
+import { isMac } from "../../lib/platform";
+import { type OpenLayout } from "../../app/multiOpen";
 import { useAction } from "../../lib/useAsync";
 import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
@@ -60,6 +64,7 @@ import { groupPath } from "./hostForm";
 import { ImportDialog } from "./ImportDialog";
 import { ConnectAllDialog, SetOsDialog } from "./InventoryDialogs";
 import { OsIcon } from "./OsIcon";
+import { MAX_LOCATIONS } from "../sftp/SftpPane";
 import { useIsProduction } from "./production";
 import { identityEvents, useIdentities } from "../credentials/IdentitiesSection";
 import { AssignIdentityDialog } from "./AssignIdentityDialog";
@@ -129,15 +134,61 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
 
+/** How long after a click a second one still makes a double-click (the common system default). */
+const DOUBLE_CLICK_MS = 300;
+
+/** Times a host is connected from Hosts by double-click or Enter before the hint stops showing. */
+const HINT_UNTIL = 3;
+const HINT_KEY = "tyrminal.hosts.doubleClickHint";
+
+/**
+ * The "Double-click to connect" hint on host names, for the first few connections from Hosts. A
+ * per-device convenience in local storage; without storage it simply keeps showing.
+ */
+function useDoubleClickHint() {
+  const [count, setCount] = useState(() => {
+    try {
+      return Number(localStorage.getItem(HINT_KEY) ?? 0) || 0;
+    } catch {
+      return 0;
+    }
+  });
+  return {
+    show: count < HINT_UNTIL,
+    used: () =>
+      setCount((n) => {
+        const next = n + 1;
+        try {
+          localStorage.setItem(HINT_KEY, String(next));
+        } catch {
+          // Storage unavailable: the hint keeps showing, nothing else depends on it.
+        }
+        return next;
+      }),
+  };
+}
+
+/** Ctrl on Windows and Linux, Cmd on macOS: the "add to the selection" modifier. */
+const toggleKey = (event: { ctrlKey: boolean; metaKey: boolean }) => (isMac ? event.metaKey : event.ctrlKey);
+
 function HostsViewImpl({
   ws,
   onConnect,
+  onConnectMany,
+  onConnectSplit,
   onOpenSftp,
+  onOpenSftpMany,
 }: {
   ws: Workspace;
   onConnect: (host: HostSummary) => void;
+  /** Several hosts at once, one tab each or one split tab; each still asks for trust and sign-in. */
+  onConnectMany?: (hosts: HostSummary[], layout: OpenLayout) => void;
+  /** Connect in split: beside the focused pane of the terminal tab in front. */
+  onConnectSplit?: (host: HostSummary) => void;
   /** Open in SFTP: the host in an SFTP tab (SSH hosts). */
   onOpenSftp?: (host: HostSummary) => void;
+  /** Open in SFTP for a selection: one SFTP tab, each host a location of it. */
+  onOpenSftpMany?: (hosts: HostSummary[]) => void;
 }) {
   const { hosts, keys, recent, groups } = useVaultData();
   const listRef = useRef<HTMLUListElement>(null);
@@ -160,12 +211,16 @@ function HostsViewImpl({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
   // state (what is not autosaved: a password typed but not set, note edits).
-  const [panel, setPanel] = useState<{ target: PanelTarget; version: number } | null>(null);
+  const [panel, setPanel] = useState<{ target: PanelTarget; version: number; takeFocus: boolean } | null>(null);
   const [discarding, setDiscarding] = useState<{ then: () => void; wording: NonNullable<ReturnType<typeof discardWording>> } | null>(null);
   const panelUnsaved = useRef<Unsaved>({ password: false, note: false });
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Selection is shown by the row tint and edge; assistive technology hears "Selected" after the name.
+  const selectedNoteId = useId();
+  const hint = useDoubleClickHint();
   const [narrow, setNarrow] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [deleting, setDeleting] = useState<HostSummary | null>(null);
@@ -179,7 +234,7 @@ function HostsViewImpl({
   // Hosts whose icon comes from a group default (HST-05) rather than their own setting.
   const [osInherited, setOsInherited] = useState<Set<string>>(new Set());
   const [settingOs, setSettingOs] = useState<{ ids: string[]; initial: HostOs | null } | null>(null);
-  const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null } | null>(null);
+  const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null; layout?: OpenLayout } | null>(null);
   // Identities (KEY-17): which one every host and group uses.
   const identityList = useIdentities();
   const [assignments, setAssignments] = useState<Map<string, IdentityAssignment>>(new Map());
@@ -337,31 +392,148 @@ function HostsViewImpl({
     void groups.reload();
   };
   const selectedIds = [...selected].filter((id) => hosts.value?.some((h) => h.id === id));
-  const toggle = (id: string, event?: MouseEvent) => {
+  // Finder-style selection on the rows themselves: the row tint and accent edge show it.
+  // The selection a plain click just replaced, when the clicked host was part of it: the first
+  // click of a double-click must not shrink what the double-click opens.
+  const replaced = useRef<{ id: string; ids: Set<string> } | null>(null);
+  const shownIds = filtered.map((h) => h.id);
+  const selectWith = (id: string, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
+    const additive = toggleKey(event);
     const from = anchor.current;
-    anchor.current = id;
-    setSelected((current) => {
-      const next = new Set(current);
-      const on = !next.has(id);
-      const ids = event?.shiftKey && from ? rangeBetween(filtered.map((h) => h.id), from, id) : [id];
-      for (const x of ids) {
-        if (on) next.add(x);
-        else next.delete(x);
-      }
-      return next;
-    });
+    if (event.shiftKey && from && shownIds.includes(from)) {
+      const range = rangeBetween(shownIds, from, id);
+      setSelected((current) => new Set(additive ? [...current, ...range] : range));
+    } else if (additive) {
+      anchor.current = id;
+      setSelected((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    } else {
+      replaced.current = selected.has(id) && selected.size > 1 ? { id, ids: new Set(selected) } : null;
+      anchor.current = id;
+      setSelected(new Set([id]));
+    }
   };
-  const shownSelected = filtered.filter((h) => selected.has(h.id)).length;
-  const toggleAllShown = () =>
-    setSelected((current) => {
-      const next = new Set(current);
-      const all = filtered.length > 0 && filtered.every((h) => next.has(h.id));
-      for (const h of filtered) {
-        if (all) next.delete(h.id);
-        else next.add(h.id);
+  // Opening the details panel narrows the list and can move the rows; when it is not open yet it
+  // opens once a double-click is no longer possible, so the second click lands on the same host.
+  const pendingPanel = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(pendingPanel.current), []);
+  const rowClick = (host: HostSummary, event: MouseEvent) => {
+    // The second click of a double-click: the double-click handler decides.
+    if (event.detail > 1) return;
+    selectWith(host.id, event);
+    if (event.shiftKey || toggleKey(event)) return;
+    window.clearTimeout(pendingPanel.current);
+    if (panel) openPanel({ kind: "edit", host });
+    else pendingPanel.current = window.setTimeout(() => openPanel({ kind: "edit", host }), DOUBLE_CLICK_MS);
+  };
+  const selectedHosts = filtered.filter((h) => selected.has(h.id));
+  // Open in SFTP for a selection: each SSH host becomes a location of the SFTP tab (at most
+  // MAX_LOCATIONS; each still asks for its own trust and sign-in).
+  const sftpSelection = selectedHosts.filter((h) => h.protocol.type === "ssh");
+  const openSelectionInSftp =
+    onOpenSftpMany && sftpSelection.length > 0 && sftpSelection.length <= MAX_LOCATIONS ? () => onOpenSftpMany(sftpSelection) : undefined;
+  /**
+   * Double-click or Enter (Cmd/Ctrl+Enter: in a split; Shift+Enter: in SFTP): the whole selection
+   * when the host is part of one, else that host. Several hosts are reviewed first.
+   */
+  const connectFrom = (host: HostSummary, how: "connect" | "split" | "sftp" = "connect", fromDoubleClick = false) => {
+    window.clearTimeout(pendingPanel.current);
+    const before = fromDoubleClick && replaced.current?.id === host.id ? replaced.current.ids : null;
+    const ids = before ?? selected;
+    const chosen = filtered.filter((h) => ids.has(h.id));
+    if (before) {
+      setSelected(new Set(before));
+    }
+    replaced.current = null;
+    const many = ids.has(host.id) && chosen.length > 1;
+    if (how === "sftp") {
+      if (many) openSelectionInSftp?.();
+      else if (host.protocol.type === "ssh") onOpenSftp?.(host);
+      return;
+    }
+    hint.used();
+    if (many) setConnectAll({ hosts: chosen, groupName: null, layout: how === "split" ? "split" : "tabs" });
+    else if (how === "split" && onConnectSplit) onConnectSplit(host);
+    else onConnect(host);
+  };
+  const focusHost = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-host-id="${CSS.escape(id)}"] .host-open`)?.focus();
+  /** Hosts per row in the card grid (1 in the list), from where the cards are laid out. */
+  const perRow = () => {
+    const items = [...(listRef.current?.children ?? [])] as HTMLElement[];
+    const top = items[0]?.offsetTop;
+    const n = items.filter((el) => el.offsetTop === top).length;
+    return layout === "grid" ? Math.max(1, n) : 1;
+  };
+  const onListKey = (event: KeyboardEvent<HTMLUListElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("input:not([type=checkbox]), textarea, select")) return;
+    const current = target.closest<HTMLElement>("[data-host-id]")?.dataset.hostId ?? null;
+    // Working in the list from the keyboard: a click's details panel that has not opened yet stays closed.
+    window.clearTimeout(pendingPanel.current);
+    if (toggleKey(event) && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      setSelected(new Set(shownIds));
+      return;
+    }
+    if (event.key === "Escape" && selected.size > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelected(new Set());
+      return;
+    }
+    if (!current) return;
+    // Home and End jump to the ends; the arrows move by one host (a row of cards up and down).
+    const steps: Record<string, number> = { ArrowDown: perRow(), ArrowUp: -perRow(), ArrowRight: 1, ArrowLeft: -1, Home: -shownIds.length, End: shownIds.length };
+    const step = steps[event.key];
+    if (step !== undefined) {
+      if (layout === "list" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) return;
+      event.preventDefault();
+      const index = shownIds.indexOf(current);
+      const nextId = shownIds[Math.min(shownIds.length - 1, Math.max(0, index + step))];
+      if (!nextId) return;
+      if (toggleKey(event) && !event.shiftKey) {
+        // Cmd/Ctrl+arrow moves without changing the selection (Space then adds or removes).
+      } else if (event.shiftKey) {
+        anchor.current ??= current;
+        const range = rangeBetween(shownIds, anchor.current, nextId);
+        setSelected(new Set(range));
+      } else {
+        anchor.current = nextId;
+        setSelected(new Set([nextId]));
+        // Host details follow the selection (edits there are saved as they are made).
+        const host = filtered.find((h) => h.id === nextId);
+        if (host) openPanel({ kind: "edit", host }, { takeFocus: false });
       }
-      return next;
-    });
+      focusHost(nextId);
+      return;
+    }
+    const host = filtered.find((h) => h.id === current);
+    // Enter, Space and typing act on the host name; other controls in the row keep their keys.
+    if (!host || !target.classList.contains("host-open")) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      connectFrom(host, toggleKey(event) ? "split" : event.shiftKey ? "sftp" : "connect");
+      return;
+    }
+    // Space adds the host to the selection or takes it out, like Cmd/Ctrl-click.
+    if (event.key === " " && !event.altKey && !toggleKey(event)) {
+      event.preventDefault();
+      selectWith(host.id, { shiftKey: event.shiftKey, ctrlKey: !isMac, metaKey: isMac });
+      return;
+    }
+    // Typing a character filters: it goes to the search field.
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && event.key !== " ") {
+      event.preventDefault();
+      setQuery((q) => q + event.key);
+      searchRef.current?.focus();
+    }
+  };
+  /** The selection strip shows from two selected hosts on. */
+  const bulkCount = selectedIds.length >= 2 ? selectedIds.length : 0;
   const free = Math.max(0, MAX_PANES - paneCount(ws));
   const hostsInGroup = (id: string) => {
     const inside = descendantsOf(groupList, id);
@@ -395,17 +567,17 @@ function HostsViewImpl({
     if (wording) setDiscarding({ then, wording });
     else then();
   };
-  const show = (target: PanelTarget) => {
+  const show = (target: PanelTarget, takeFocus: boolean) => {
     version.current += 1;
     panelUnsaved.current = { password: false, note: false };
-    setPanel({ target, version: version.current });
+    setPanel({ target, version: version.current, takeFocus });
   };
-  const openPanel = (target: PanelTarget) => {
+  const openPanel = (target: PanelTarget, { takeFocus = true } = {}) => {
     if (target.kind === "edit" && panel?.target.kind === "edit" && panel.target.host.id === target.host.id) return;
     // Remember what opened the panel (the latest host name or button outside it) to return focus there.
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body && !active.closest(".host-panel")) opener.current = active;
-    guard(() => show(target));
+    guard(() => show(target, takeFocus));
   };
   /** Closes the panel and puts focus back where it was opened from (or on "Add host"). */
   const closePanel = useCallback(() => {
@@ -488,58 +660,8 @@ function HostsViewImpl({
             </div>
           )}
 
-          {selectedIds.length > 0 && (
-            <div className="bulk-bar" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
-              <strong>{msg.hosts.selected(selectedIds.length)}</strong>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => setConnectAll({ hosts: (hosts.value ?? []).filter((h) => selected.has(h.id)), groupName: null })}
-              >
-                <IconPlay size={13} />
-                {msgD.inventory.connectSelected}
-              </button>
-              {groupList.length > 0 && (
-                <button type="button" className="btn btn-sm" onClick={() => setBulk("move")}>
-                  <IconFolder size={13} />
-                  {msg.hosts.moveTo}
-                </button>
-              )}
-              <button type="button" className="btn btn-sm" onClick={() => setSettingOs({ ids: selectedIds, initial: null })}>
-                <IconServer size={13} />
-                {msgD.inventory.setOs}
-              </button>
-              <button type="button" className="btn btn-sm" onClick={() => setBulk("add_tag")}>
-                {msg.hosts.addTag}
-              </button>
-              <button type="button" className="btn btn-sm" onClick={() => setBulk("remove_tag")}>
-                {msg.hosts.removeTag}
-              </button>
-              <button type="button" className="btn btn-sm btn-danger" onClick={() => setBulk("delete")}>
-                <IconTrash2 size={13} />
-                {msg.common.delete}
-              </button>
-              <span className="spacer" />
-              <IconButton size="sm" label={msg.hosts.clearSelection} onClick={() => setSelected(new Set())}>
-                <IconX size={14} />
-              </IconButton>
-            </div>
-          )}
-
           {total > 0 && (
             <div className="toolbar">
-              <input
-                type="checkbox"
-                className="select-all"
-                aria-label={msgD.inventory.selectAll}
-                title={msgD.inventory.selectAll}
-                checked={filtered.length > 0 && shownSelected === filtered.length}
-                ref={(el) => {
-                  if (el) el.indeterminate = shownSelected > 0 && shownSelected < filtered.length;
-                }}
-                disabled={filtered.length === 0}
-                onChange={toggleAllShown}
-              />
               <div className="input-with-icon">
                 <IconSearch size={15} />
                 <input
@@ -548,6 +670,7 @@ function HostsViewImpl({
                   placeholder={msg.common.search}
                   aria-label={msg.hosts.searchLabel}
                   title={msg.hosts.searchHelp}
+                  ref={searchRef}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
@@ -592,8 +715,56 @@ function HostsViewImpl({
 
           {total > 0 && filtered.length === 0 && <p className="muted">{msg.hosts.noMatch}</p>}
 
+          {bulkCount > 0 && (
+            <div className="bulk-bar box-strip" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
+              <strong>{msg.hosts.selected(selectedIds.length)}</strong>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => setConnectAll({ hosts: (hosts.value ?? []).filter((h) => selected.has(h.id)), groupName: null })}
+              >
+                <IconPlay size={13} />
+                {msgSelect.connectN(selectedIds.length)}
+              </button>
+              {openSelectionInSftp && (
+                <button type="button" className="btn btn-sm" onClick={openSelectionInSftp}>
+                  <IconArrowLeftRight size={13} />
+                  {msgSelect.openInSftp(sftpSelection.length)}
+                </button>
+              )}
+              {groupList.length > 0 && (
+                <button type="button" className="btn btn-sm" onClick={() => setBulk("move")}>
+                  <IconFolder size={13} />
+                  {msg.hosts.moveTo}
+                </button>
+              )}
+              <button type="button" className="btn btn-sm" onClick={() => setSettingOs({ ids: selectedIds, initial: null })}>
+                <IconServer size={13} />
+                {msgD.inventory.setOs}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setBulk("add_tag")}>
+                {msg.hosts.addTag}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setBulk("remove_tag")}>
+                {msg.hosts.removeTag}
+              </button>
+              <button type="button" className="btn btn-sm btn-danger" onClick={() => setBulk("delete")}>
+                <IconTrash2 size={13} />
+                {msg.common.delete}
+              </button>
+              <span className="spacer" />
+              <button type="button" className="btn btn-sm btn-ghost" aria-label={msg.hosts.clearSelection} onClick={() => setSelected(new Set())}>
+                <IconX size={13} />
+                {msgSelect.clear}
+              </button>
+            </div>
+          )}
+
+          <span id={selectedNoteId} className="visually-hidden">
+            {msgSelect.selectedNote}
+          </span>
           {layout === "grid" ? (
-            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
+            <ul className="tile-grid host-grid" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
               {filtered.map((host) => {
                 const isConnected = connected.has(host.id);
                 return (
@@ -603,26 +774,22 @@ function HostsViewImpl({
                       data-connected={isConnected}
                       data-active={panelHostId === host.id}
                       data-pending={pendingIds.has(host.id) || undefined}
+                      data-selected={selected.has(host.id) || undefined}
+                      data-host-id={host.id}
                       aria-label={host.label}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
-                        openPanel({ kind: "edit", host });
+                        rowClick(host, event);
                       }}
-                      onDoubleClick={() => onConnect(host)}
+                      onDoubleClick={(event) => {
+                        if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
+                        connectFrom(host, "connect", true);
+                      }}
                       onContextMenu={(event) => {
                         event.preventDefault();
                         actions(host, event.currentTarget);
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        className="host-select"
-                        aria-label={msg.hosts.select(host.label)}
-                        checked={selected.has(host.id)}
-                        data-visible={selected.size > 0}
-                        onClick={(event) => toggle(host.id, event)}
-                        readOnly
-                      />
                       {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                       <div className="host-card-main">
                         <span className="host-card-title">
@@ -630,7 +797,12 @@ function HostsViewImpl({
                             type="button"
                             className="host-open truncate"
                             aria-current={panelHostId === host.id ? true : undefined}
-                            onClick={() => openPanel({ kind: "edit", host })}
+                            data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
+                            aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              rowClick(host, event);
+                            }}
                           >
                             {host.label}
                           </button>
@@ -674,10 +846,6 @@ function HostsViewImpl({
                           </span>
                         )}
                         </div>
-                        <button type="button" className="btn btn-primary btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
-                          <IconPlay size={13} />
-                          {msg.hosts.connect}
-                        </button>
                       </div>
                       <div className="host-card-actions">
                         <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
@@ -690,17 +858,36 @@ function HostsViewImpl({
               })}
             </ul>
           ) : (
-            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef}>
+            <ul className="list" aria-label={msg.hosts.title} data-testid="host-list" ref={listRef} onKeyDown={onListKey}>
               {filtered.map((host) => (
-                <li key={host.id} data-flip-key={host.id} data-active={panelHostId === host.id} data-pending={pendingIds.has(host.id) || undefined}>
-                  <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onClick={(event) => toggle(host.id, event)} readOnly />
+                <li
+                  key={host.id}
+                  data-flip-key={host.id}
+                  data-active={panelHostId === host.id}
+                  data-pending={pendingIds.has(host.id) || undefined}
+                  data-selected={selected.has(host.id) || undefined}
+                  data-host-id={host.id}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
+                    rowClick(host, event);
+                  }}
+                  onDoubleClick={(event) => {
+                    if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
+                    connectFrom(host, "connect", true);
+                  }}
+                >
                   {osOf.has(host.id) ? <OsIcon os={osOf.get(host.id) as HostOs} /> : <Avatar label={host.label} />}
                   <div className="row-main">
                     <button
                       type="button"
                       className="host-open row-title"
                       aria-current={panelHostId === host.id ? true : undefined}
-                      onClick={() => openPanel({ kind: "edit", host })}
+                      data-tooltip={hint.show ? msgSelect.doubleClickHint : undefined}
+                      aria-describedby={selected.has(host.id) ? selectedNoteId : undefined}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        rowClick(host, event);
+                      }}
                     >
                       {host.label}
                     </button>
@@ -718,10 +905,6 @@ function HostsViewImpl({
                     </span>
                   )}
                   <div className="row-actions">
-                    <button type="button" className="btn btn-primary btn-sm" aria-label={msg.hosts.connectTo(host.label)} onClick={() => onConnect(host)}>
-                      <IconPlay size={13} />
-                      {msg.hosts.connect}
-                    </button>
                     <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
                       <IconEllipsis size={16} />
                     </IconButton>
@@ -738,6 +921,7 @@ function HostsViewImpl({
           // Not keyed by the host: creating the host on its first save keeps the same panel.
           key={panel.version}
           target={panel.target}
+          takeFocus={panel.takeFocus}
           keys={keyList}
           groups={groupList}
           defaultGroupId={currentGroupId}
@@ -774,7 +958,20 @@ function HostsViewImpl({
           anchor={menu.anchor}
           onClose={() => setMenu(null)}
           items={[
+            // On a host of a multi-selection the menu acts on the whole selection first.
+            ...(selected.has(menu.host.id) && selectedHosts.length > 1
+              ? [
+                  {
+                    label: msgSelect.connectN(selectedHosts.length),
+                    icon: <IconPlay size={15} />,
+                    onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null }),
+                  },
+                  ...(openSelectionInSftp ? [{ label: msgSelect.openInSftp(sftpSelection.length), icon: <IconArrowLeftRight size={15} />, onSelect: openSelectionInSftp }] : []),
+                  "separator" as const,
+                ]
+              : []),
             { label: msg.hosts.connect, icon: <IconPlay size={15} />, onSelect: () => onConnect(menu.host) },
+            ...(onConnectSplit ? [{ label: msgSelect.connectInSplit, icon: <IconColumns2 size={15} />, onSelect: () => onConnectSplit(menu.host) }] : []),
             ...(onOpenSftp && menu.host.protocol.type === "ssh"
               ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(menu.host) }]
               : []),
@@ -921,11 +1118,13 @@ function HostsViewImpl({
           hosts={connectAll.hosts}
           groupName={connectAll.groupName}
           free={free}
+          initialLayout={connectAll.layout ?? "tabs"}
           onClose={() => setConnectAll(null)}
-          onConfirm={(list) => {
+          onConfirm={(list, layout) => {
             setConnectAll(null);
             notify("success", msgD.inventory.connectAllDone(list.length));
-            for (const host of list) onConnect(host);
+            if (onConnectMany) onConnectMany(list, layout);
+            else for (const host of list) onConnect(host);
           }}
         />
       )}

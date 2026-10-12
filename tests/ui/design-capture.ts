@@ -5,7 +5,7 @@
 //   cd tests/ui && npx playwright test -c design-capture.config.ts
 // AUDIT_OUT and AUDIT_PREFIX choose the folder and a file-name prefix (used for other branches).
 import { type Page, expect, test } from "@playwright/test";
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 const OUT = process.env.AUDIT_OUT ?? new URL("../../docs/design/before", import.meta.url).pathname;
 const PREFIX = process.env.AUDIT_PREFIX ?? "";
 const shot = async (page: Page, name: string) => {
@@ -53,8 +53,8 @@ for (const theme of ["dark", "light"] as const) {
     await t("palette", async () => { await page.getByRole("button", { name: "Search or run a command" }).click(); await page.getByRole("combobox", { name: /Type a command/ }).fill("dep"); });
     await page.keyboard.press("Escape");
     await openApp(page, { theme, trustPromptFor: "staging-web" });
-    await t("trust-prompt", async () => { await nav(page, /^Hosts/); await page.getByRole("button", { name: "Connect to staging-web" }).click(); await expect(page.getByRole("alertdialog")).toBeVisible(); });
+    await t("trust-prompt", async () => { await nav(page, /^Hosts/); await connectHost(page, "staging-web"); await expect(page.getByRole("alertdialog")).toBeVisible(); });
     await openApp(page, { theme, hostKeyChangedFor: "staging-web" });
-    await t("host-key-changed", async () => { await nav(page, /^Hosts/); await page.getByRole("button", { name: "Connect to staging-web" }).click(); await page.waitForTimeout(500); });
+    await t("host-key-changed", async () => { await nav(page, /^Hosts/); await connectHost(page, "staging-web"); await page.waitForTimeout(500); });
   });
 }
