@@ -1405,10 +1405,6 @@ kbd,
   font-variant-numeric: tabular-nums;
 }
 
-.nav-session {
-  height: 30px;
-  font-weight: var(--weight-regular);
-}
 
 .sidebar-footer {
   display: grid;

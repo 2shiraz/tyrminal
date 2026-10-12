@@ -1,10 +1,8 @@
 import { type ReactNode, memo } from "react";
 
 import type { Destination } from "../../app/AppShell";
-import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
 import { versionLabel } from "../../lib/version";
-import { msgC } from "../../lib/messages-c";
 import { Shortcut } from "../ui/controls";
 import {
   // agent B: tunnels and history
@@ -57,9 +55,7 @@ const VAULT: { id: Destination; icon: ReactNode }[] = [
 function SidebarImpl({
   destination,
   collapsed,
-  ws,
   onNavigate,
-  onSelectTab,
   onOpenPalette,
   onLocalTerminal,
   onSftp,
@@ -71,9 +67,7 @@ function SidebarImpl({
 }: {
   destination: Destination | null;
   collapsed: boolean;
-  ws: Workspace;
   onNavigate: (d: Destination) => void;
-  onSelectTab: (id: number) => void;
   onOpenPalette: () => void;
   onLocalTerminal: () => void;
   /** Opens a new SFTP tab. */
@@ -123,32 +117,6 @@ function SidebarImpl({
       <div className="nav-group-label eyebrow">{msg.nav.library}</div>
       {VAULT.map(item)}
 
-      {ws.tabs.length > 0 && (
-        <>
-          <div className="nav-group-label eyebrow">{msg.nav.sessionsGroup}</div>
-          <ul aria-label={msg.nav.sessions}>
-            {ws.tabs.map((tab) => {
-              const status = tabStatus(ws, tab);
-              return (
-                <li key={tab.id}>
-                  <button
-                    type="button"
-                    className="nav-item nav-session"
-                    aria-current={ws.active === tab.id ? "page" : undefined}
-                    data-tooltip={collapsed ? tabTitle(ws, tab) : undefined}
-                    data-tooltip-side="right"
-                    onClick={() => onSelectTab(tab.id)}
-                  >
-                    <span className="status-dot" data-tone={status.indicator} data-unread={status.unread || undefined} aria-hidden="true" />
-                    <span className="nav-label truncate">{tabTitle(ws, tab)}</span>
-                    <span className="visually-hidden">{msgC.status.describe(status)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
 
       <div className="sidebar-footer">
         <button type="button" className="nav-item" data-nav="local" onClick={onLocalTerminal} data-tooltip={collapsed ? msg.nav.localTerminal : undefined} data-tooltip-side="right">

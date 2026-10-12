@@ -980,9 +980,7 @@ function Shell() {
       <Sidebar
         destination={terminalVisible ? null : destination}
         collapsed={collapsed}
-        ws={ws}
         onNavigate={navigate}
-        onSelectTab={selectTabById}
         onOpenPalette={openPalette}
         onLocalTerminal={openLocal}
         onSftp={openSftp}

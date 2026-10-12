@@ -37,8 +37,8 @@ test("status: output in a background tab is marked unread until the tab is shown
   await output(page, "background line\r\n");
   await expect(local).toHaveAttribute("data-unread", "true");
   await expect(local).toHaveAccessibleName(/new output/);
-  // The sidebar's session list says the same.
-  await expect(page.getByRole("list", { name: "Open sessions" }).getByRole("button", { name: /Local terminal.*new output/ })).toBeVisible();
+  // The sidebar no longer lists sessions; the tab strip is the one place they are shown.
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("list", { name: "Open sessions" })).toHaveCount(0);
 
   await local.click();
   await expect(local).not.toHaveAttribute("data-unread", /.*/);
