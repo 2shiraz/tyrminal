@@ -142,7 +142,10 @@ test("connect to every host of a group after reviewing the list", async ({ page 
   await page.getByRole("button", { name: "Actions for group Production" }).click();
   await page.getByRole("menuitem", { name: "Connect to every host" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Open 2 sessions" }).click();
-  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(2);
+  // These are the first terminals of the page: creating the first WebGL renderer on the test
+  // runner's emulated GPU (SwiftShader) blocks the page for 3-4 s before the next pane can open its
+  // session, so allow what the other many-terminal tests allow.
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length, { timeout: 15_000 }).toBe(2);
 });
 
 test("a group-wide connection that does not fit is refused, not cut short", async ({ page }) => {
@@ -155,7 +158,8 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
     await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
-  await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(12);
+  // As above: the first terminals take a few seconds to start on the test runner's emulated GPU.
+  await expect.poll(async () => (await calls(page, "session_open_ssh")).length, { timeout: 15_000 }).toBe(12);
   await openHosts(page);
   await page.getByRole("checkbox", { name: "Select all shown hosts" }).check();
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
