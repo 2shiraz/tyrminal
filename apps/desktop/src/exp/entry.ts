@@ -4,3 +4,5 @@ import "./styles/tokens.css";
 import "./styles/shell.css";
 import "./styles/components.css";
 import "./styles/screens.css";
+import "./styles/springs.css";
+import "./styles/motion.css";

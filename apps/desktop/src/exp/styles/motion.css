@@ -1,0 +1,136 @@
+/* Afterglow motion, M1 (plan §5): press and release, popovers, tooltips. It extends main's motion
+   system (styles/motion.css, lib/press.ts, lib/inputModality.ts) rather than forking it:
+   - lib/press.ts marks a pressable `data-pressed` on pointer down, before any handler runs. Here
+     that press eases in over 90 ms, and the release springs back with a small overshoot (the
+     `release` spring, generated into springs.css), the tactile cue.
+   - Keyboard-opened surfaces stay instant (main's [data-opened-by="keyboard"] rule), and the
+     palette never animates, even from the pointer (the Raycast rule).
+   - Reduced motion: every duration and scale token is 0 or 1, so all of this is instant.
+   Only transform and opacity move; colours change, never animate position. */
+
+:root[data-ui="afterglow"] {
+  /* ------------------------------------------------------------ press and release */
+
+  /* Controls give 3% under the pointer, tiles and cards 2%. Rows and menu items take the pressed
+     tint only: they are hit tens of times an hour and a moving row reads as jitter. */
+  /* Colour first: main's hover rule (fade out over 120 ms, appear at once) reads the first
+     duration. Tabs are left out: their width glide (main's TabStrip) owns their transitions and
+     a press scale would distort it. */
+  & :is(.btn, .nav-item, .chip, .status-button, .sidebar-search, .segmented label, .tab-close, .folder-head, .settings-nav-item) {
+    transition:
+      background-color var(--hover-out) var(--ease-colour),
+      border-color var(--hover-out) var(--ease-colour),
+      color var(--hover-out) var(--ease-colour),
+      box-shadow var(--hover-out) var(--ease-colour),
+      transform var(--spring-release-duration) var(--spring-release);
+  }
+
+  & :is(.host-card, .tile, .snippet, .scheme-card, .group-grid > .group-row, .fav-tile) {
+    transition:
+      background-color var(--hover-out) var(--ease-colour),
+      border-color var(--hover-out) var(--ease-colour),
+      color var(--hover-out) var(--ease-colour),
+      box-shadow var(--hover-out) var(--ease-colour),
+      transform var(--spring-release-duration) var(--spring-release);
+  }
+
+  /* Hover colour appears at once; the transform keeps its spring. */
+  & :is(.btn, .nav-item, .chip, .status-button, .sidebar-search, .segmented label, .tab-close, .folder-head, .settings-nav-item, .host-card, .tile, .snippet, .scheme-card, .group-grid > .group-row, .fav-tile):hover {
+    transition-duration: 0ms, 0ms, 0ms, 0ms, var(--spring-release-duration);
+  }
+
+  /* Pressed: a short ease into the press (90 ms), so it reads as physical rather than a jump. */
+  & :is(.btn, .nav-item, .chip, .status-button, .sidebar-search, .segmented label, .tab-close, .folder-head, .settings-nav-item, .host-card, .tile, .snippet, .scheme-card, .group-grid > .group-row, .fav-tile)[data-pressed] {
+    transition:
+      background-color 0ms,
+      border-color 0ms,
+      color 0ms,
+      box-shadow 0ms,
+      transform var(--duration-press) var(--ease-press) !important;
+  }
+
+  & :is(.btn, .nav-item, .chip, .status-button, .sidebar-search, .segmented label, .tab-close, .folder-head, .settings-nav-item)[data-pressed]:not(:disabled, [aria-disabled="true"]) {
+    transform: scale(var(--scale-press));
+  }
+
+  & :is(.host-card, .tile, .snippet, .scheme-card, .group-grid > .group-row, .fav-tile)[data-pressed]:not([aria-disabled="true"]) {
+    transform: scale(var(--scale-press-card));
+  }
+
+  /* Main nudges buttons down half a pixel as well; Afterglow's press is the scale alone. */
+  & .btn[data-pressed]:not(:disabled),
+  & .btn:active:not(:disabled) {
+    transform: scale(var(--scale-press));
+  }
+
+  /* ------------------------------------------------------------ popovers and menus */
+
+  /* They grow from their trigger corner (main's Menu sets --origin) on the critically damped
+     popover spring; exits fade faster (main's .m-leaving, 100 ms). */
+  & .m-pop {
+    transition:
+      opacity var(--duration-fast) var(--ease-out),
+      transform var(--spring-popover-duration) var(--spring-popover);
+
+    @starting-style {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  /* The command palette is simply there, however it was opened. */
+  & .palette[open][data-opened-by="pointer"] {
+    transition: none;
+  }
+
+  /* ------------------------------------------------------------ tooltips */
+
+  & button[data-tooltip]::after {
+    padding: 5px 8px;
+    border-color: var(--border);
+    border-radius: var(--r-xs);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop);
+    transition: opacity var(--hover-out) var(--ease-out) 0s;
+  }
+
+  & button[data-tooltip]:hover::after,
+  & button[data-tooltip]:focus-visible::after {
+    transition-delay: 500ms;
+  }
+
+  &[data-tips-warm] button[data-tooltip]:hover::after {
+    transition-delay: 0s;
+    transition-duration: 0s;
+  }
+}
+
+/* Keyboard-opened surfaces never animate (main's rule, restated at Afterglow's specificity). */
+:root[data-ui="afterglow"] [data-opened-by="keyboard"] {
+  transition: none !important;
+}
+
+/* Touch screens fire hover on tap: the press scale is for fine pointers only. */
+@media not ((hover: hover) and (pointer: fine)) {
+  :root[data-ui="afterglow"] [data-pressed] {
+    transform: none !important;
+  }
+}
+
+/* Tabs: main's width glide stays exactly as it is (tests/ui/tabstrip.spec.ts samples it), but the
+   colour change names background-color rather than the background shorthand, which would also
+   transition background-position under the pressed tint. */
+:root[data-ui="afterglow"] .tab {
+  transition:
+    background-color var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out);
+}
+
+:root[data-ui="afterglow"][data-input="pointer"] .tabstrip-tabs > .tab,
+:root[data-ui="afterglow"][data-input="pointer"] .tabstrip-tabs > .tab[data-pressed] {
+  transition:
+    width var(--duration-glide) var(--ease-in-out),
+    min-width var(--duration-glide) var(--ease-in-out),
+    background-color var(--duration-press) var(--ease-out),
+    color var(--duration-press) var(--ease-out) !important;
+}

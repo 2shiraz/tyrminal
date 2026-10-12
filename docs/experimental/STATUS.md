@@ -16,3 +16,13 @@ milestone, newest last.
   the 2 identity specs that fail also fail on main, and the toast-beside-panel spec that the card
   inset broke is fixed (exp Toasts measures panels with the inset). Next: M1 press and release
   springs, origin-aware menus, Phosphor icons.
+- **M1 press, hover, popovers (2026-10-12).** Visible: every button, nav pill, chip, card and tile
+  eases into a 0.97 (cards 0.98) press and springs back with a small overshoot on release (200 ms,
+  CSS `linear()` generated from the shared spring table); menus spring open from their trigger
+  corner; tooltips are rounded and instant after the first; switches have a light thumb; the whole
+  icon set is Phosphor (92 glyphs, same names as main's). Screenshots refreshed in
+  `docs/design/afterglow/` (the menu shot, `*-08-menu.png`, shows the icons best). Checks:
+  typecheck, exp build, contrast, role-based specs against the exp build (457 passed; the 2 identity
+  specs fail on main too), new `tests/ui/afterglow-motion.exp.ts` (5 passed: release spring, 220 ms
+  budget, menu spring vs keyboard, reduced motion, Phosphor). Next: M2 liquid tabs with a gliding
+  pill and the afterglow ping.

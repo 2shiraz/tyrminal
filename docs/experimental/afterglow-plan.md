@@ -516,3 +516,26 @@ Each entry says what changed from the plan above and why. Newest last.
 10. **Captures use the compatibility renderer.** SwiftShader's WebGL context comes up blank at 2× device
     pixels, so `tests/ui/afterglow-capture.ts` opens the app with `renderer: "compatibility"` for the
     1440p screenshots. The role-based specs keep main's settings.
+11. **Every animation fits in 220 ms (M1).** Main's motion spec (`tests/ui/motion.spec.ts`, which must
+    keep passing unweakened against the experimental build) caps any running animation at 220 ms and
+    pins a few timings: menus include a 0.14 s transition, the nav marker glides in 140 ms, the unlock
+    shake is 220 ms. The spring table in §5.2 therefore became a table of bounce plus total
+    duration (`exp/motion/springs.json`); `scripts/exp/springs.mjs` time-fits each spring so overshoot
+    and settle land inside the duration and derives the matching Motion `visualDuration`. Press
+    release is a 200 ms spring with bounce 0.25 (visualDuration 0.13 s), popovers a 180 ms critically
+    damped spring with a 140 ms fade, sheets 220 ms. The feel is snappier than the plan's numbers and
+    within Emil's "UI under 300 ms" rule. Where main pins a timing (nav glide 140 ms, shake 220 ms),
+    Afterglow keeps main's.
+12. **Press feedback reuses main's `data-pressed` (M1).** lib/press.ts already marks pressables on
+    pointer down; Afterglow eases into a 0.97 scale (0.98 for cards) over 90 ms and springs back on
+    release. Rows, menu items and tabs take the pressed tint only: rows are hit tens of times an
+    hour, and a press scale on tabs would distort main's width glide (`tabstrip.spec.ts` samples it).
+    The colour transition is listed first so main's hover rule (fade out over 120 ms, appear at once)
+    holds.
+13. **Tooltips and menus stay on main's machinery (M1).** Main already opens menus from their trigger
+    corner (`--origin`) and warms tooltips after the first; Afterglow only retimes them (popover
+    spring, 500 ms first delay) and restyles them.
+14. **Phosphor icons replace Lucide by module swap (M1).** `scripts/exp/gen-icons.mjs` maps each of
+    main's 92 icon exports to a Phosphor regular glyph and generates `exp/ui/icons.tsx` with the same
+    names (plus duotone variants for tiles), so no component changes. A new main icon without a
+    mapping fails the generator.

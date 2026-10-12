@@ -551,3 +551,30 @@
   background: var(--accent-soft);
   box-shadow: none;
 }
+
+/* Switch thumbs are a light disc in both states, as a physical toggle: the track carries the state. */
+:root[data-ui="afterglow"] {
+  & .switch::after {
+    background: #e9e7f0;
+    box-shadow: 0 1px 2px rgb(6 4 14 / 0.4);
+  }
+
+  &[data-theme="light"] .switch::after {
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgb(30 24 52 / 0.3), 0 0 0 0.5px rgb(30 24 52 / 0.12);
+  }
+
+  & .switch:checked::after {
+    background: #ffffff;
+  }
+
+  & .switch {
+    transition:
+      background-color var(--hover-out) var(--ease-colour),
+      border-color var(--hover-out) var(--ease-colour);
+  }
+
+  & .switch::after {
+    transition: transform var(--spring-release-duration) var(--spring-release);
+  }
+}

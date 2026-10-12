@@ -1,0 +1,14 @@
+{
+  "//": "Afterglow springs, one source for CSS and JS. Each is a bounce and a total duration in ms: the whole motion, overshoot and settle included, fits the duration, because main's motion rules (tests/ui/motion.spec.ts) cap any running animation at 220 ms. scripts/exp/springs.mjs derives the equivalent Motion visualDuration and the CSS linear() curve.",
+  "release": { "bounce": 0.25, "duration": 200 },
+  "popover": { "bounce": 0, "duration": 180 },
+  "sheet": { "bounce": 0.06, "duration": 220 },
+  "sheetFlick": { "bounce": 0.15, "duration": 220 },
+  "sheetExit": { "bounce": 0, "duration": 160 },
+  "tabLayout": { "bounce": 0, "duration": 200 },
+  "reorder": { "bounce": 0.12, "duration": 220 },
+  "sort": { "bounce": 0, "duration": 200 },
+  "morph": { "bounce": 0.1, "duration": 220 },
+  "badge": { "bounce": 0.3, "duration": 200 },
+  "rise": { "bounce": 0.08, "duration": 220 }
+}
