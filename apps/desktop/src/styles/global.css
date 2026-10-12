@@ -3189,6 +3189,8 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   max-height: 70vh;
   border-radius: var(--radius-control);
   border: 1px solid var(--border-subtle);
+}
+
 /* agent D: inventory and snippets */
 .os-icon {
   font-weight: 700;

@@ -376,6 +376,8 @@ export const recordings = {
   /** Deletes every recording that is not running now; separate from turning recording off. */
   removeAll: () => call<number>("session_log_delete_all"),
   open: (id: string) => call<SessionLogPlaybackDto>("session_log_open", { id }),
+};
+
 // agent D: inventory and snippets
 
 /** Presentation settings of hosts (the OS icon), apart from their connection settings. */
