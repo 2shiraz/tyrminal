@@ -2,7 +2,7 @@ import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun } from "../ui/icons";
 // server at a glance
 import { msgG } from "../../lib/messages-glance";
 
@@ -20,6 +20,8 @@ export function StatusBar({
   onToggleFiles,
   serverOpen,
   onToggleServer,
+  notesOpen,
+  onToggleNotes,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -35,6 +37,9 @@ export function StatusBar({
   // server at a glance
   serverOpen?: boolean | undefined;
   onToggleServer?: (() => void) | undefined;
+  /** P-30: the focused host's notes. */
+  notesOpen?: boolean | undefined;
+  onToggleNotes?: (() => void) | undefined;
 }) {
   const state = status?.state ?? "connecting";
   const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
@@ -104,6 +109,20 @@ export function StatusBar({
         </span>
       )}
       <span className="spacer" />
+      {onToggleNotes && (
+        <button
+          type="button"
+          className="status-button"
+          aria-pressed={notesOpen ?? false}
+          data-panel="notes"
+          onClick={onToggleNotes}
+          data-tooltip={msg.palette.toggleNotes}
+          data-tooltip-side="top"
+        >
+          <IconFile size={13} />
+          {msg.status.notes}
+        </button>
+      )}
       {onToggleServer && (
         <button
           type="button"

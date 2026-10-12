@@ -92,6 +92,8 @@ export interface PaneHandle {
   commands(): CommandRecord[];
   /** P-29: the output of one finished command, or null when it is gone. */
   commandOutput(id: number): string | null;
+  /** P-30: offers text for pasting, always through the paste review; never sent without it. */
+  reviewPaste(text: string): void;
 }
 
 export interface SessionEnvironment {
@@ -397,6 +399,9 @@ export function TerminalView(props: TerminalViewProps) {
       revealMatch: (match) => controllerRef.current?.revealMatch(match),
       commands: () => controllerRef.current?.commandOutputs.list() ?? [],
       commandOutput: (id) => controllerRef.current?.commandOutputs.output(id) ?? null,
+      reviewPaste: (text) => {
+        if (status.current.state === "connected") controllerRef.current?.reviewPaste(text);
+      },
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

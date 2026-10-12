@@ -7,6 +7,7 @@ import { IconFolder } from "../../components/ui/icons";
 import { groups as groupsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { NoteCard } from "../notes/NoteCard";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
 import { groupPath } from "./HostEditor";
 
@@ -127,6 +128,7 @@ export function GroupEditor({
           </label>
         </fieldset>
         <GroupDefaultsSection state={defaults} />
+        {group && <NoteCard target={{ kind: "group", groupId: group.id }} />}
         <ErrorNotice error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose}>

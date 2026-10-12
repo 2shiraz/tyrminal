@@ -18,6 +18,7 @@ import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "..
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -134,10 +135,10 @@ function Shell() {
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
-  // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
+  // The side panel beside the terminals: snippets, files, server facts or host notes, one at a time.
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | "notes" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server" | "notes") => setSidePanel((v) => (v === which ? null : which)), []);
   // terminal input: the side panel's section (snippets, history, appearance; TRM-14)
   const [panelSection, setPanelSection] = useState<PanelSection>("snippets");
   const panelSectionRef = useRef(panelSection);
@@ -781,6 +782,15 @@ function Shell() {
                         focusedHandle()?.focus();
                       }}
                     />
+                  ) : showPanel && sidePanel === "notes" ? (
+                    <NotesPanel
+                      host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
+                      onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (text) => focusedHandle()?.reviewPaste(text) : undefined}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
                   ) : showPanel ? (
                     <ConnectionPanel
                       section={panelSection}
@@ -838,6 +848,8 @@ function Shell() {
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           serverOpen={sidePanel === "server"}
           onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
+          notesOpen={sidePanel === "notes"}
+          onToggleNotes={terminalVisible && !sftpVisible ? () => togglePanel("notes") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}

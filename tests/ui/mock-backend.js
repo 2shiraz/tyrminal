@@ -45,6 +45,7 @@ export function installMockBackend(options) {
     groups: [],
     snippets: [],
     knownHosts: [],
+    notes: {},
     sessions: new Map(),
     nextSession: 1,
   };
@@ -94,6 +95,12 @@ export function installMockBackend(options) {
       { id: id(300), host: "10.20.0.11", port: 22, algorithm: "ssh-ed25519", fingerprint: "SHA256:k3J9vT0yQ2uX5rB8nM1cP4sD7fG0hL3wZ6qE9tY2iA8", addedAt: now - 86400 * 30 },
       { id: id(301), host: "ci3.lab.example", port: 2222, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Z0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4", addedAt: now - 86400 * 4 },
     ];
+    // P-30: notes by host label or group name ("host:api-gateway", "group:Production").
+    for (const [key, note] of Object.entries(options.notes ?? {})) {
+      const [kind, name] = key.split(":");
+      const target = kind === "host" ? state.hosts.find((h) => h.label === name) : state.groups.find((g) => g.name === name);
+      if (target) state.notes[`${kind}:${target.id}`] = { format: "markdown", updatedAt: 1760184000, ...note };
+    }
     // security review (P-27): an old DSA key, a 2048-bit RSA key and an RSA-only trusted key for
     // a host that is no longer in the inventory.
     if (options.reviewFixtures) {
@@ -1347,6 +1354,29 @@ export function installMockBackend(options) {
     discovery_stop: () => {
       if (state.discovery) Object.assign(state.discovery, { running: false, secondsLeft: 0 });
       return { ...(state.discovery ?? { running: false, secondsLeft: 0, found: [], truncated: false }) };
+    },
+    // P-30: notes, keyed "host:<id>" / "group:<id>"; seeded only by a test (options.notes).
+    note_get: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      return state.notes[key] ? { ...state.notes[key] } : null;
+    },
+    note_set: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (!a.note || !a.note.text.trim()) {
+        delete state.notes[key];
+        return null;
+      }
+      state.notes[key] = { text: a.note.text.replace(/\r\n?/g, "\n"), format: a.note.format, updatedAt: 1760184000 };
+      return { ...state.notes[key] };
+    },
+    note_for_host: (a) => {
+      const h = state.hosts.find((x) => x.id === a.hostId);
+      if (!h) throw { code: "NOT_FOUND", message: "That host no longer exists." };
+      const out = state.notes[`host:${h.id}`] ? [{ note: { ...state.notes[`host:${h.id}`] }, origin: { kind: "host" } }] : [];
+      for (let g = state.groups.find((x) => x.id === h.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+        if (state.notes[`group:${g.id}`]) out.push({ note: { ...state.notes[`group:${g.id}`] }, origin: { kind: "group", groupId: g.id, name: g.name } });
+      }
+      return out;
     },
     link_open: (a) => {
       if (!/^https?:\/\//.test(a.url)) throw { code: "INVALID_INPUT", message: "Only web links (http and https) can be opened." };

@@ -588,3 +588,12 @@ export const glance = {
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
 };
+
+/** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
+export const notes = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").Note | null>("note_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, note: import("@tyrminal/contracts").NoteInput | null) =>
+    call<import("@tyrminal/contracts").Note | null>("note_set", { target, note }),
+  /** A host's own note first, then its groups' (nearest first). */
+  forHost: (hostId: string) => call<import("@tyrminal/contracts").HostNote[]>("note_for_host", { hostId }),
+};

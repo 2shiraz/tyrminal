@@ -291,6 +291,9 @@ pub fn run() {
             commands::inventory::startup_effective,
             commands::inventory::group_defaults_get,
             commands::inventory::group_defaults_set,
+            commands::inventory::note_get,
+            commands::inventory::note_set,
+            commands::inventory::note_for_host,
             // command history
             commands::command_history::history_settings_get,
             commands::command_history::history_settings_set,

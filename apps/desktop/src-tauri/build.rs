@@ -168,6 +168,9 @@ const COMMANDS: &[&str] = &[
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    "note_get",
+    "note_set",
+    "note_for_host",
     // LAN discovery
     "discovery_networks",
     "discovery_start",
