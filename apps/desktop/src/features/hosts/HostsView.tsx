@@ -31,7 +31,7 @@ import {
 } from "../../components/ui/icons";
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { msgAutosave } from "../../lib/messages-autosave";
+import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgDiscovery } from "../../lib/messages-discovery";
 import { useAction } from "../../lib/useAsync";
@@ -115,10 +115,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it for another host, and the guard
-  // state (a password typed but not set).
+  // state (what is not autosaved: a password typed but not set, note edits).
   const [panel, setPanel] = useState<{ target: PanelTarget; version: number } | null>(null);
-  const [discarding, setDiscarding] = useState<(() => void) | null>(null);
-  const panelSecret = useRef(false);
+  const [discarding, setDiscarding] = useState<{ then: () => void; wording: NonNullable<ReturnType<typeof discardWording>> } | null>(null);
+  const panelUnsaved = useRef<Unsaved>({ password: false, note: false });
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -308,14 +308,15 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     return () => observer.disconnect();
   }, []);
 
-  /** Runs `then` now, or after the user agrees to discard a password typed in the panel but not set. */
+  /** Runs `then` now, or after the user agrees to discard what the panel has not saved (a typed password, note edits). */
   const guard = (then: () => void) => {
-    if (panel && panelSecret.current) setDiscarding(() => then);
+    const wording = panel ? discardWording(panelUnsaved.current) : null;
+    if (wording) setDiscarding({ then, wording });
     else then();
   };
   const show = (target: PanelTarget) => {
     version.current += 1;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel({ target, version: version.current });
   };
   const openPanel = (target: PanelTarget) => {
@@ -329,7 +330,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const closePanel = useCallback(() => {
     const back = opener.current;
     opener.current = null;
-    panelSecret.current = false;
+    panelUnsaved.current = { password: false, note: false };
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
@@ -657,7 +658,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           defaultGroupId={currentGroupId}
           os={panelHostId ? (osOf.get(panelHostId) ?? null) : null}
           identity={identityList ? { list: identityList, current: panelHostId ? (assignments.get(`host:${panelHostId}`)?.identityId ?? null) : null } : undefined}
-          secretRef={panelSecret}
+          unsavedRef={panelUnsaved}
           onRequestClose={() => guard(closePanel)}
           onSaved={(saved) => {
             // Only the panel that saved: a write that finishes after switching hosts updates the list only.
@@ -938,14 +939,14 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
 
       {discarding && (
         <Dialog
-          title={msgAutosave.discardSecretTitle}
+          title={discarding.wording.title}
           role="alertdialog"
           icon={<IconTrash2 size={18} />}
           tone="warning"
           onDismiss={() => setDiscarding(null)}
         >
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msgAutosave.discardSecretBody}
+            {discarding.wording.body}
           </p>
           <div className="dialog-actions">
             <button type="button" className="btn" onClick={() => setDiscarding(null)} autoFocus data-autofocus>
@@ -955,13 +956,13 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               type="button"
               className="btn btn-danger-solid"
               onClick={() => {
-                const then = discarding;
+                const { then } = discarding;
                 setDiscarding(null);
-                panelSecret.current = false;
+                panelUnsaved.current = { password: false, note: false };
                 then();
               }}
             >
-              {msgAutosave.discardSecret}
+              {discarding.wording.action}
             </button>
           </div>
         </Dialog>

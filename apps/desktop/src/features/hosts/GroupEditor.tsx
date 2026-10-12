@@ -12,7 +12,7 @@ import { IconFolder } from "../../components/ui/icons";
 import { AutosaveStatus, type SaveResult, handleUndoKey, useAutosave } from "../../lib/autosave";
 import { groupDefaults as groupDefaultsApi, groups as groupsApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { msgAutosave } from "../../lib/messages-autosave";
+import { discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { validGroupName, validPort, validUsername } from "./fieldRules";
 import { NoteCard } from "../notes/NoteCard";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
@@ -101,7 +101,9 @@ export function GroupEditor({
   const [username, setUsername] = useState(start.username);
   const [port, setPort] = useState(start.port);
   const [keyId, setKeyId] = useState(start.keyId);
-  const [confirming, setConfirming] = useState(false);
+  // Leaving with what is not autosaved (a typed proxy password, note edits) asks first.
+  const [confirming, setConfirming] = useState<NonNullable<ReturnType<typeof discardWording>> | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
   const defaults = useGroupDefaults(group?.id ?? null);
   const fields: GroupFields = { name, parent, username, port, keyId };
   const idRef = useRef<string | null>(group?.id ?? null);
@@ -177,8 +179,9 @@ export function GroupEditor({
   const typedSecret = defaults.proxy.password !== "";
 
   async function close() {
-    if (typedSecret) {
-      setConfirming(true);
+    const wording = discardWording({ password: typedSecret, note: noteDirty });
+    if (wording) {
+      setConfirming(wording);
       return;
     }
     const ok = await autosave.flush();
@@ -265,7 +268,7 @@ export function GroupEditor({
             remove: () => void autosave.commit(async () => void (await write({ releaseProxy: true }))),
           }}
         />
-        {exists && idRef.current !== null && <NoteCard target={{ kind: "group", groupId: idRef.current }} />}
+        {exists && idRef.current !== null && <NoteCard target={{ kind: "group", groupId: idRef.current }} onDirty={setNoteDirty} />}
         <ErrorNotice error={autosave.state === "error" && autosave.error ? toAppError(autosave.error) : null} />
         <div className="dialog-actions">
           {idRef.current === null && <p className="hint dialog-actions-hint">{msgAutosave.newGroupHint}</p>}
@@ -275,24 +278,24 @@ export function GroupEditor({
         </div>
       </form>
       {confirming && (
-        <Dialog title={msgAutosave.discardSecretTitle} role="alertdialog" tone="warning" onDismiss={() => setConfirming(false)}>
+        <Dialog title={confirming.title} role="alertdialog" tone="warning" onDismiss={() => setConfirming(null)}>
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msgAutosave.discardSecretBody}
+            {confirming.body}
           </p>
           <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => setConfirming(false)} autoFocus data-autofocus>
+            <button type="button" className="btn" onClick={() => setConfirming(null)} autoFocus data-autofocus>
               {msgAutosave.keepEditing}
             </button>
             <button
               type="button"
               className="btn btn-danger-solid"
               onClick={() => {
-                setConfirming(false);
+                setConfirming(null);
                 defaults.setProxyPassword("");
                 void autosave.flush().then((ok) => ok && onClose(created.current));
               }}
             >
-              {msgAutosave.discardSecret}
+              {confirming.action}
             </button>
           </div>
         </Dialog>
