@@ -119,3 +119,13 @@ test("server panel: never offered for a Telnet session", async ({ page }) => {
   await expect(serverButton(page)).toHaveCount(0);
   expect(await glanceCalls(page)).toBe(0);
 });
+
+test("server panel: the per-host switch keeps its own size beside its label", async ({ page }) => {
+  await connected(page);
+  await serverButton(page).click();
+  const toggle = panel(page).getByRole("switch", { name: /Show for this host/ });
+  await expect(toggle).toBeVisible();
+  const box = await toggle.boundingBox();
+  // A switch, not a full-width bar.
+  expect(box?.width ?? 0).toBeLessThan(60);
+});
