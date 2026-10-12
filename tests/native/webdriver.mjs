@@ -157,6 +157,43 @@ export class Session {
     return this.#call("POST", "/execute/async", { script, args });
   }
 
+  /** W3C actions: real key and pointer input dispatched by the WebDriver server. */
+  async performActions(actions) {
+    await this.#call("POST", "/actions", { actions });
+    await this.#call("DELETE", "/actions");
+  }
+
+  /** Presses a chord, e.g. `chord(["\uE009", "c"])` for Ctrl+C (W3C key codes for modifiers). */
+  chord(keys) {
+    const down = keys.map((value) => ({ type: "keyDown", value }));
+    const up = [...keys].reverse().map((value) => ({ type: "keyUp", value }));
+    return this.performActions([{ type: "key", id: "keyboard", actions: [...down, ...up] }]);
+  }
+
+  /** Clicks at viewport coordinates with a real pointer (mouse down/up at that position). */
+  clickAt(x, y, button = 0) {
+    return this.performActions([
+      {
+        type: "pointer",
+        id: "mouse",
+        parameters: { pointerType: "mouse" },
+        actions: [
+          { type: "pointerMove", duration: 0, origin: "viewport", x: Math.round(x), y: Math.round(y) },
+          { type: "pointerDown", button },
+          { type: "pointerUp", button },
+        ],
+      },
+    ]);
+  }
+
+  setWindowRect(rect) {
+    return this.#call("POST", "/window/rect", rect);
+  }
+
+  getWindowRect() {
+    return this.#call("GET", "/window/rect");
+  }
+
   /** PNG screenshot of the WebView contents as a Buffer. */
   async screenshot() {
     return Buffer.from(await this.#call("GET", "/screenshot"), "base64");

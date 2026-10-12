@@ -25,6 +25,8 @@
     "check:release": "node scripts/check-release.mjs",
     "test:ui": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests test",
     "test:ui:update": "pnpm --filter @tyrminal/desktop build && pnpm --filter @tyrminal/ui-tests update",
+    "test:ui:container": "node scripts/ui-container.mjs",
+    "test:ui:update:container": "node scripts/ui-container.mjs --update",
     "check:contrast": "node scripts/check-contrast.mjs"
   }
 }

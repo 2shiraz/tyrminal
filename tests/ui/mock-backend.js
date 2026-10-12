@@ -198,7 +198,7 @@ export function installMockBackend(options) {
     vault_create: () => {
       state.vault = { state: "unlocked", generation: state.vault.generation };
       emit("vault-status", state.vault);
-      return { recoveryKey: "7K2MD-Q9XW4-R3T8P-H6VNC-2BJ5L-M8S4D-F1G7K-P3Q9R-W2E6T-Y5U8I-A4S7D" };
+      return { recoveryKey: "7K2MD-Q9XW4-R3T8P-H6VNC-2BJ5L-M8S4D-F1G7K-P3Q9R-W2E6T-Y5U8I-A4S7D" }; // gitleaks:allow (synthetic UI-mock value, not a vault key)
     },
     vault_unlock: (a) => {
       if (a.passphrase !== "correct horse") throw { code: "WRONG_CREDENTIAL", message: "That did not unlock the vault. Nothing was changed." };

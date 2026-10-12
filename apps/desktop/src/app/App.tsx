@@ -38,9 +38,7 @@ function useActivityReports(enabled: boolean) {
 export function App() {
   return (
     <PreferencesProvider>
-      <ToastProvider>
-        <Root />
-      </ToastProvider>
+      <Root />
     </PreferencesProvider>
   );
 }
@@ -98,7 +96,13 @@ function Root() {
   if (status.state === "unlocked") {
     // Keyed by generation: every lock/unlock cycle starts from a clean tree, so nothing rendered
     // from the previous unlocked period (lists, dialogs, terminals) can survive a lock.
-    return <AppShell key={status.generation} />;
+    // Toasts live inside the same keyed tree: they can name hosts and snippets, so a lock removes
+    // them, and a late notification from the previous period's async work goes nowhere.
+    return (
+      <ToastProvider key={status.generation}>
+        <AppShell />
+      </ToastProvider>
+    );
   }
   return <Unlock busy={status.state === "unlocking"} />;
 }

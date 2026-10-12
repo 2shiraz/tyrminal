@@ -52,6 +52,9 @@ jobs:
       - name: verify:fast
         run: pnpm run verify:fast
 
+      - name: Full-screen applications for the macOS lab server
+        if: runner.os == 'macOS'
+        run: brew install tmux htop midnight-commander nano
       - name: Prepare Windows lab prerequisites
         if: runner.os == 'Windows'
         shell: pwsh

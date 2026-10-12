@@ -34,6 +34,8 @@ const IMAGE = "tyrminal-lab-sshd:alpine3.22-openssh10.0p1";
 const SERVERS = ["a", "b"];
 const isWindows = process.platform === "win32";
 const LOCAL_USERS = { user: "tyrlab", noForwardUser: "tyrlabnofwd", noSessionUser: "tyrlabnosess" };
+/** Full-screen applications the terminal tests drive on the lab server. */
+const TUI_APPS = ["vim", "nano", "tmux", "htop", "mc"];
 const DOCKER_USERS = { user: "tyr", noForwardUser: "noforward", noSessionUser: "nosession" };
 
 function run(cmd, args, opts = {}) {
@@ -198,6 +200,9 @@ async function dockerUp() {
     await waitForBanner(port);
     lab.servers[name] = describeServer(name, inDir, port, { container });
   }
+  lab.apps = Object.fromEntries(TUI_APPS.map((a) => [a, true]));
+  lab.colorsScript = "tyr-colors";
+  lab.serverPackages = run("docker", ["exec", "tyrminal-lab-a", "apk", "info", "-v", ...TUI_APPS]).split("\n").filter(Boolean);
   writeLab(lab);
 }
 
@@ -320,6 +325,8 @@ function sshdConfig({ port, inDir, version }) {
     "LogLevel VERBOSE",
   ];
   if (!isWindows) lines.push(`UsePAM ${process.platform === "darwin" ? "yes" : "no"}`);
+  // macOS: sessions get the compiled-in PATH; add Homebrew so the lab applications are found.
+  if (process.platform === "darwin") lines.push("SetEnv PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin");
   // Lab only, as in the container image: all clients share one source address and the suite
   // deliberately fails authentication. The option exists from OpenSSH 9.8.
   if (versionAtLeast(version, 9, 8)) lines.push("PerSourcePenalties no");
@@ -383,9 +390,24 @@ async function localUp() {
   // Directories on the path to the lab files must be traversable by sshd's per-user checks.
   if (!isWindows) chmodSync(runDir, 0o711);
 
+  // The lab server is this machine: which full-screen applications it can offer.
+  const which = (app) => (isWindows ? spawnSync("bash", ["-lc", `command -v ${app}`]).status === 0 : spawnSync("sh", ["-c", `command -v ${app}`]).status === 0);
+  const apps = Object.fromEntries(TUI_APPS.map((a) => [a, which(a)]));
+  const versions = TUI_APPS.filter((a) => apps[a]).map((a) => {
+    const flag = a === "tmux" ? "-V" : "--version";
+    const r = spawnSync(isWindows ? "bash" : "sh", [isWindows ? "-lc" : "-c", `${a} ${flag} 2>&1 | head -n 1`], { encoding: "utf8" });
+    return `${a}: ${(r.stdout || "").trim()}`;
+  });
+  // The colors fixture must be readable by the lab accounts, so it goes to a shared location.
+  const colorsTarget = isWindows ? null : "/usr/local/bin/tyr-colors";
+  if (colorsTarget) privileged("install", ["-m", "0755", join(labDir, "tyr-colors.sh"), colorsTarget]);
+
   const lab = {
     createdAt: new Date().toISOString(),
     mode: "local",
+    apps,
+    serverPackages: versions,
+    colorsScript: colorsTarget ? "tyr-colors" : null,
     serverVersion: version,
     ...LOCAL_USERS,
     password: material.password,

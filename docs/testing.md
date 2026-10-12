@@ -8,7 +8,10 @@ All commands run from the repository root. Only the commands listed here exist.
 |---|---|---|
 | `pnpm doctor` | Toolchain/SDK probe; which gates this machine can run | — |
 | `pnpm verify:fast` | `cargo fmt --check`, clippy with warnings denied, all Rust unit/property/known-answer tests, contract freshness, TypeScript, frontend build, feature-matrix check | Rust, Node, pnpm |
-| `pnpm lab:up` / `pnpm lab:down` | Start/stop the SSH lab | Docker |
+| `pnpm lab:up` / `pnpm lab:down` | Start/stop the SSH lab (`TYRMINAL_LAB_MODE=local` runs host OpenSSH instead of Docker) | Docker, or OpenSSH server |
+| `pnpm test:ui` | Browser UI behavior and visual regression (Playwright, mock backend; never native evidence) | Chromium for Playwright 1.56.1 |
+| `pnpm test:ui:container` / `pnpm test:ui:update:container` | The same inside the pinned Playwright image CI uses; the only place visual baselines are recorded | Docker |
+| `node scripts/check-contrast.mjs` | WCAG 2.2 AA contrast for every theme token pair and terminal scheme | Node |
 | `pnpm test:integration` | SSH adapter and core session flows against the lab; OS secret store round trip | lab |
 | `pnpm test:security` | Vault, storage and core negative tests; host-trust and session-ownership lab tests; release-policy check | lab |
 | `pnpm build:e2e` | Test build of the application with the embedded WebDriver server (`target/e2e`) | — |
@@ -22,7 +25,7 @@ A suite prints each step with its command, exit code and duration, and writes
 `docs/reports/raw/verify-<suite>.json`. A step whose prerequisite is missing is `BLOCKED` and
 fails the suite.
 
-Not implemented yet (named in the spec): `test:ui`, `test:performance` as a gate, `test:soak`,
+Not implemented yet (named in the spec): `test:performance` as a gate, `test:soak`,
 `test:sync`, `test:mobile`, `verify:release`, `docs:check` beyond the feature matrix.
 
 ## Layers
@@ -33,11 +36,13 @@ Not implemented yet (named in the spec): `test:ui`, `test:performance` as a gate
 | Known-answer crypto | `crates/vault/tests/known_answer.rs` | Vectors from libsodium and the reference Argon2 (`tests/fixtures/vault-vectors/generate.py`) |
 | Integration | `crates/storage/tests`, `crates/core/tests/vault_service.rs` | Real SQLite files |
 | Integration (lab) | `crates/ssh/tests/lab.rs`, `crates/core/tests/sessions_lab.rs` | Real OpenSSH servers |
+| Browser UI | `tests/ui` | Production frontend build + test-only mock backend (UI tests only) |
 | Native end to end | `tests/native` | The real application binary + lab |
 | Performance | `tests/performance` | Release-profile application |
 
 Lab tests are `#[ignore]`d so `cargo test` works without Docker. When they are run, a missing lab
-is a failure, never a skip. Mocks are not used in any of these layers.
+is a failure, never a skip. Mocks are used only in the browser UI layer, which never moves a
+feature to VERIFIED.
 
 ## SSH lab
 

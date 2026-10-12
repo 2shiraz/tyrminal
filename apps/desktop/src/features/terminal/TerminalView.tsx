@@ -213,11 +213,22 @@ export function TerminalView(props: TerminalViewProps) {
     handlers.current.onIndicator(indicator);
   }, [indicator]);
 
+  // A change to the pane itself (shown, focused, a prompt or the find bar closing) takes focus.
+  // A session state change alone (connecting -> connected) only keeps focus that is already here
+  // or nowhere, so it never pulls the keyboard away from what the user moved on to.
+  const paneKey = `${visible}|${focused}|${needsAttention}|${closed !== null}|${findOpen}`;
+  const lastPaneKey = useRef("");
   useEffect(() => {
+    const paneChanged = lastPaneKey.current !== paneKey;
+    lastPaneKey.current = paneKey;
     if (!visible) return;
     controllerRef.current?.refit();
-    if (focused && !needsAttention && !closed && !findOpen) controllerRef.current?.focus();
-  }, [visible, focused, needsAttention, closed, state, findOpen]);
+    if (!focused || needsAttention || closed || findOpen) return;
+    const pane = hostRef.current?.parentElement ?? null;
+    const active = document.activeElement;
+    const focusHereOrNowhere = !active || active === document.body || (pane?.contains(active) ?? false);
+    if (paneChanged ? !userIsElsewhere(pane) : focusHereOrNowhere) controllerRef.current?.focus();
+  }, [paneKey, visible, focused, needsAttention, closed, state, findOpen]);
 
   const sessionId = () => controllerRef.current?.id ?? null;
 
@@ -648,4 +659,15 @@ function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: 
       </form>
     </Dialog>
   );
+}
+
+/**
+ * True when focus sits in a text field, dialog or menu outside this terminal: a session that
+ * finishes connecting must not pull the keyboard away from, say, a tab being renamed.
+ */
+function userIsElsewhere(pane: HTMLElement | null): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return false;
+  if (pane?.contains(active)) return false;
+  return active.matches("input, textarea, select, [contenteditable='true']") || active.closest("dialog, [role='menu']") !== null;
 }

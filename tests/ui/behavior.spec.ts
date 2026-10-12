@@ -49,6 +49,8 @@ test("keyboard only: palette connects, tabs rename, move and close, focus return
   // Move it left (Ctrl+Shift+Left on the focused tab) and close it with Delete.
   await page.keyboard.press("Control+Shift+ArrowLeft");
   await expect(page.getByRole("tab").nth(1)).toHaveText(/scratch/);
+  // The moved tab keeps keyboard focus even though its DOM node was reordered.
+  await expect(page.getByRole("tab", { name: /scratch/ })).toBeFocused();
   await page.keyboard.press("Delete");
   await expect(page.getByRole("tab")).toHaveCount(2);
   // Alt+1 selects the first terminal tab again.
@@ -144,10 +146,13 @@ test("locking clears the snippets panel, terminals and every decrypted name", as
   await connectFromPalette(page, "api-gateway");
   await page.keyboard.press("Control+Shift+S");
   await expect(page.getByText("Deploy to staging")).toBeVisible();
+  // A toast naming a snippet and host is on screen when the lock happens.
+  await page.getByRole("button", { name: "Run Disk usage in the terminal" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Sent “Disk usage”" })).toBeVisible();
   await page.keyboard.press("Control+Shift+L");
   await expect(page.getByRole("heading", { name: "Unlock your vault" })).toBeVisible();
   const text = await page.evaluate(() => document.body.innerText);
-  for (const leaked of ["Deploy to staging", "api-gateway", "df -h", "10.20.0.11"]) expect(text).not.toContain(leaked);
+  for (const leaked of ["Deploy to staging", "Disk usage", "api-gateway", "df -h", "10.20.0.11"]) expect(text).not.toContain(leaked);
   await expect(page.locator(".terminal-pane")).toHaveCount(0);
   await expect(page.locator(".side-panel")).toHaveCount(0);
 });

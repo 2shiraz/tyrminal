@@ -31,7 +31,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: {
-    command: `pnpm --filter @tyrminal/desktop exec vite preview --host 127.0.0.1 --port ${port} --strictPort`,
+    // vite directly, not through pnpm: the pinned test container has no network for pnpm's self-install.
+    command: `node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port ${port} --strictPort`,
+    cwd: "../../apps/desktop",
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

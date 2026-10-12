@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Destination } from "../../app/AppShell";
 import { type Direction, type Workspace, panesOf, tabTitle } from "../../app/workspace";
@@ -62,6 +62,15 @@ export function TabStrip({
   const [newMenu, setNewMenu] = useState<HTMLElement | null>(null);
   const [drag, setDrag] = useState<{ from: number; over: number | null; side: "before" | "after" } | null>(null);
   const tabRefs = useRef(new Map<number, HTMLElement>());
+  // Reordering can move the focused tab's DOM node, which drops focus; put it back after commit.
+  const refocusAfterMove = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const id = refocusAfterMove.current;
+    if (id === null) return;
+    refocusAfterMove.current = null;
+    const element = tabRefs.current.get(id);
+    if (element && document.activeElement !== element) element.focus();
+  });
   const PageIcon = PAGE_ICONS[destination];
 
   function focusTab(index: number) {
@@ -76,6 +85,7 @@ export function TabStrip({
       const delta = event.key === "ArrowRight" ? 1 : -1;
       if (id !== null && (event.metaKey || event.ctrlKey) && event.shiftKey) {
         event.preventDefault();
+        refocusAfterMove.current = id;
         onMove(index, index + delta);
         return;
       }
