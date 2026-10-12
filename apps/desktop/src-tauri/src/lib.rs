@@ -168,6 +168,7 @@ pub fn run() {
             commands::files::files_upload,
             commands::files::files_download,
             commands::files::files_cancel,
+            commands::files::files_local_list,
             commands::files::files_edit_open,
             commands::files::files_edit_status,
             commands::files::files_edit_save,
