@@ -74,6 +74,7 @@ export const msgD = {
     conflictsNote: "Servers marked as conflicting keep the key you trusted before. Remove that trust in Known hosts first if the server's key really changed.",
   },
   keys: {
+    listTitle: "Keys",
     emptyBody: "Generate an Ed25519, ECDSA or RSA key here, or import an existing private key.",
     kind: "Key type",
     kinds: {

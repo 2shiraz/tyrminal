@@ -3,7 +3,7 @@ import { type FormEvent, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
-import { ErrorNotice, IconButton, SecretField, Switch, TextField } from "../../components/ui/controls";
+import { BoxEmpty, ErrorNotice, IconButton, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { IconPencil, IconPlus, IconTrash2, IconUser } from "../../components/ui/icons";
 import { identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -30,19 +30,20 @@ export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {
   const keyLabel = (id: string | null) => keys.find((k) => k.id === id)?.label ?? null;
 
   return (
-    <section className="page-inner" aria-labelledby="identities-title" style={{ maxWidth: 900 }}>
-      <div className="page-header">
-        <div className="page-title">
-          <h2 id="identities-title">{msgD.identities.title}</h2>
-          <p>{msgD.identities.body}</p>
-        </div>
-        <button type="button" className="btn" onClick={() => setEditing("new")}>
-          <IconPlus size={16} />
+    <div className="page-inner identities-page" style={{ maxWidth: 900 }}>
+    <section className="section" aria-labelledby="identities-title">
+      <div className="section-head">
+        <h2 id="identities-title">{msgD.identities.title}</h2>
+        {list && <span className="box-count">{list.length}</span>}
+        <span className="spacer" />
+        <button type="button" className="btn btn-sm" onClick={() => setEditing("new")}>
+          <IconPlus size={14} />
           {msgD.identities.add}
         </button>
       </div>
+      <p className="muted section-hint">{msgD.identities.body}</p>
       <ErrorNotice error={remove.error} />
-      {list && list.length === 0 && <p className="muted">{msgD.identities.empty}</p>}
+      {list && list.length === 0 && <BoxEmpty>{msgD.identities.empty}</BoxEmpty>}
       {list && list.length > 0 && (
         <ul className="list" aria-label={msgD.identities.title}>
           {list.map((identity) => (
@@ -91,6 +92,7 @@ export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {
         />
       )}
     </section>
+    </div>
   );
 }
 

@@ -920,27 +920,73 @@ kbd,
   padding: var(--space-5);
 }
 
+/* A page section is a box (revamp §7): its head is the box strip, its list touches the edges, and
+   anything else inside (toolbars, notes, empty states, settings) sits on the box padding. */
 .section {
-  display: grid;
-  gap: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
 }
 
 .section-head {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  min-height: var(--strip-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+}
+
+.section-head:last-child {
+  border-bottom: 0;
 }
 
 .section-head h2 {
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
+.section > :not(.section-head, .list, .box-empty) {
+  margin: var(--space-3);
+}
+
+.section > :not(.section-head, .list, .box-empty) + :not(.section-head, .list, .box-empty) {
+  margin-top: 0;
+}
+
+.section > .list {
+  border: 0;
+  border-radius: 0;
+}
+
+.section > .section-hint {
+  font-size: var(--text-sm);
+}
+
+/* Identities follow the keys box on the Keychain page. */
+.identities-page {
+  padding-top: 0;
+}
+
+.section :focus-visible {
+  outline-offset: -2px;
+}
+
+/* A list is a box of rows (revamp §7): 36 px rows touching the box edges, hairlines between. */
 .list {
   display: grid;
-  gap: 1px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--border-subtle);
+  margin: 0;
+  padding: 0;
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  list-style: none;
   overflow: hidden;
 }
 
@@ -949,14 +995,36 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-raised);
+  min-height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-box);
   transition: background var(--duration-press) var(--ease-out);
 }
 
+.list > li + li {
+  border-top: var(--box-rule);
+}
+
 .list > li:hover {
-  background: var(--bg-raised-hover);
+  background: var(--bg-hover);
+}
+
+.list :focus-visible {
+  outline-offset: -2px;
+}
+
+/* A row's icon: 16 px and muted, no tinted square (revamp §7). */
+.list .tile-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+}
+
+.list .tile-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .row-main {
