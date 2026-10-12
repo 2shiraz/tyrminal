@@ -59,8 +59,6 @@ export interface HostFormOptions {
 
 export function useHostForm({ host, initial, keys, groups = [], defaultGroupId = null, identity }: HostFormOptions) {
   const source = host ?? initial;
-  // agent B: tunnels and history
-  const advanced = useHostAdvanced(host?.id ?? null);
   // The starting point is fixed for the life of the form; owners remount it to start over.
   const [start] = useState(() => {
     const sourceAuth = host?.auth ?? initial?.auth;
@@ -86,6 +84,8 @@ export function useHostForm({ host, initial, keys, groups = [], defaultGroupId =
     };
   });
   const [groupId, setGroupId] = useState<string | null>(start.groupId);
+  // agent B: tunnels and history (the group chosen here decides which route the host can inherit)
+  const advanced = useHostAdvanced(host?.id ?? null, groupId);
   const [label, setLabel] = useState(start.label);
   const [address, setAddress] = useState(start.address);
   const [port, setPort] = useState(start.port);
@@ -545,7 +545,7 @@ function CredentialsCard({ form }: { form: HostForm }) {
 /** 5. "Show more": the connection settings that live in their own records (jump host, proxy). */
 function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
   const advanced = form.advanced;
-  const configured = advanced.jumpHostId !== null || advanced.proxy.kind !== "none";
+  const configured = advanced.jumpHostId !== null || advanced.proxy.kind !== "none" || advanced.groupRoute !== null;
   return (
     <details className="host-section host-more" open={configured ? true : undefined}>
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
