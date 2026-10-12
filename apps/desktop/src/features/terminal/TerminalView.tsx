@@ -1,4 +1,4 @@
-import type { HostOs, IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { HostOs, HostSummary, IpcError, MultiplexerSession, SessionEvent, SessionState, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Indicator } from "../../app/workspace";
@@ -34,6 +34,9 @@ import { ConnectionSheet, type TimelineEntry, timelineEntry } from "./Connection
 import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import { QuickForwardBar } from "../tunnels/QuickForward";
+// quick connect
+import { configureQuick, quickDraft, takeQuick } from "../../lib/quickConnect";
+import { QuickSetup, setupStops } from "./QuickSetup";
 import type { CommandRecord } from "./commandOutput";
 import { encodingById } from "./encoding";
 import type { PasteCheck, PasteChecks } from "./pasteSafety";
@@ -147,6 +150,8 @@ interface TerminalViewProps {
   pasteChecks?: PasteChecks | undefined;
   /** P-25: extra labels for this session in the paste review (an environment label, for one). */
   targetLabels?: ReactNode;
+  /** Quick connect: the setup saved the host; the pane becomes that host's (and connects). */
+  onQuickSaved?: ((host: HostSummary) => void) | undefined;
 }
 
 export function Fingerprint({ value }: { value: string }) {
@@ -221,12 +226,17 @@ export function TerminalView(props: TerminalViewProps) {
   }
 
   const pending = props.pending === true;
+  // quick connect: the pane shows the setup until Continue; nothing is opened before that.
+  const [quickSetup, setQuickSetup] = useState(() => target.kind === "quick" && takeQuick(target.token) === null && quickDraft(target.token) !== null);
+  const quickDraftTarget = target.kind === "quick" && quickSetup ? quickDraft(target.token) : null;
+  const quickProtocol = target.kind === "quick" && !quickSetup ? (takeQuick(target.token)?.protocol ?? null) : null;
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return;
-    if (pending) {
-      // Nothing is opened, started or sent while a restored pane waits for the user.
-      publish({ state: "closed", clipboardAllowed: false });
+    if (pending || quickSetup) {
+      // Nothing is opened, started or sent while a restored pane waits for the user, or while a
+      // quick connection is being set up.
+      publish({ state: pending ? "closed" : "connecting", clipboardAllowed: false });
       return;
     }
     setState("connecting");
@@ -330,7 +340,7 @@ export function TerminalView(props: TerminalViewProps) {
             setAuth(null);
             setClipboardAsk(null);
             setClosed({ error: event.error, exitStatus: event.exitStatus });
-            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind === "quick" ? (target.protocol === "ssh" ? "ssh" : "local") : target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
+            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind === "quick" ? (takeQuick(target.token)?.protocol === "ssh" ? "ssh" : "local") : target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
               autoAttempts.current += 1;
               setAutoRetry({ attempt: autoAttempts.current, dueAt: Date.now() + reconnectDelayMs(autoAttempts.current) });
             }
@@ -351,9 +361,10 @@ export function TerminalView(props: TerminalViewProps) {
       controller.dispose();
       controllerRef.current = null;
     };
-    // `target` is fixed for the life of a pane; `attempt` drives reconnects; `pending` the first start.
+    // `target` is fixed for the life of a pane; `attempt` drives reconnects; `pending` and
+    // `quickSetup` the first start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt, pending]);
+  }, [attempt, pending, quickSetup]);
 
   // The host's paste checks can change while the session is open (the user edits the host).
   const skipMultiline = props.pasteChecks?.multiline === false;
@@ -491,8 +502,10 @@ export function TerminalView(props: TerminalViewProps) {
 
   // connection track: the host's OS for the sheet's host tile (null: a generic mark).
   const hostId = target.kind === "ssh" ? target.hostId : null;
-  // quick connect: an SSH connection to an unsaved address shows the same sheet as a saved host.
-  const sshLike = target.kind === "ssh" || (target.kind === "quick" && target.protocol === "ssh");
+  // quick connect: an SSH connection to an unsaved address shows the same sheet as a saved host,
+  // its track starting with the setup's stops.
+  const sshLike = target.kind === "ssh" || (target.kind === "quick" && quickProtocol === "ssh");
+  const leadStops = quickProtocol ? setupStops(quickProtocol) : undefined;
   const [hostOs, setHostOs] = useState<HostOs | null>(null);
   useEffect(() => {
     if (!hostId) return;
@@ -508,7 +521,7 @@ export function TerminalView(props: TerminalViewProps) {
 
   // When the session opens, the sheet stays for one short exit to settle, faded, inert and
   // click-through, while the shell already takes input. Under reduced motion it goes at once.
-  const showSheet = !pending && (closed !== null || state !== "connected" || needsAttention);
+  const showSheet = !pending && !quickSetup && (closed !== null || state !== "connected" || needsAttention);
   const [settling, setSettling] = useState(false);
   const [sheetWasShown, setSheetWasShown] = useState(showSheet);
   if (sheetWasShown !== showSheet) {
@@ -666,8 +679,24 @@ export function TerminalView(props: TerminalViewProps) {
         />
       )}
 
+      {quickSetup && target.kind === "quick" && quickDraftTarget && (
+        <QuickSetup
+          address={quickDraftTarget.address}
+          initialUser={quickDraftTarget.username}
+          initialPort={quickDraftTarget.port}
+          interactive={visible && focused}
+          onConnect={(input) => {
+            configureQuick(target.token, input);
+            setQuickSetup(false);
+          }}
+          onConnectSaved={(host) => handlers.current.onQuickSaved?.(host)}
+          onClose={() => handlers.current.onClose()}
+        />
+      )}
+
       {(showSheet || settling) && (
         <ConnectionSheet
+          leadStops={leadStops}
           os={hostOs}
           settling={settling && !showSheet}
           ssh={sshLike}

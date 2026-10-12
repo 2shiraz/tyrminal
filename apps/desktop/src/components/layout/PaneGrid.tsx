@@ -1,4 +1,4 @@
-import type { TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
+import type { HostSummary, TerminalPreferences, WorkspacePreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState, memo } from "react";
 
 import { useOptionalVaultData } from "../../app/vaultData";
@@ -31,6 +31,7 @@ function PaneGridImpl({
   onSelectPane,
   onUnread,
   onClose,
+  onQuickSaved,
   onSplit,
   onRatio,
   onSwap,
@@ -56,6 +57,8 @@ function PaneGridImpl({
   onSelectPane: (pane: number) => void;
   onUnread: (pane: number) => void;
   onClose: (pane: number) => void;
+  /** Quick connect saved its host: the pane becomes that host's. */
+  onQuickSaved?: (pane: number, host: HostSummary) => void;
   onSplit: (pane: number, dir: Direction) => void;
   onRatio: (tab: number, path: ("a" | "b")[], ratio: number) => void;
   onSwap: (a: number, b: number) => void;
@@ -207,6 +210,8 @@ function PaneGridImpl({
                   />
                 ) : (
                 <TerminalView
+                  // quick connect: a pane that becomes a saved host's starts afresh as that host's.
+                  key={pane.target.kind === "quick" ? pane.target.token : "session"}
                   paneId={id}
                   target={pane.target}
                   startIn={pane.startIn}
@@ -222,6 +227,7 @@ function PaneGridImpl({
                   onFocus={() => onFocus(id)}
                   onUnread={() => onUnread(id)}
                   onClose={() => onClose(id)}
+                  onQuickSaved={onQuickSaved ? (host) => onQuickSaved(id, host) : undefined}
                   onOpenKnownHosts={onOpenKnownHosts}
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}

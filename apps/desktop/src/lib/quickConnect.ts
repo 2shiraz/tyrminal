@@ -1,22 +1,41 @@
-// Quick connect (Home): the input for a session to an address that is not saved, handed from the
-// quick-connect sheet to the terminal pane that opens it. It lives only in memory, in this window,
-// and is never part of workspace or layout state (the pane's target holds only an opaque token).
-// A typed password is used once: after the first open, a reconnect asks for it again.
+// Quick connect: a session to an address that is not saved. Starting one opens a tab at once; its
+// pane shows the setup (protocol, user, sign-in) and then connects. What the pane needs lives only
+// in memory, in this window, and is never part of workspace or layout state (the pane's target holds
+// only an opaque token). A typed password is used once: after the first open, a reconnect asks for
+// it again.
 
 import type { QuickConnectInput } from "@tyrminal/contracts";
 
-const pending = new Map<string, QuickConnectInput>();
+interface Pending {
+  /** What was typed in the search, for the setup's starting values. */
+  target: QuickTarget;
+  /** Set by the setup's Continue; null while the pane is still being set up. */
+  input: QuickConnectInput | null;
+}
 
-/** Keeps `input` for the pane about to open and returns the token its target carries. */
-export function stashQuick(input: QuickConnectInput): string {
+const pending = new Map<string, Pending>();
+
+/** Keeps `target` for the tab about to open and returns the token its pane's target carries. */
+export function startQuick(target: QuickTarget): string {
   const token = crypto.randomUUID();
-  pending.set(token, input);
+  pending.set(token, { target, input: null });
   return token;
 }
 
-/** The input for `token`, or null when it is gone (another window, or the app reloaded). */
+/** The address a pane is being set up for, or null when the token is gone. */
+export function quickDraft(token: string): QuickTarget | null {
+  return pending.get(token)?.target ?? null;
+}
+
+/** The setup finished: the pane connects with `input`. */
+export function configureQuick(token: string, input: QuickConnectInput): void {
+  const entry = pending.get(token);
+  if (entry) pending.set(token, { ...entry, input });
+}
+
+/** The input for `token`, or null while it is being set up or when it is gone. */
 export function takeQuick(token: string): QuickConnectInput | null {
-  return pending.get(token) ?? null;
+  return pending.get(token)?.input ?? null;
 }
 
 /**
@@ -24,8 +43,13 @@ export function takeQuick(token: string): QuickConnectInput | null {
  * behind (for a reconnect) asks for it again. Nothing secret outlives the first session.
  */
 export function quickUsed(token: string): void {
-  const input = pending.get(token);
-  if (input?.auth.kind === "password") pending.set(token, { ...input, auth: { kind: "ask" } });
+  const entry = pending.get(token);
+  if (entry?.input?.auth.kind === "password") pending.set(token, { ...entry, input: { ...entry.input, auth: { kind: "ask" } } });
+}
+
+/** The pane closed or became a saved host's: its details go. */
+export function forgetQuick(token: string): void {
+  pending.delete(token);
 }
 
 /** Forgets every pending quick connection (the vault locked). */

@@ -302,7 +302,7 @@
   }
 }
 
-/* ---------- quick connect (Home): the setup sheet ---------- */
+/* ---------- quick connect: the setup sheet in the new tab's pane ---------- */
 .quick-connect-sheet .connect-track {
   margin-bottom: var(--space-1);
 }

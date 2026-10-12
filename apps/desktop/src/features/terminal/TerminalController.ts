@@ -42,8 +42,8 @@ import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/sh
 
 export type TerminalTarget =
   | { kind: "ssh"; hostId: string }
-  /** Quick connect: an address that is not saved. `token` names the one-time handoff of its input. */
-  | { kind: "quick"; token: string; protocol: "ssh" | "telnet" }
+  /** Quick connect: an address that is not saved. `token` names its details, kept in memory (lib/quickConnect). */
+  | { kind: "quick"; token: string }
   | { kind: "local" }
   /** P-33: a shell in a container, on the connection of the SSH session `sessionId`. */
   | { kind: "container"; sessionId: string; engine: ContainerEngine; containerId: string };
