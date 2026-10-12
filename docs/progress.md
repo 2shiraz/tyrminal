@@ -11,6 +11,7 @@ Updated: 2026-10-12. Read this first when resuming (see AGENTS.md).
 | 02 Vault foundation | Backup/restore (format §10, vectors, native test), quick unlock via the OS secret store, lock on system sleep, single instance per data directory, kill-the-writer and disk-full fault injection: done. An OS screen-lock hook remains | `docs/reports/phase-02-03.md` |
 | 03 SSH vertical slice | Keyboard-interactive, negotiated-algorithm display, auto-reconnect done (native test kills the server process; passes on Linux) | `docs/reports/phase-02-03.md` |
 | UX track (§3 of the 2026-10 brief) | UI redesign, first-class terminal, snippets: done and tested on Linux; CI on macOS/Windows in progress | this file |
+| Current folder for files and new tabs (AUT-06 follow-up, TRM-02) | Files panel opens in the shell's folder; duplicated tabs keep it (local: checked start folder; SSH: `cd` at the first integrated prompt); `shellContexts.onMark` mark events. Tested: core unit, local lab (real shells), UI mock | ADR 0006 |
 | 04–15 | Not started | |
 
 Feature matrix: see `node scripts/feature-matrix.mjs --check` (29 IMPLEMENTED_UNVERIFIED,

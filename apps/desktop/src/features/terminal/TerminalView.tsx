@@ -60,6 +60,8 @@ export interface PaneHandle {
 interface TerminalViewProps {
   paneId: number;
   target: TerminalTarget;
+  /** Folder to start the first attempt in (a duplicated tab's); reconnects start as usual. */
+  startIn?: string | undefined;
   /** Where this session goes, as configured by the user (not supplied by the server). */
   identity: string;
   label: string;
@@ -206,7 +208,7 @@ export function TerminalView(props: TerminalViewProps) {
     });
     controllerRef.current = controller;
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
-    const timer = window.setTimeout(() => void controller.start(target), 0);
+    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();

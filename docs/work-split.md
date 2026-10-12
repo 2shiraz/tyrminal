@@ -182,6 +182,17 @@ Never merge these by hand; regenerate them after resolving the sources:
   suggestions only; nothing runs). `CommandPalette.tsx` gets an optional `onShellIntegration` prop
   and one entry; `AppShell.tsx` opens `IntegrationDialog` from it. Please keep them when merging.
 
+- **Current folder for files and new tabs (branch `claude/inventory-view`, 2026-10-12):** small
+  additive edits outside the autocomplete feature. Please keep them when merging:
+  - `workspace.ts`: optional `Pane.startIn`, added to `PaneSeed`.
+  - `AppShell.tsx`: `open()` takes an optional `startIn`, and `onDuplicate` passes the source shell's folder.
+  - `PaneGrid.tsx` / `TerminalView.tsx`: pass `startIn` to the first `controller.start`.
+  - `TerminalController.ts`: `start(target, startIn)` and a `pendingFolder` handled from `shellContexts.onMark`.
+  - `FilesPanel.tsx`: opens in the shell's folder and adds a "Go to the shell's folder" button.
+  - `ipc.ts`: `openLocal(..., startIn)`.
+  - Core: `Sessions::open_local_in`.
+  The command-history owner (AUT-01) can subscribe to `shellContexts.onMark` for command marks.
+
 **From agent B (notices of small additive edits in agent A's files, each in a block marked
 `agent B: tunnels and history`; please keep them when you touch these files):**
 

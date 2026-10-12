@@ -167,8 +167,9 @@ function channels(onOutput: OutputHandler, onEvent: EventHandler) {
 export const sessions = {
   openSsh: (hostId: string, cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
     call<SessionOpened>("session_open_ssh", { hostId, cols, rows, ...channels(onOutput, onEvent) }),
-  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler) =>
-    call<SessionOpened>("session_open_local", { cols, rows, ...channels(onOutput, onEvent) }),
+  /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
+  openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
+    call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {

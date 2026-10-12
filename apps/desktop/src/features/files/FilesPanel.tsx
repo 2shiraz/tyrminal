@@ -1,5 +1,5 @@
 import type { ConflictChoice, EditStatus, RemoteEntry, RemoteListing, TransferDirection, TransferEvent, TransferStarted } from "@tyrminal/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { ErrorNotice, IconButton, Notice, Shortcut, Switch, TextField } from "../../components/ui/controls";
@@ -17,6 +17,7 @@ import {
   IconPencil,
   IconRefreshCw,
   IconSlidersHorizontal,
+  IconSquareTerminal,
   IconTrash2,
   IconUpload,
   IconX,
@@ -24,6 +25,7 @@ import {
 import { AppError, files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { shellContexts } from "../autocomplete/shellContext";
 import { DRAG_TYPE, type LocalLocation, LocalPane } from "./LocalPane";
 
 export interface FilesTarget {
@@ -117,27 +119,44 @@ export function FilesPanel({
   const listingRef = useRef<RemoteListing | null>(null);
   listingRef.current = listing;
 
+  // The shell's current folder, when the shell integration reports it (AUT-06).
+  const shellFolder = useSyncExternalStore(shellContexts.subscribe, () => (sessionId ? (shellContexts.get(sessionId)?.cwd ?? null) : null));
+
+  const show = useCallback((result: RemoteListing) => {
+    // Refreshing the same folder keeps the selection while the entry is still there.
+    const same = listingRef.current?.path === result.path;
+    setListing(result);
+    setPathText(result.path);
+    setSelected((name) => (same && result.entries.some((e) => e.name === name) ? name : null));
+  }, []);
+
   const load = useCallback(
     async (path: string | null) => {
       if (!sessionId) return;
       const result = await run(() => filesApi.list(sessionId, path));
-      if (result) {
-        // Refreshing the same folder keeps the selection while the entry is still there.
-        const same = listingRef.current?.path === result.path;
-        setListing(result);
-        setPathText(result.path);
-        setSelected((name) => (same && result.entries.some((e) => e.name === name) ? name : null));
-      }
+      if (result) show(result);
     },
-    [sessionId, run],
+    [sessionId, run, show],
   );
 
-  // A different session starts at its login folder (a new listing also clears any error).
+  // A different session opens in its shell's folder when that is known, else its login folder
+  // (also when the shell's folder cannot be listed). A new listing also clears any error.
   useEffect(() => {
     setListing(null);
     setSelected(null);
-    if (sessionId) void load(null);
-  }, [sessionId, load]);
+    if (!sessionId) return;
+    let live = true;
+    const start = shellContexts.get(sessionId)?.cwd ?? null;
+    if (start) {
+      filesApi.list(sessionId, start).then(
+        (result) => live && show(result),
+        () => live && void load(null),
+      );
+    } else void load(null);
+    return () => {
+      live = false;
+    };
+  }, [sessionId, load, show]);
 
   useEffect(() => {
     ref.current?.querySelector<HTMLInputElement>('input[name="remote-path"]')?.focus();
@@ -411,6 +430,11 @@ export function FilesPanel({
                 autoCapitalize="off"
                 autoCorrect="off"
               />
+              {shellFolder && (
+                <IconButton label={msg.files.shellFolder(shellFolder)} onClick={() => void load(shellFolder)} disabled={pending || current === shellFolder}>
+                  <IconSquareTerminal size={15} />
+                </IconButton>
+              )}
               <IconButton label={msg.files.refresh} onClick={() => current && void load(current)} disabled={!current || pending}>
                 <IconRefreshCw size={15} />
               </IconButton>
