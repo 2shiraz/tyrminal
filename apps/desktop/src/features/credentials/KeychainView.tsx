@@ -1,4 +1,4 @@
-import type { KeyCertificate, KeyKind, KeySummary } from "@tyrminal/contracts";
+import type { KeyCertificate, KeyKind, KeySummary, PickedKeyFile } from "@tyrminal/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
@@ -209,25 +209,30 @@ function ImportKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [privateKey, setPrivateKey] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [remember, setRemember] = useState(false);
-  const [fileProblem, setFileProblem] = useState<string | null>(null);
-  const file = useRef<HTMLInputElement>(null);
+  // A file picked in the native dialog: only its name is known here, never its contents.
+  const [picked, setPicked] = useState<PickedKeyFile | null>(null);
   const { pending, error, run } = useAction();
 
-  async function chosen(picked: File | undefined) {
-    setFileProblem(null);
-    if (!picked) return;
-    if (picked.size > MAX_KEY_FILE_BYTES) {
-      setFileProblem(msgD.keys.fileTooLarge);
-      return;
-    }
-    setPrivateKey(await picked.text());
-    if (label.trim() === "") setLabel(picked.name.replace(/\.(ppk|pem|key)$/i, ""));
+  async function pick() {
+    const file = await run(() => keysD.pickFile());
+    if (!file) return;
+    setPicked(file);
+    setPrivateKey("");
+    if (label.trim() === "") setLabel(file.fileName.replace(/\.(ppk|pem|key)$/i, ""));
+  }
+
+  function close() {
+    if (picked) void keysD.clearPicked().catch(() => undefined);
+    onClose();
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const secret = passphrase === "" ? null : passphrase;
     const imported = await run(() =>
-      keysApi.import({ label, privateKey, passphrase: passphrase === "" ? null : passphrase, rememberPassphrase: remember }),
+      picked
+        ? keysD.importPicked(label, secret, remember)
+        : keysApi.import({ label, privateKey, passphrase: secret, rememberPassphrase: remember }),
     );
     if (imported) {
       setPrivateKey("");
@@ -237,38 +242,52 @@ function ImportKeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   }
 
   return (
-    <Dialog title={msg.keys.importTitle} icon={<IconFileCode size={18} />} wide onDismiss={onClose}>
+    <Dialog title={msg.keys.importTitle} icon={<IconFileCode size={18} />} wide onDismiss={close}>
       <form className="stack" onSubmit={submit}>
         <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
           {msgD.keys.importBody}
         </p>
         <TextField label={msg.keys.label} value={label} onChange={setLabel} autoFocus maxLength={256} />
-        <TextArea label={msg.keys.privateKey} value={privateKey} onChange={setPrivateKey} rows={7} />
+        {picked ? (
+          <div className="row-flex" data-testid="picked-key">
+            <IconFileCode size={15} />
+            <span className="mono selectable">{picked.fileName}</span>
+            {picked.passphraseProtected && <span className="badge">{msg.keys.protected}</span>}
+            <span className="spacer" />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setPicked(null);
+                void keysD.clearPicked().catch(() => undefined);
+              }}
+            >
+              {msgD.keys.pasteInstead}
+            </button>
+          </div>
+        ) : (
+          <TextArea label={msg.keys.privateKey} value={privateKey} onChange={setPrivateKey} rows={7} />
+        )}
         <div className="row-flex">
-          <button type="button" className="btn btn-sm" onClick={() => file.current?.click()}>
+          <button type="button" className="btn btn-sm" onClick={() => void pick()} disabled={pending}>
             <IconFolderOpen size={14} />
             {msgD.keys.chooseFile}
           </button>
-          <input
-            ref={file}
-            type="file"
-            hidden
-            aria-label={msgD.keys.chooseFile}
-            onChange={(event) => {
-              void chosen(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
         </div>
-        {fileProblem && <Notice tone="warning">{fileProblem}</Notice>}
-        <SecretField label={msg.keys.passphrase} value={passphrase} onChange={setPassphrase} hint={msg.keys.passphraseHint} maxLength={1024} />
+        <SecretField
+          label={msg.keys.passphrase}
+          value={passphrase}
+          onChange={setPassphrase}
+          hint={picked?.passphraseProtected ? msgD.keys.pickedNeedsPassphrase : msg.keys.passphraseHint}
+          maxLength={1024}
+        />
         {passphrase !== "" && <Switch label={msg.keys.remember} checked={remember} onChange={setRemember} />}
         <ErrorNotice error={error} />
         <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={close}>
             {msg.common.cancel}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={label.trim() === "" || privateKey.trim() === "" || pending}>
+          <button type="submit" className="btn btn-primary" disabled={label.trim() === "" || (!picked && privateKey.trim() === "") || pending}>
             {pending ? msg.common.working : msg.keys.import}
           </button>
         </div>

@@ -660,6 +660,22 @@ export function installMockBackend(options) {
       state.keys = [...state.keys, key];
       return key;
     },
+    // The native dialog: the mock "picks" a synthetic encrypted PuTTY key and keeps its text here.
+    key_import_pick_file: () => {
+      state.pickedKey = { fileName: "work.ppk", passphraseProtected: true };
+      return structuredClone(state.pickedKey);
+    },
+    key_import_picked: (a) => {
+      if (!state.pickedKey) throw { code: "KEY_INVALID", message: "Choose the key file again." };
+      if (state.pickedKey.passphraseProtected && !a.passphrase) throw { code: "KEY_INVALID", message: "This private key is encrypted. Enter its passphrase to import it." };
+      const key = { id: id(870 + state.keys.length), label: a.label, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:picked", publicKey: `ecdsa-sha2-nistp256 AAAAPicked ${a.label}`, passphraseProtected: true, passphraseStored: a.rememberPassphrase, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      state.pickedKey = null;
+      return key;
+    },
+    key_import_pick_clear: () => {
+      state.pickedKey = null;
+    },
     key_certificate_list: () => Object.values(state.certificates ?? {}),
     key_certificate_attach: (a) => {
       if (!a.certificate.includes("-cert-v01@openssh.com")) throw { code: "KEY_INVALID", message: "That is not a valid OpenSSH certificate, or its signature does not check out." };

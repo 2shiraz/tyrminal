@@ -32,6 +32,7 @@ export type { KeySummary } from "./KeySummary";
 export type { KnownHostSummary } from "./KnownHostSummary";
 export type { LocalListing } from "./LocalListing";
 export type { LocalPick } from "./LocalPick";
+export type { PickedKeyFile } from "./PickedKeyFile";
 export type { Preferences } from "./Preferences";
 export type { RecoveryKeyIssued } from "./RecoveryKeyIssued";
 export type { RemoteEntry } from "./RemoteEntry";

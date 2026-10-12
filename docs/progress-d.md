@@ -58,12 +58,19 @@ Updated: 2026-10-12.
 - **Organization:** move/copy a snippet to a folder, rename a folder with its subfolders, each in
   one transaction.
 
+- **Key files (KEY-01, owner request):** picked in a native dialog and read natively; the page only
+  sees the file name. Native test `tests/native/keys.test.mjs` (added to `test:native`).
+- **VERIFIED from agent A's native CI run 38232479810 (4130b7a, all three platforms):** HST-03,
+  HST-04, HST-07, HST-08, HST-09, HST-10, HST-12, IMP-03, KEY-05. IMP-01 stays IN_PROGRESS:
+  its scope includes key and known-host import, which is not built.
+
 ## Evidence
 
 - `cargo test -p tyrminal-core --test inventory` — includes
   `host_os_is_set_in_bulk_follows_duplicates_and_goes_with_deleted_hosts` (real vault, reopened
   from disk).
-- `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion.
+- `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion, PQ check, snippet runs.
+- `pnpm build:e2e` then `node --test tests/native/keys.test.mjs tests/native/snippets.test.mjs` under xvfb: 4/4.
 - `node scripts/ui-container.mjs` — full suite green, including `inventory-presentation.spec.ts`.
 - `pnpm verify:fast` 7/7; `cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib` 20/20 against the local lab (OpenSSH 9.6p1).
 - `cargo test -p tyrminal-ssh --test lab -- --ignored`: 16/17; `ipv6_loopback_endpoint_…` cannot bind `[::1]` in this sandbox (EAFNOSUPPORT, no IPv6 in the container), unrelated to these changes.

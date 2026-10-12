@@ -581,6 +581,14 @@ pub(crate) fn parse_securecrt(text: &str) -> Result<Parsed, IpcError> {
     if text.trim_start().starts_with('<') { parse_securecrt_xml(text) } else { parse_securecrt_ini(text) }
 }
 
+// ---------- key files ----------
+
+/// Whether private-key text (OpenSSH, PEM or PuTTY) needs a passphrase to decode. Used to tell
+/// the user before import, without the text leaving the native side.
+pub fn key_text_is_encrypted(text: &str) -> bool {
+    tyrminal_ssh::ClientKey::is_passphrase_protected(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

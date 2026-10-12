@@ -27,20 +27,35 @@ test("generate an ECDSA key: the chosen type reaches the core", async ({ page })
   expect(call?.args).toMatchObject({ label: "ops p384", kind: "ecdsa_p384" });
 });
 
-test("import a PuTTY key from a file; an encrypted one needs its passphrase", async ({ page }) => {
+test("import a key file through the native dialog: only its name reaches the page", async ({ page }) => {
   await openKeychain(page);
   await page.getByRole("button", { name: "Import key" }).first().click();
   const dialog = page.getByRole("dialog");
-  const ppk = "PuTTY-User-Key-File-3: ecdsa-sha2-nistp256\nEncryption: aes256-cbc\nComment: synthetic\n";
-  await dialog.getByLabel("Choose key file").setInputFiles({ name: "work.ppk", mimeType: "text/plain", buffer: Buffer.from(ppk) });
+  await dialog.getByRole("button", { name: "Choose key file…" }).click();
+  await expect(dialog.getByTestId("picked-key")).toContainText("work.ppk");
+  await expect(dialog.getByTestId("picked-key")).toContainText("Passphrase protected");
   await expect(dialog.getByLabel("Name")).toHaveValue("work");
-  await expect(dialog.getByLabel("Private key")).toHaveValue(ppk);
+  // The page never gets a text field holding the key, and never sends key text itself.
+  await expect(dialog.getByLabel("Private key")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Import key" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Enter its passphrase");
   await dialog.getByLabel("Key passphrase").fill("synthetic passphrase");
   await dialog.getByRole("button", { name: "Import key" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("work", { exact: true })).toBeVisible();
+  const imports = (await calls(page, "key_import_picked")) as { args: Record<string, unknown> }[];
+  expect(imports.at(-1)?.args).toEqual({ label: "work", passphrase: "synthetic passphrase", rememberPassphrase: false });
+  expect(await calls(page, "key_import")).toHaveLength(0);
+});
+
+test("closing the import dialog forgets a picked key file", async ({ page }) => {
+  await openKeychain(page);
+  await page.getByRole("button", { name: "Import key" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Choose key file…" }).click();
+  await expect(dialog.getByTestId("picked-key")).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await calls(page, "key_import_pick_clear")).toHaveLength(1);
 });
 
 test("attach a user certificate to a key, see its principals, then remove it", async ({ page }) => {

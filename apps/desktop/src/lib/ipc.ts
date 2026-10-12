@@ -291,6 +291,11 @@ export const keysD = {
   attachCertificate: (keyId: string, certificate: string) =>
     call<import("@tyrminal/contracts").KeyCertificate>("key_certificate_attach", { keyId, certificate }),
   removeCertificate: (keyId: string) => call<void>("key_certificate_remove", { keyId }),
+  /** Native file dialog; the key stays on the native side. `null` if cancelled. */
+  pickFile: () => call<import("@tyrminal/contracts").PickedKeyFile | null>("key_import_pick_file"),
+  importPicked: (label: string, passphrase: string | null, rememberPassphrase: boolean) =>
+    call<KeySummary>("key_import_picked", { label, passphrase, rememberPassphrase }),
+  clearPicked: () => call<void>("key_import_pick_clear"),
 };
 
 /** Snippet runs without a terminal, saved host selections and snippet organization. */

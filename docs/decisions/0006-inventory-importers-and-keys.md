@@ -17,6 +17,7 @@ parallel branches never assign the same number.
 
 | Crate | Version | License | Used by | Reason |
 |---|---|---|---|---|
+| `zeroize` | 1.9.1 | Apache-2.0 OR MIT | `tyrminal-desktop` (adapter) | Holds a natively picked private-key file until import and clears it from memory. Already a dependency of `tyrminal-core` at the same version. |
 | `quick-xml` | 0.42.0, `default-features = false` | MIT | `tyrminal-core` (`importers.rs`) | SecureCRT exports its sessions as XML. Already in the lockfile through `plist` → `tauri-utils`, so no new code is downloaded. It never resolves DTDs or external entities; on top of that the importer refuses any document with a DOCTYPE, accepts only the five predefined entities and character references, and bounds nesting (64) and element count (1,000,000) within the 1 MiB import limit. |
 
 ## Importers (IMP-04, IMP-05, IMP-06)
@@ -56,6 +57,12 @@ sandbox. Nothing is stubbed in the UI.
 
 ## Keys (KEY-01, KEY-02, KEY-07, KEY-14) — slice 3
 
+- **Key files (owner request via agent A):** "Choose key file…" opens a native dialog from Rust
+  (`key_import_pick_file`; test builds read `TYRMINAL_E2E_KEY_FILE`). The adapter reads at most
+  1 MiB of UTF-8 text, keeps it per window in a zeroizing buffer and returns only the file name
+  and whether it is encrypted; `key_import_picked` sends it through the same core import as pasted
+  text. A failed import keeps the file (so a passphrase can be added); success or closing the
+  dialog drops it.
 - **Generation:** Ed25519 (default), ECDSA P-256/P-384/P-521 and RSA 3072/4096 through `ssh-key`
   (already a dependency via russh). RSA runs on a blocking thread. No DSA, no RSA below 3072.
 - **ML-DSA keys: BLOCKED.** There is no SSH standard for ML-DSA user keys, OpenSSH does not

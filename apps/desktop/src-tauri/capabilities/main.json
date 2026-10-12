@@ -87,6 +87,9 @@
     "allow-execution-target-save",
     "allow-execution-target-delete",
     "allow-snippet-move",
-    "allow-snippet-folder-rename"
+    "allow-snippet-folder-rename",
+    "allow-key-import-pick-file",
+    "allow-key-import-picked",
+    "allow-key-import-pick-clear"
   ]
 }

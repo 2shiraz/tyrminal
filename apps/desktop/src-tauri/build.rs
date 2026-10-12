@@ -91,6 +91,9 @@ const COMMANDS: &[&str] = &[
     "execution_target_delete",
     "snippet_move",
     "snippet_folder_rename",
+    "key_import_pick_file",
+    "key_import_picked",
+    "key_import_pick_clear",
 ];
 
 fn main() {

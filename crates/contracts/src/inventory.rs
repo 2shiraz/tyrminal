@@ -108,3 +108,13 @@ pub struct ExecutionTargetInput {
     pub name: String,
     pub host_ids: Vec<String>,
 }
+
+/// A private-key file the user picked in the native dialog. Its contents stay on the native side;
+/// the renderer only learns its name and whether it needs a passphrase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PickedKeyFile {
+    pub file_name: String,
+    pub passphrase_protected: bool,
+}

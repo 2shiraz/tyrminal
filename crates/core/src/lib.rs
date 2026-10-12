@@ -27,6 +27,8 @@ pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;
 pub use tyrminal_platform::{MemorySecretStore, OsSecretStore, SecretStore, UnavailableSecretStore, restrict_to_owner};
 pub use vault::VaultService;
+// agent D: inventory and snippets
+pub use importers::key_text_is_encrypted;
 
 use std::path::Path;
 use std::sync::Arc;
