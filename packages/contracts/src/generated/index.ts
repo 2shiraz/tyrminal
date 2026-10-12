@@ -24,6 +24,7 @@ export type { KeyDeployPreview } from "./KeyDeployPreview";
 export type { KeyImportInput } from "./KeyImportInput";
 export type { KeySummary } from "./KeySummary";
 export type { KnownHostSummary } from "./KnownHostSummary";
+export type { LocalListing } from "./LocalListing";
 export type { LocalPick } from "./LocalPick";
 export type { Preferences } from "./Preferences";
 export type { RecoveryKeyIssued } from "./RecoveryKeyIssued";

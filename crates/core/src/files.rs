@@ -179,6 +179,65 @@ pub(crate) async fn free_remote_name(sftp: &Sftp, dir: &str, name: &str) -> Resu
     Err(no_free_name())
 }
 
+/// Resolves `rel` (names below a chosen local folder) to a path inside `root`. Every name must be
+/// a single plain component, and no step may be a symbolic link, so the result cannot leave the
+/// folder the user chose.
+pub fn local_within(root: &Path, rel: &[String]) -> Result<PathBuf, IpcError> {
+    let outside = || err(ErrorCode::AccessDenied, "That is outside the folder you chose.");
+    let mut path = root.to_path_buf();
+    for name in rel {
+        let mut parts = Path::new(name).components();
+        match (parts.next(), parts.next()) {
+            (Some(std::path::Component::Normal(_)), None) if !name.contains(['/', '\\']) => {}
+            _ => return Err(outside()),
+        }
+        path.push(name);
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(outside());
+        }
+    }
+    Ok(path)
+}
+
+/// Lists a folder inside a chosen local folder (links are listed but never followed).
+pub async fn list_local(root: &Path, rel: &[String], max: usize) -> Result<(Vec<RemoteEntry>, bool), IpcError> {
+    let dir = local_within(root, rel)?;
+    let mut read = tokio::fs::read_dir(&dir).await.map_err(|e| local_io(&e))?;
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    while let Some(entry) = read.next_entry().await.map_err(|e| local_io(&e))? {
+        if entries.len() >= max {
+            truncated = true;
+            break;
+        }
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(meta) = tokio::fs::symlink_metadata(entry.path()).await else { continue };
+        let kind = if meta.file_type().is_symlink() {
+            RemoteEntryKind::Symlink
+        } else if meta.is_dir() {
+            RemoteEntryKind::Dir
+        } else if meta.is_file() {
+            RemoteEntryKind::File
+        } else {
+            RemoteEntryKind::Other
+        };
+        #[cfg(unix)]
+        let permissions = {
+            use std::os::unix::fs::PermissionsExt;
+            Some(meta.permissions().mode() & 0o7777)
+        };
+        #[cfg(not(unix))]
+        let permissions = None;
+        let modified =
+            meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+        entries.push(RemoteEntry { name, kind, size: meta.is_file().then_some(meta.len()), permissions, modified });
+    }
+    entries.sort_by(|a, b| {
+        (a.kind != RemoteEntryKind::Dir).cmp(&(b.kind != RemoteEntryKind::Dir)).then_with(|| a.name.cmp(&b.name))
+    });
+    Ok((entries, truncated))
+}
+
 pub(crate) fn temp_name(name: &str, token: &str) -> String {
     // Keeps the temporary name within the usual 255-byte limit whatever the target name is.
     let short: String = name.chars().take(64).collect();
@@ -505,6 +564,32 @@ mod tests {
         assert!(remote_name("..hidden").is_ok());
         assert!(remote_name("-rf").is_ok());
         assert!(remote_name("name with spaces;$(x)").is_ok());
+    }
+
+    #[tokio::test]
+    async fn local_browsing_stays_inside_the_chosen_folder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("chosen");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/a.txt"), b"x").unwrap();
+        std::fs::write(dir.path().join("secret.txt"), b"s").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path(), root.join("escape")).unwrap();
+        let rel = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(local_within(&root, &rel(&["sub", "a.txt"])).is_ok());
+        for bad in [&["..", "secret.txt"][..], &["sub/../.."], &["/etc"], &["."], &[""], &["sub\\..\\.."]] {
+            assert_eq!(local_within(&root, &rel(bad)).unwrap_err().code, ErrorCode::AccessDenied, "{bad:?}");
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(local_within(&root, &rel(&["escape", "secret.txt"])).unwrap_err().code, ErrorCode::AccessDenied);
+            let (entries, _) = list_local(&root, &[], 100).await.unwrap();
+            let link = entries.iter().find(|e| e.name == "escape").unwrap();
+            assert_eq!(link.kind, RemoteEntryKind::Symlink, "links are listed, not followed");
+        }
+        let (entries, truncated) = list_local(&root, &rel(&["sub"]), 100).await.unwrap();
+        assert_eq!((entries.len(), truncated), (1, false));
+        assert_eq!(entries[0].size, Some(1));
     }
 
     #[test]

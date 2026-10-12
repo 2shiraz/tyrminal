@@ -742,3 +742,16 @@ pub struct EditStatus {
     pub name: String,
     pub changed: bool,
 }
+
+/// A folder inside a local folder the user chose (`token`), listed for the two-pane view. `path`
+/// is the list of names below the chosen folder; the chosen folder itself is `[]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LocalListing {
+    pub token: String,
+    pub root_name: String,
+    pub path: Vec<String>,
+    pub entries: Vec<RemoteEntry>,
+    pub truncated: bool,
+}

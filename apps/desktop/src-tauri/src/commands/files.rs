@@ -12,7 +12,8 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, State, WebviewWindow};
 use tyrminal_core::TransferSink;
 use tyrminal_core::contracts::{
-    ConflictChoice, EditStatus, ErrorCode, IpcError, LocalPick, RemoteListing, TransferEvent, TransferStarted,
+    ConflictChoice, EditStatus, ErrorCode, IpcError, LocalListing, LocalPick, RemoteListing, TransferEvent,
+    TransferStarted,
 };
 
 use crate::state::{AppState, Grant, GrantKind};
@@ -196,6 +197,7 @@ pub async fn files_chmod(
 
 /// Uploads a chosen local file or folder into the remote folder `dir`, under its own name.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn files_upload(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -203,9 +205,17 @@ pub async fn files_upload(
     token: String,
     dir: String,
     choice: ConflictChoice,
+    path: Option<Vec<String>>,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let path = state.grant(window.label(), &token, &[GrantKind::File, GrantKind::UploadFolder])?;
+    // `path`: an item inside a chosen folder (two-pane view); otherwise the chosen item itself.
+    let path = match path {
+        Some(rel) if !rel.is_empty() => {
+            let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+            tyrminal_core::local_within(&root, &rel)?
+        }
+        _ => state.grant(window.label(), &token, &[GrantKind::File, GrantKind::UploadFolder])?,
+    };
     let name = file_name(&path);
     let sink = Arc::new(ChannelTransferSink(events));
     state.core()?.sessions.upload(window.label(), &session_id, path, &dir, &name, choice, sink).await
@@ -222,9 +232,12 @@ pub async fn files_download(
     name: String,
     token: String,
     choice: ConflictChoice,
+    path: Option<Vec<String>>,
     events: Channel<TransferEvent>,
 ) -> Result<TransferStarted, IpcError> {
-    let folder = state.grant(window.label(), &token, &[GrantKind::Folder])?;
+    // `path`: a folder inside the chosen one (two-pane view).
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    let folder = tyrminal_core::local_within(&root, &path.unwrap_or_default())?;
     let sink = Arc::new(ChannelTransferSink(events));
     state.core()?.sessions.download(window.label(), &session_id, &dir, &name, folder, choice, sink).await
 }
@@ -289,4 +302,19 @@ pub async fn files_edit_close(
     edit_id: String,
 ) -> Result<(), IpcError> {
     state.core()?.sessions.edit_close(window.label(), &edit_id).await
+}
+
+/// Lists a folder inside a local folder the user chose (the local side of the two-pane view).
+#[tauri::command]
+pub async fn files_local_list(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    token: String,
+    path: Vec<String>,
+) -> Result<LocalListing, IpcError> {
+    state.core()?;
+    let root = state.grant(window.label(), &token, &[GrantKind::Folder, GrantKind::UploadFolder])?;
+    let (entries, truncated) =
+        tyrminal_core::list_local(&root, &path, tyrminal_core::contracts::limits::MAX_DIR_ENTRIES).await?;
+    Ok(LocalListing { token, root_name: file_name(&root), path, entries, truncated })
 }

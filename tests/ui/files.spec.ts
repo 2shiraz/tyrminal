@@ -12,7 +12,7 @@ async function connect(page: Page, host: string) {
 }
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Files" });
-const list = (page: Page) => panel(page).getByRole("list", { name: /Contents of/ });
+const list = (page: Page) => panel(page).getByRole("list", { name: /^Contents of \// });
 /** Lets the newest running mock transfer complete. */
 const finishLatest = (page: Page) =>
   page.evaluate(() => {
@@ -213,4 +213,43 @@ test("files: a file opened in an editor is saved only on request, and server cha
 
   await editing.getByRole("button", { name: "Stop editing README.md" }).click();
   await expect(editing).toHaveCount(0);
+});
+
+test("files: two panes copy between this computer and the server by button and by drag and drop", async ({ page }) => {
+  await openApp(page);
+  await connect(page, "api-gateway");
+  await page.keyboard.press("Control+Shift+O");
+  await expect(list(page)).toBeVisible();
+  await panel(page).getByRole("switch", { name: "Show this computer" }).check();
+  const local = panel(page).getByRole("region", { name: "This computer" });
+  await expect(local).toContainText("Choose a folder on this computer");
+  await local.getByRole("button", { name: "Choose folder…" }).click();
+  const localList = local.getByRole("list", { name: /on this computer/ });
+  await expect(localList.getByRole("button")).toHaveText([/photos/, /deploy\.tar\.gz.*40 KB/, /notes\.md/]);
+  const transfers = panel(page).getByRole("region", { name: "Transfers" });
+
+  // Button: local file to the server folder shown.
+  await localList.getByRole("button", { name: "Select notes.md" }).click();
+  await panel(page).getByRole("button", { name: "Upload to the server folder" }).click();
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").first()).toHaveText("Done");
+  await expect(list(page).getByRole("button", { name: "Select notes.md" })).toBeVisible();
+
+  // Button: remote file to the local folder shown; the local pane refreshes.
+  await list(page).getByRole("button", { name: "Select README.md" }).click();
+  await panel(page).getByRole("button", { name: "Download to this computer" }).click();
+  await finishLatest(page);
+  await expect(localList.getByRole("button", { name: "Select README.md" })).toBeVisible();
+
+  // Drag and drop: a local folder onto the server pane.
+  await localList.getByRole("button", { name: "Open photos" }).dragTo(panel(page).locator(".files-body"));
+  await finishLatest(page);
+  await expect(transfers.getByTestId("transfer-state").nth(2)).toHaveText("Done");
+  await expect(list(page).getByRole("button", { name: "Open photos" })).toBeVisible();
+
+  // Local navigation stays inside the chosen folder.
+  await localList.getByRole("button", { name: "Open photos" }).dblclick();
+  await expect(local).toContainText("Projects / photos");
+  await local.getByRole("button", { name: "Up one local folder" }).click();
+  await expect(local.getByRole("button", { name: "Up one local folder" })).toBeDisabled();
 });
