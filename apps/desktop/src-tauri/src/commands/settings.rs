@@ -73,6 +73,20 @@ pub async fn link_open(url: String) -> Result<(), IpcError> {
     }
 }
 
+/// Static build and platform facts for Settings → About. Read-only; nothing about the user,
+/// their hosts or their vault.
+#[tauri::command]
+pub async fn app_info() -> tyrminal_core::contracts::AppInfo {
+    tyrminal_core::contracts::AppInfo {
+        commit: env!("TYRMINAL_BUILD_COMMIT").to_owned(),
+        build_date: env!("TYRMINAL_BUILD_DATE").to_owned(),
+        os: std::env::consts::OS.to_owned(),
+        arch: std::env::consts::ARCH.to_owned(),
+        tauri_version: tauri::VERSION.to_owned(),
+        webview_version: tauri::webview_version().ok(),
+    }
+}
+
 /// Saves a diagnostic report to a file the user chooses (test builds read
 /// `TYRMINAL_E2E_REPORT_PATH`). Nothing is sent anywhere. `None`: the dialog was cancelled.
 #[tauri::command]

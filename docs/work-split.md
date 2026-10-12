@@ -145,15 +145,48 @@ Never merge these by hand; regenerate them after resolving the sources:
 - Anything else: keep both behaviours, run the tests of both sides, and record what was done in
   the merge commit message.
 
+## Host details panel (branch `claude/host-panel`)
+
+The Hosts view edits hosts in a side panel instead of a dialog (`features/hosts/HostPanel.tsx`,
+form state and cards in `features/hosts/hostForm.tsx`; `HostEditor.tsx` stays as the dialog that
+Home's quick connect uses). Edits outside `features/hosts`:
+
+- `apps/desktop/src/features/tunnels/HostAdvanced.tsx`: `useHostAdvanced` also returns `changed`
+  (for the unsaved-changes guard), and `HostAdvancedSection` takes `embedded` (fields without
+  their own `<details>`, inside the panel's "Show more"). No behaviour change otherwise.
+- `apps/desktop/src/lib/messages-d.ts`: a `hostPanel` block at the end.
+- `apps/desktop/src/styles/global.css`: one block at the end for the panel, plus one rule that
+  gives a hint inside the selected `.choice` muted text (AA contrast on the accent tint).
+- Tests: `tests/ui/{inventory,tunnels,accessibility,visual}.spec.ts` drive the panel; new
+  `tests/ui/host-panel.spec.ts`; the two `08-host-editor` baselines re-recorded;
+  `tests/native/{app,backup}.test.mjs` and `flows.mjs` save through the panel.
+- PR #8's fields live in the panel: the protocol select (SSH, Telnet, serial device) and the
+  serial line settings in the Protocol card; encoding, terminal type and agent forwarding under
+  "Show more". `tests/ui/protocols.spec.ts` drives the panel.
+
 ## Status (each agent edits only its own column)
 
 | | Agent A | Agent B | Agent C | Agent D |
 |---|---|---|---|---|
-| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | — | Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18; certificate sign-in, IMP-02, HST-05 and SEC-08/10 moved to the tunnels owner |
-| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | — | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization; suggestions (AUT-02/03/04/12, P-14); known_hosts import (IMP-01); shell integration (AUT-06/07) |
+| Working on | SFTP: two-pane local/remote view, remote-to-remote copy, drag and drop, keep-both conflicts | Agent forwarding (CON-11), then diagnostics (CON-15) and Phase 08 logs | Native tests toward VERIFIED (macOS/Windows CI), TRM-14 side panel | Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18; certificate sign-in, IMP-02, HST-05 and SEC-08/10 moved to the tunnels owner |
+| Done since split | Folder transfers, lost-link and 2 GiB tests, external editing | Port forwarding (FWD-01..09), jump hosts (CON-09), authenticated proxies (CON-10); IMPLEMENTED_UNVERIFIED on Linux, see `docs/progress-b.md` | Slices 1–5: tabs, status, layouts, templates, detach-to-window, shortcuts, highlighting, encodings, broadcast review, palette/recent (draft PR #7) | Inventory presentation (sort, select all/range, OS icons), group-wide connection; PuTTY/MobaXterm/SecureCRT importers, known-host conversion; ECDSA/RSA generation, PPK v2/v3, user certificates (import/check); snippet runs on several hosts with saved targets, snippet organization; suggestions (AUT-02/03/04/12, P-14); known_hosts import (IMP-01); shell integration (AUT-06/07) |
 | Blocked | — | — | — | Cloud discovery IMP-07..13 (third-party APIs); hardware keys KEY-08..13; SEC-09 (not in russh) |
 
 ## Requests (one agent asking the other for a change in a file it owns)
+
+- **Command history (AUT-01) → owner of `shellContext.ts` / `SuggestDialog.tsx` (PR #10/#5), done in
+  branch `claude/session-logs`, keep when merging:** `ShellMark` `command_start` gained an optional
+  `leadingSpace` flag (the mark's `command` is trimmed, which lost the shell's "leading space = do not
+  remember" convention); `SuggestDialog.tsx` gained a "History" group, a "History…" button and the
+  history manager view, each in a block marked `command history`. `AppShell.tsx` installs the capture
+  with one marked `useEffect` line. Record kinds 60 and 61 are command history.
+
+- **Server at a glance (P-32), in shared files, keep when merging:** blocks marked `server at a
+  glance` in `AppShell.tsx` (a third side panel, `"server"`, and its target: SSH sessions with a
+  negotiated connection only), `StatusBar.tsx` (the **Server** button), `sessions.rs` (the `glance`
+  field of `Entry` and `Sessions::server_glance`), `vault.rs`/`records.rs` (record kinds 70–79; 70 is
+  the per-host off list), `global.css` (`.glance*`), the Tauri command lists and `ipc.ts`, and
+  `tests/ui/mock-backend.js` (which now sends `negotiated` for SSH hosts only, as the core does).
 
 - **A → C:** `tests/ui/accessibility.spec.ts` (axe-core, WCAG 2.2 A/AA) finds two violations in
   `TabStrip.tsx`: `aria-required-children` (the `tablist` contains elements that are not tabs) and
@@ -240,3 +273,127 @@ Never merge these by hand; regenerate them after resolving the sources:
    `crates/ssh/tests/proxy_lab.rs` (lab layer, either lab mode), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).
+- **C → A (already done by C, keep it when merging):** in `tests/ui/behavior.spec.ts`, the broadcast
+  test now waits for the terminal's reply to its `ESC[6n` query to be sent before typing (one
+  `expect.poll` on the focused pane's `data-tx`). C fixed keyboard focus after a split (it used to
+  stay in the old pane), so the typing pane is now the one answering the query, and under load the
+  reply could land between typed keys. Nothing else in that file changed.
+- **C → B, D (record kinds):** agent C's vault record kinds use numbers 20–29 (layout templates
+  first). Suggest B 30–39 and D 40–49 so new kinds on parallel branches never collide.
+- **C → A (already done by C):** one row for `layout_list`/`layout_save`/`layout_delete` was added at the
+  end of the command table in `docs/ipc-contract.md`.
+- **C → A (open, needed for TRM-02 detach-to-window):** a live session handoff between windows.
+  Today `Entry.owner` is fixed at open and the adapter's sink is bound to the opening window's
+  channels, so a tab cannot move to another window without ending its sessions. Proposed, in A's
+  files (C writes the UI, the window capability and the tests once it exists):
+  1. core `Sessions::offer_handoff(owner, session_id, to_label) -> token`: only the current owner
+     may offer; records `(session_id, to_label, token)` with a short expiry; one offer per session.
+  2. core `Sessions::accept_handoff(caller_label, token) -> session_id`: succeeds only when
+     `caller_label == to_label` and the token is unexpired; switches the owner atomically (owner
+     behind a mutex, still checked in `authorize`), so the old window is denied from then on.
+  3. adapter: the per-session sink becomes swappable; `session_attach(token, output, events)`
+     (called by the new window) accepts the handoff and swaps in its channels; output produced in
+     between is held under the existing unacknowledged-output bound, not dropped.
+  4. a session whose offer is not accepted (window closed, expiry) stays with its owner; closing
+     either window during the handoff ends nothing it does not own.
+  Lab tests C would add: the old window's write/resize/ack are denied after accept; a third window
+  cannot accept; a replayed or expired token is refused; closing the new window ends the session.
+- **C → A (already done by C, keep it when merging):** P-13 adds a review step before broadcast
+  starts, so the broadcast test in `tests/ui/behavior.spec.ts` confirms the review dialog (one added
+  line). The full review behaviour is tested in `tests/ui/workspaces.spec.ts`.
+- **C → A (already done by C, keep it when merging):** workspace preferences (highlighting, key
+  bindings, Option/Alt and mouse) hang off `Preferences` as one optional field,
+  `workspace: Option<WorkspacePreferences>` (type in `crates/contracts/src/layouts.rs`), validated by
+  one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
+  shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
+  Files without the field load as before.
+- **C → A (done, owner request "settings to set keybinds"):** `SettingsViews.tsx` gets one more
+  entry in its section list (`shortcuts`, labelled "Keyboard shortcuts", plus the `msgC` import), so
+  the nav scrolls to the shortcuts section. The section itself, with every action grouped, search,
+  recording, swap on conflict, resets and reserved system chords, stays in `WorkspaceSettings.tsx`.
+- **C → A (done):** the two axe findings in `TabStrip.tsx`: the tablist now holds only tabs (new-tab
+  and layout buttons sit beside it), and the close control is a non-focusable pointer target
+  (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in
+  `tests/ui/accessibility.spec.ts` when your PR lands; `tests/ui/workspaces.spec.ts` checks the
+  same structure meanwhile.
+- **C → A (done by C, keep it when merging):** detach-to-window adds a second capability file,
+  `capabilities/detached.json` (windows `detached-*`, ten permissions: take its tab, attach and use
+  handed-over sessions, read preferences, report activity). `tauri.conf.json` enables
+  `["main","detached"]`, and `scripts/check-release.mjs` checks that file against an explicit
+  allowlist, keeps "build.rs = granted commands" over both files, and refuses
+  `allow-window-detach-take` in `main.json`. C cherry-picked your handoff commit 636f104 to build on;
+  it is identical to yours, so the merge is clean.
+- **C → A (done by C, keep it when merging):** `tauri.e2e.conf.json` lists the `detached`
+  capability too and lets the test-only `e2e-automation` capability reach `detached-*` windows;
+  `tests/native/webdriver.mjs` gains `windowHandles`/`windowHandle`/`switchToWindow` in a marked
+  block; `tests/ui/mock-backend.js` takes `options.windowLabel` for a page playing a detached window.
+- **C → B (done by C, keep it when merging):** `tests/ui/tunnels.spec.ts` line ~103 closes the tab
+  through `.tab-close` inside the tab instead of a "Close …" button: after the axe fix the close
+  control is no longer a focusable button nested in the tab (keyboard: Delete or the tab menu).
+
+**From the terminal-input branch (additive edits in files other sessions own; please keep them):**
+
+- `components/layout/PaneGrid.tsx`: optional prop `broadcastPaneIds`; `data-broadcast` is
+  `"excluded"` for a pane left out of a broadcasting tab, and its header says so (one line).
+- `app/AppShell.tsx`: broadcast state is `members` (confirmed panes and their sessions, from
+  `features/broadcast/members.ts`); `broadcasting` is derived from it, so other uses are unchanged.
+- `features/layouts/BroadcastReview.tsx`: per-pane checkboxes; `onConfirm` receives the chosen panes.
+- `features/terminal/TerminalController.ts`: `onKey` leaves IME-processed keys to xterm (3 lines).
+- `tests/ui/mock-backend.js`: per-session input log (`__mockInputBySession`) and `__mockDropAt(i)`.
+- `tests/ui/tunnels.spec.ts`: closes the tab through `.tab-close` (no nested button since PR #7).
+- `crates/contracts/src/layouts.rs`: `HighlightKeyword.pattern` (serde default false); `crates/core/src/layouts.rs`
+  `sanitize_workspace` checks patterns through the new `crates/core/src/highlight.rs`;
+  `features/layouts/WorkspaceSettings.tsx` renders `features/highlight/HighlightRules.tsx` instead of its
+  `Keywords` list (removed); `app/AppShell.tsx` one `useSlowPatternNotice()` line.
+- `features/palette/CommandPalette.tsx`: `export type PaletteItem` and an `extra` prop whose items are
+  appended after the built-in ones (one marked line); `features/terminal/TerminalView.tsx`: `copy`/`paste`
+  on `PaneHandle`, a "Show connection details" button on the failure notice and its dialog (marked);
+  `lib/ipc.ts`: `connectionDetails` at the end (marked); `tests/ui/mock-backend.js`: `session_diagnostics`.
+- `features/terminal/TerminalController.ts`: installs `features/terminal/composition.ts` after `open()`.
+- `app/AppShell.tsx`: the snippets side panel renders `features/sidepanel/ConnectionPanel.tsx` (sections:
+  snippets, history, appearance); `SnippetsPanel.tsx` is no longer used. Visual baselines
+  `*-09-terminal-snippets.png` re-recorded in the pinned container.
+- `crates/contracts/src/layouts.rs` `WorkspacePreferences`: `right_click_paste`, `middle_click_paste`
+  (marked); `crates/core/src/layouts.rs` refuses both right-click flags; `WorkspaceSettings.tsx`
+  renders `features/mouse/MouseSettings.tsx` instead of its right-click switch;
+  `TerminalController.ts` creates `features/mouse/mouseMap.ts` and lets it swallow the X11 paste
+  that follows a handled middle click.
+- `tests/ui/workspaces.spec.ts` "highlighting: words and IP addresses…": expectations now list every
+  decoration on the row (built-in kinds are on by default), read with `tests/ui/highlight-helpers.ts`.
+  `HighlightPreferences` gained the built-in kind toggles and a `Default` with highlighting on.
+- `TerminalController.ts`: registers `features/tokens/tokenLinks.ts` as a link provider and keeps the
+  pane's target; `TerminalView.tsx`: one `onToken` callback and a `<TokenMenu>`; `AppShell.tsx`: one
+  `<NewHostFromTerminal>` line (prefilled host editor from a clicked address).
+- `lib/shortcuts.ts`: `previousCommand`/`nextCommand` at the end of the union and both maps (marked);
+  `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines; `WorkspaceSettings.tsx`: both in the
+  "terminal" shortcut group. `tests/ui/behavior.spec.ts`
+  `clickTerminalText` finds text by position (decorated cells are one element per cell).
+- `scripts/check-contrast.mjs`: one marked block runs `scripts/check-highlight-contrast.mjs` (highlight
+  colors of every scheme at AA, computed by the app's palette code).
+- **Note for C and D (merge of main #5 on the terminal-input branch):** three OSC handlers now share
+  sequences: D's `attachShellContext` (OSC 7 and 133), C's OSC 7 (layout working directory) and the
+  command marks (OSC 133). xterm calls the most recent handler first and stops at one returning
+  true, so `TerminalController` registers `attachShellContext` first and the other two observe and
+  return false. Please keep that order (and `return false` in those two) when touching these lines.
+
+## SFTP tab hook-up (branch `claude/sftp-tab`)
+
+The SFTP tab lives in `apps/desktop/src/features/sftp/` (own messages and stylesheet). Its
+hook-up into files other branches own is kept to the minimum, for C (#7, tabs/workspaces) and
+the terminal-input branch (#9) to keep when they merge:
+
+- `app/workspace.ts`: `PaneTarget = TerminalTarget | { kind: "sftp" }` and `Pane.target: PaneTarget`.
+  An SFTP tab has one pane and is never split (AppShell ignores split requests for it).
+- `components/layout/PaneGrid.tsx`: a pane whose target is `sftp` renders `SftpView` instead of
+  `TerminalView`; it stays mounted while hidden like a terminal.
+- `components/layout/TabStrip.tsx`: one optional `onNewSftp` item in the **+** menu.
+- `features/terminal/TerminalView.tsx`: `AuthDialog` and `Fingerprint` are exported (no other change).
+- `Sidebar.tsx`, `HomeView.tsx`, `CommandPalette.tsx`: one optional `onSftp` entry each.
+- `AppShell.tsx`: `openSftp`; the side panels and status-bar session details are hidden on an SFTP tab.
+- **C → SFTP tab (done by C when merging #18 into #7):** SFTP tabs are left out of layout templates
+  (`templateTabs`) and cannot be split through C's `split()` (pane-limit path); detach refuses
+  them (no live terminal session). `tests/ui/sftp.spec.ts` closes the tab through `.tab-close`
+  inside the tab, as `tunnels.spec.ts` does, since the close control is no longer a focusable
+  button; `workspaces.spec.ts` picks the first recent connection by label instead of menu index.
+- **Terminal-input branch (keep when merging):** the save-layout dialog's tab/pane count is taken from
+  `templateTabs` (SFTP tabs left out), and `workspaces.spec.ts` checks that an SFTP tab is not saved.

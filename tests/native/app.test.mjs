@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { KEYS } from "./flows.mjs";
+import { HOST_PANEL, KEYS, saveAndCloseHostPanel } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
@@ -115,15 +115,14 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
 
     await nav("Hosts");
     await s.clickButton("Add host");
-    await s.fill("Name", "Lab server", { within: "dialog" });
-    await s.fill("Address", "127.0.0.1", { within: "dialog" });
-    const port = await s.fill("Port", "", { within: "dialog" });
+    await s.fill("Name", "Lab server", { within: HOST_PANEL });
+    await s.fill("Address", "127.0.0.1", { within: HOST_PANEL });
+    const port = await s.fill("Port", "", { within: HOST_PANEL });
     await s.clear(port);
     await s.type(port, String(forwarder.port));
-    await s.fill("User name", lab.user, { within: "dialog" });
+    await s.fill("User name", lab.user, { within: HOST_PANEL });
     await app.screenshot("05-host-editor");
-    await s.clickButton("Save", { within: "dialog" });
-    await s.waitGone("dialog");
+    await saveAndCloseHostPanel(s);
     const hostRow = await hostText();
     assert.match(hostRow, /Lab server/);
     assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port}`));

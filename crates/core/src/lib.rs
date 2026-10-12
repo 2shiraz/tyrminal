@@ -15,7 +15,9 @@ mod files;
 mod folders;
 mod handoff;
 mod import;
+// agent C: workspaces
 mod inventory;
+mod layouts;
 mod preferences;
 mod records;
 mod remote_copy;
@@ -28,16 +30,24 @@ mod validate;
 mod vault;
 // agent B: tunnels and history
 mod tunnels;
+// terminal input: highlight patterns
+mod highlight;
 // agent D: inventory and snippets
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
 // terminal notifications (P-23)
 mod notify;
+// compromised-password check (SEC-11)
+pub mod password_check;
+// command history
+mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
-pub use files::{TransferSink, list_local, local_within};
+pub use files::{TransferSink, list_local, local_make_dir, local_remove, local_rename, local_set_mode, local_within};
 pub use preferences::PreferencesStore;
 pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
@@ -48,6 +58,8 @@ pub use tyrminal_platform::{
 };
 pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
+// agent C: workspaces
+pub use layouts::validate_detach;
 // agent D: inventory and snippets
 pub use importers::key_text_is_encrypted;
 
@@ -111,6 +123,32 @@ impl Core {
     ) -> Result<tyrminal_contracts::DiscoveryStatus, IpcError> {
         self.vault.require_unlocked().await?;
         self.discovery.start(owner, network_id)
+    }
+}
+
+// compromised-password check (SEC-11)
+impl Core {
+    /// Whether the check is on, where it would send prefixes, and whether this build can.
+    pub async fn password_check_status(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckStatus, IpcError> {
+        let secrets = self.vault.stored_secrets().await?;
+        Ok(password_check::status(&self.preferences.get().password_check, source, &secrets))
+    }
+
+    /// Checks every stored password against `source` (an explicit request; refused while the
+    /// preference is off).
+    pub async fn check_stored_passwords(
+        &self,
+        source: &dyn password_check::RangeSource,
+    ) -> Result<contracts::PasswordCheckReport, IpcError> {
+        let prefs = self.preferences.get().password_check;
+        if !prefs.enabled {
+            return password_check::run(&prefs, source, Vec::new()).await;
+        }
+        let secrets = self.vault.stored_secrets().await?;
+        password_check::run(&prefs, source, secrets).await
     }
 }
 

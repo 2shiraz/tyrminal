@@ -512,12 +512,19 @@ pub struct Preferences {
     pub local_shell: Option<String>,
     /// Applications chosen (in a native dialog) for editing remote files, by extension.
     pub editor_apps: Vec<EditorApp>,
+    // agent C: workspaces (highlighting, key bindings); validated in core `layouts::sanitize_workspace`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<crate::WorkspacePreferences>,
     /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
     /// separate from session recording and command history.
     pub diagnostics: bool,
     // terminal notifications (P-23)
     /// A desktop notification when a long command finishes in a tab the user is not looking at.
     pub command_notifications: CommandNotifications,
+    // compromised-password check (SEC-11)
+    /// Off by default; see `PasswordCheckPreferences`.
+    pub password_check: crate::PasswordCheckPreferences,
 }
 
 /// Command-finished notifications (P-23). The finish is known only from shell-integration
@@ -546,6 +553,25 @@ pub struct CommandNotice {
     pub body: String,
     /// False when it was not shown (too soon after the previous one, or a test build).
     pub shown: bool,
+}
+
+/// Static facts about this build and the computer it runs on, for Settings → About and bug
+/// reports. Nothing here identifies the user, their hosts or their vault.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppInfo {
+    /// Short commit hash the app was built from, or `dev` when it is unknown.
+    pub commit: String,
+    /// UTC build date, `YYYY-MM-DD`.
+    pub build_date: String,
+    /// Operating system family (`linux`, `macos`, `windows`).
+    pub os: String,
+    /// CPU architecture (`x86_64`, `aarch64`).
+    pub arch: String,
+    pub tauri_version: String,
+    /// The system WebView's version, when the platform reports it.
+    pub webview_version: Option<String>,
 }
 
 /// One failure for a diagnostic report: which command failed and how, never with what.
@@ -619,6 +645,10 @@ pub enum AuthPromptKind {
 pub enum SessionEvent {
     State {
         state: SessionState,
+        /// During a jump-host chain: which hop this step belongs to (`None` for a direct
+        /// connection and for session-level states such as `Connected`).
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
     },
     /// First contact with this endpoint: the user must decide before anything else happens.
     #[serde(rename_all = "camelCase")]
@@ -674,29 +704,23 @@ pub enum SessionEvent {
         /// Empty for AEAD ciphers.
         mac: String,
         strict_kex: bool,
+        /// During a jump-host chain: the hop whose key exchange this is. Sent for every hop as
+        /// soon as its key exchange finishes, before its host key is verified.
+        #[serde(default)]
+        hop: Option<crate::ChainPosition>,
     },
     /// Pre-authentication banner from the server. Untrusted.
-    Banner {
-        text: String,
-    },
+    Banner { text: String },
     /// Environment variables were requested for this session (SNP-13). Names only, never values.
     /// `rejected` lists those the server refused (usually not allowed by its `AcceptEnv`); they
     /// are not set in the session.
-    Environment {
-        sent: Vec<String>,
-        rejected: Vec<String>,
-    },
+    Environment { sent: Vec<String>, rejected: Vec<String> },
     /// A notice from Tyrminal itself, never server text, shown when it happens (for example
     /// that the server used a forwarded key, or that a Telnet session is not encrypted).
-    Notice {
-        text: String,
-    },
+    Notice { text: String },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
-    Closed {
-        error: Option<IpcError>,
-        exit_status: Option<u32>,
-    },
+    Closed { error: Option<IpcError>, exit_status: Option<u32> },
 }
 
 /// Returned when a session is opened. The id is an opaque handle bound to the calling window and
@@ -729,6 +753,17 @@ mod tests {
         assert_eq!(prefs.terminal.scrollback, 5_000);
         let rendered = format!("{key:?} {auth:?} {issued:?}");
         assert!(!rendered.to_lowercase().contains("canary"), "{rendered}");
+    }
+
+    #[test]
+    fn state_and_negotiated_events_without_a_hop_still_parse() {
+        let state: SessionEvent = serde_json::from_str(r#"{"type":"state","state":"connected"}"#).unwrap();
+        assert_eq!(state, SessionEvent::State { state: SessionState::Connected, hop: None });
+        let negotiated: SessionEvent = serde_json::from_str(
+            r#"{"type":"negotiated","kex":"k","hostKey":"h","cipher":"c","mac":"","strictKex":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(negotiated, SessionEvent::Negotiated { hop: None, .. }));
     }
 
     #[test]

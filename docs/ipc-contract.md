@@ -57,6 +57,8 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |
 | `session_open_ssh` | host id, size, output channel, event channel | session id | Host-key trust and auth prompts arrive as events |
 | `session_open_local` | size, optional `startIn` folder, channels | session id | Local PTY; `startIn` used only if absolute, existing and free of control characters, else home |
+| `session_open_files` | host id, event channel | session id | SSH hosts only: same trust and auth prompts, then the SFTP subsystem and no shell or PTY; `session_write`/`session_resize` refuse it; `files_*` commands take its id; `session_close` ends it |
+| `files_local_mkdir` / `files_local_rename` / `files_local_remove` / `files_local_chmod` | grant token, names below it, name(s) / mode | — | Inside a folder the user chose natively only: single-component names, no link in any step, rename never replaces, delete removes files, links (not their targets) and empty folders only |
 | `session_write` | session id, bytes | — | Chunked; at most `MAX_TERMINAL_INPUT_CHUNK` per call |
 | `session_resize` / `session_ack` / `session_close` | session id, … | — | `ack` is output flow control |
 | `session_trust_answer` | prompt id, `TrustDecision` | — | `once`, `always`, `cancel` |
@@ -68,6 +70,8 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
+| `app_info` | — | `AppInfo` | Static build and platform facts (commit, build date, OS, architecture, Tauri and WebView versions); nothing about the user or the vault |
+| `layout_list` / `layout_save` / `layout_delete` | — / `LayoutTemplateInput` / id | `LayoutTemplateSummary[]` / `LayoutTemplateSummary` / — | Agent C. Saved only on request. Each split tree names each pane once, ratios are 0.15–0.85, at most 16 panes, SSH targets must be saved hosts. No commands, output or secrets are stored. A restored pane connects only on Connect |
 | `discovery_networks` | — | interfaces (name, addresses) | Local interface table only; sends nothing (HST-14, ADR 0009) |
 | `discovery_start` | network id | discovery status | Vault unlocked; id must be a listed interface; browses `_ssh._tcp` there for 30 s |
 | `discovery_status` | — | running, seconds left, found (cleaned, ≤ 64), truncated | This window's browse |

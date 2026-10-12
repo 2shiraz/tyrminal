@@ -10,9 +10,11 @@
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/terminal.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { KEYS, ui } from "./flows.mjs";
+import { KEYS, PASSPHRASE, ui } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -107,6 +109,39 @@ describe("terminal with real applications", { concurrency: false }, () => {
     assert.ok(Math.abs(xs[0] - xs[1]) <= 1, `CJK: ${xs[0]} vs ${xs[1]}`);
     assert.ok(Math.abs(xs[2] - xs[3]) <= 1, `emoji: ${xs[2]} vs ${xs[3]}`);
     assert.ok(Math.abs(xs[4] - xs[5]) <= 1, `combining mark: ${xs[4]} vs ${xs[5]}`);
+  });
+
+  test("text composed through an input method reaches the shell once, as UTF-8 (TRM-11)", async () => {
+    // WebDriver cannot drive the platform IME, so the composition is played as the WebView
+    // delivers it to the page: compositionstart, preedit updates in the input element, then
+    // compositionend. Everything after that (xterm's composition handling, the encoder, IPC,
+    // the core and the real shell) is the production path.
+    // The ordered composition handling is installed on xterm's helper in this WebView too.
+    assert.equal(await s.execute(`return document.querySelector(".pane[data-focused=true] .terminal-host")?.dataset.composition ?? null`), "ordered");
+    // od reads the terminal line itself, so the bytes it prints are exactly what arrived: no
+    // shell expansion or completion in between.
+    await t.type("od -An -tx1; echo IME-DONE\n");
+    await new Promise((r) => setTimeout(r, 300));
+    const composed = await s.execute(`
+      const ta = document.querySelector(".pane[data-focused=true] .xterm-helper-textarea");
+      ta.focus();
+      const at = ta.value.length;
+      ta.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      for (const preedit of ["に", "にほん", "にほんご"]) {
+        ta.value = ta.value.slice(0, at) + preedit;
+        ta.dispatchEvent(new CompositionEvent("compositionupdate", { data: preedit }));
+      }
+      const preview = document.querySelector(".pane[data-focused=true] .composition-view");
+      const shown = preview?.classList.contains("active") ? preview.textContent : null;
+      ta.value = ta.value.slice(0, at) + "日本語";
+      ta.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語" }));
+      return shown;`);
+    assert.equal(composed, "にほんご", "the preedit text is shown while composing");
+    await t.type("\n");
+    await s.chord([KEYS.ctrl, "D"]);
+    const text = await t.waitForText(/^IME-DONE$/m, "od output");
+    // The nine UTF-8 bytes of 日本語 and the newline, once.
+    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
@@ -304,6 +339,552 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
       assert.equal(renderer, webgl ? "webgl" : "dom", `WebGL2 available: ${webgl}`);
       assert.match(status, webgl ? /Renderer: GPU/ : /Renderer: Compatibility/);
       await app.screenshot(`t07-renderer-${renderer}`);
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+/** The command palette shortcut: Cmd+K on macOS, Ctrl+Shift+K elsewhere (lib/shortcuts.ts). */
+const PALETTE = process.platform === "darwin" ? [KEYS.meta, "K"] : [KEYS.ctrl, KEYS.shift, "K"];
+
+describe("workspaces with real sessions", { concurrency: false }, () => {
+  /** @type {App} */ let app;
+  let s;
+  let t;
+
+  before(async () => {
+    app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    s = app.session;
+    t = ui(s);
+    await t.createVault();
+    await t.importKey(lab.keys.ed25519);
+    await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+    await t.connect("Lab");
+    await t.type("export PS1='tyr$ '; clear\n");
+    await t.waitForText("tyr$");
+  });
+
+  after(async () => {
+    await app?.quit();
+  });
+
+  const tabState = (name) =>
+    s.execute(
+      `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+       return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
+    );
+  /** Clicks a terminal tab with a real pointer. */
+  const clickTab = async (name) => {
+    const rect = await s.until(
+      () =>
+        s.execute(
+          `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+           if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2 };`,
+        ),
+      { describe: `tab ${name}` },
+    );
+    await s.clickAt(rect.x, rect.y);
+  };
+  const selectTab = (name) => clickTab(name);
+
+  test("output from a background SSH session marks its tab unread until it is shown", async () => {
+    await t.type("sleep 2; echo LATE-$((40+2))\n");
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    assert.equal((await tabState("Lab")).unread, null, "nothing unseen yet");
+    await s.until(async () => (await tabState("Lab"))?.unread === "true", { describe: "Lab tab marked unread", timeout: 10_000 });
+    await selectTab("Lab");
+    await t.waitForText("LATE-42");
+    await s.until(async () => (await tabState("Lab"))?.unread === null, { describe: "unread cleared" });
+    await app.screenshot("w01-unread-cleared");
+  });
+
+  test("duplicating a tab opens a new, separate session to the same host", async () => {
+    await selectTab("Lab");
+    await t.type("echo ORIGINAL-$((1+1))\n");
+    await t.waitForText("ORIGINAL-2");
+    // Keyboard route: the command palette's "Duplicate tab" acts on the tab in front.
+    await s.chord(PALETTE);
+    const palette = await s.waitFor("dialog.palette input");
+    await s.type(palette, "Duplicate tab");
+    await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Duplicate tab") || null`), {
+      describe: "palette match",
+    });
+    await s.chord([KEYS.enter]);
+    const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+    await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ tabs: [...document.querySelectorAll(".tabstrip .tab")].map((e) => e.textContent), dialogs: [...document.querySelectorAll("dialog[open]")].map((d) => d.className + ":" + d.textContent.slice(0, 80)) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
+    // A new session is a new server connection: the host key is confirmed again ("Trust once").
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the copy" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "copy connected" });
+    const tabs = await s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].map((e) => e.textContent)`);
+    assert.equal(tabs.filter((x) => x.includes("Lab")).length, 2, JSON.stringify(tabs));
+    // Its screen starts fresh: nothing from the original tab is replayed into it.
+    await t.waitForText(/\$\s*$/m, "a prompt in the copy");
+    assert.doesNotMatch(await t.terminalText(), /ORIGINAL-2/);
+    await t.type("echo COPY-$((2+2))\n");
+    await t.waitForText("COPY-4");
+    await app.screenshot("w02-duplicate");
+  });
+
+  test("16 panes of real local shells: the limit holds, a grid tiles them, input reaches only the focused one", async () => {
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await s.until(async () => (await tabState("Local terminal"))?.status === "ok", { describe: "local shell" });
+    const visibleCount = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    const total = () => s.execute(`return document.querySelectorAll(".pane").length`);
+    // Other tabs already hold panes; split until 16 are open in all (the grid below re-tiles them).
+    const runCommand = async (name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; (await total()) < 16 && i < 16; i += 1) {
+      const before = await total();
+      // The palette first, then the focused pane's own header button.
+      const button = i === 0 ? null : await s.find('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]');
+      if (button) await s.click(button);
+      else await runCommand("Split pane right");
+      await s.until(async () => (await total()) === before + 1, { describe: `pane ${before + 1}` });
+    }
+    assert.equal(await total(), 16);
+    // Repeated halving leaves the newest panes very narrow; tile them before using their headers.
+    await runCommand("Arrange panes in a grid");
+    await s.click(await s.waitFor('.pane:not([hidden])[data-focused="true"] .pane-header button[aria-label="Split pane right"]'));
+    await s.until(() => s.execute(`return document.body.textContent.includes("At most 16 panes can be open")`), { describe: "limit message" }).catch(async (e) => {
+      const state = await s.execute(`return JSON.stringify({ panes: document.querySelectorAll(".pane").length, focused: document.querySelector('.pane:not([hidden])[data-focused="true"]')?.getBoundingClientRect(), toasts: document.querySelector(".toasts, [role=region]")?.outerHTML?.slice(0, 300) })`);
+      throw new Error(`${e.message} ${state}`);
+    });
+    assert.equal(await total(), 16);
+    const mine = await visibleCount();
+    // Every local pane reaches a connected shell.
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .status-dot")].filter((d) => d.dataset.tone === "ok").length`).then((n) => (n === mine ? n : null)),
+      { describe: "all panes connected", timeout: 30_000 },
+    );
+    // A literal token: the local shell differs per platform (PowerShell on Windows), and the point
+    // is where the input goes, not what the shell computes.
+    // Into the focused pane, once its shell shows a prompt (zsh on macOS, PowerShell on Windows).
+    const focusedRows = `document.querySelector('.pane:not([hidden])[data-focused="true"] .xterm-rows')?.innerText ?? ""`;
+    await s.until(() => s.execute(`return /[$%#>]\\s*$/m.test(${focusedRows}.replaceAll("\\u00a0", " ")) || null`), { describe: "a prompt in the focused pane", timeout: 30_000 });
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo ONLY-HERE-42\n");
+    await s.until(
+      () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .xterm-rows")].filter((e) => e.textContent.includes("ONLY-HERE-42")).length`).then((n) => (n > 0 ? n : null)),
+      { describe: "echo in the focused pane" },
+    );
+    const panesWithText = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden])")].filter((p) => p.querySelector(".xterm-rows")?.textContent.includes("ONLY-HERE-42")).map((p) => p.dataset.focused)`);
+    assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
+    await app.screenshot("w03-sixteen-panes");
+  });
+
+  test("a saved layout restores disconnected; only Connect opens a new session", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    // Close every tab, then start from one SSH tab to the lab.
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    await t.type("echo NOT-IN-TEMPLATE-$((3*3))\n");
+    await t.waitForText("NOT-IN-TEMPLATE-9");
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Lab layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(() => s.execute(`return document.querySelector(".tab-layout")?.textContent?.includes("Lab layout") || null`), { describe: "layout indicator" });
+
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout Lab", "Lab layout");
+    await s.waitFor(".pane:not([hidden]) .overlay-card");
+    // No session exists for the restored pane: no terminal, no xterm, nothing received.
+    const restored = await s.execute(`return { xterm: document.querySelectorAll(".pane:not([hidden]) .xterm").length, status: document.querySelector(".statusbar")?.textContent ?? "" }`);
+    assert.equal(restored.xterm, 0, "no terminal was started");
+    assert.doesNotMatch(restored.status, /Connected/);
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt for the restored pane" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.until(async () => /Connected/.test(await t.statusText()), { describe: "restored pane connected" });
+    // A fresh session: the earlier output is not replayed.
+    await t.waitForText(/\$/, "a prompt");
+    assert.doesNotMatch(await t.terminalText(), /NOT-IN-TEMPLATE-9/);
+    await app.screenshot("w04-layout-restored");
+  });
+
+  test("a saved directory (OSC 7) is offered after Connect and only changes directory when sent", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    // The report shells with OSC 7 support send (the lab account's sh does not, so it is sent here).
+    await t.type(`mkdir -p /tmp/tyr-osc7; cd /tmp/tyr-osc7; printf '\\033]7;file://%s%s\\007' "$(hostname)" "$PWD"; echo OSC7-$((1+1))\n`);
+    await t.waitForText("OSC7-2");
+    // The report comes with the next prompt.
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden])[data-has-directory]') !== null || null`), { describe: "directory reported" }).catch(async (e) => {
+      throw new Error(`${e.message}\n${(await t.terminalText()).split("\n").slice(-8).join("\n")}`);
+    });
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Dir layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout Dir", "Dir layout");
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    const offered = await s.until(() => s.execute(`return document.querySelector('[data-testid="restore-command"]')?.textContent ?? null`), { describe: "directory offer" });
+    assert.equal(offered, "cd -- '/tmp/tyr-osc7'");
+    // Not sent yet: the new shell is still in its login directory.
+    await t.type("echo AT-$PWD-END\n");
+    await t.waitForText(/AT-.*-END/);
+    assert.doesNotMatch(await t.terminalText(), /AT-\/tmp\/tyr-osc7-END/);
+    await s.clickButton("Send", { within: ".pane:not([hidden]) .term-banner" });
+    await t.type("echo NOW-$PWD-END\n");
+    await t.waitForText("NOW-/tmp/tyr-osc7-END");
+    await app.screenshot("w06-directory-restored");
+  });
+
+  test("focus layout and the unsaved-layout indicator with real sessions", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.clickButton("Local terminal", { within: "nav.sidebar" });
+    await runCommand("Split pane right");
+    await runCommand("Split pane down");
+    const visible = () => s.execute(`return document.querySelectorAll(".pane:not([hidden])").length`);
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes" });
+    await s.until(() => s.execute(`return document.querySelectorAll('.pane .status-dot[data-tone="ok"]').length === 3 || null`), { describe: "three shells" });
+
+    await runCommand("Focus layout");
+    await s.until(async () => ((await visible()) === 1 ? true : null), { describe: "one pane in focus layout" });
+    const items = await s.findAll('nav[aria-label="Panes in this tab"] .focus-item');
+    assert.equal(items.length, 3);
+    await s.click(items[0]);
+    await s.until(() => s.execute(`return document.querySelector('nav[aria-label="Panes in this tab"] .focus-item[aria-current="true"]') === document.querySelectorAll('nav[aria-label="Panes in this tab"] .focus-item')[0] || null`), { describe: "first pane shown" });
+    // The shown pane is a live shell (its session kept running while it was listed).
+    await s.type(await s.waitFor('.pane:not([hidden])[data-focused="true"] .xterm-helper-textarea'), "echo FOCUS-OK\n");
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden]) .xterm-rows')?.textContent?.includes("FOCUS-OK") || null`), { describe: "input in the focused pane" });
+    await runCommand("Leave focus layout");
+    await s.until(async () => ((await visible()) === 3 ? true : null), { describe: "three panes again" });
+
+    // Saved as a layout: clean; rearranged: marked unsaved; saved again: clean.
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Three", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    const dirty = () => s.execute(`return document.querySelector(".tab-layout")?.dataset.dirty ?? null`);
+    await s.until(async () => ((await s.find(".tab-layout")) ? true : null), { describe: "layout indicator" });
+    assert.equal(await dirty(), null);
+    await runCommand("Arrange panes side by side");
+    await s.until(async () => ((await dirty()) === "true" ? true : null), { describe: "unsaved marker" });
+    await runCommand("Save layout Three", "Three");
+    await s.until(async () => ((await dirty()) === null ? true : null), { describe: "saved again" });
+    await app.screenshot("w07-focus-and-unsaved");
+  });
+});
+
+describe("a tab moved to its own window", { concurrency: false }, () => {
+  test("the live SSH session moves with it and keeps delivering output there; the main window lets it go", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      await t.type("export PS1='tyr$ '; echo BEFORE-$((2+3))\n");
+      await t.waitForText("BEFORE-5");
+      const main = await s.windowHandle();
+      // Started here, printed after the move: the same shell keeps running in the new window.
+      await t.type("sleep 4; echo LATE-$((5+6))\n");
+
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, "Move tab to a new window");
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Move tab") || null`), {
+        describe: "palette match",
+      });
+      await s.chord([KEYS.enter]);
+      // The tab leaves the main window without ending its session.
+      await s.until(() => s.execute(`return document.querySelectorAll(".tabstrip .tab:not(.tab-page)").length === 0 || null`), { describe: "tab gone from main" });
+      const handles = await s.until(async () => {
+        const list = await s.windowHandles();
+        return list.length === 2 ? list : null;
+      }, { describe: "a second window", timeout: 20_000 });
+      await s.switchToWindow(handles.find((h) => h !== main));
+      await s.until(() => s.execute(`return document.querySelector(".detached-head")?.textContent?.includes("Lab") || null`), { describe: "detached window shows the tab", timeout: 20_000 });
+      await t.waitForText("LATE-11", "output of the moved session arrives in the new window", 20_000);
+      // A fresh terminal here: earlier screen contents do not move with the tab.
+      assert.doesNotMatch(await t.terminalText(), /BEFORE-5/);
+      await app.screenshot("w05-detached");
+      // The embedded WebDriver sends keys to the main window only, so typing here is covered by
+      // the UI test and the core lab test (only the new window may write after the handoff).
+      await s.switchToWindow(main);
+      assert.equal(await s.execute(`return document.querySelectorAll(".pane").length`), 0, "the main window holds no pane of the moved tab");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("output highlighting patterns in the real WebView (TRM-07)", { concurrency: false }, () => {
+  test("patterns from saved preferences match in a worker; a slow one is switched off and the shell stays usable", async () => {
+    const rule = (text, tone, pattern) => ({ text, tone, caseSensitive: false, pattern });
+    const app = await App.launch({
+      prefs: {
+        ...DOM_RENDERER_PREFS,
+        workspace: {
+          highlight: {
+            enabled: true,
+            ipAddresses: false,
+            keywords: [rule("[a-z]{0,99}[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
+          },
+          bindings: [],
+          optionAsMeta: false,
+          rightClickSelectsWord: false,
+        },
+      },
+    });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      // The lab's POSIX shell on every platform (Windows' local shell is not one).
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      // Lines of letters with no "!": the first pattern backtracks for a long time on them.
+      await t.type("printf 'login user=alice ok\\n'; for i in $(seq 1 30); do printf '%0150d\\n' 0 | tr 0 a; done; echo HL-DONE\n");
+      await t.waitForText(/^HL-DONE$/m, "output");
+      await s
+        .until(() => s.execute(`return document.body.textContent.includes("took too long and was switched off") || null`), {
+          describe: "slow pattern notice",
+          timeout: 15_000,
+        })
+        .catch(async (error) => {
+          const marks = await s.execute(`return [...document.querySelectorAll(".term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+          throw new Error(`${error.message}; decorations: ${marks}`);
+        });
+      // The other rules are drawn (the pattern by the worker, the word on the page).
+      await t.type("clear; printf 'login user=alice ok\\n'\n");
+      const tones = await s.until(
+        () =>
+          s.execute(`const t = [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).sort(); return t.length === 2 ? t : null`),
+        { describe: "highlight decorations" },
+      ).catch(async (error) => {
+        const marks = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
+        throw new Error(`${error.message}; decorations: ${marks}; screen: ${(await t.terminalText()).slice(-300)}`);
+      });
+      assert.deepEqual(tones, ["danger", "info"]);
+      await t.type("echo STILL-HERE\n");
+      await t.waitForText(/^STILL-HERE$/m, "shell responsive");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("keyboard and mouse customization through native preferences (TRM-08)", { concurrency: false }, () => {
+  test("a rebound shortcut and the mouse mappings are stored by the core and apply after a restart", async () => {
+    const mod = process.platform === "darwin" ? KEYS.meta : KEYS.ctrl;
+    let app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      let s = app.session;
+      let t = ui(s);
+      await t.createVault();
+      await t.nav("Settings");
+      // Find in terminal → Ctrl+Shift+G (Cmd+Shift+G on macOS), recorded from real key events.
+      await s.click(await s.waitFor('.shortcut-list li[data-action="find"] button[aria-label="Change shortcut for Find in terminal"]'));
+      await s.until(() => s.execute(`return document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent.includes("Press") || null`), {
+        describe: "recording",
+      });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.until(() => s.execute(`return /G/.test(document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "") || null`), {
+        describe: "new shortcut shown",
+      });
+      // Right click pastes; middle click pastes.
+      await s.click(await s.waitFor('[role="radiogroup"][aria-label="Right click"] label:nth-child(2)'));
+      const middle = await s.execute(`return [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.htmlFor ?? null`);
+      await s.click(await s.waitFor(`[id="${middle}"]`));
+
+      // The core wrote them to preferences.json (validated natively on the way).
+      const file = join(app.dataDir, "preferences.json");
+      const stored = await s.until(
+        () => {
+          try {
+            const w = JSON.parse(readFileSync(file, "utf8")).workspace;
+            return w?.rightClickPaste && w.middleClickPaste && w.bindings?.some((b) => b.action === "find" && b.key === "g" && b.shift) ? w : null;
+          } catch {
+            return null;
+          }
+        },
+        { describe: "preferences.json updated" },
+      );
+      assert.equal(stored.rightClickSelectsWord, false);
+
+      const dataDir = app.dataDir;
+      await app.quit({ keepData: true });
+      app = await App.launch({ dataDir });
+      s = app.session;
+      t = ui(s);
+      await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen", timeout: 20_000 });
+      await s.fill("Passphrase", PASSPHRASE);
+      await s.clickButton("Unlock");
+      await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+
+      await t.nav("Settings");
+      const shown = await s.until(
+        () =>
+          s.execute(`const r = document.querySelector('[role="radiogroup"][aria-label="Right click"] label:nth-child(2) input');
+            const m = [...document.querySelectorAll("label.switch-row")].find((l) => l.textContent.includes("Middle click pastes"))?.querySelector("input");
+            const k = document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent ?? "";
+            return r && m ? { right: r.checked, middle: m.checked, keys: k } : null;`),
+        { describe: "settings after restart" },
+      );
+      assert.equal(shown.right, true);
+      assert.equal(shown.middle, true);
+      assert.match(shown.keys, /G/);
+
+      // The rebound shortcut works in a terminal after the restart.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await s.chord([mod, KEYS.shift, "G"]);
+      await s.waitFor(".pane:not([hidden]) .find-bar");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
+  test("a host connected once is offered on Home and in the new-tab menu, and both reconnect", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      const trustOnce = async () => {
+        await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+        await s.clickButton("Trust once", { within: "dialog" });
+        await s.waitGone("dialog");
+        await s.until(async () => /Connected/.test(await t.statusText()), { describe: "connected" });
+      };
+      const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
+
+      // Home lists it under Recent once the core has recorded the connection.
+      await t.nav("Home");
+      const tile = await s.until(() => s.find('section[aria-labelledby="home-recent"] button[aria-label="Connect to Lab"]'), {
+        describe: "Lab under Recent on Home",
+        timeout: 20_000,
+      });
+      await s.click(tile);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
+
+      // The new-tab menu offers it too.
+      await s.click(await s.waitFor(".tabstrip button.tab-new"));
+      const item = await s.until(
+        async () => {
+          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
+            if ((await s.text(candidate)).trim() === "Lab") return candidate;
+          }
+          return null;
+        },
+        { describe: "Lab in the new-tab menu" },
+      );
+      await s.click(item);
+      await trustOnce();
+      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the menu" });
+      await t.type("echo REOPENED-$((2+2))\n");
+      await t.waitForText("REOPENED-4");
+    } finally {
+      await app.quit();
+    }
+  });
+});
+
+describe("broadcast with a pane left out, on real shells (P-13)", { concurrency: false }, () => {
+  test("only the confirmed panes receive typed input; the one left out keeps its own", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      const runCommand = async (name) => {
+        await s.chord(PALETTE);
+        const input = await s.waitFor("dialog.palette input");
+        await s.type(input, name);
+        await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+        await s.chord([KEYS.enter]);
+        await s.waitGone("dialog.palette");
+      };
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(async () => /Connected/.test(await t.statusText()), { describe: "local shell" });
+      await runCommand("Split pane right");
+      await runCommand("Split pane right");
+      await runCommand("Arrange panes in a grid");
+      await s.until(() => s.execute(`return [...document.querySelectorAll(".pane .status-dot")].filter((d) => d.dataset.tone === "ok").length === 3 || null`), {
+        describe: "three connected panes",
+        timeout: 30_000,
+      });
+      await runCommand("Type into every pane");
+      await s.waitFor('dialog[role="alertdialog"] input[type="checkbox"]');
+      const boxes = await s.findAll('dialog[role="alertdialog"] input[type="checkbox"]');
+      assert.equal(boxes.length, 3, "every pane is listed");
+      // Leave out the second pane.
+      await s.click(boxes[1]);
+      await s.clickButton("Type into 2 panes", { within: 'dialog[role="alertdialog"]' });
+      await s.waitGone('dialog[role="alertdialog"]');
+      await s.until(() => s.execute(`return document.querySelectorAll('.pane[data-broadcast="true"]').length === 2 && document.querySelectorAll('.pane[data-broadcast="excluded"]').length === 1 || null`), {
+        describe: "two receiving panes, one left out",
+      });
+
+      // Typed in a confirmed pane once every shell shows a prompt. A literal token: the local
+      // shell differs per platform; the point is where the input goes.
+      await s.until(
+        () => s.execute(`return [...document.querySelectorAll(".pane .xterm-rows")].every((e) => /[$%#>]\\s*$/m.test(e.innerText.replaceAll("\\u00a0", " "))) || null`),
+        { describe: "prompts in all panes", timeout: 30_000 },
+      );
+      const focusedReceiving = await s.execute(`return document.querySelector('.pane[data-focused="true"]')?.dataset.broadcast ?? null`);
+      assert.equal(focusedReceiving, "true", "typing from a confirmed pane");
+      await s.type(await s.waitFor('.pane[data-focused="true"] .xterm-helper-textarea'), "echo BCAST-TOKEN-7\n");
+      const where = () =>
+        s.execute(`return [...document.querySelectorAll(".pane")].map((p) => (p.dataset.broadcast ?? "") + ":" + (p.querySelector(".xterm-rows")?.textContent.includes("BCAST-TOKEN-7") ? "yes" : "no"))`);
+      await s.until(async () => ((await where()).filter((x) => x.endsWith("yes")).length === 2 ? true : null), { describe: "token in two panes" });
+      await new Promise((r) => setTimeout(r, 500));
+      assert.deepEqual((await where()).sort(), ["excluded:no", "true:yes", "true:yes"]);
     } finally {
       await app.quit();
     }

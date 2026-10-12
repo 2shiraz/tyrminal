@@ -6,6 +6,7 @@ import { IconCopy, IconFingerprint, IconLock, IconShieldCheck } from "../../comp
 import { vault } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { versionLabel } from "../../lib/version";
 import { RestoreBackupDialog } from "./BackupRestore";
 
 function Brand() {
@@ -17,6 +18,11 @@ function Brand() {
       </span>
     </div>
   );
+}
+
+/** The app version, small and muted, at the foot of the vault screens. */
+function VersionFoot() {
+  return <p className="auth-version">{msg.about.footer(versionLabel(__APP_VERSION__))}</p>;
 }
 
 /**
@@ -122,6 +128,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           {msg.unlock.localOnly}
         </div>
       </form>
+      <VersionFoot />
       {restoring && <RestoreBackupDialog vaultExists={false} onClose={() => setRestoring(false)} onRestored={onDone} />}
     </div>
   );
@@ -186,6 +193,7 @@ export function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; 
           {msg.onboarding.recoveryDone}
         </button>
       </form>
+      <VersionFoot />
     </div>
   );
 }
@@ -269,6 +277,7 @@ export function Unlock({ busy }: { busy: boolean }) {
           {mode === "passphrase" ? msg.unlock.useRecovery : msg.unlock.usePassphrase}
         </button>
       </form>
+      <VersionFoot />
     </div>
   );
 }

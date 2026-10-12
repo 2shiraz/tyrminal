@@ -349,8 +349,22 @@ pub async fn identity_save(
 
 /// Deletes an identity; resolves to how many hosts and groups were using it.
 #[tauri::command]
-pub async fn identity_delete(state: State<'_, AppState>, id: String) -> Result<u32, IpcError> {
-    state.core()?.vault.delete_identity(&id).await
+pub async fn identity_delete(
+    state: State<'_, AppState>,
+    id: String,
+    // identity deletion (BUILD_SPEC §10.2): without it, deleting a used identity is refused.
+    references: Option<tyrminal_core::contracts::IdentityReferences>,
+) -> Result<u32, IpcError> {
+    state.core()?.vault.delete_identity(&id, references).await
+}
+
+// identity deletion (BUILD_SPEC §10.2)
+#[tauri::command]
+pub async fn identity_usage(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<tyrminal_core::contracts::IdentityUse>, IpcError> {
+    state.core()?.vault.identity_usage(&id).await
 }
 
 #[tauri::command]

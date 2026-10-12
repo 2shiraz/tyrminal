@@ -108,6 +108,8 @@ pub struct HostKeyRequest {
     /// The address actually connected to, when known.
     pub resolved: Option<SocketAddr>,
     pub key: PresentedHostKey,
+    /// The algorithms the key exchange just settled on (known before the key is verified).
+    pub negotiated: Option<crate::Negotiated>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +137,10 @@ pub enum TrustVerdict {
 /// exchange, before any authentication message can be sent. May wait for the user.
 pub trait HostKeyVerifier: Send + 'static {
     fn verify(&mut self, request: &HostKeyRequest) -> impl Future<Output = TrustVerdict> + Send;
+
+    /// Called once name resolution has finished, just before the TCP connect starts (only by
+    /// [`crate::connect`], which resolves names itself). Nothing is decided here.
+    fn connecting(&mut self) {}
 }
 
 #[cfg(test)]

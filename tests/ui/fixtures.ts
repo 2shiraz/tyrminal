@@ -8,6 +8,8 @@ export interface MockOptions {
   scheme?: string;
   renderer?: "auto" | "compatibility";
   trustPromptFor?: string;
+  /** Ask for a password when connecting to this host (answered with session_auth_answer). */
+  passwordPromptFor?: string;
   // agent B: tunnels and history
   /** Name the jump-chain hop in that trust prompt. */
   trustPromptHop?: { index: number; total: number; label: string };
@@ -18,6 +20,9 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  // compromised-password check (SEC-11)
+  /** Pretend the build can make range requests (the real build cannot yet). */
+  passwordCheckAvailable?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

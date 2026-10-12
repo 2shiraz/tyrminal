@@ -42,6 +42,15 @@ use crate::validate;
 // agent B: tunnels and history
 use crate::records::{KIND_TUNNEL, TunnelRecord};
 use tyrminal_contracts::{ChainHop, HostConnection, HostConnectionInput, TunnelInput, TunnelSummary};
+// agent C: workspaces
+use crate::layouts::{self, LayoutRecord};
+use crate::records::KIND_LAYOUT;
+use tyrminal_contracts::{LayoutTemplateInput, LayoutTemplateSummary};
+// command history
+use crate::records::{HistoryRecord, HistorySettingsRecord, KIND_HISTORY, KIND_HISTORY_SETTINGS};
+use tyrminal_contracts::{HistoryEntry, HistorySettings};
+// server at a glance
+use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
 // agent D: inventory and snippets
 use crate::records::StoredProxy;
 use crate::records::{
@@ -71,12 +80,19 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent B: tunnels and history
     tunnels: BTreeMap<Id, Stored<TunnelRecord>>,
+    // agent C: workspaces
+    layouts: BTreeMap<Id, Stored<LayoutRecord>>,
     // agent D: inventory and snippets
     appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
     certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
     targets: BTreeMap<Id, Stored<ExecutionTargetRecord>>,
     identities: BTreeMap<Id, Stored<IdentityRecord>>,
     workflows: BTreeMap<Id, Stored<WorkflowRecord>>,
+    // command history
+    history: BTreeMap<Id, Stored<HistoryRecord>>,
+    history_settings: BTreeMap<Id, Stored<HistorySettingsRecord>>,
+    // server at a glance
+    glance_settings: BTreeMap<Id, Stored<GlanceSettingsRecord>>,
 }
 
 impl Open {
@@ -90,12 +106,19 @@ impl Open {
             groups: BTreeMap::new(),
             // agent B: tunnels and history
             tunnels: BTreeMap::new(),
+            // agent C: workspaces
+            layouts: BTreeMap::new(),
             // agent D: inventory and snippets
             appearances: BTreeMap::new(),
             certificates: BTreeMap::new(),
             targets: BTreeMap::new(),
             identities: BTreeMap::new(),
             workflows: BTreeMap::new(),
+            // command history
+            history: BTreeMap::new(),
+            history_settings: BTreeMap::new(),
+            // server at a glance
+            glance_settings: BTreeMap::new(),
         }
     }
 }
@@ -536,12 +559,19 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent B: tunnels and history
                 KIND_TUNNEL => load!(TunnelRecord, open.tunnels),
+                // agent C: workspaces
+                KIND_LAYOUT => load!(LayoutRecord, open.layouts),
                 // agent D: inventory and snippets
                 KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
                 KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
                 KIND_EXECUTION_TARGET => load!(ExecutionTargetRecord, open.targets),
                 KIND_IDENTITY => load!(IdentityRecord, open.identities),
                 KIND_WORKFLOW => load!(WorkflowRecord, open.workflows),
+                // command history
+                KIND_HISTORY => load!(HistoryRecord, open.history),
+                KIND_HISTORY_SETTINGS => load!(HistorySettingsRecord, open.history_settings),
+                // server at a glance
+                KIND_GLANCE_SETTINGS => load!(GlanceSettingsRecord, open.glance_settings),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1552,6 +1582,53 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let stored = open.snippets.get(&id).ok_or_else(|| not_found("That snippet no longer exists."))?;
         Ok(Zeroizing::new(stored.record.text.clone()))
+    }
+
+    // ---------- layout templates (agent C: workspaces) ----------
+
+    pub async fn list_layouts(&self) -> Result<Vec<LayoutTemplateSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.layouts.iter().map(|(id, l)| layouts::summary(id, &l.record)).collect();
+        list.sort_by(|a, b| (a.name.to_lowercase(), &a.id).cmp(&(b.name.to_lowercase(), &b.id)));
+        Ok(list)
+    }
+
+    /// Saves a template (explicitly, on the user's request; nothing saves layouts automatically).
+    pub async fn save_layout(&self, input: LayoutTemplateInput) -> Result<LayoutTemplateSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let tabs = layouts::validate_tabs(&input.tabs, |id| open.hosts.contains_key(id))?;
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.layouts.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of layouts."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = LayoutRecord { name, tabs, updated_at: now_unix() };
+        let content_len = record.content_len();
+        self.write(open, id, KIND_LAYOUT, revision, Some((&record, content_len))).await?;
+        let summary = layouts::summary(&id, &record);
+        open.layouts.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_layout(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.layouts.get(&id).ok_or_else(|| not_found("That layout no longer exists."))?.revision + 1;
+        self.write::<LayoutRecord>(open, id, KIND_LAYOUT, revision, None).await?;
+        open.layouts.remove(&id);
+        Ok(())
     }
 
     // ---------- keys ----------
@@ -2962,11 +3039,26 @@ impl VaultService {
         id: &Id,
         host: &HostRecord,
     ) -> Option<(String, &'a IdentityRecord, SettingOrigin)> {
+        Self::identity_for_host_without(open, id, host, None)
+    }
+
+    // identity deletion (BUILD_SPEC §10.2): the same resolution as if `excluded` were removed
+    // from every host and group, to show what each host would use instead.
+    fn identity_for_host_without<'a>(
+        open: &'a Open,
+        id: &Id,
+        host: &HostRecord,
+        excluded: Option<&str>,
+    ) -> Option<(String, &'a IdentityRecord, SettingOrigin)> {
         let lookup = |identity: &str| {
+            if Some(identity) == excluded {
+                return None;
+            }
             validate::id(identity).ok().and_then(|i| open.identities.get(&i)).map(|s| (identity.to_owned(), &s.record))
         };
         if let Some((_, own)) = Self::workflow_of_host(open, &validate::id_text(id))
             && let Some(identity) = own.record.identity_id.as_deref()
+            && Some(identity) != excluded
         {
             return lookup(identity).map(|(i, r)| (i, r, SettingOrigin::Host));
         }
@@ -3057,19 +3149,51 @@ impl VaultService {
 
     /// Deletes an identity. Hosts and groups that used it fall back to their own settings; their
     /// references are removed in the same transaction. Returns how many were using it.
-    pub async fn delete_identity(&self, id: &str) -> Result<u32, IpcError> {
+    /// Deletes an identity. While hosts or groups name it, this is refused unless `references`
+    /// says what happens to them: reassigned to another identity, or the identity removed from
+    /// them (BUILD_SPEC §10.2: never a silent fallback to another secret). All in one
+    /// transaction. Returns how many hosts and groups changed.
+    pub async fn delete_identity(
+        &self,
+        id: &str,
+        references: Option<tyrminal_contracts::IdentityReferences>,
+    ) -> Result<u32, IpcError> {
         let id = validate::id(id)?;
         let text = validate::id_text(&id);
+        let replacement = match &references {
+            Some(tyrminal_contracts::IdentityReferences::Reassign { identity_id }) => {
+                Some(validate::id_text(&validate::id(identity_id)?))
+            }
+            _ => None,
+        };
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
         let revision =
             open.identities.get(&id).ok_or_else(|| not_found("That identity no longer exists."))?.revision + 1;
+        let users: Vec<(Id, &Stored<WorkflowRecord>)> = open
+            .workflows
+            .iter()
+            .filter(|(_, w)| w.record.identity_id.as_deref() == Some(text.as_str()))
+            .map(|(wid, w)| (*wid, w))
+            .collect();
+        if !users.is_empty() && references.is_none() {
+            return Err(err(
+                ErrorCode::InUse,
+                "Hosts or groups use this identity. Choose another identity for them or remove it from them.",
+            ));
+        }
+        if let Some(replacement) = &replacement {
+            if *replacement == text {
+                return Err(invalid("Choose a different identity to use instead."));
+            }
+            if !validate::id(replacement).is_ok_and(|r| open.identities.contains_key(&r)) {
+                return Err(not_found("The identity to use instead no longer exists."));
+            }
+        }
         let mut writes: Vec<(Id, u64, Option<WorkflowRecord>)> = Vec::new();
-        for (wid, stored) in
-            open.workflows.iter().filter(|(_, w)| w.record.identity_id.as_deref() == Some(text.as_str()))
-        {
-            let next = WorkflowRecord { identity_id: None, ..stored.record.clone() };
-            writes.push((*wid, stored.revision + 1, (!next.is_empty()).then_some(next)));
+        for (wid, stored) in users {
+            let next = WorkflowRecord { identity_id: replacement.clone(), ..stored.record.clone() };
+            writes.push((wid, stored.revision + 1, (!next.is_empty()).then_some(next)));
         }
         let mut rows = vec![self.seal_row::<IdentityRecord>(open, id, KIND_IDENTITY, revision, None)?];
         for (wid, revision, record) in &writes {
@@ -3138,6 +3262,176 @@ impl VaultService {
         let identity_id = identity.as_ref().map(validate::id_text);
         self.update_workflow(open, &target, |w| WorkflowRecord { identity_id, ..w }).await?;
         Ok(Self::assignment(open, &target))
+    }
+}
+
+// privilege prompts (KEY-18)
+/// Typing an identity's password into a session on an explicit request. Nothing here watches
+/// terminal output: a server can print text that looks like a password prompt (BUILD_SPEC §4.5).
+impl VaultService {
+    /// The identity a host uses now (its own, else its nearest group's when it inherits).
+    fn session_identity_of<'a>(
+        open: &'a Open,
+        host_id: &str,
+    ) -> Result<Option<(String, &'a IdentityRecord)>, IpcError> {
+        let id = validate::id(host_id)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::identity_for_host(open, &id, host).map(|(identity_id, record, _)| (identity_id, record)))
+    }
+
+    /// Which identity's password a session to `host_id` may insert, read under `generation`.
+    pub(crate) async fn session_identity(
+        &self,
+        generation: u32,
+        host_id: &str,
+    ) -> Result<Option<tyrminal_contracts::SessionIdentity>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(Self::session_identity_of(open, host_id)?.map(|(identity_id, record)| tyrminal_contracts::SessionIdentity {
+            identity_id,
+            label: record.label.clone(),
+            has_password: record.password.is_some(),
+        }))
+    }
+
+    /// The password of the identity a session's host uses, for an explicit insert. Refused
+    /// unless that is still `expected_identity` (the one the user was shown when they chose to
+    /// insert it), so a change in between can never send a different identity's password.
+    pub(crate) async fn identity_password(
+        &self,
+        generation: u32,
+        host_id: &str,
+        expected_identity: &str,
+    ) -> Result<Zeroizing<String>, IpcError> {
+        let expected = validate::id_text(&validate::id(expected_identity)?);
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        match Self::session_identity_of(open, host_id)? {
+            Some((identity_id, record)) if identity_id == expected => match &record.password {
+                // Typed into a terminal, a control character is a keystroke (Enter, Ctrl-C, an
+                // escape sequence), not part of the password. Refused rather than stripped.
+                Some(password) if password.chars().any(char::is_control) => {
+                    Err(invalid("This password contains control characters, so it cannot be typed into a terminal."))
+                }
+                Some(password) => Ok(Zeroizing::new(password.as_str().to_owned())),
+                None => Err(invalid("This identity has no stored password.")),
+            },
+            _ => Err(err(
+                ErrorCode::Conflict,
+                "The identity of this host changed. Check which identity it uses and try again.",
+            )),
+        }
+    }
+}
+
+// identity deletion (BUILD_SPEC §10.2)
+impl VaultService {
+    /// How a host signs in without the identity `excluded`.
+    fn sign_in_without(open: &Open, id: &Id, host: &HostRecord, excluded: &str) -> tyrminal_contracts::SignInAfter {
+        use tyrminal_contracts::SignInAfter;
+        if let Some((identity_id, record, _)) = Self::identity_for_host_without(open, id, host, Some(excluded)) {
+            return SignInAfter::Identity { identity_id, label: record.label.clone() };
+        }
+        let key = |key_id: &str| SignInAfter::Key {
+            key_id: key_id.to_owned(),
+            label: validate::id(key_id)
+                .ok()
+                .and_then(|k| open.ssh_keys.get(&k))
+                .map(|k| k.record.label.clone())
+                .unwrap_or_default(),
+        };
+        match inventory::effective(&group_index(open), host).auth {
+            EffectiveAuth::Own(StoredAuth::Password { .. }) => SignInAfter::StoredPassword,
+            EffectiveAuth::Own(StoredAuth::Key { key_id }) => key(key_id),
+            EffectiveAuth::GroupKey(key_id) => key(&key_id),
+            EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => {
+                SignInAfter::AskPassword
+            }
+        }
+    }
+
+    /// The hosts and groups an identity applies to, and how each host would sign in without it.
+    /// Shown before a deletion so the user sees exactly what changes.
+    pub async fn identity_usage(&self, id: &str) -> Result<Vec<tyrminal_contracts::IdentityUse>, IpcError> {
+        let id = validate::id(id)?;
+        let text = validate::id_text(&id);
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if !open.identities.contains_key(&id) {
+            return Err(not_found("That identity no longer exists."));
+        }
+        let mut uses = Vec::new();
+        for (gid, group) in &open.groups {
+            let group_text = validate::id_text(gid);
+            if Self::workflow_of_group(open, &group_text).and_then(|(_, w)| w.record.identity_id.clone()).as_deref()
+                == Some(text.as_str())
+            {
+                uses.push(tyrminal_contracts::IdentityUse {
+                    target: SettingsTarget::Group { group_id: group_text },
+                    label: group.record.name.clone(),
+                    direct: true,
+                    after_removal: None,
+                });
+            }
+        }
+        for (hid, host) in &open.hosts {
+            let Some((identity_id, _, origin)) = Self::identity_for_host(open, hid, &host.record) else { continue };
+            if identity_id != text {
+                continue;
+            }
+            uses.push(tyrminal_contracts::IdentityUse {
+                target: SettingsTarget::Host { host_id: validate::id_text(hid) },
+                label: host.record.label.clone(),
+                direct: matches!(origin, SettingOrigin::Host),
+                after_removal: Some(Self::sign_in_without(open, hid, &host.record, &text)),
+            });
+        }
+        uses.sort_by_key(|u| u.label.to_lowercase());
+        Ok(uses)
+    }
+}
+
+// compromised-password check (SEC-11)
+impl VaultService {
+    /// Every password the vault stores, with where it lives: host passwords, identity
+    /// passwords, proxy passwords and remembered key passphrases. Copies in zeroizing buffers,
+    /// for the check only.
+    pub(crate) async fn stored_secrets(&self) -> Result<Vec<crate::password_check::StoredSecret>, IpcError> {
+        use crate::password_check::StoredSecret;
+        use tyrminal_contracts::StoredPasswordKind;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let copy = |kind, label: &str, secret: &Zeroizing<String>| StoredSecret {
+            kind,
+            label: label.to_owned(),
+            secret: Zeroizing::new(secret.as_str().to_owned()),
+        };
+        let mut out = Vec::new();
+        for host in open.hosts.values() {
+            if let StoredAuth::Password { password } = &host.record.auth {
+                out.push(copy(StoredPasswordKind::Host, &host.record.label, password));
+            }
+            if let Some(password) = host.record.connection.proxy.as_ref().and_then(|p| p.password.as_ref()) {
+                out.push(copy(StoredPasswordKind::Proxy, &host.record.label, password));
+            }
+        }
+        for identity in open.identities.values() {
+            if let Some(password) = &identity.record.password {
+                out.push(copy(StoredPasswordKind::Identity, &identity.record.label, password));
+            }
+        }
+        for key in open.ssh_keys.values() {
+            if let Some(passphrase) = &key.record.passphrase {
+                out.push(copy(StoredPasswordKind::KeyPassphrase, &key.record.label, passphrase));
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -3294,6 +3588,206 @@ impl VaultService {
     }
 }
 
+// command history
+/// Command history (`command_history.rs` has the rules) and its setting.
+impl VaultService {
+    fn history_enabled(open: &Open) -> bool {
+        open.history_settings.values().next().is_some_and(|s| s.record.enabled)
+    }
+
+    pub async fn history_settings(&self) -> Result<HistorySettings, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(HistorySettings { enabled: Self::history_enabled(open) })
+    }
+
+    /// Turns history on or off. Off stops remembering and suggesting; it never deletes.
+    pub async fn set_history_settings(&self, settings: HistorySettings) -> Result<HistorySettings, IpcError> {
+        let record = HistorySettingsRecord { enabled: settings.enabled };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, revision) = match open.history_settings.iter().next() {
+            Some((id, s)) => (*id, s.revision + 1),
+            None => (random_id().map_err(from_vault)?, 1),
+        };
+        self.write(open, id, KIND_HISTORY_SETTINGS, revision, Some((&record, 0))).await?;
+        open.history_settings.clear();
+        open.history_settings.insert(id, Stored { revision, record });
+        Ok(settings)
+    }
+
+    /// Adds a command to a scope when history is on (otherwise does nothing), under the
+    /// generation of the session it came from.
+    pub(crate) async fn add_history(&self, generation: u32, scope: &str, command: &str) -> Result<(), IpcError> {
+        let Some(command) = crate::command_history::normalize(command)? else { return Ok(()) };
+        let mut inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if !Self::history_enabled(open) {
+            return Ok(());
+        }
+        let existing = open.history.iter().find(|(_, h)| h.record.scope == scope).map(|(id, h)| (*id, h.revision));
+        let (id, revision, mut record) = match existing {
+            Some((id, revision)) => (id, revision + 1, open.history[&id].record.clone()),
+            None => {
+                if open.history.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of histories."));
+                }
+                (random_id().map_err(from_vault)?, 1, HistoryRecord { scope: scope.to_owned(), commands: Vec::new() })
+            }
+        };
+        crate::command_history::add(&mut record, command, now_unix());
+        self.write(open, id, KIND_HISTORY, revision, Some((&record, record.content_len()))).await?;
+        open.history.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    /// Suggestions for `query` from a scope (none while history is off).
+    pub(crate) async fn suggest_history(
+        &self,
+        generation: u32,
+        scope: &str,
+        query: &str,
+    ) -> Result<Vec<String>, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if !Self::history_enabled(open) {
+            return Ok(Vec::new());
+        }
+        Ok(open
+            .history
+            .values()
+            .find(|h| h.record.scope == scope)
+            .map_or_else(Vec::new, |h| crate::command_history::suggest(&h.record, query)))
+    }
+
+    /// Every remembered command, most recently used first.
+    pub async fn list_history(&self) -> Result<Vec<HistoryEntry>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut out: Vec<HistoryEntry> = open
+            .history
+            .values()
+            .flat_map(|h| {
+                let host_id = (h.record.scope != crate::command_history::LOCAL_SCOPE).then(|| h.record.scope.clone());
+                let host_label = host_id
+                    .as_deref()
+                    .and_then(|id| validate::id(id).ok())
+                    .and_then(|id| open.hosts.get(&id))
+                    .map(|s| s.record.label.clone());
+                h.record.commands.iter().map(move |e| HistoryEntry {
+                    host_id: host_id.clone(),
+                    host_label: host_label.clone(),
+                    command: e.command.clone(),
+                    last_used: e.last_used,
+                    uses: e.uses,
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| b.last_used.cmp(&a.last_used).then_with(|| a.command.cmp(&b.command)));
+        Ok(out)
+    }
+
+    /// Forgets one command of a host (`None`: of local terminals).
+    pub async fn delete_history(&self, host_id: Option<&str>, command: &str) -> Result<(), IpcError> {
+        let scope = match host_id {
+            Some(id) => validate::id_text(&validate::id(id)?),
+            None => crate::command_history::LOCAL_SCOPE.to_owned(),
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (id, current) = open
+            .history
+            .iter()
+            .find(|(_, h)| h.record.scope == scope)
+            .map(|(id, h)| (*id, h.revision))
+            .ok_or_else(|| not_found("That command is no longer remembered."))?;
+        let mut record = open.history[&id].record.clone();
+        if !crate::command_history::remove(&mut record, command) {
+            return Err(not_found("That command is no longer remembered."));
+        }
+        let revision = current + 1;
+        if record.commands.is_empty() {
+            self.write::<HistoryRecord>(open, id, KIND_HISTORY, revision, None).await?;
+            open.history.remove(&id);
+        } else {
+            self.write(open, id, KIND_HISTORY, revision, Some((&record, record.content_len()))).await?;
+            open.history.insert(id, Stored { revision, record });
+        }
+        Ok(())
+    }
+
+    /// Deletes all command history. Returns how many commands were removed.
+    pub async fn clear_history(&self) -> Result<u32, IpcError> {
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let scopes: Vec<(Id, u64, usize)> =
+            open.history.iter().map(|(id, h)| (*id, h.revision, h.record.commands.len())).collect();
+        let mut removed = 0usize;
+        for (id, revision, count) in scopes {
+            self.write::<HistoryRecord>(open, id, KIND_HISTORY, revision + 1, None).await?;
+            open.history.remove(&id);
+            removed += count;
+        }
+        Ok(u32::try_from(removed).unwrap_or(u32::MAX))
+    }
+}
+
+// server at a glance
+/// Whether the server panel (P-32) reads a host's values. It is on unless turned off for the host.
+impl VaultService {
+    fn glance_off(open: &Open, host_id: &str) -> bool {
+        open.glance_settings.values().next().is_some_and(|s| s.record.off_hosts.iter().any(|h| h == host_id))
+    }
+
+    pub async fn glance_enabled(&self, host_id: &str) -> Result<bool, IpcError> {
+        let host_id = validate::id_text(&validate::id(host_id)?);
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::glance_off(open, &host_id))
+    }
+
+    /// Same as [`Self::glance_enabled`], under the generation of the session asking.
+    pub(crate) async fn glance_enabled_for(&self, generation: u32, host_id: &str) -> Result<bool, IpcError> {
+        let inner = self.inner.lock().await;
+        if self.generation() != generation {
+            return Err(locked());
+        }
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Ok(!Self::glance_off(open, host_id))
+    }
+
+    /// Turns the panel on or off for a saved host.
+    pub async fn set_glance_enabled(&self, host_id: &str, enabled: bool) -> Result<bool, IpcError> {
+        let id = validate::id(host_id)?;
+        let host_id = validate::id_text(&id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if !open.hosts.contains_key(&id) {
+            return Err(IpcError::new(ErrorCode::NotFound, "This host no longer exists."));
+        }
+        let (record_id, revision, mut record) = match open.glance_settings.iter().next() {
+            Some((rid, s)) => (*rid, s.revision + 1, s.record.clone()),
+            None => (random_id().map_err(from_vault)?, 1, GlanceSettingsRecord::default()),
+        };
+        // Hosts deleted since the last change are dropped here, which also bounds the list.
+        record.off_hosts.retain(|h| h != &host_id && validate::id(h).is_ok_and(|h| open.hosts.contains_key(&h)));
+        if !enabled {
+            record.off_hosts.push(host_id);
+        }
+        let len = record.content_len();
+        self.write(open, record_id, KIND_GLANCE_SETTINGS, revision, Some((&record, len))).await?;
+        open.glance_settings.clear();
+        open.glance_settings.insert(record_id, Stored { revision, record });
+        Ok(enabled)
+    }
+}
+
 #[cfg(test)]
 mod suspend_tests {
     use super::*;
@@ -3306,5 +3800,110 @@ mod suspend_tests {
         assert!(slept_between(s(35), s(5)));
         assert!(slept_between(s(7200), s(5)));
         assert!(!slept_between(Duration::ZERO, s(5)), "a clock set backwards is not sleep");
+    }
+}
+
+// privilege prompts (KEY-18)
+#[cfg(test)]
+mod privilege_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use tyrminal_contracts::{HostAuthInput, SecretChange, SettingsTarget};
+
+    fn host(label: &str, auth: HostAuthInput, group_id: Option<String>) -> HostInput {
+        HostInput {
+            id: None,
+            label: label.into(),
+            address: format!("{label}.example"),
+            port: None,
+            username: "ops".into(),
+            auth,
+            group_id,
+            tags: Vec::new(),
+            protocol: tyrminal_contracts::HostProtocol::Ssh,
+            terminal: Default::default(),
+            forward_agent: false,
+        }
+    }
+
+    fn identity(id: Option<String>, label: &str, password: SecretChange) -> IdentityInput {
+        IdentityInput { id, label: label.into(), username: "ops".into(), password, key_id: None }
+    }
+
+    fn set(value: &str) -> SecretChange {
+        SecretChange::Set { value: value.into() }
+    }
+
+    #[tokio::test]
+    async fn inserted_passwords_belong_to_the_identity_the_user_was_shown() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let core = crate::Core::open(&dir.path().join("vault.db")).unwrap();
+        let v = &core.vault;
+        v.create("correct horse battery staple".into()).await.unwrap();
+        let generation = v.generation();
+        let ops = v.save_identity(identity(None, "Ops", set("sudo-pass"))).await.unwrap();
+        let other = v.save_identity(identity(None, "Other", set("other-pass"))).await.unwrap();
+        let group = v
+            .save_group(GroupInput {
+                id: None,
+                name: "G".into(),
+                parent_id: None,
+                username: None,
+                port: None,
+                key_id: None,
+            })
+            .await
+            .unwrap();
+        v.set_identity(SettingsTarget::Group { group_id: group.id.clone() }, Some(ops.id.clone())).await.unwrap();
+        let inheriting = v.save_host(host("a", HostAuthInput::Inherit, Some(group.id.clone()))).await.unwrap();
+        let plain = v.save_host(host("b", HostAuthInput::AskPassword, None)).await.unwrap();
+
+        // The group's identity reaches the inheriting host.
+        let shown = v.session_identity(generation, &inheriting.id).await.unwrap().unwrap();
+        assert_eq!(
+            (shown.identity_id.as_str(), shown.label.as_str(), shown.has_password),
+            (ops.id.as_str(), "Ops", true)
+        );
+        let password = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap();
+        assert_eq!(password.as_str(), "sudo-pass");
+
+        // A different identity than the host uses now is refused, never substituted.
+        let wrong = v.identity_password(generation, &inheriting.id, &other.id).await.unwrap_err();
+        assert_eq!(wrong.code, ErrorCode::Conflict);
+        assert!(v.session_identity(generation, &plain.id).await.unwrap().is_none());
+        assert_eq!(v.identity_password(generation, &plain.id, &ops.id).await.unwrap_err().code, ErrorCode::Conflict);
+
+        // The host's own identity wins once set; the group's is then refused for it.
+        v.set_identity(SettingsTarget::Host { host_id: inheriting.id.clone() }, Some(other.id.clone())).await.unwrap();
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(v.identity_password(generation, &inheriting.id, &other.id).await.unwrap().as_str(), "other-pass");
+        v.set_identity(SettingsTarget::Host { host_id: inheriting.id.clone() }, None).await.unwrap();
+
+        // A password with control characters would be keystrokes in a terminal: refused.
+        v.save_identity(identity(Some(ops.id.clone()), "Ops", set("pw\rrm -rf ~\r"))).await.unwrap();
+        let refused = v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidInput);
+        assert!(!refused.message.contains("rm -rf"), "the password never appears in an error");
+
+        // No password stored: nothing to insert.
+        v.save_identity(identity(Some(ops.id.clone()), "Ops", SecretChange::Clear)).await.unwrap();
+        assert!(!v.session_identity(generation, &inheriting.id).await.unwrap().unwrap().has_password);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+
+        // After a lock, the old generation reads nothing, even once unlocked again.
+        v.lock().await;
+        v.unlock_with_passphrase("correct horse battery staple".into()).await.unwrap();
+        assert_eq!(v.session_identity(generation, &inheriting.id).await.unwrap_err().code, ErrorCode::VaultLocked);
+        assert_eq!(
+            v.identity_password(generation, &inheriting.id, &ops.id).await.unwrap_err().code,
+            ErrorCode::VaultLocked
+        );
     }
 }
