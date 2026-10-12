@@ -80,6 +80,9 @@ const COMMANDS: &[&str] = &[
     "tunnel_stop",
     "tunnel_active",
     "tunnel_clear_ended",
+    "host_connection_get",
+    "host_connection_set",
+    "host_chain",
 ];
 
 fn main() {

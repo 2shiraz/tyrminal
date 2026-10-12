@@ -41,7 +41,7 @@ use crate::records::{
 use crate::validate;
 // agent B: tunnels and history
 use crate::records::{KIND_TUNNEL, TunnelRecord};
-use tyrminal_contracts::{TunnelInput, TunnelSummary};
+use tyrminal_contracts::{ChainHop, HostConnection, TunnelInput, TunnelSummary};
 
 struct Stored<T> {
     revision: u64,
@@ -89,9 +89,20 @@ pub(crate) struct ConnectionPlan {
     pub endpoint: Endpoint,
     pub username: String,
     pub auth: PlanAuth,
+    // agent B: tunnels and history
+    /// Jump hosts to go through first, first hop first; empty for a direct connection.
+    pub jumps: Vec<HopPlan>,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
     pub generation: u32,
+}
+
+// agent B: tunnels and history
+/// One host of a connection chain.
+pub(crate) struct HopPlan {
+    pub endpoint: Endpoint,
+    pub username: String,
+    pub auth: PlanAuth,
 }
 
 pub(crate) enum PlanAuth {
@@ -197,6 +208,8 @@ fn copy_host(record: &HostRecord) -> HostRecord {
         group: record.group.clone(),
         tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
+        // agent B: tunnels and history
+        connection: record.connection.clone(),
     }
 }
 
@@ -944,6 +957,9 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1, None)
             }
         };
+        // agent B: tunnels and history: connection settings are saved on their own and kept here.
+        let connection =
+            existing_id.and_then(|id| open.hosts.get(&id)).map(|s| s.record.connection.clone()).unwrap_or_default();
         let record = HostRecord {
             label,
             address,
@@ -953,6 +969,7 @@ impl VaultService {
             group: group.map(|g| validate::id_text(&g)),
             tags,
             last_connected_at,
+            connection,
         };
         self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
         let summary = host_summary(&group_index(open), &id, &record);
@@ -1198,6 +1215,8 @@ impl VaultService {
                 group,
                 tags: host.tags,
                 last_connected_at: None,
+                // agent B: tunnels and history
+                connection: Default::default(),
             };
             new_hosts.push((random_id().map_err(from_vault)?, record));
         }
@@ -1587,7 +1606,38 @@ impl VaultService {
         let id = validate::id(host_id)?;
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
-        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let target = Self::hop_plan(open, &id)?;
+        // agent B: tunnels and history: the jump hosts, first hop first.
+        let jumps = crate::tunnels::chain(&id, |hop| Self::jump_of(open, hop))?
+            .iter()
+            .map(|hop| Self::hop_plan(open, hop))
+            .collect::<Result<Vec<_>, _>>()?;
+        let known_hosts = open
+            .known_hosts
+            .values()
+            .map(|k| {
+                let known = KnownHost {
+                    host: k.record.host.clone(),
+                    port: k.record.port,
+                    public_key: k.record.public_key.clone(),
+                };
+                (known, k.record.fingerprint.clone())
+            })
+            .collect();
+        Ok(ConnectionPlan {
+            host_id: validate::id_text(&id),
+            endpoint: target.endpoint,
+            username: target.username,
+            auth: target.auth,
+            jumps,
+            known_hosts,
+            generation: self.generation(),
+        })
+    }
+
+    /// Where and as whom one host of a chain is reached, with its credentials.
+    fn hop_plan(open: &Open, id: &Id) -> Result<HopPlan, IpcError> {
+        let host = &open.hosts.get(id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         let groups = group_index(open);
         let effective = inventory::effective(&groups, host);
         if effective.username.is_empty() {
@@ -1610,25 +1660,10 @@ impl VaultService {
             EffectiveAuth::GroupKey(key_id) => key_plan(key_id)?,
             EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
         };
-        let known_hosts = open
-            .known_hosts
-            .values()
-            .map(|k| {
-                let known = KnownHost {
-                    host: k.record.host.clone(),
-                    port: k.record.port,
-                    public_key: k.record.public_key.clone(),
-                };
-                (known, k.record.fingerprint.clone())
-            })
-            .collect();
-        Ok(ConnectionPlan {
-            host_id: validate::id_text(&id),
+        Ok(HopPlan {
             endpoint: Endpoint::new(host.address.clone(), effective.port),
             username: effective.username.clone(),
             auth,
-            known_hosts,
-            generation: self.generation(),
         })
     }
 
@@ -1644,6 +1679,71 @@ impl VaultService {
 
 // agent B: tunnels and history
 impl VaultService {
+    /// A host's advanced connection settings.
+    pub async fn host_connection(&self, host_id: &str) -> Result<HostConnection, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(HostConnection { jump_host_id: host.connection.jump_host.clone() })
+    }
+
+    /// Replaces a host's advanced connection settings. The jump host must exist, and the chain it
+    /// makes must end (no loops) within `MAX_CHAIN_HOPS` hosts.
+    pub async fn set_host_connection(&self, host_id: &str, input: HostConnection) -> Result<Vec<ChainHop>, IpcError> {
+        let id = validate::id(host_id)?;
+        let jump = input.jump_host_id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
+        if let Some(jump) = &jump
+            && !open.hosts.contains_key(jump)
+        {
+            return Err(not_found("That jump host no longer exists. Choose another."));
+        }
+        let mut record = copy_host(&current.record);
+        record.connection.jump_host = jump.map(|j| validate::id_text(&j));
+        let revision = current.revision + 1;
+        // Check the chain this would make before anything is written.
+        let proposed = jump;
+        crate::tunnels::chain(&id, |hop| if *hop == id { Ok(proposed) } else { Self::jump_of(open, hop) })?;
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Self::chain_view(open, &id)
+    }
+
+    /// The hosts a connection to `host_id` goes through, first hop first, the host itself last.
+    pub async fn host_chain(&self, host_id: &str) -> Result<Vec<ChainHop>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::chain_view(open, &id)
+    }
+
+    /// The jump host recorded on `id`.
+    fn jump_of(open: &Open, id: &Id) -> Result<Option<Id>, IpcError> {
+        let host =
+            &open.hosts.get(id).ok_or_else(|| not_found("A host in this connection chain no longer exists."))?.record;
+        host.connection.jump_host.as_deref().map(validate::id).transpose()
+    }
+
+    fn chain_view(open: &Open, id: &Id) -> Result<Vec<ChainHop>, IpcError> {
+        let groups = group_index(open);
+        let mut hops = crate::tunnels::chain(id, |hop| Self::jump_of(open, hop))?;
+        hops.push(*id);
+        hops.iter()
+            .map(|hop| {
+                let record = &open.hosts.get(hop).ok_or_else(|| not_found("That host no longer exists."))?.record;
+                Ok(ChainHop {
+                    host_id: validate::id_text(hop),
+                    label: record.label.clone(),
+                    address: record.address.clone(),
+                    port: inventory::effective(&groups, record).port,
+                })
+            })
+            .collect()
+    }
+
     fn tunnel_summary(open: &Open, id: &Id, record: &TunnelRecord) -> TunnelSummary {
         let host_label =
             validate::id(&record.host_id).ok().and_then(|host| open.hosts.get(&host)).map(|h| h.record.label.clone());

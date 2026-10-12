@@ -76,6 +76,9 @@
     "allow-tunnel-start",
     "allow-tunnel-stop",
     "allow-tunnel-active",
-    "allow-tunnel-clear-ended"
+    "allow-tunnel-clear-ended",
+    "allow-host-connection-get",
+    "allow-host-connection-set",
+    "allow-host-chain"
   ]
 }

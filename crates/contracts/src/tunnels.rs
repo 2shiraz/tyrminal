@@ -113,3 +113,27 @@ pub struct ActiveTunnel {
     /// Why an auto-started rule could not start, or why a running one failed.
     pub error: Option<IpcError>,
 }
+
+// ---------- advanced connection settings (jump hosts; proxies and agent forwarding later) ----------
+
+/// How a host is reached, beyond address and credentials. Kept apart from `HostInput` and saved
+/// with its own command, so editing a host's basics never changes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HostConnection {
+    /// A saved host to connect through first (`ProxyJump`). That host's own jump host, if it has
+    /// one, comes before it, so chains are built by pointing hosts at each other.
+    pub jump_host_id: Option<String>,
+}
+
+/// One hop of a host's connection chain, first hop first; the host itself is last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChainHop {
+    pub host_id: String,
+    pub label: String,
+    pub address: String,
+    pub port: u16,
+}

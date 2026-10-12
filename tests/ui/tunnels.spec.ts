@@ -111,3 +111,33 @@ test("tunnels: a closed session ends its forwards; start errors are shown", asyn
   await page.getByRole("menuitem", { name: "Duplicate" }).click();
   await expect(rules(page).locator('[data-rule="Web (copy)"]')).toBeVisible();
 });
+
+test("hosts: the editor's Advanced section sets a jump host and refuses loops", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-nav="hosts"]').click();
+  const edit = async (label: string) => {
+    await page.getByRole("button", { name: `More actions for ${label}` }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+  };
+  await edit("db-primary");
+  const dialog = page.getByRole("dialog", { name: /Edit host/ });
+  await dialog.getByText("Advanced").click();
+  await dialog.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
+  await expect(dialog).toContainText("Connects through api-gateway first");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => [...(window as unknown as { __mockJumps: Map<string, string> }).__mockJumps.entries()])).toHaveLength(1);
+
+  // Pointing api-gateway back through db-primary would loop: refused, and the host is unchanged.
+  await edit("api-gateway");
+  const again = page.getByRole("dialog", { name: /Edit host/ });
+  await again.getByText("Advanced").click();
+  await again.getByRole("combobox", { name: "Jump host" }).selectOption({ label: "db-primary" });
+  await again.getByRole("button", { name: "Save" }).click();
+  await expect(again.getByRole("alert")).toContainText("would form a loop");
+  await again.getByRole("button", { name: "Cancel" }).click();
+
+  // Reopening shows the saved jump host.
+  await edit("db-primary");
+  await expect(page.getByRole("dialog", { name: /Edit host/ }).getByRole("combobox", { name: "Jump host" })).toHaveValue(/.+/);
+});

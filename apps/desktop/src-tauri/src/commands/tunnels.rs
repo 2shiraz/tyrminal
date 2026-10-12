@@ -2,7 +2,7 @@
 //! started them and to one of its connected SSH sessions.
 
 use tauri::{State, WebviewWindow};
-use tyrminal_core::contracts::{ActiveTunnel, IpcError, TunnelInput, TunnelSummary};
+use tyrminal_core::contracts::{ActiveTunnel, ChainHop, HostConnection, IpcError, TunnelInput, TunnelSummary};
 
 use crate::state::AppState;
 
@@ -52,4 +52,26 @@ pub async fn tunnel_active(window: WebviewWindow, state: State<'_, AppState>) ->
 pub async fn tunnel_clear_ended(window: WebviewWindow, state: State<'_, AppState>) -> Result<(), IpcError> {
     state.core()?.sessions.clear_ended_tunnels(window.label());
     Ok(())
+}
+
+/// A host's advanced connection settings (jump host).
+#[tauri::command]
+pub async fn host_connection_get(state: State<'_, AppState>, host_id: String) -> Result<HostConnection, IpcError> {
+    state.core()?.vault.host_connection(&host_id).await
+}
+
+/// Replaces a host's advanced connection settings; returns the resulting chain.
+#[tauri::command]
+pub async fn host_connection_set(
+    state: State<'_, AppState>,
+    host_id: String,
+    connection: HostConnection,
+) -> Result<Vec<ChainHop>, IpcError> {
+    state.core()?.vault.set_host_connection(&host_id, connection).await
+}
+
+/// The hosts a connection goes through, first hop first, the host itself last.
+#[tauri::command]
+pub async fn host_chain(state: State<'_, AppState>, host_id: String) -> Result<Vec<ChainHop>, IpcError> {
+    state.core()?.vault.host_chain(&host_id).await
 }

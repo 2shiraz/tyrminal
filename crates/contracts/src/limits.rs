@@ -79,3 +79,5 @@ pub const MAX_TUNNEL_CONNECTIONS: u32 = 64;
 pub const MAX_ACTIVE_TUNNELS: usize = 32;
 /// Ended forwards kept in the active list so their outcome stays visible.
 pub const MAX_ENDED_TUNNELS: usize = 32;
+/// Hosts in one connection chain, the destination included.
+pub const MAX_CHAIN_HOPS: usize = 8;

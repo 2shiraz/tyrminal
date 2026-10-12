@@ -60,6 +60,10 @@ pub(crate) struct HostRecord {
     /// Unix seconds of the last connection that reached the shell. Absent in older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected_at: Option<u64>,
+    // agent B: tunnels and history
+    /// Jump host and other advanced connection settings. Absent in older records.
+    #[serde(default, skip_serializing_if = "StoredConnection::is_default")]
+    pub connection: StoredConnection,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -115,6 +119,20 @@ pub(crate) struct TrustEventRecord {
 }
 
 // agent B: tunnels and history
+/// How a host is reached beyond address and credentials (`tunnels.rs` validates it).
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StoredConnection {
+    /// Host id of the jump host (`ProxyJump`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+}
+
+impl StoredConnection {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 // Agent B's record kinds start at 100 so the two parallel branches never pick the same number.
 pub(crate) const KIND_TUNNEL: u16 = 100;
 
@@ -206,6 +224,7 @@ mod tests {
             group: None,
             tags: Vec::new(),
             last_connected_at: None,
+            connection: StoredConnection::default(),
         };
         let bytes = encode(&host, 64).unwrap();
         assert_eq!(bytes[0], MARKER_LIVE_V1);

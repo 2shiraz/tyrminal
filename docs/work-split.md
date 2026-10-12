@@ -112,8 +112,8 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 | | Agent A | Agent B |
 |---|---|---|
-| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | Jump hosts (CON-09, FWD-09), then proxies (CON-10) |
-| Done since split | — | Port forwarding: local/remote/SOCKS5 adapter, saved rules, session-scoped runs, Tunnels page (FWD-01..08 IMPLEMENTED_UNVERIFIED on Linux; see `docs/progress-b.md`) |
+| Working on | SFTP remainder: folder transfers, large-file and interrupted-link tests, external editing | Proxies (CON-10), then agent forwarding (CON-11) |
+| Done since split | — | Port forwarding: local/remote/SOCKS5 adapter, saved rules, session-scoped runs, Tunnels page (FWD-01..08); jump-host chains with per-hop verification (CON-09). IMPLEMENTED_UNVERIFIED on Linux; see `docs/progress-b.md` |
 | Blocked | — | — |
 
 ## Requests (one agent asking the other for a change in a file it owns)
@@ -132,7 +132,14 @@ Never merge these by hand; regenerate them after resolving the sources:
    `TaskContext` carries the session id and `Sessions`.
 4. `apps/desktop/src/lib/messages.ts`: `nav.tunnels`; `apps/desktop/src/components/layout/TabStrip.tsx`:
    `tunnels` in `PAGE_ICONS` (both needed because `Destination` gained `"tunnels"`).
-5. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
+5. `crates/core/src/vault.rs` host paths: `HostRecord` gained `connection` (jump host);
+   `save_host` keeps the stored value, `copy_host` copies it, CSV/OpenSSH import sets the default.
+   `connection_plan` now builds a hop chain through a new `hop_plan` helper (same per-host rules).
+6. **Request:** add an optional hop description to `SessionEvent::TrustPrompt` / `HostKeyChanged`
+   (for example `via: Option<String>`, the saved label of the hop) and show it in the trust dialog,
+   so the prompt names the specific jump-chain hop (BUILD_SPEC §4.5). B will fill it in
+   `run_ssh`. Until then the prompt shows the hop's own address and port.
+7. Please add to `docs/testing.md` when convenient: `crates/ssh/tests/forward_lab.rs` and
    `crates/core/tests/tunnels_lab.rs` (lab layer; need `TYRMINAL_LAB_MODE=local`), and
    `tests/ui/tunnels.spec.ts`. And to `docs/security-invariants.md` / threat model: listeners
    loopback-only without explicit approval; unrequested server channels refused (ADR 0004).

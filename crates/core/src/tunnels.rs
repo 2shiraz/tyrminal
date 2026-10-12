@@ -12,12 +12,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tyrminal_contracts::limits::{MAX_ACTIVE_TUNNELS, MAX_ENDED_TUNNELS, MAX_TUNNEL_CONNECTIONS};
+use tyrminal_contracts::limits::{MAX_ACTIVE_TUNNELS, MAX_CHAIN_HOPS, MAX_ENDED_TUNNELS, MAX_TUNNEL_CONNECTIONS};
 use tyrminal_contracts::{ActiveTunnel, ErrorCode, IpcError, TunnelInput, TunnelKind, TunnelState, TunnelSummary};
 use tyrminal_ssh::{
     BindScope, DynamicForward, ForwardEnd, ForwardError, ForwardHandle, LocalForward, RemoteForward, StatsSnapshot,
     VerifiedConnection, local_bind_addr, local_bind_scope, remote_bind_scope,
 };
+use tyrminal_vault::Id;
 
 use crate::error::{err, invalid, not_found};
 use crate::records::TunnelRecord;
@@ -105,6 +106,31 @@ pub(crate) fn normalize(input: &TunnelInput) -> Result<TunnelRecord, IpcError> {
         auto_start: input.auto_start,
         updated_at: 0,
     })
+}
+
+// ---------- jump host chains ----------
+
+/// The jump hosts a connection to `start` goes through, first hop first (`start` excluded).
+/// `jump_of` reports the jump host recorded on a host. Loops, chains longer than
+/// `MAX_CHAIN_HOPS` hosts and missing hosts are refused, so a saved chain always ends.
+pub(crate) fn chain(
+    start: &Id,
+    mut jump_of: impl FnMut(&Id) -> Result<Option<Id>, IpcError>,
+) -> Result<Vec<Id>, IpcError> {
+    let mut hops: Vec<Id> = Vec::new();
+    let mut current = *start;
+    while let Some(next) = jump_of(&current)? {
+        if next == *start || hops.contains(&next) {
+            return Err(invalid("These jump hosts would form a loop. Choose a different jump host."));
+        }
+        hops.push(next);
+        if hops.len() + 1 > MAX_CHAIN_HOPS {
+            return Err(invalid("A connection can go through at most 7 jump hosts."));
+        }
+        current = next;
+    }
+    hops.reverse();
+    Ok(hops)
 }
 
 // ---------- running forwards ----------
@@ -507,6 +533,32 @@ mod tests {
         let mut bad = input(TunnelKind::Local, "");
         bad.name = "\u{1b}[31mred".into();
         assert!(normalize(&bad).is_err());
+    }
+
+    #[test]
+    fn chains_run_first_hop_first_and_refuse_loops_length_and_gaps() {
+        let id = |n: u8| -> Id { [n; 16] };
+        let links = |pairs: &'static [(u8, u8)]| {
+            move |host: &Id| -> Result<Option<Id>, IpcError> {
+                Ok(pairs.iter().find(|(from, _)| id(*from) == *host).map(|(_, to)| id(*to)))
+            }
+        };
+        assert_eq!(chain(&id(1), links(&[])).unwrap(), Vec::<Id>::new());
+        // 1 → via 2 → via 3: connect to 3, then 2, then 1.
+        assert_eq!(chain(&id(1), links(&[(1, 2), (2, 3)])).unwrap(), vec![id(3), id(2)]);
+        assert!(chain(&id(1), links(&[(1, 1)])).is_err(), "a host cannot be its own jump host");
+        assert!(chain(&id(1), links(&[(1, 2), (2, 1)])).is_err());
+        assert!(chain(&id(1), links(&[(1, 2), (2, 3), (3, 2)])).is_err());
+        // Eight hosts in all is the limit (seven jump hosts).
+        let ok: &'static [(u8, u8)] = &[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)];
+        assert_eq!(chain(&id(1), links(ok)).unwrap().len(), 7);
+        let long: &'static [(u8, u8)] = &[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9)];
+        assert!(chain(&id(1), links(long)).is_err());
+        // A missing host anywhere in the chain fails the whole chain.
+        let gap = |host: &Id| -> Result<Option<Id>, IpcError> {
+            if *host == id(1) { Ok(Some(id(2))) } else { Err(not_found("gone")) }
+        };
+        assert_eq!(chain(&id(1), gap).unwrap_err().code, ErrorCode::NotFound);
     }
 
     #[test]

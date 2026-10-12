@@ -265,6 +265,8 @@ export function installMockBackend(options) {
       // approval dialog is exercised; nothing here binds a socket.
       const rules = [];
       const runs = new Map();
+      const jumps = new Map();
+      window.__mockJumps = jumps;
       let nextRule = 1;
       let nextRun = 1;
       const loopback = (h) => /^(localhost|::1|\[::1\]|127\.\d+\.\d+\.\d+)$/i.test(h.trim());
@@ -354,6 +356,22 @@ export function installMockBackend(options) {
         },
         tunnel_clear_ended: () => {
           for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
+        },
+        host_connection_get: (a) => ({ jumpHostId: jumps.get(a.hostId) ?? null }),
+        host_connection_set: (a) => {
+          // Loops are refused as natively; the chain is returned first hop first.
+          const next = a.connection.jumpHostId;
+          for (let at = next, n = 0; at; at = jumps.get(at), n += 1) {
+            if (at === a.hostId || n > 8) throw { code: "INVALID_INPUT", message: "These jump hosts would form a loop. Choose a different jump host." };
+          }
+          if (next) jumps.set(a.hostId, next);
+          else jumps.delete(a.hostId);
+          const chain = [];
+          for (let at = a.hostId; at; at = jumps.get(at)) chain.unshift(at);
+          return chain.map((hostId) => {
+            const h = state.hosts.find((x) => x.id === hostId);
+            return { hostId, label: h?.label ?? "", address: h?.address ?? "", port: h?.port ?? 22 };
+          });
         },
       };
     })(),

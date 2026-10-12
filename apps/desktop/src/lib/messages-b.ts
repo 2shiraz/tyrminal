@@ -22,6 +22,14 @@ export function endpoint(host: string, port: number | string): string {
 }
 
 export const msgB = {
+  advanced: {
+    title: "Advanced",
+    jumpHost: "Jump host",
+    direct: "None (connect directly)",
+    jumpHint: "Connect through another saved host first (ProxyJump).",
+    via: (label: string) => `Connects through ${label} first. Each host's key is checked before anything is sent to it.`,
+    missingJump: "Deleted host",
+  },
   tunnels: {
     title: "Tunnels",
     subtitle: "Forward ports through your SSH connections. Listeners stay on this computer unless you approve otherwise.",

@@ -3051,3 +3051,21 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--danger);
   white-space: normal;
 }
+
+/* agent B: tunnels and history */
+.advanced {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.advanced > summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.advanced > summary:hover {
+  color: var(--text);
+}

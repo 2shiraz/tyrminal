@@ -180,6 +180,9 @@ pub fn run() {
             commands::tunnels::tunnel_stop,
             commands::tunnels::tunnel_active,
             commands::tunnels::tunnel_clear_ended,
+            commands::tunnels::host_connection_get,
+            commands::tunnels::host_connection_set,
+            commands::tunnels::host_chain,
         ])
         .build(tauri::generate_context!());
 

@@ -49,7 +49,50 @@ impl Lab {
         self.0.pointer(pointer).and_then(Value::as_str).unwrap_or_else(|| panic!("lab.json: {pointer}")).to_owned()
     }
     fn port(&self) -> u16 {
-        self.0.pointer("/servers/a/port").and_then(Value::as_u64).unwrap() as u16
+        self.port_of("a")
+    }
+    fn port_of(&self, server: &str) -> u16 {
+        self.0.pointer(&format!("/servers/{server}/port")).and_then(Value::as_u64).unwrap() as u16
+    }
+    /// Authentication activity in a lab server's sshd log (local lab: a file).
+    fn auth_log_lines(&self, server: &str) -> usize {
+        let file = self.str(&format!("/servers/{server}/logFile"));
+        let text = std::fs::read_to_string(file).expect("lab sshd log");
+        text.lines()
+            .filter(|l| ["Accepted ", "Failed ", "Postponed ", "userauth"].iter().any(|n| l.contains(n)))
+            .count()
+    }
+}
+
+/// Tests that assert on a server's authentication log run one at a time.
+static AUTH_LOG: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// One stable local endpoint whose backend can be switched (to present a different host key).
+struct Forwarder {
+    port: u16,
+    target: Arc<std::sync::Mutex<SocketAddr>>,
+}
+
+impl Forwarder {
+    async fn start(target: SocketAddr) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let target = Arc::new(std::sync::Mutex::new(target));
+        let shared = Arc::clone(&target);
+        tokio::spawn(async move {
+            while let Ok((mut inbound, _)) = listener.accept().await {
+                let backend = *shared.lock().unwrap();
+                tokio::spawn(async move {
+                    if let Ok(mut outbound) = TcpStream::connect(backend).await {
+                        let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+                    }
+                });
+            }
+        });
+        Self { port, target }
+    }
+    fn retarget(&self, target: SocketAddr) {
+        *self.target.lock().unwrap() = target;
     }
 }
 
@@ -98,6 +141,10 @@ impl Session {
 
 impl Fixture {
     async fn host(&self, user: &str) -> String {
+        self.host_at(user, &format!("lab {user}"), self.lab.port()).await
+    }
+
+    async fn host_at(&self, user: &str, label: &str, port: u16) -> String {
         let key_id = match self.core.vault.list_keys().await.unwrap().into_iter().next() {
             Some(key) => key.id,
             None => {
@@ -112,9 +159,9 @@ impl Fixture {
         };
         let input = HostInput {
             id: None,
-            label: format!("lab {user}"),
+            label: label.into(),
             address: "127.0.0.1".into(),
-            port: Some(self.lab.port()),
+            port: Some(port),
             username: user.into(),
             auth: HostAuthInput::Key { key_id },
             group_id: None,
@@ -125,15 +172,17 @@ impl Fixture {
 
     /// Opens a session, trusting the host key once, and waits for the shell.
     async fn connect(&self, window: &str, host_id: &str) -> Session {
+        self.connect_trusting(window, host_id, TrustDecision::Once).await
+    }
+
+    /// Opens a session, answering every trust prompt with `decision`, and waits for the shell.
+    async fn connect_trusting(&self, window: &str, host_id: &str, decision: TrustDecision) -> Session {
         let (tx, mut events) = mpsc::unbounded_channel();
         let opened = self.core.sessions.open_ssh(window, host_id, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
         loop {
             match tokio::time::timeout(WAIT, events.recv()).await.expect("connect in time").unwrap() {
                 SessionEvent::TrustPrompt { prompt_id, .. } => {
-                    self.core
-                        .sessions
-                        .answer_trust(window, &opened.session_id, &prompt_id, TrustDecision::Once)
-                        .unwrap();
+                    self.core.sessions.answer_trust(window, &opened.session_id, &prompt_id, decision).unwrap();
                 }
                 SessionEvent::State { state: SessionState::Connected } => break,
                 SessionEvent::Closed { error, .. } => panic!("session closed while connecting: {error:?}"),
@@ -426,4 +475,172 @@ async fn an_approved_external_rule_binds_and_an_unapproved_one_cannot_be_saved()
     f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
     let names: Vec<_> = f.core.vault.list_tunnels().await.unwrap().into_iter().map(|t| t.name).collect();
     assert_eq!(names, ["lan", "lan (copy)"]);
+}
+
+// ---------- jump hosts ----------
+
+/// Opens a session and returns the events up to the first that needs an answer or ends it.
+async fn open_until_prompt(f: &Fixture, host_id: &str) -> (String, mpsc::UnboundedReceiver<SessionEvent>) {
+    let (tx, events) = mpsc::unbounded_channel();
+    let opened = f.core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(EventSink(tx))).await.unwrap();
+    (opened.session_id, events)
+}
+
+/// The next event other than progress (state changes, negotiated algorithms, banners).
+async fn next_decision(events: &mut mpsc::UnboundedReceiver<SessionEvent>) -> SessionEvent {
+    loop {
+        match tokio::time::timeout(WAIT, events.recv()).await.expect("event in time").expect("channel open") {
+            SessionEvent::State { state } if state != SessionState::Connected => {}
+            SessionEvent::Negotiated { .. } | SessionEvent::Banner { .. } => {}
+            other => return other,
+        }
+    }
+}
+
+async fn jump_to(f: &Fixture, host: &str, via: &str) {
+    let connection = tyrminal_core::contracts::HostConnection { jump_host_id: Some(via.into()) };
+    f.core.vault.set_host_connection(host, connection).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_jump_chain_verifies_and_signs_in_to_every_hop_in_order() {
+    let f = fixture().await;
+    let _log = AUTH_LOG.lock().await;
+    let user = f.lab.str("/user");
+    let bastion = f.host_at(&user, "bastion", f.lab.port_of("a")).await;
+    let inner = f.host_at(&user, "inner", f.lab.port_of("b")).await;
+    jump_to(&f, &inner, &bastion).await;
+    let chain = f.core.vault.host_chain(&inner).await.unwrap();
+    let ports: Vec<_> = chain.iter().map(|h| (h.label.as_str(), h.port)).collect();
+    assert_eq!(ports, [("bastion", f.lab.port_of("a")), ("inner", f.lab.port_of("b"))]);
+    let b_before = f.lab.auth_log_lines("b");
+
+    let (session, mut events) = open_until_prompt(&f, &inner).await;
+    // First the bastion's key, and nothing has reached the inner server yet.
+    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, .. } = next_decision(&mut events).await else {
+        panic!("expected the bastion's trust prompt")
+    };
+    assert_eq!((port, fingerprint), (f.lab.port_of("a"), f.lab.str("/servers/a/hostKeyEd25519Fingerprint")));
+    assert_eq!(f.lab.auth_log_lines("b"), b_before);
+    f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Always).unwrap();
+    // Then the inner server's own key, verified end to end through the bastion's channel.
+    let SessionEvent::TrustPrompt { prompt_id, port, fingerprint, resolved_address, .. } =
+        next_decision(&mut events).await
+    else {
+        panic!("expected the inner host's trust prompt")
+    };
+    assert_eq!((port, fingerprint), (f.lab.port_of("b"), f.lab.str("/servers/b/hostKeyEd25519Fingerprint")));
+    assert_eq!(resolved_address, None, "a hop reached through a bastion has no locally resolved address");
+    assert_eq!(f.lab.auth_log_lines("b"), b_before, "no credential before the inner key is trusted");
+    f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Always).unwrap();
+    assert_eq!(next_decision(&mut events).await, SessionEvent::State { state: SessionState::Connected });
+    assert!(f.lab.auth_log_lines("b") > b_before, "the inner server saw the sign-in");
+
+    // A tunnel on the chained session runs through every hop (FWD-09).
+    let echo = echo_server().await;
+    let rule = f.rule(&inner, TunnelKind::Local, echo).await;
+    let run = f.core.sessions.start_tunnel(WINDOW, &session, &rule).await.unwrap();
+    assert!(echoes(loopback(run.bound_port), b"through two hops").await);
+
+    f.core.sessions.close(WINDOW, &session).unwrap();
+    // Both keys are remembered: the next connection asks nothing.
+    let mut again = f.connect(WINDOW, &inner).await;
+    f.core.sessions.close(WINDOW, &again.id).unwrap();
+    assert_eq!(again.closed().await, None);
+    assert_eq!(f.core.vault.list_known_hosts().await.unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_changed_bastion_key_blocks_the_chain_before_any_credential_is_sent() {
+    let f = fixture().await;
+    let _log = AUTH_LOG.lock().await;
+    let user = f.lab.str("/user");
+    let forwarder = Forwarder::start(SocketAddr::from(([127, 0, 0, 1], f.lab.port_of("a")))).await;
+    let bastion = f.host_at(&user, "bastion", forwarder.port).await;
+    let inner = f.host_at(&user, "inner", f.lab.port_of("b")).await;
+    jump_to(&f, &inner, &bastion).await;
+
+    let mut first = f.connect_trusting(WINDOW, &inner, TrustDecision::Always).await;
+    f.core.sessions.close(WINDOW, &first.id).unwrap();
+    first.closed().await;
+
+    assert_eq!(f.core.vault.list_known_hosts().await.unwrap().len(), 2, "both hops trusted");
+    // The bastion's endpoint now answers with another server's key.
+    forwarder.retarget(SocketAddr::from(([127, 0, 0, 1], f.lab.port_of("kbd"))));
+    let (impostor_before, inner_before) = (f.lab.auth_log_lines("kbd"), f.lab.auth_log_lines("b"));
+    let (_session, mut events) = open_until_prompt(&f, &inner).await;
+    match next_decision(&mut events).await {
+        SessionEvent::HostKeyChanged { port, presented_fingerprint, .. } => {
+            assert_eq!(port, forwarder.port);
+            assert_eq!(presented_fingerprint, f.lab.str("/servers/kbd/hostKeyEd25519Fingerprint"));
+        }
+        other => panic!("expected the changed bastion key to block, got {other:?}"),
+    }
+    match next_decision(&mut events).await {
+        SessionEvent::Closed { error, .. } => assert_eq!(error.map(|e| e.code), Some(ErrorCode::HostKeyChanged)),
+        other => panic!("expected the chain to end, got {other:?}"),
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(f.lab.auth_log_lines("kbd"), impostor_before, "a credential reached the impostor bastion");
+    assert_eq!(f.lab.auth_log_lines("b"), inner_before, "the chain went past a bastion that failed verification");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_bastion_that_refuses_forwarding_ends_the_chain_with_a_clear_error() {
+    let f = fixture().await;
+    let _log = AUTH_LOG.lock().await;
+    let bastion = f.host_at(&f.lab.str("/noForwardUser"), "strict bastion", f.lab.port_of("a")).await;
+    let inner = f.host_at(&f.lab.str("/user"), "inner", f.lab.port_of("b")).await;
+    jump_to(&f, &inner, &bastion).await;
+    let inner_before = f.lab.auth_log_lines("b");
+
+    let (session, mut events) = open_until_prompt(&f, &inner).await;
+    let SessionEvent::TrustPrompt { prompt_id, .. } = next_decision(&mut events).await else { panic!("trust prompt") };
+    f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+    match next_decision(&mut events).await {
+        SessionEvent::Closed { error, .. } => assert_eq!(error.map(|e| e.code), Some(ErrorCode::ChannelDenied)),
+        other => panic!("expected the chain to stop at the bastion, got {other:?}"),
+    }
+    assert_eq!(f.lab.auth_log_lines("b"), inner_before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
+    let f = fixture().await;
+    let user = f.lab.str("/user");
+    let a = f.host_at(&user, "a", f.lab.port_of("a")).await;
+    let b = f.host_at(&user, "b", f.lab.port_of("b")).await;
+    jump_to(&f, &b, &a).await;
+    let looped = tyrminal_core::contracts::HostConnection { jump_host_id: Some(b.clone()) };
+    assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
+    let itself = tyrminal_core::contracts::HostConnection { jump_host_id: Some(a.clone()) };
+    assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
+    let missing =
+        tyrminal_core::contracts::HostConnection { jump_host_id: Some("00000000000000000000000000000000".into()) };
+    assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
+
+    // Editing the host's basics keeps its jump host; the setting survives a lock.
+    let mut edit = f.core.vault.list_hosts().await.unwrap().into_iter().find(|h| h.id == b).unwrap();
+    edit.label = "b renamed".into();
+    let input = HostInput {
+        id: Some(b.clone()),
+        label: edit.label.clone(),
+        address: edit.address.clone(),
+        port: Some(edit.port),
+        username: edit.username.clone(),
+        auth: HostAuthInput::AskPassword,
+        group_id: None,
+        tags: Vec::new(),
+    };
+    f.core.vault.save_host(input).await.unwrap();
+    f.core.vault.lock().await;
+    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    assert_eq!(f.core.vault.host_connection(&b).await.unwrap().jump_host_id, Some(a.clone()));
+    // Duplicates keep the route.
+    let copy = f.core.vault.duplicate_host(&b).await.unwrap();
+    assert_eq!(f.core.vault.host_connection(&copy.id).await.unwrap().jump_host_id, Some(a));
 }

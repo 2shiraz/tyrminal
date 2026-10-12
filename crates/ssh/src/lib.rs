@@ -16,6 +16,7 @@ mod host_trust;
 mod sftp;
 // agent B: tunnels and history
 mod forward;
+mod jump;
 
 pub use algorithms::negotiation_summary;
 pub use auth::{
@@ -36,3 +37,4 @@ pub use forward::{
     LocalForward, RemoteForward, SocksRefusal, SocksTarget, StatsSnapshot, local_bind_addr, local_bind_scope,
     remote_bind_scope, socks5_accept, start_dynamic, start_local, start_remote,
 };
+pub use jump::HopStream;

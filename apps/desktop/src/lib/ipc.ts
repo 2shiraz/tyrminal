@@ -252,6 +252,8 @@ export const backup = {
 type TunnelSummaryDto = import("@tyrminal/contracts").TunnelSummary;
 type TunnelInputDto = import("@tyrminal/contracts").TunnelInput;
 type ActiveTunnelDto = import("@tyrminal/contracts").ActiveTunnel;
+type HostConnectionDto = import("@tyrminal/contracts").HostConnection;
+type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
 export const tunnels = {
@@ -265,4 +267,10 @@ export const tunnels = {
   /** This window's running and recently ended forwards with live counters. */
   active: () => call<ActiveTunnelDto[]>("tunnel_active"),
   clearEnded: () => call<void>("tunnel_clear_ended"),
+  /** A host's jump host and other advanced connection settings. */
+  connection: (hostId: string) => call<HostConnectionDto>("host_connection_get", { hostId }),
+  setConnection: (hostId: string, connection: HostConnectionDto) =>
+    call<ChainHopDto[]>("host_connection_set", { hostId, connection }),
+  /** The hosts a connection goes through, first hop first, the host itself last. */
+  chain: (hostId: string) => call<ChainHopDto[]>("host_chain", { hostId }),
 };
