@@ -5,7 +5,7 @@ import { ErrorNotice, IconButton, Switch } from "../../components/ui/controls";
 import { IconPanelRightClose } from "../../components/ui/icons";
 import { type AppError, glance, toAppError } from "../../lib/ipc";
 import { msgG } from "../../lib/messages-glance";
-import { formatSize } from "../files/FilesPanel";
+import { formatSize } from "../sftp/model";
 
 /** The SSH session the panel reads; Telnet, serial and local sessions never get here. */
 export interface GlanceTarget {

@@ -3,6 +3,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 import { openApp } from "./fixtures";
+import { marksOnRow } from "./highlight-helpers";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -503,7 +504,9 @@ test("keyboard shortcuts: grouped and searchable, reserved chords refused, confl
   }
   await expect(list.getByRole("list", { name: "Files" }).locator("li")).toHaveCount(1);
   await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
-  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(44);
+  // The command jumps (shell integration) are listed with the terminal actions.
+  await expect(list.getByRole("list", { name: "Terminal" })).toContainText("Jump to the previous command");
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(46);
 
   // Search filters by name and by keys; no match says so.
   await search.fill("zoom");
@@ -641,9 +644,16 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   const line = "build ERROR at 10.0.0.12 from fe80::1 at 12:30:45, mac aa:bb:cc:dd:ee:ff, errors=0";
   await output(page, `\r\n${line}\r\n`);
   const marks = page.locator(".term-highlight");
-  await expect(marks).toHaveCount(3);
-  await expect(page.locator('.term-highlight[data-tone="danger"]')).toHaveCount(1);
-  await expect(page.locator('.term-highlight[data-tone="info"]')).toHaveCount(2);
+  // The user's word first; the built-in kinds (on by default) color the rest of the plain text.
+  await expect.poll(() => marksOnRow(page, "build ERROR")).toEqual([
+    ["danger", "ERROR"],
+    ["address", "10.0.0.12"],
+    ["address", "fe80::1"],
+    ["date", "12:30:45"],
+    ["address", "aa:bb:cc:dd:ee:ff"],
+    ["danger", "errors"],
+    ["number", "0"],
+  ]);
   // The screen text is exactly what arrived, and highlighting sent nothing.
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   expect(await calls(page, "session_write")).toHaveLength(writesBefore);
@@ -652,6 +662,7 @@ test("highlighting: words and IP addresses are colored on screen; the text and i
   await openSettings(page);
   await page.getByLabel("Highlight output").first().uncheck();
   await page.getByRole("tab", { name: /api-gateway/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText(line);
   await expect(marks).toHaveCount(0);
 });
 
@@ -884,4 +895,24 @@ test("templates: the reported directory is saved; after Connect a return is offe
   await offer.getByRole("button", { name: "Send" }).click();
   await expect(offer).toHaveCount(0);
   await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("cd -- '/srv/it'\\''s app': synthetic output");
+});
+
+test("templates: an SFTP tab is left out of a saved layout", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /Local terminal/ }).click();
+  await expect(page.locator(".pane:not([hidden]) .xterm")).toBeVisible();
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menu", { name: "New tab" }).getByRole("menuitem", { name: /SFTP/ }).click();
+  await expect(page.getByRole("tab", { name: /SFTP/ })).toHaveAttribute("aria-selected", "true");
+
+  await paletteRun(page, "Save layout as");
+  const dialog = page.getByRole("dialog", { name: "Save the open tabs as a layout" });
+  await expect(dialog).toContainText("1 tab, 1 pane");
+  await dialog.getByLabel("Layout name").fill("Mixed");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved layout “Mixed”.")).toBeVisible();
+  const [saved] = await calls(page, "layout_save");
+  const tabs = (saved!.args as { layout: { tabs: { panes: unknown[] }[] } }).layout.tabs;
+  expect(tabs.map((t) => t.panes)).toEqual([[{ kind: "local" }]]);
 });

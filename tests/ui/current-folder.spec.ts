@@ -33,7 +33,9 @@ async function duplicateTab(page: Page, name: RegExp) {
 }
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Files" });
-const folderField = (page: Page) => panel(page).getByRole("textbox", { name: "Folder on the server" });
+/** The folder the panel shows, by its list's name ("Contents of /path"). */
+const folderList = (page: Page) => panel(page).getByRole("grid", { name: /^Contents of \// });
+const shows = (page: Page, path: string) => expect(folderList(page)).toHaveAccessibleName(`Contents of ${path}`);
 
 test("the files panel opens in the shell's folder and can go back to it", async ({ page }) => {
   await connected(page);
@@ -41,14 +43,14 @@ test("the files panel opens in the shell's folder and can go back to it", async 
   await waitForTerminalText(page, "marked");
 
   await page.keyboard.press("Control+Shift+O");
-  await expect(folderField(page)).toHaveValue("/home/deploy/app");
+  await shows(page, "/home/deploy/app");
   const toShell = panel(page).getByRole("button", { name: "Go to the shell's folder (/home/deploy/app)" });
   await expect(toShell).toBeDisabled();
   await panel(page).getByRole("button", { name: "Up one folder" }).click();
-  await expect(folderField(page)).toHaveValue("/home/deploy");
+  await shows(page, "/home/deploy");
   await toShell.click();
-  await expect(folderField(page)).toHaveValue("/home/deploy/app");
-  await expect(panel(page).getByRole("grid", { name: /^Contents of \// }).getByRole("button")).toHaveText([/config\.yml/]);
+  await shows(page, "/home/deploy/app");
+  await expect(folderList(page).getByRole("button", { name: /^(Open|Select) / })).toHaveText([/config\.yml/]);
 });
 
 test("a shell folder the server cannot list falls back to the login folder", async ({ page }) => {
@@ -56,7 +58,7 @@ test("a shell folder the server cannot list falls back to the login folder", asy
   await output(page, `${folderMark("api-gateway", "/srv/gone")}marked\r\n`);
   await waitForTerminalText(page, "marked");
   await page.keyboard.press("Control+Shift+O");
-  await expect(folderField(page)).toHaveValue("/home/deploy");
+  await shows(page, "/home/deploy");
   await expect(panel(page).getByRole("alert")).toHaveCount(0);
 });
 

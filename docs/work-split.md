@@ -341,6 +341,51 @@ Home's quick connect uses). Edits outside `features/hosts`:
   through `.tab-close` inside the tab instead of a "Close …" button: after the axe fix the close
   control is no longer a focusable button nested in the tab (keyboard: Delete or the tab menu).
 
+**From the terminal-input branch (additive edits in files other sessions own; please keep them):**
+
+- `components/layout/PaneGrid.tsx`: optional prop `broadcastPaneIds`; `data-broadcast` is
+  `"excluded"` for a pane left out of a broadcasting tab, and its header says so (one line).
+- `app/AppShell.tsx`: broadcast state is `members` (confirmed panes and their sessions, from
+  `features/broadcast/members.ts`); `broadcasting` is derived from it, so other uses are unchanged.
+- `features/layouts/BroadcastReview.tsx`: per-pane checkboxes; `onConfirm` receives the chosen panes.
+- `features/terminal/TerminalController.ts`: `onKey` leaves IME-processed keys to xterm (3 lines).
+- `tests/ui/mock-backend.js`: per-session input log (`__mockInputBySession`) and `__mockDropAt(i)`.
+- `tests/ui/tunnels.spec.ts`: closes the tab through `.tab-close` (no nested button since PR #7).
+- `crates/contracts/src/layouts.rs`: `HighlightKeyword.pattern` (serde default false); `crates/core/src/layouts.rs`
+  `sanitize_workspace` checks patterns through the new `crates/core/src/highlight.rs`;
+  `features/layouts/WorkspaceSettings.tsx` renders `features/highlight/HighlightRules.tsx` instead of its
+  `Keywords` list (removed); `app/AppShell.tsx` one `useSlowPatternNotice()` line.
+- `features/palette/CommandPalette.tsx`: `export type PaletteItem` and an `extra` prop whose items are
+  appended after the built-in ones (one marked line); `features/terminal/TerminalView.tsx`: `copy`/`paste`
+  on `PaneHandle`, a "Show connection details" button on the failure notice and its dialog (marked);
+  `lib/ipc.ts`: `connectionDetails` at the end (marked); `tests/ui/mock-backend.js`: `session_diagnostics`.
+- `features/terminal/TerminalController.ts`: installs `features/terminal/composition.ts` after `open()`.
+- `app/AppShell.tsx`: the snippets side panel renders `features/sidepanel/ConnectionPanel.tsx` (sections:
+  snippets, history, appearance); `SnippetsPanel.tsx` is no longer used. Visual baselines
+  `*-09-terminal-snippets.png` re-recorded in the pinned container.
+- `crates/contracts/src/layouts.rs` `WorkspacePreferences`: `right_click_paste`, `middle_click_paste`
+  (marked); `crates/core/src/layouts.rs` refuses both right-click flags; `WorkspaceSettings.tsx`
+  renders `features/mouse/MouseSettings.tsx` instead of its right-click switch;
+  `TerminalController.ts` creates `features/mouse/mouseMap.ts` and lets it swallow the X11 paste
+  that follows a handled middle click.
+- `tests/ui/workspaces.spec.ts` "highlighting: words and IP addresses…": expectations now list every
+  decoration on the row (built-in kinds are on by default), read with `tests/ui/highlight-helpers.ts`.
+  `HighlightPreferences` gained the built-in kind toggles and a `Default` with highlighting on.
+- `TerminalController.ts`: registers `features/tokens/tokenLinks.ts` as a link provider and keeps the
+  pane's target; `TerminalView.tsx`: one `onToken` callback and a `<TokenMenu>`; `AppShell.tsx`: one
+  `<NewHostFromTerminal>` line (prefilled host editor from a clicked address).
+- `lib/shortcuts.ts`: `previousCommand`/`nextCommand` at the end of the union and both maps (marked);
+  `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines; `WorkspaceSettings.tsx`: both in the
+  "terminal" shortcut group. `tests/ui/behavior.spec.ts`
+  `clickTerminalText` finds text by position (decorated cells are one element per cell).
+- `scripts/check-contrast.mjs`: one marked block runs `scripts/check-highlight-contrast.mjs` (highlight
+  colors of every scheme at AA, computed by the app's palette code).
+- **Note for C and D (merge of main #5 on the terminal-input branch):** three OSC handlers now share
+  sequences: D's `attachShellContext` (OSC 7 and 133), C's OSC 7 (layout working directory) and the
+  command marks (OSC 133). xterm calls the most recent handler first and stops at one returning
+  true, so `TerminalController` registers `attachShellContext` first and the other two observe and
+  return false. Please keep that order (and `return false` in those two) when touching these lines.
+
 ## SFTP tab hook-up (branch `claude/sftp-tab`)
 
 The SFTP tab lives in `apps/desktop/src/features/sftp/` (own messages and stylesheet). Its
@@ -360,3 +405,5 @@ the terminal-input branch (#9) to keep when they merge:
   them (no live terminal session). `tests/ui/sftp.spec.ts` closes the tab through `.tab-close`
   inside the tab, as `tunnels.spec.ts` does, since the close control is no longer a focusable
   button; `workspaces.spec.ts` picks the first recent connection by label instead of menu index.
+- **Terminal-input branch (keep when merging):** the save-layout dialog's tab/pane count is taken from
+  `templateTabs` (SFTP tabs left out), and `workspaces.spec.ts` checks that an SFTP tab is not saved.

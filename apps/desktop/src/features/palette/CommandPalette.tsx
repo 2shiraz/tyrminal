@@ -51,6 +51,9 @@ import { msgP } from "../../lib/messages-privilege";
 import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
 
+/** A palette entry; other features contribute entries through the `extra` prop. */
+export type PaletteItem = Item;
+
 interface Item {
   id: string;
   group: string;
@@ -114,6 +117,7 @@ export function CommandPalette({
   layouts,
   pick,
   openTabs,
+  extra,
   onShellIntegration,
   onInsertPassword,
   onConnectionLog,
@@ -163,6 +167,8 @@ export function CommandPalette({
     | undefined;
   /** Open tabs, so the palette can switch to one by name or destination. */
   openTabs?: { id: number; title: string; detail: string; onSelect: () => void }[] | undefined;
+  /** Further actions contributed by other features (listed after the built-in actions). */
+  extra?: PaletteItem[] | undefined;
   /** Picking mode: only destinations are listed, and choosing one calls `onPick`. */
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
@@ -376,8 +382,10 @@ export function CommandPalette({
     });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
+    // terminal input: contributed actions
+    list.push(...(extra ?? []));
     return list;
-  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs]);
+  }, [hosts.value, snippets.value, hasTerminal, terminalConnected, onConnect, onSnippet, onLocal, onSftp, onAction, onToggleTheme, onNavigate, workspace, layouts, pick, broadcast, onToggleBroadcast, onDeployKey, recent.value, openTabs, extra]);
 
   const results = useMemo(() => {
     const scored = items
