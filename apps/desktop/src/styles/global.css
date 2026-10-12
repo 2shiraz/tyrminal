@@ -1637,7 +1637,7 @@ kbd,
   position: relative;
   flex: 1;
   min-width: 0;
-  background: var(--term-bg, var(--bg-inset));
+  background: var(--term-bg, var(--scheme-bg, var(--bg-inset)));
 }
 
 .pane {
@@ -1646,7 +1646,7 @@ kbd,
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--term-bg, var(--bg-inset));
+  background: var(--term-bg, var(--scheme-bg, var(--bg-inset)));
   transition: box-shadow var(--motion-fast) var(--ease-out);
 }
 
@@ -2356,25 +2356,11 @@ mark {
   box-shadow: var(--glow-accent);
 }
 
-.scheme-swatch {
-  display: grid;
-  gap: 4px;
-  height: 52px;
-  padding: 7px 8px;
+.scheme-preview {
+  display: block;
+  width: 100%;
+  height: auto;
   border-radius: var(--radius-sm);
-  font: 10px / 1.2 var(--font-mono);
-  overflow: hidden;
-}
-
-.scheme-dots {
-  display: flex;
-  gap: 3px;
-}
-
-.scheme-dots span {
-  width: 9px;
-  height: 9px;
-  border-radius: 3px;
 }
 
 .scheme-name {
@@ -2394,6 +2380,44 @@ mark {
   overflow: hidden;
 }
 
+/* ===================================================================== terminal chrome */
+
+/* The active terminal tab and, while a terminal is in front, the status bar take the terminal
+   scheme's colours, so the terminal reads as part of the window rather than a box pasted into it.
+   Text uses the scheme's foreground, which every scheme keeps at 4.5:1 on its background. */
+.tab:not(.tab-page)[aria-selected="true"],
+.main:has(.workspace:not([hidden])) .statusbar {
+  --text: var(--scheme-fg);
+  --text-muted: var(--scheme-fg);
+  --text-faint: color-mix(in srgb, var(--scheme-fg) 80%, var(--scheme-bg));
+  --accent-text: var(--scheme-fg);
+  --border: color-mix(in srgb, var(--scheme-fg) 18%, transparent);
+  --border-subtle: color-mix(in srgb, var(--scheme-fg) 10%, transparent);
+  --bg-hover: color-mix(in srgb, var(--scheme-fg) 8%, transparent);
+  --bg-active: color-mix(in srgb, var(--scheme-fg) 14%, transparent);
+  --success: var(--scheme-green);
+  --success-soft: color-mix(in srgb, var(--scheme-green) 22%, transparent);
+  --warning: var(--scheme-yellow);
+  --warning-soft: color-mix(in srgb, var(--scheme-yellow) 22%, transparent);
+  --danger: var(--scheme-red);
+  --danger-soft: color-mix(in srgb, var(--scheme-red) 22%, transparent);
+  color: var(--scheme-fg);
+}
+
+.tab:not(.tab-page)[aria-selected="true"],
+.tab:not(.tab-page)[aria-selected="true"]::after {
+  background: var(--scheme-bg);
+}
+
+.main:has(.workspace:not([hidden])) .statusbar {
+  background: var(--scheme-bg);
+  border-top-color: var(--border-subtle);
+}
+
+.main:has(.workspace:not([hidden])) .status-button[aria-pressed="true"] {
+  background: var(--bg-active);
+}
+
 /* ===================================================================== terminal */
 
 .terminal-host {
@@ -2411,6 +2435,11 @@ mark {
 
 .terminal-host .xterm {
   height: 100%;
+}
+
+/* xterm's own stylesheet paints the viewport black; below the last row that showed as a strip. */
+.terminal-host .xterm .xterm-viewport {
+  background-color: var(--term-bg, var(--scheme-bg));
 }
 
 .terminal-host .xterm-viewport {

@@ -1,6 +1,7 @@
 import type { Preferences } from "@tyrminal/contracts";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
+import { schemeById } from "../features/terminal/schemes";
 import { diagnostics, preferences as prefsApi } from "../lib/ipc";
 
 const DEFAULTS: Preferences = {
@@ -76,6 +77,17 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     root.dataset.theme = resolvedTheme;
     root.dataset.reduceMotion = String(prefs.reduceMotion);
   }, [resolvedTheme, prefs.reduceMotion]);
+
+  // The chrome around a terminal (its tab, the status bar) takes the terminal scheme's colours.
+  useEffect(() => {
+    const scheme = schemeById(prefs.terminal.scheme);
+    const style = document.documentElement.style;
+    style.setProperty("--scheme-bg", scheme.background);
+    style.setProperty("--scheme-fg", scheme.foreground);
+    style.setProperty("--scheme-green", scheme.green);
+    style.setProperty("--scheme-yellow", scheme.yellow);
+    style.setProperty("--scheme-red", scheme.red);
+  }, [prefs.terminal.scheme]);
 
   const update = useCallback((change: (current: Preferences) => Preferences) => {
     setPrefs((current) => {
