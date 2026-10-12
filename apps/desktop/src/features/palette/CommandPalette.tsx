@@ -46,6 +46,7 @@ import { msgD } from "../../lib/messages-d";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
+import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
 
 /** A palette entry; other features contribute entries through the `extra` prop. */
@@ -360,6 +361,17 @@ export function CommandPalette({
     list.push(nav("keychain", <IconKeyRound size={16} />));
     list.push(nav("knownHosts", <IconFingerprint size={16} />));
     list.push(nav("settings", <IconSettings size={16} />, "settings"));
+    list.push({
+      id: "nav-shortcuts",
+      group: msg.palette.groupNavigate,
+      label: msgC.keys.title,
+      keywords: "keybindings keys hotkeys",
+      icon: <IconSettings size={16} />,
+      run: () => {
+        requestShortcutsSection();
+        onNavigate("settings");
+      },
+    });
     // agent B: tunnels and history
     list.push(nav("tunnels", <IconRoute size={16} />));
     // terminal input: contributed actions

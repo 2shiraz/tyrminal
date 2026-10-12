@@ -268,8 +268,8 @@ function remapLayout(layout: Layout, map: Map<number, number>): Layout {
  * new session of its own (nothing typed in the original is repeated). Refused (unchanged) when the
  * copy would exceed MAX_PANES.
  */
-/** `folderOf`: where a copied pane's shell should start (its source shell's reported folder). */
-export function duplicateTab(ws: Workspace, tabId: number, folderOf?: (paneId: number) => string | undefined): Workspace {
+/** `startIn`: the folder each copied pane starts in, when its shell reports one. */
+export function duplicateTab(ws: Workspace, tabId: number, startIn: (paneId: number) => string | undefined = () => undefined): Workspace {
   const index = ws.tabs.findIndex((t) => t.id === tabId);
   const tab = ws.tabs[index];
   if (!tab) return ws;
@@ -279,8 +279,8 @@ export function duplicateTab(ws: Workspace, tabId: number, folderOf?: (paneId: n
   const map = new Map<number, number>();
   for (const id of ids) {
     const source = ws.panes[id] as Pane;
-    const startIn = folderOf?.(id);
-    const seed: PaneSeed = { target: source.target, label: source.label, identity: source.identity, ...(startIn ? { startIn } : {}) };
+    const folder = source.pending ? undefined : startIn(id);
+    const seed: PaneSeed = { target: source.target, label: source.label, identity: source.identity, ...(folder ? { startIn: folder } : {}) };
     const [after, created] = newPane(next, seed, source.pending);
     next = after;
     map.set(id, created);
@@ -473,24 +473,20 @@ function toTarget(target: TerminalTarget): LayoutTarget {
   return target.kind === "ssh" ? { kind: "ssh", hostId: target.hostId } : { kind: "local" };
 }
 
-/** A pane's terminal destination; SFTP tabs are never part of a template or a detached window. */
-function terminalTarget(pane: Pane | undefined): TerminalTarget | null {
-  return pane && pane.target.kind !== "sftp" ? pane.target : null;
-}
-
 /**
  * The open tabs as a template: arrangement, destinations, tab names and focus. Only that: no
  * session, output, command or directory is part of a template.
  */
 export function templateTabs(ws: Workspace): LayoutTab[] {
-  const terminalTabs = ws.tabs.filter((tab) => panesOf(tab.layout).every((id) => terminalTarget(ws.panes[id]) !== null));
-  return terminalTabs.map((tab) => {
+  // SFTP tabs hold no terminal destination and are not part of a template.
+  const terminalOnly = (tab: Tab) => panesOf(tab.layout).every((id) => ws.panes[id]?.target.kind !== "sftp");
+  return ws.tabs.filter(terminalOnly).map((tab) => {
     const ids = panesOf(tab.layout);
     const index = new Map(ids.map((id, i) => [id, i]));
     const directories = ids.map((id) => ws.panes[id]?.directory ?? null);
     return {
       title: tab.customTitle,
-      panes: ids.map((id) => toTarget(terminalTarget(ws.panes[id]) as TerminalTarget)),
+      panes: ids.map((id) => toTarget((ws.panes[id] as Pane).target as TerminalTarget)),
       layout: toNode(tab.layout, index),
       focused: index.get(tab.focused) ?? 0,
       focusMode: tab.focusMode,
@@ -574,9 +570,8 @@ export function detachInput(ws: Workspace, tab: Tab, sessionOf: (pane: number) =
     layout: toNode(tab.layout, index),
     panes: ids.map((id) => {
       const p = ws.panes[id] as Pane;
-      const target = terminalTarget(p);
-      if (!target) throw new Error("An SFTP tab cannot move to another window.");
-      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(target) };
+      // Only tabs whose every pane has a live terminal session are detached.
+      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(p.target as TerminalTarget) };
     }),
     focused: index.get(tab.focused) ?? 0,
   };

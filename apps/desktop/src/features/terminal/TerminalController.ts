@@ -363,7 +363,7 @@ export class TerminalController {
    * tab's folder): a local shell starts there; an SSH shell is sent `cd` to it at its first
    * prompt, and only when that prompt carries the shell integration's mark.
    */
-  async start(target: TerminalTarget, attachToken?: string, startIn: string | null = null): Promise<void> {
+  async start(target: TerminalTarget, startIn: string | null = null, attachToken?: string): Promise<void> {
     this.target = target;
     await fontsReady(this.prefs);
     if (this.disposed) return;

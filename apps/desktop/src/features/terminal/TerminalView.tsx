@@ -33,8 +33,8 @@ import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
-import { encodingById } from "./encoding";
 import type { CommandRecord } from "./commandOutput";
+import { encodingById } from "./encoding";
 import { schemeById } from "./schemes";
 import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
 
@@ -310,7 +310,7 @@ export function TerminalView(props: TerminalViewProps) {
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
     // A handed-over session is taken over once; a later attempt (reconnect) never reuses the token.
     const token = attempt === 0 ? handlers.current.attachToken : undefined;
-    const timer = window.setTimeout(() => void controller.start(target, token, attempt === 0 ? (props.startIn ?? null) : null), 0);
+    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null, token), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();

@@ -438,13 +438,13 @@ test("broadcast target review: a pane that changes during the review blocks the 
 
 async function openSettings(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "Shortcuts and input" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Keyboard shortcuts" })).toBeVisible();
 }
 
-test("keyboard customization: rebinding, terminal keys refused, conflicts refused, reset", async ({ page }) => {
+test("keyboard customization: rebinding, terminal keys refused, removal, reset all", async ({ page }) => {
   await openApp(page);
   await openSettings(page);
-  const list = page.getByRole("list", { name: "Application shortcuts" });
+  const list = page.getByRole("group", { name: "Application shortcuts" });
   const row = (action: string) => list.locator(`li[data-action="${action}"]`);
 
   // Ctrl with a single key belongs to the terminal.
@@ -455,11 +455,11 @@ test("keyboard customization: rebinding, terminal keys refused, conflicts refuse
   // A plain key is refused too.
   await page.keyboard.press("KeyP");
   await expect(row("palette").getByRole("alert")).toHaveText(/belongs to the terminal/);
-  // A shortcut another action uses is refused.
-  await page.keyboard.press("Control+Shift+KeyF");
-  await expect(row("palette").getByRole("alert")).toHaveText("That shortcut is already used for Find in terminal.");
-  // While recording, shortcuts do not run (Ctrl+Shift+K did not open the palette).
-  await expect(page.getByRole("dialog", { name: /Command palette|Type a command/ })).toHaveCount(0);
+  // While recording, shortcuts do not run (Ctrl+Shift+T, a new local terminal elsewhere, did nothing).
+  await page.keyboard.press("Control+Shift+KeyT");
+  await expect(row("palette").getByRole("alert")).toContainText("already used for New local terminal");
+  await expect(page.locator(".tab:not(.tab-page)")).toHaveCount(0);
+  await page.getByRole("button", { name: "Change shortcut for Command palette" }).click();
   await page.keyboard.press("Alt+KeyP");
   await expect(row("palette")).toContainText("Alt");
   await expect(row("palette")).toContainText("P");
@@ -482,6 +482,81 @@ test("keyboard customization: rebinding, terminal keys refused, conflicts refuse
   await expect(row("palette")).toContainText("Ctrl");
   await page.keyboard.press("Control+Shift+KeyK");
   await expect(page.getByRole("combobox", { name: /Type a command/ })).toBeFocused();
+});
+
+test("keyboard shortcuts: grouped and searchable, reserved chords refused, conflicts swap or cancel, per-row reset", async ({ page }) => {
+  await openApp(page);
+  // Reachable from the command palette: the section scrolls into view with its search focused.
+  await page.keyboard.press("Control+Shift+KeyK");
+  await page.getByRole("combobox", { name: /Type a command/ }).fill("keyboard shortcuts");
+  await page.keyboard.press("Enter");
+  const search = page.getByRole("searchbox", { name: "Search shortcuts" });
+  await expect(search).toBeFocused();
+  // And from the Settings navigation.
+  await expect(page.locator(".settings-nav").getByRole("button", { name: "Keyboard shortcuts" })).toBeVisible();
+
+  const list = page.getByRole("group", { name: "Application shortcuts" });
+  const row = (action: string) => list.locator(`li[data-action="${action}"]`);
+  // Every action is listed, in its group.
+  for (const group of ["Tabs and panes", "Terminal", "Files", "Snippets", "Navigation"]) {
+    await expect(list.getByRole("heading", { level: 3, name: group })).toBeVisible();
+  }
+  await expect(list.getByRole("list", { name: "Files" }).locator("li")).toHaveCount(1);
+  await expect(list.getByRole("list", { name: "Tabs and panes" })).toContainText("Go to tab 1–9");
+  expect(await list.locator("li[data-action]:not([data-action=tabNumber])").count()).toBe(29);
+
+  // Search filters by name and by keys; no match says so.
+  await search.fill("zoom");
+  await expect(list.locator("li[data-action]")).toHaveCount(3);
+  await expect(list.getByRole("heading", { level: 3 })).toHaveText(["Terminal"]);
+  await search.fill("Ctrl+Shift+K");
+  await expect(list.locator("li[data-action]")).toHaveCount(1);
+  await expect(row("palette")).toBeVisible();
+  await search.fill("no such action");
+  await expect(list).toContainText("No shortcut matches.");
+  await search.fill("");
+
+  // Chords the system keeps are refused with the reason; so are the tab-number keys.
+  await page.getByRole("button", { name: "Change shortcut for Lock vault" }).click();
+  await page.keyboard.press("Alt+F4");
+  await expect(row("lock").getByRole("alert")).toHaveText("The system keeps that shortcut (close the window).");
+  await page.keyboard.press("Alt+Digit3");
+  await expect(row("lock").getByRole("alert")).toHaveText("The system keeps that shortcut (go to a tab by number).");
+  await page.keyboard.press("Escape");
+  await expect(row("lock")).toContainText("Ctrl");
+
+  // A chord another action uses: cancel keeps both as they were.
+  await page.getByRole("button", { name: "Change shortcut for Command palette" }).click();
+  await page.keyboard.press("Control+Shift+KeyF");
+  await expect(row("palette").getByRole("alert")).toContainText("That shortcut is already used for Find in terminal.");
+  await row("palette").getByRole("button", { name: "Cancel" }).click();
+  await expect(row("palette").getByRole("alert")).toHaveCount(0);
+  await expect(row("palette")).toContainText("K");
+  await expect(row("find")).toContainText("F");
+
+  // Swap: the palette takes Ctrl+Shift+F and Find takes the palette's Ctrl+Shift+K.
+  await page.getByRole("button", { name: "Change shortcut for Command palette" }).click();
+  await page.keyboard.press("Control+Shift+KeyF");
+  await row("palette").getByRole("button", { name: "Swap with Find in terminal" }).click();
+  await expect(row("palette").locator(".visually-hidden")).toHaveText("Ctrl+Shift+F");
+  await expect(row("find").locator(".visually-hidden")).toHaveText("Ctrl+Shift+K");
+  await expect
+    .poll(async () => JSON.stringify((await calls(page, "prefs_set")).at(-1)?.args ?? null))
+    .toContain('"action":"find","key":"k","ctrl":true,"alt":false,"shift":true,"meta":false');
+  await page.keyboard.press("Control+Shift+KeyF");
+  await expect(page.getByRole("combobox", { name: /Type a command/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // Per-row reset puts back the default of that row only.
+  await row("find").getByRole("button", { name: "Reset shortcut for Find in terminal" }).click();
+  await expect(row("find").locator(".visually-hidden")).toHaveText("Ctrl+Shift+F");
+  await expect(row("palette").locator(".visually-hidden")).toHaveText("Ctrl+Shift+F");
+  await row("palette").getByRole("button", { name: "Reset shortcut for Command palette" }).click();
+  await expect(row("palette").locator(".visually-hidden")).toHaveText("Ctrl+Shift+K");
+  await expect(page.getByRole("button", { name: "Reset all shortcuts" })).toHaveCount(0);
+
+  // Alt as Meta is described in the same section (on macOS it is the Option-as-Meta switch).
+  await expect(page.locator("#settings-shortcuts")).toContainText("Alt sends Meta");
 });
 
 test("highlighting: words and IP addresses are colored on screen; the text and input are unchanged", async ({ page }) => {
@@ -670,8 +745,8 @@ test("palette and new-tab menu: switch to an open tab by name; reopen a recent c
   expect(recent).toBeGreaterThan(0);
   await page.getByRole("button", { name: "New tab" }).click();
   const menu = page.getByRole("menu", { name: "New tab" });
-  // Local terminal, SFTP and Hosts come before the recent connections.
-  const first = menu.getByRole("menuitem").nth(3);
+  // The first recent connection, after the fixed entries (local terminal, SFTP, connect).
+  const first = menu.getByRole("menuitem").filter({ hasNotText: /^(Local terminal|SFTP|Connect)/ }).first();
   const label = (await first.textContent())!.trim();
   await first.click();
   await expect(terminalTabs(page)).toHaveCount(3);

@@ -300,6 +300,10 @@ Home's quick connect uses). Edits outside `features/hosts`:
   one line in `crates/core/src/preferences.rs` `sanitize` that calls `layouts::sanitize_workspace`. Settings
   shows them through one `<WorkspaceSettings />` line (plus its import) in `SettingsViews.tsx`.
   Files without the field load as before.
+- **C → A (done, owner request "settings to set keybinds"):** `SettingsViews.tsx` gets one more
+  entry in its section list (`shortcuts`, labelled "Keyboard shortcuts", plus the `msgC` import), so
+  the nav scrolls to the shortcuts section. The section itself, with every action grouped, search,
+  recording, swap on conflict, resets and reserved system chords, stays in `WorkspaceSettings.tsx`.
 - **C → A (done):** the two axe findings in `TabStrip.tsx`: the tablist now holds only tabs (new-tab
   and layout buttons sit beside it), and the close control is a non-focusable pointer target
   (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in
@@ -354,7 +358,8 @@ Home's quick connect uses). Edits outside `features/hosts`:
   pane's target; `TerminalView.tsx`: one `onToken` callback and a `<TokenMenu>`; `AppShell.tsx`: one
   `<NewHostFromTerminal>` line (prefilled host editor from a clicked address).
 - `lib/shortcuts.ts`: `previousCommand`/`nextCommand` at the end of the union and both maps (marked);
-  `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines. `tests/ui/behavior.spec.ts`
+  `lib/messages-c.ts`: their two labels; `AppShell.tsx`: two `case` lines; `WorkspaceSettings.tsx`: both in the
+  "terminal" shortcut group. `tests/ui/behavior.spec.ts`
   `clickTerminalText` finds text by position (decorated cells are one element per cell).
 - `scripts/check-contrast.mjs`: one marked block runs `scripts/check-highlight-contrast.mjs` (highlight
   colors of every scheme at AA, computed by the app's palette code).
@@ -378,15 +383,10 @@ the terminal-input branch (#9) to keep when they merge:
 - `features/terminal/TerminalView.tsx`: `AuthDialog` and `Fingerprint` are exported (no other change).
 - `Sidebar.tsx`, `HomeView.tsx`, `CommandPalette.tsx`: one optional `onSftp` entry each.
 - `AppShell.tsx`: `openSftp`; the side panels and status-bar session details are hidden on an SFTP tab.
-
-**Merge of the SFTP tab (#18) into the terminal-input branch** (keep these when merging):
-
-- `app/workspace.ts`: saved layouts leave SFTP tabs out (a template holds terminal destinations only),
-  and `detachInput` refuses an SFTP tab (it has no session to hand over; `detachTab` already says
-  "not connected" first). The save dialog's tab/pane count is taken from what is saved.
-- `app/AppShell.tsx`: `split` ignores an SFTP pane (covers the tab menu, pane headers and shortcuts);
-  the status-bar snippets toggle stays hidden on an SFTP tab.
-- `components/layout/PaneGrid.tsx`: the flat pane grid renders `SftpView` for an `sftp` pane.
-- `tests/ui/sftp.spec.ts` closes the tab through `.tab-close`; `tests/ui/workspaces.spec.ts` picks the
-  first recent connection after the new "Open SFTP" menu item, and checks that an SFTP tab is left
-  out of a saved layout.
+- **C → SFTP tab (done by C when merging #18 into #7):** SFTP tabs are left out of layout templates
+  (`templateTabs`) and cannot be split through C's `split()` (pane-limit path); detach refuses
+  them (no live terminal session). `tests/ui/sftp.spec.ts` closes the tab through `.tab-close`
+  inside the tab, as `tunnels.spec.ts` does, since the close control is no longer a focusable
+  button; `workspaces.spec.ts` picks the first recent connection by label instead of menu index.
+- **Terminal-input branch (keep when merging):** the save-layout dialog's tab/pane count is taken from
+  `templateTabs` (SFTP tabs left out), and `workspaces.spec.ts` checks that an SFTP tab is not saved.

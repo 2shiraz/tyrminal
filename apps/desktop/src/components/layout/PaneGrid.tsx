@@ -171,7 +171,11 @@ export function PaneGrid({
               )}
               <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
                 {pane.target.kind === "sftp" ? (
-                  <SftpView visible={visible} onIndicator={(indicator) => onPatch(id, { indicator })} onOpenKnownHosts={onOpenKnownHosts} />
+                  <SftpView
+                    visible={visible}
+                    onIndicator={(indicator) => onPatch(id, { indicator })}
+                    onOpenKnownHosts={onOpenKnownHosts}
+                  />
                 ) : (
                 <TerminalView
                   paneId={id}
