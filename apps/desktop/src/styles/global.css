@@ -4491,6 +4491,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   display: inline-flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
 
 /* ---------- press and hover feedback (docs/design/interaction-polish.md, section 1) ----------
    Hover appears at once and fades out over 120 ms. Pressed (data-pressed, set on pointer down by
