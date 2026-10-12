@@ -1078,7 +1078,6 @@ kbd,
 
 .dialog::backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(3px);
   animation: fade-in var(--motion-base) var(--ease-out);
 }
 
@@ -1095,41 +1094,42 @@ kbd,
   }
 }
 
+/* Boxy dialogs (revamp §7): a 44 px title strip, a 16 px body, a footer strip for the actions. */
 .dialog-body {
   display: grid;
   gap: var(--space-4);
-  padding: var(--space-5);
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 .dialog-head {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--strip-height-pane);
+  margin: 0 calc(-1 * var(--space-4));
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
 }
 
+/* The icon is a tinted glyph in the strip, not a tile. */
 .dialog-icon {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--accent-soft);
   color: var(--accent-text);
 }
 
 .dialog-icon[data-tone="danger"] {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 
 .dialog-icon[data-tone="warning"] {
-  background: var(--warning-soft);
   color: var(--warning);
 }
 
 .dialog-head h2 {
-  padding-top: 6px;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .dialog-actions {
@@ -1140,23 +1140,24 @@ kbd,
   margin-top: var(--space-1);
 }
 
-/* In a dialog taller than the window, the actions stay in view while the content scrolls. */
+/* The actions sit in a footer strip, which stays in view while a tall dialog's content scrolls. */
 .dialog .dialog-actions {
   position: sticky;
-  bottom: calc(-1 * var(--space-5));
-  margin-inline: calc(-1 * var(--space-5));
-  margin-bottom: calc(-1 * var(--space-5));
-  padding: var(--space-3) var(--space-5) var(--space-5);
-  background: var(--bg-overlay);
+  bottom: calc(-1 * var(--space-4));
+  margin-inline: calc(-1 * var(--space-4));
+  margin-bottom: calc(-1 * var(--space-4));
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--box-rule);
+  background: var(--bg-strip);
 }
 
 .menu {
   position: fixed;
   z-index: 60;
   min-width: 200px;
-  padding: 5px;
+  padding: var(--space-1);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-3);
   transform-origin: top left;
@@ -1176,10 +1177,10 @@ kbd,
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 32px;
+  height: var(--row-dense);
   padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-inner);
   background: transparent;
   color: var(--text);
   font-size: var(--text-sm);
@@ -1234,9 +1235,12 @@ kbd,
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-dialog);
   background: var(--bg-overlay);
-  box-shadow: var(--shadow-3);
+  /* A 2 px status edge on the left, as notices. */
+  box-shadow:
+    inset 2px 0 0 var(--toast-edge, var(--accent)),
+    var(--shadow-3);
   font-size: var(--text-sm);
   animation: toast-in var(--duration-fast) var(--ease-out);
 }
@@ -1247,8 +1251,16 @@ kbd,
   color: var(--accent-text);
 }
 
+.toast[data-tone="success"] {
+  --toast-edge: var(--success);
+}
+
 .toast[data-tone="success"] > svg {
   color: var(--success);
+}
+
+.toast[data-tone="danger"] {
+  --toast-edge: var(--danger);
 }
 
 .toast[data-tone="danger"] > svg {
@@ -1281,9 +1293,9 @@ kbd,
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
   background: color-mix(in srgb, var(--bg-sidebar) 88%, transparent);
   border-right: 1px solid var(--border-subtle);
   overflow: hidden auto;
@@ -1294,7 +1306,7 @@ kbd,
   align-items: center;
   gap: 10px;
   height: 36px;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-3);
   margin-bottom: var(--space-2);
 }
 
@@ -1312,9 +1324,9 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  height: 34px;
-  margin-bottom: var(--space-3);
+  width: calc(100% - 2 * var(--space-2));
+  height: var(--control-height);
+  margin: 0 var(--space-2) var(--space-3);
   padding: 0 var(--space-2) 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -1334,8 +1346,13 @@ kbd,
   margin-left: auto;
 }
 
+/* Group labels are 28 px strips. */
 .nav-group-label {
-  padding: var(--space-3) var(--space-2) 6px;
+  display: flex;
+  align-items: center;
+  height: var(--row-dense);
+  margin-top: var(--space-2);
+  padding: 0 var(--space-3);
 }
 
 .nav-item {
@@ -1344,10 +1361,10 @@ kbd,
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 34px;
-  padding: 0 var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -1364,20 +1381,15 @@ kbd,
   color: var(--text);
 }
 
+/* The current page: the active fill and a 2 px accent edge on the left, as a selected row. */
 .nav-item[aria-current="page"] {
   background: var(--bg-active);
+  box-shadow: var(--edge-select);
   color: var(--text);
 }
 
-.nav-item[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
+.nav-item:focus-visible {
+  outline-offset: -2px;
 }
 
 .nav-item svg {
@@ -1400,13 +1412,14 @@ kbd,
   display: grid;
   gap: 2px;
   margin-top: auto;
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+  border-top: var(--box-rule);
 }
 
 /* The version, small and muted under the footer actions; it opens Settings → About. */
 .sidebar-version {
   justify-self: start;
+  margin-left: var(--space-1);
   padding: 2px var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
@@ -1437,6 +1450,11 @@ kbd,
   padding: 0;
 }
 
+.shell[data-sidebar="collapsed"] .brand {
+  justify-content: center;
+  padding: 0;
+}
+
 .main {
   display: grid;
   grid-template-rows: var(--tabstrip-height) minmax(0, 1fr) var(--statusbar-height);
@@ -1448,10 +1466,10 @@ kbd,
 
 .tabstrip {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: stretch;
+  gap: 0;
   min-width: 0;
-  padding: 0 var(--space-2);
+  padding: 0;
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;
@@ -1469,11 +1487,10 @@ kbd,
   gap: var(--space-2);
   flex: 0 1 220px;
   min-width: 120px;
-  height: 34px;
   padding: 0 4px 0 var(--space-3);
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  border: 0;
+  border-right: var(--box-rule);
+  border-radius: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -1487,10 +1504,15 @@ kbd,
   color: var(--text);
 }
 
+/* The active tab takes the page colour and a 2 px accent line on its top edge (as the live SFTP pane). */
 .tab[aria-selected="true"] {
   background: var(--bg-surface);
-  border-color: var(--border-subtle);
+  box-shadow: var(--edge-live);
   color: var(--text);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .tab[aria-selected="true"]::after {
@@ -1587,7 +1609,7 @@ kbd,
 .tab-new {
   flex: none;
   align-self: center;
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
 .tab-spacer {
@@ -1889,7 +1911,7 @@ kbd,
   gap: var(--space-3);
   min-width: 0;
   padding: 0 var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  border-top: var(--box-rule);
   background: var(--bg-sidebar);
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -1903,10 +1925,11 @@ kbd,
   min-width: 0;
 }
 
+/* Items are separated by full-height 1 px rules, as cells in a strip. */
 .status-sep {
+  align-self: stretch;
   width: 1px;
-  height: 12px;
-  background: var(--border);
+  background: var(--border-subtle);
 }
 
 .status-button {
@@ -1953,16 +1976,15 @@ kbd,
 
 .palette::backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(2px);
 }
 
 .palette-input {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: 54px;
-  padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  height: var(--strip-height-pane);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
   color: var(--text-faint);
 }
 
@@ -1972,7 +1994,7 @@ kbd,
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   user-select: text;
 }
 
@@ -1983,20 +2005,29 @@ kbd,
 .palette-list {
   max-height: min(420px, 55vh);
   overflow: auto;
-  padding: 6px;
+  padding: 0 0 var(--space-1);
 }
 
+/* Groups are 28 px strips; items are square 28 px rows with the selection edge. */
 .palette-group {
-  padding: 10px 10px 4px;
+  display: flex;
+  align-items: center;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+}
+
+.palette-group:not(:first-child) {
+  border-top: var(--box-rule);
 }
 
 .palette-item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-height: 40px;
-  padding: 6px 10px;
-  border-radius: var(--radius-control);
+  gap: var(--space-2);
+  min-height: var(--row-dense);
+  padding: 2px var(--space-3);
   color: var(--text);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -2009,6 +2040,7 @@ kbd,
 
 .palette-item[aria-selected="true"] {
   background: var(--bg-selected);
+  box-shadow: var(--edge-select);
 }
 
 .palette-item[aria-selected="true"] > svg {
@@ -2032,12 +2064,12 @@ kbd,
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  height: 36px;
-  padding: 0 var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-sidebar);
+  height: var(--strip-height);
+  padding: 0 var(--space-3);
+  border-top: var(--box-rule);
+  background: var(--bg-strip);
   color: var(--text-faint);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
 }
 
 .palette-foot span {
@@ -2950,7 +2982,7 @@ button[data-tooltip]::after {
   top: calc(100% + 6px);
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-inner);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-2);
   color: var(--text);
