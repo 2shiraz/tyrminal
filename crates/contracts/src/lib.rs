@@ -20,6 +20,8 @@ mod inventory;
 mod privilege;
 // identity deletion (KEY-15/16, BUILD_SPEC §10.2)
 mod identity_removal;
+// compromised-password check (SEC-11)
+mod password_check;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
@@ -31,3 +33,5 @@ pub use inventory::*;
 pub use privilege::*;
 // identity deletion (KEY-15/16, BUILD_SPEC §10.2)
 pub use identity_removal::*;
+// compromised-password check (SEC-11)
+pub use password_check::*;

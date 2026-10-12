@@ -3118,6 +3118,44 @@ impl VaultService {
     }
 }
 
+// compromised-password check (SEC-11)
+impl VaultService {
+    /// Every password the vault stores, with where it lives: host passwords, identity
+    /// passwords, proxy passwords and remembered key passphrases. Copies in zeroizing buffers,
+    /// for the check only.
+    pub(crate) async fn stored_secrets(&self) -> Result<Vec<crate::password_check::StoredSecret>, IpcError> {
+        use crate::password_check::StoredSecret;
+        use tyrminal_contracts::StoredPasswordKind;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let copy = |kind, label: &str, secret: &Zeroizing<String>| StoredSecret {
+            kind,
+            label: label.to_owned(),
+            secret: Zeroizing::new(secret.as_str().to_owned()),
+        };
+        let mut out = Vec::new();
+        for host in open.hosts.values() {
+            if let StoredAuth::Password { password } = &host.record.auth {
+                out.push(copy(StoredPasswordKind::Host, &host.record.label, password));
+            }
+            if let Some(password) = host.record.connection.proxy.as_ref().and_then(|p| p.password.as_ref()) {
+                out.push(copy(StoredPasswordKind::Proxy, &host.record.label, password));
+            }
+        }
+        for identity in open.identities.values() {
+            if let Some(password) = &identity.record.password {
+                out.push(copy(StoredPasswordKind::Identity, &identity.record.label, password));
+            }
+        }
+        for key in open.ssh_keys.values() {
+            if let Some(passphrase) = &key.record.passphrase {
+                out.push(copy(StoredPasswordKind::KeyPassphrase, &key.record.label, passphrase));
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod suspend_tests {
     use super::*;

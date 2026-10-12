@@ -127,6 +127,9 @@ const COMMANDS: &[&str] = &[
     "session_insert_identity_password",
     // identity deletion (BUILD_SPEC §10.2)
     "identity_usage",
+    // compromised-password check (SEC-11)
+    "password_check_status",
+    "password_check_run",
 ];
 
 fn main() {

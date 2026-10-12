@@ -476,6 +476,9 @@ pub struct Preferences {
     pub local_shell: Option<String>,
     /// Applications chosen (in a native dialog) for editing remote files, by extension.
     pub editor_apps: Vec<EditorApp>,
+    // compromised-password check (SEC-11)
+    /// Off by default; see `PasswordCheckPreferences`.
+    pub password_check: crate::PasswordCheckPreferences,
 }
 
 /// An application used to edit remote files with a given extension. Added only through the

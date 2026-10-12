@@ -23,6 +23,8 @@ import { useAction, useLoaded } from "../../lib/useAsync";
 import { SCHEMES, lowContrastColors } from "../terminal/schemes";
 import { ExportBackupButton, RestoreBackupDialog } from "../vault/BackupRestore";
 import { RecoveryKeyStep } from "../vault/VaultScreens";
+// compromised-password check (SEC-11)
+import { PasswordCheckSetting } from "../password-check/PasswordCheckSetting";
 
 // The preview pulls in the terminal emulator; load it only when Settings opens.
 const TerminalPreview = lazy(() => import("../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
@@ -370,6 +372,8 @@ export function SettingsView() {
                 </button>
               </div>
               <QuickUnlockSetting key={quickKey} onEnable={() => setDialog("quick")} />
+              {/* compromised-password check (SEC-11) */}
+              <PasswordCheckSetting />
             </section>
 
             <section id="settings-backup" className="settings-section" aria-labelledby="settings-backup-title">

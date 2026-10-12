@@ -406,3 +406,10 @@ export const identityDeletion = {
   remove: (id: string, references: import("@tyrminal/contracts").IdentityReferences | null) =>
     call<number>("identity_delete", { id, references }),
 };
+
+// compromised-password check (SEC-11)
+export const passwordCheck = {
+  status: () => call<import("@tyrminal/contracts").PasswordCheckStatus>("password_check_status"),
+  /** Sends one 5-character hash prefix per distinct stored password; refused while off. */
+  run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
+};

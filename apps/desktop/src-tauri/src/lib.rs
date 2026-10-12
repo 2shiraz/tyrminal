@@ -245,6 +245,9 @@ pub fn run() {
             commands::privilege::session_insert_identity_password,
             // identity deletion (BUILD_SPEC §10.2)
             commands::inventory::identity_usage,
+            // compromised-password check (SEC-11)
+            commands::password_check::password_check_status,
+            commands::password_check::password_check_run,
         ])
         .build(tauri::generate_context!());
 

@@ -78,3 +78,4 @@ The release-policy check separately asserts no HTTP client in the desktop featur
 | Item | Version | License | Reason |
 |---|---|---|---|
 | `@axe-core/playwright` (pulls `axe-core` 4.13.x), UI tests only | =4.13.0 | MPL-2.0 | Automated WCAG 2.2 A/AA audit of the main screens (`tests/ui/accessibility.spec.ts`); never shipped |
+| `sha1` in `tyrminal-core` (already in the tree through `ssh-key`; same `digest` 0.11 as `sha2`) | 0.11.0 | MIT OR Apache-2.0 | Compromised-password check (SEC-11): the k-anonymity range protocol is defined over SHA-1, so this is a protocol requirement, not a security choice (ADR 0009) |

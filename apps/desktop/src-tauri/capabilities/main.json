@@ -120,6 +120,8 @@
     "allow-env-effective",
     "allow-session-identity",
     "allow-session-insert-identity-password",
-    "allow-identity-usage"
+    "allow-identity-usage",
+    "allow-password-check-status",
+    "allow-password-check-run"
   ]
 }

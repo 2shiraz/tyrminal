@@ -16,6 +16,9 @@ export interface MockOptions {
   noWebgl?: boolean;
   /** Deliver a vault status event before the first status request returns. */
   statusEventFirst?: boolean;
+  // compromised-password check (SEC-11)
+  /** Pretend the build can make range requests (the real build cannot yet). */
+  passwordCheckAvailable?: boolean;
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {

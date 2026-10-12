@@ -13,10 +13,13 @@ earlier parallel identities implementation on this branch was reverted (commits 
 
 | Identity deletion safety (BUILD_SPEC §10.2): refused while in use unless reassigned or removed, with a preview of each host's fallback | `crates/core/tests/identity_deletion.rs` (real vault: preview, refusal, reassign, remove, reload); D's `core:inventory` updated for the explicit choice; `tests/ui/identity-deletion.spec.ts` 2/2 (mock). D's `inventory_lab` already covers sign-in following an identity edit, and `tests/native/privilege.test.mjs` signs in with an identity through the real UI | KEY-15, KEY-16 |
 
-## Next
+| SEC-11 local part: SHA-1 prefix only to a pluggable range source, padding-aware strict parser, opt-in (off by default), https-only configurable endpoint, settings UI stating what is sent | `core:password_check::tests` 3/3; `crates/core/tests/password_check.rs` 3/3 against a stub range server on loopback (requests carry only `/range/<5 hex>` and `Add-Padding`; duplicates looked up once; garbled, 500 and unreachable answers fail the check; locked vault sends nothing); `tests/ui/password-check.spec.ts` 2/2 (mock) | SEC-11 (BLOCKED: transport) |
 
-- SEC-11: compromised-password check (opt-in, k-anonymity, configurable endpoint, local stub
-  server in tests only).
+## Blocked
+
+- SEC-11 transport: needs an HTTPS client in the release graph, which `check-release.mjs`
+  forbids. Owner decision pending: (A) off-by-default cargo feature or (B) one allowed client
+  (ADR 0009).
 
 ## Notes for other owners
 

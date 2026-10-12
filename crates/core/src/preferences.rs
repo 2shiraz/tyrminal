@@ -58,6 +58,8 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
             return Err(invalid("An editor choice is not valid."));
         }
     }
+    // compromised-password check (SEC-11)
+    prefs.password_check.endpoint = crate::password_check::validate_endpoint(&prefs.password_check.endpoint)?;
     Ok(prefs)
 }
 

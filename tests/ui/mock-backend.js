@@ -22,6 +22,8 @@ export function installMockBackend(options) {
       reduceMotion: true,
       localShell: null,
       editorApps: [],
+      // compromised-password check (SEC-11)
+      passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",
@@ -787,6 +789,28 @@ export function installMockBackend(options) {
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
       }
+    },
+    // compromised-password check (SEC-11): unavailable like the real build unless a test says so.
+    password_check_status: () => ({
+      enabled: state.prefs.passwordCheck.enabled,
+      endpoint: state.prefs.passwordCheck.endpoint,
+      available: Boolean(options.passwordCheckAvailable),
+      unavailableReason: options.passwordCheckAvailable
+        ? null
+        : "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does.",
+      storedPasswords: state.hosts.filter((h) => h.auth.kind === "stored_password").length,
+    }),
+    password_check_run: () => {
+      if (!state.prefs.passwordCheck.enabled) throw { code: "INVALID_INPUT", message: "Turn on the compromised-password check first. It is off until you do." };
+      if (!options.passwordCheckAvailable)
+        throw { code: "UNREACHABLE", message: "This build cannot contact a password-check service yet: it has no HTTPS client. The setting is kept for when it does." };
+      return {
+        items: [
+          { kind: "host", label: "edge-cache", breachCount: 10434004 },
+          { kind: "identity", label: "Ops", breachCount: 0 },
+        ],
+        requests: 2,
+      };
     },
     // privilege prompts (KEY-18)
     session_identity: (a) => {

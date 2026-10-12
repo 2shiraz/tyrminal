@@ -12,3 +12,5 @@ pub mod vault;
 pub mod tunnels;
 // privilege prompts (KEY-18)
 pub mod privilege;
+// compromised-password check (SEC-11)
+pub mod password_check;
