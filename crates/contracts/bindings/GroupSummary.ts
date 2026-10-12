@@ -4,9 +4,4 @@
  * A host group. Groups nest (no cycles) and give their hosts default connection settings;
  * the nearest group that sets a value wins.
  */
-export type GroupSummary = { id: string, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, 
-/**
- * An identity the group gives its hosts (instead of a key). At most one of `key_id` and
- * `identity_id` is set.
- */
-identityId: string | null, };
+export type GroupSummary = { id: string, name: string, parentId: string | null, username: string | null, port: number | null, keyId: string | null, };
