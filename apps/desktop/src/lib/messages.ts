@@ -64,6 +64,7 @@ export const msg = {
     settings: "Settings",
     // agent B: tunnels and history
     tunnels: "Tunnels",
+    recordings: "Recordings",
     lock: "Lock vault",
     localTerminal: "Local terminal",
     primary: "Primary",

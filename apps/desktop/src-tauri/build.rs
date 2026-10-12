@@ -110,6 +110,14 @@ const COMMANDS: &[&str] = &[
     "host_connection_get",
     "host_connection_set",
     "host_chain",
+    "recording_settings_get",
+    "recording_settings_set",
+    "session_log_list",
+    "session_log_storage",
+    "session_log_bookmark",
+    "session_log_delete",
+    "session_log_delete_all",
+    "session_log_open",
     // agent C: workspaces
     "layout_list",
     "layout_save",
@@ -154,6 +162,8 @@ const COMMANDS: &[&str] = &[
     // compromised-password check (SEC-11)
     "password_check_status",
     "password_check_run",
+    // security review (P-27)
+    "security_review",
     "startup_get",
     "startup_set",
     "startup_effective",

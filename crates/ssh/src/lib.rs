@@ -21,7 +21,7 @@ mod jump;
 mod proxy;
 
 pub use agent::ForwardedAgent;
-pub use algorithms::negotiation_summary;
+pub use algorithms::{KeyExchangePolicy, POST_QUANTUM_KEX, negotiation_summary};
 pub use auth::{
     AuthOutcome, ClientKey, KbdPrompt, KbdRound, KeyError, MAX_KBD_PROMPTS, MAX_KBD_ROUNDS, MAX_SERVER_TEXT,
     sanitize_server_text,
@@ -43,4 +43,4 @@ pub use forward::{
 pub use jump::HopStream;
 pub use proxy::{ProxyError, ProxyKind, ProxySpec, connect_via_proxy};
 // agent D: key formats and certificates
-pub use auth::{CertificateInfo, KeyKind, check_user_certificate, host_key_from_openssh};
+pub use auth::{CertificateInfo, KeyKind, check_user_certificate, host_key_from_openssh, rsa_public_key_bits};

@@ -437,7 +437,16 @@ computer and sends only its first 5 characters (for example `5BAA6`) to the serv
 shown; the match is made on your computer, and passwords, full hashes and names never leave it.
 This build cannot contact a service yet, and the page says so.
 
-Apart from that check, which only runs when you ask, Tyrminal makes no network connections of
+Settings → **Security review** (also in the command palette) checks this vault on your computer
+and lists what needs attention, most serious first: DSA keys and RSA keys under 3072 bits, keys
+with no passphrase of their own, SSH hosts that sign in with a password, user certificates that
+have expired or expire within 30 days, and trusted host keys that no host uses or that are RSA
+only. It sends nothing and changes nothing. Each item has a button for the usual fix (generate a
+key, edit the host, open the keychain, or remove the trusted key with a reason), and nothing
+happens until you complete that step. Keys Tyrminal generates are kept without a passphrase of
+their own, protected by the vault's encryption, so they are listed as a note.
+
+Apart from the compromised-password check, which only runs when you ask, Tyrminal makes no network connections of
 its own. Settings → Privacy has:
 
 - **Diagnostics** (off by default): keeps, in memory only, which action failed and its error

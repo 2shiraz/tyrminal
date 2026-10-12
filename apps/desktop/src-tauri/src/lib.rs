@@ -233,6 +233,14 @@ pub fn run() {
             commands::tunnels::host_connection_get,
             commands::tunnels::host_connection_set,
             commands::tunnels::host_chain,
+            commands::history::recording_settings_get,
+            commands::history::recording_settings_set,
+            commands::history::session_log_list,
+            commands::history::session_log_storage,
+            commands::history::session_log_bookmark,
+            commands::history::session_log_delete,
+            commands::history::session_log_delete_all,
+            commands::history::session_log_open,
             // agent C: workspaces
             commands::layouts::layout_list,
             commands::layouts::layout_save,
@@ -277,6 +285,8 @@ pub fn run() {
             // compromised-password check (SEC-11)
             commands::password_check::password_check_status,
             commands::password_check::password_check_run,
+            // security review (P-27)
+            commands::security_review::security_review,
             commands::inventory::startup_get,
             commands::inventory::startup_set,
             commands::inventory::startup_effective,

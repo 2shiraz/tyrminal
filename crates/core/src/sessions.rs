@@ -138,6 +138,7 @@ pub struct Sessions {
     ended_logs: Mutex<std::collections::VecDeque<(String, String, Vec<String>)>>,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
+    pub(crate) recordings: crate::recording::Recordings,
     // agent D: inventory and snippets
     /// Snippet runs on exec channels, with their cancel switches.
     snippet_runs: crate::snippet_runs::Runs,
@@ -166,7 +167,7 @@ fn closed_event(error: Option<IpcError>, exit_status: Option<u32>) -> SessionEve
 }
 
 impl Sessions {
-    pub(crate) fn new(vault: Arc<VaultService>) -> Arc<Self> {
+    pub(crate) fn new(vault: Arc<VaultService>, logs_dir: std::path::PathBuf) -> Arc<Self> {
         Arc::new(Self {
             vault,
             entries: Mutex::new(HashMap::new()),
@@ -178,6 +179,7 @@ impl Sessions {
             ended_logs: Mutex::new(std::collections::VecDeque::new()),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
+            recordings: crate::recording::Recordings::new(logs_dir),
             // agent D: inventory and snippets
             snippet_runs: crate::snippet_runs::Runs::default(),
         })
@@ -279,7 +281,12 @@ impl Sessions {
         }
         let plan = self.vault.connection_plan(host_id).await?;
         let (id, entry, input_rx) = self.register(owner, plan.generation, sink, Some(plan.host_id.clone()), false)?;
-        let sink: Arc<dyn SessionSink> = entry.relay.clone();
+        // Session recording: wraps the relay, so a recording continues when the session moves
+        // to another window.
+        let relay: Arc<dyn SessionSink> = entry.relay.clone();
+        let sink = (self.recordings)
+            .wrap(&self.vault, plan.generation, &id, plan.label.clone(), Some(plan.host_id.clone()), cols, rows, relay)
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -443,7 +450,7 @@ impl Sessions {
                 match crate::serial::open(&settings) {
                     Ok(link) => {
                         sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
-                        pump(Transport::Serial(link), &relay, input_rx, transcoder).await
+                        pump(Transport::Serial(link), &relay, &*relay, input_rx, transcoder).await
                     }
                     Err(error) => Outcome::failed(error),
                 }
@@ -496,7 +503,10 @@ impl Sessions {
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
         let (id, entry, input_rx) = self.register(owner, generation, sink, None, false)?;
         let relay = Arc::clone(&entry.relay);
-        let sink: Arc<dyn SessionSink> = relay.clone();
+        // Session recording (see open_ssh).
+        let sink = (self.recordings)
+            .wrap(&self.vault, generation, &id, "Local terminal".to_owned(), None, cols, rows, relay.clone())
+            .await;
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -564,6 +574,12 @@ impl Sessions {
         }
         // agent B: tunnels and history
         self.tunnel_runs.session_ended(session_id).await;
+        let reason = if self.vault.generation() == generation {
+            crate::records::LogEnd::Closed
+        } else {
+            crate::records::LogEnd::Locked
+        };
+        self.recordings.session_ended(&self.vault, session_id, reason).await;
         *entry.prompts() = Prompts::default();
         self.streams.abort_where(None, Some(session_id)).await;
         // Local copies of files opened for editing in this session are removed with it.
@@ -578,6 +594,13 @@ impl Sessions {
     }
 
     /// The connected SSH link of a session the caller owns.
+    /// The window that owns a session now (it changes when the session moves to another window).
+    pub(crate) fn session_owner(&self, session_id: &str) -> Option<String> {
+        let entry = self.entries().get(session_id).cloned()?;
+        let owner = entry.owner().clone();
+        Some(owner)
+    }
+
     pub(crate) fn connection(
         &self,
         owner: &str,
@@ -1142,7 +1165,10 @@ impl Sessions {
             return Err(invalid("The terminal size is out of range."));
         }
         let entry = self.terminal(owner, session_id)?;
-        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())
+        entry.input.send(Input::Resize(cols, rows)).await.map_err(|_| denied())?;
+        // Session recording
+        self.recordings.resize(session_id, cols, rows);
+        Ok(())
     }
 
     /// The renderer reports that its terminal has processed `bytes` of output.
@@ -1277,6 +1303,9 @@ impl Sessions {
             *owner = caller.to_owned();
             entry.relay.switch(sink);
         }
+        // Its forwards move with it, so the new window can list and stop them and closing the
+        // old window leaves them running.
+        self.tunnel_runs.reassign(&offer.session_id, caller);
         // Flow control changed; if the queue is full, queued input wakes the task anyway.
         let _ = entry.input.try_send(Input::Wake);
         Ok(offer.session_id)
@@ -1713,7 +1742,7 @@ async fn run_ssh(
             // Startup snippets are typed alongside the pump, inside the session body: when the
             // session is closed or the vault locks, the supervisor drops both together, so the
             // typing (and the text not yet typed) never outlives the session.
-            let pumping = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder);
+            let pumping = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, &*ctx.sink, input, transcoder);
             let typing = async {
                 run_startup(&ctx.entry, startup).await;
                 std::future::pending::<Outcome>().await
@@ -1789,11 +1818,16 @@ async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
-    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy);
+    let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy, plan.key_exchange);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
-    let hops = plan.jumps.into_iter().map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy));
+    let hops = plan
+        .jumps
+        .into_iter()
+        .map(|hop| (hop.label, hop.endpoint, hop.username, hop.auth, hop.proxy, hop.key_exchange));
     let mut chain: Vec<VerifiedConnection> = Vec::new();
-    for (index, (label, endpoint, username, auth, proxy)) in hops.chain(std::iter::once(first)).enumerate() {
+    for (index, (label, endpoint, username, auth, proxy, key_exchange)) in
+        hops.chain(std::iter::once(first)).enumerate()
+    {
         // Prompts name the hop when there is more than one, so a jump host's trust or password
         // prompt cannot be mistaken for the destination's.
         let hop = (total > 1).then(|| tyrminal_contracts::ChainPosition {
@@ -1829,18 +1863,26 @@ async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked
             entry: Arc::clone(&ctx.entry),
             sink: Arc::clone(&ctx.sink),
         };
-        let options = ConnectOptions::new(endpoint.clone());
+        let options = ConnectOptions { key_exchange, ..ConnectOptions::new(endpoint.clone()) };
+        let required = key_exchange == tyrminal_ssh::KeyExchangePolicy::RequirePostQuantum;
+        let kex_error = |e: &SshError| match e {
+            SshError::NoCommonAlgorithm if required => err(
+                ErrorCode::ProtocolError,
+                "This server does not offer post-quantum key exchange, which this host requires. Nothing was sent to it.",
+            ),
+            other => from_ssh(other),
+        };
         let mut conn = match (chain.last(), proxy) {
-            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| from_ssh(&e))?,
+            (None, None) => tyrminal_ssh::connect(&options, verifier).await.map_err(|e: SshError| kex_error(&e))?,
             (None, Some(proxy)) => {
                 let stream = tyrminal_ssh::connect_via_proxy(&proxy, &endpoint.host, endpoint.port)
                     .await
                     .map_err(crate::tunnels::proxy_error)?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
             (Some(via), _) => {
                 let stream = via.open_hop(&endpoint.host, endpoint.port).await.map_err(|e| hop_error(&e))?;
-                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| from_ssh(&e))?
+                tyrminal_ssh::connect_stream(&options, stream, None, verifier).await.map_err(|e| kex_error(&e))?
             }
         };
         if let Some(n) = conn.negotiated() {
@@ -2084,7 +2126,7 @@ async fn run_local(
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
             sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
-            pump(Transport::Local { reader, handle, recheck_size: None }, relay, input, None).await
+            pump(Transport::Local { reader, handle, recheck_size: None }, relay, &**sink, input, None).await
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
@@ -2125,7 +2167,8 @@ async fn run_telnet(
     let terminal = endpoint.terminal;
     let codec = crate::telnet::Codec::new(cols, rows, terminal.term.term());
     let link = TelnetLink { reader, writer, codec, replies: Vec::new() };
-    pump(Transport::Telnet(Box::new(link)), relay, input, crate::transcode::Transcoder::new(terminal.encoding)).await
+    pump(Transport::Telnet(Box::new(link)), relay, relay, input, crate::transcode::Transcoder::new(terminal.encoding))
+        .await
 }
 
 enum Transport {
@@ -2270,9 +2313,12 @@ fn lost() -> Outcome {
 }
 
 /// Moves bytes between the transport and the renderer until either side ends.
+/// `sink` carries flow control; `out` receives the output (the relay itself, or a recording that
+/// passes it on to the relay).
 async fn pump(
     mut transport: Transport,
     sink: &Relay,
+    out: &dyn SessionSink,
     mut input: mpsc::Receiver<Input>,
     mut transcoder: Option<crate::transcode::Transcoder>,
 ) -> Outcome {
@@ -2333,7 +2379,7 @@ async fn pump(
                         }
                     }
                     // The output that arrived before a drop is still shown.
-                    if !sink.output(batch) {
+                    if !out.output(batch) {
                         return Outcome::ended(exit_status);
                     }
                     if dropped {
