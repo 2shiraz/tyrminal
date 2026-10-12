@@ -71,81 +71,84 @@ export function NoteCard({
   }
 
   return (
-    <section className="host-section note-card" role="group" aria-labelledby={titleId}>
-      <div className="note-card-head">
+    <section className="box host-section note-card" role="group" aria-labelledby={titleId}>
+      <div className="box-strip">
         <h3 id={titleId} className="host-section-title">
           {msg.notes.title}
         </h3>
         {draft === null && note !== undefined && (
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => edit({ text: note?.text ?? "", format: note?.format ?? "markdown" })}>
-            {note ? <IconPencil size={14} /> : <IconPlus size={14} />}
-            {note ? msg.notes.edit : msg.notes.add}
-          </button>
+          <div className="box-actions">
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => edit({ text: note?.text ?? "", format: note?.format ?? "markdown" })}>
+              {note ? <IconPencil size={14} /> : <IconPlus size={14} />}
+              {note ? msg.notes.edit : msg.notes.add}
+            </button>
+          </div>
         )}
       </div>
-
-      {draft === null ? (
-        note ? (
-          <NoteView text={note.text} format={note.format} />
+      <div className="host-section-body">
+        {draft === null ? (
+          note ? (
+            <NoteView text={note.text} format={note.format} />
+          ) : (
+            note === null && inherited.length === 0 && <p className="hint">{msg.notes.empty}</p>
+          )
         ) : (
-          note === null && inherited.length === 0 && <p className="hint">{msg.notes.empty}</p>
-        )
-      ) : (
-        <div className="stack-sm">
-          <Segmented
-            label={msg.notes.format}
-            value={draft.format}
-            onChange={(format) => edit({ ...draft, format })}
-            options={[
-              { value: "markdown", label: msg.notes.markdown },
-              { value: "plain", label: msg.notes.plain },
-            ]}
-          />
-          <TextArea
-            label={msg.notes.label}
-            value={draft.text}
-            onChange={(text) => {
-              clearError();
-              edit({ ...draft, text });
-            }}
-            hint={msg.notes.hint}
-            rows={8}
-            autoFocus
-          />
-          {tooLong && <p className="field-error">{msg.notes.tooLong}</p>}
-          <ErrorNotice error={error} />
-          <div className="row-flex" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-            {note && (
-              <button type="button" className="btn btn-sm btn-danger" disabled={pending} onClick={() => void save("", draft.format)}>
-                {msg.notes.remove}
-              </button>
-            )}
-            <span className="spacer" />
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => {
+          <div className="stack-sm">
+            <Segmented
+              label={msg.notes.format}
+              value={draft.format}
+              onChange={(format) => edit({ ...draft, format })}
+              options={[
+                { value: "markdown", label: msg.notes.markdown },
+                { value: "plain", label: msg.notes.plain },
+              ]}
+            />
+            <TextArea
+              label={msg.notes.label}
+              value={draft.text}
+              onChange={(text) => {
                 clearError();
-                edit(null);
+                edit({ ...draft, text });
               }}
-            >
-              {msg.common.cancel}
-            </button>
-            <button type="button" className="btn btn-sm btn-primary" disabled={!dirty || tooLong || pending} onClick={() => void save(draft.text, draft.format)}>
-              {pending ? msg.common.working : msg.notes.save}
-            </button>
+              hint={msg.notes.hint}
+              rows={8}
+              autoFocus
+            />
+            {tooLong && <p className="field-error">{msg.notes.tooLong}</p>}
+            <ErrorNotice error={error} />
+            <div className="row-flex" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {note && (
+                <button type="button" className="btn btn-sm btn-danger" disabled={pending} onClick={() => void save("", draft.format)}>
+                  {msg.notes.remove}
+                </button>
+              )}
+              <span className="spacer" />
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  clearError();
+                  edit(null);
+                }}
+              >
+                {msg.common.cancel}
+              </button>
+              <button type="button" className="btn btn-sm btn-primary" disabled={!dirty || tooLong || pending} onClick={() => void save(draft.text, draft.format)}>
+                {pending ? msg.common.working : msg.notes.save}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {inherited.map((entry) =>
-        entry.origin.kind === "group" ? (
-          <div key={entry.origin.groupId} className="note-inherited">
-            <span className="hint">{msg.notes.fromGroup(entry.origin.name)}</span>
-            <NoteView text={entry.note.text} format={entry.note.format} />
-          </div>
-        ) : null,
-      )}
+        {inherited.map((entry) =>
+          entry.origin.kind === "group" ? (
+            <div key={entry.origin.groupId} className="note-inherited">
+              <span className="hint">{msg.notes.fromGroup(entry.origin.name)}</span>
+              <NoteView text={entry.note.text} format={entry.note.format} />
+            </div>
+          ) : null,
+        )}
+      </div>
     </section>
   );
 }

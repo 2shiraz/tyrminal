@@ -4203,15 +4203,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   padding: var(--space-3);
 }
 
+/* The panel's sections are boxes (box.css): a strip with the heading, then the fields. */
 .host-section {
+  flex: none;
+  /* Unclipped, unlike other boxes: a clipped box has no minimum height, and the panel's grid would
+     squeeze it. The strip rounds its own corners instead. */
+  overflow: visible;
+}
+
+.host-section > .box-strip {
+  border-radius: calc(var(--radius-box) - 1px) calc(var(--radius-box) - 1px) 0 0;
+}
+
+.host-section-body {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
 }
 
 .host-section-title {
@@ -4219,16 +4227,19 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-weight: var(--weight-semibold);
 }
 
-.host-address {
-  display: grid;
+.host-address > .host-section-body {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-3);
 }
 
-/* Line the mark up with the input, below the field's label. */
-.host-address > .avatar {
-  margin-top: 22px;
+/* The strip names the box; the field's label stays for assistive technology. */
+.host-address .field > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .host-address-mark {
@@ -4254,6 +4265,23 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .protocol-select {
   width: auto;
   min-width: 7em;
+}
+
+/* "SSH on [22] port" stays one line at the panel's narrowest: the protocol menu gives way, not the
+   line (hosts.css makes the panel's other selects full width). */
+.host-panel .host-panel-body .protocol-line {
+  flex-wrap: nowrap;
+}
+
+.host-panel .host-panel-body .protocol-line > .protocol-select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.host-panel .host-panel-body .protocol-line > :is(.protocol-port, span) {
+  flex: none;
+  overflow-wrap: normal;
 }
 
 .host-auth {
@@ -4290,16 +4318,43 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 }
 
 .host-more > summary {
-  width: fit-content;
   cursor: pointer;
+  list-style: none;
+}
+
+.host-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A disclosure arrow at the start of the strip, turned while the box is open. */
+.host-more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.host-more[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 .host-more > summary:hover {
   color: var(--text);
 }
 
-.host-more:not([open]) {
-  gap: 0;
+.host-more:not([open]) > summary {
+  border-bottom: 0;
+  border-radius: calc(var(--radius-box) - 1px);
+}
+
+.host-reuse {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .host-effective {
@@ -4650,18 +4705,9 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   font-size: var(--text-sm);
 }
 
-/* P-30: host and group notes. Plain token styling. */
+/* P-30: host and group notes, a box like the host's other sections. */
 .note-card {
-  display: grid;
-  gap: var(--space-3);
   min-width: 0;
-}
-
-.note-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
 }
 
 .note-view {
