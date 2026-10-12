@@ -310,6 +310,9 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
   });
 });
 
+/** The command palette shortcut: Cmd+K on macOS, Ctrl+Shift+K elsewhere (lib/shortcuts.ts). */
+const PALETTE = process.platform === "darwin" ? [KEYS.meta, "K"] : [KEYS.ctrl, KEYS.shift, "K"];
+
 describe("workspaces with real sessions", { concurrency: false }, () => {
   /** @type {App} */ let app;
   let s;
@@ -367,7 +370,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     await t.type("echo ORIGINAL-$((1+1))\n");
     await t.waitForText("ORIGINAL-2");
     // Keyboard route: the command palette's "Duplicate tab" acts on the tab in front.
-    await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+    await s.chord(PALETTE);
     const palette = await s.waitFor("dialog.palette input");
     await s.type(palette, "Duplicate tab");
     await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Duplicate tab") || null`), {
@@ -401,7 +404,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     const total = () => s.execute(`return document.querySelectorAll(".pane").length`);
     // Other tabs already hold panes; split until 16 are open in all (the grid below re-tiles them).
     const runCommand = async (name) => {
-      await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+      await s.chord(PALETTE);
       const input = await s.waitFor("dialog.palette input");
       await s.type(input, name);
       await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
@@ -431,7 +434,9 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .status-dot")].filter((d) => d.dataset.tone === "ok").length`).then((n) => (n === mine ? n : null)),
       { describe: "all panes connected", timeout: 30_000 },
     );
-    await t.type("echo ONLY-HERE-$((6*7))\n");
+    // A literal token: the local shell differs per platform (PowerShell on Windows), and the point
+    // is where the input goes, not what the shell computes.
+    await t.type("echo ONLY-HERE-42\n");
     await s.until(
       () => s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .xterm-rows")].filter((e) => e.textContent.includes("ONLY-HERE-42")).length`).then((n) => (n > 0 ? n : null)),
       { describe: "echo in the focused pane" },
@@ -443,7 +448,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
 
   test("a saved layout restores disconnected; only Connect opens a new session", async () => {
     const runCommand = async (name) => {
-      await s.chord([KEYS.ctrl, KEYS.shift, "K"]);
+      await s.chord(PALETTE);
       const input = await s.waitFor("dialog.palette input");
       await s.type(input, name);
       await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });

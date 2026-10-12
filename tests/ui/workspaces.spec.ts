@@ -184,8 +184,13 @@ test("16 panes: the limit holds, a grid arrangement tiles them evenly, sessions 
 test("focus layout: one pane fills the tab, the others are listed with their state", async ({ page }) => {
   await openApp(page);
   await connectFromPalette(page, "api-gateway");
+  // One split at a time, each session opened before the next, so the newest session is the
+  // third pane (the mock writes output to the newest session).
+  const opened = () => calls(page, "session_open_ssh").then((c) => c.length);
   await page.keyboard.press("Alt+Shift+Equal");
+  await expect.poll(opened).toBe(2);
   await page.keyboard.press("Alt+Shift+Minus");
+  await expect.poll(opened).toBe(3);
   await expect(visiblePanes(page)).toHaveCount(3);
   await page.keyboard.press("Control+Shift+Enter");
   await expect(visiblePanes(page)).toHaveCount(1);
