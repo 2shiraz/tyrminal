@@ -12,7 +12,6 @@ import {
   IconClipboardPaste,
   IconCopy,
   IconHistory,
-  IconInfo,
   IconPalette,
   IconPencil,
   IconX,
@@ -36,7 +35,6 @@ export interface ExtraContext {
   /** Opens the side panel at a section. */
   onShowSection: (section: "history" | "appearance") => void;
   /** Present when the focused pane is an SSH session that has a session id. */
-  onDetails?: (() => void) | undefined;
 }
 
 export function extraPaletteItems(c: ExtraContext): PaletteItem[] {
@@ -44,7 +42,6 @@ export function extraPaletteItems(c: ExtraContext): PaletteItem[] {
   const add = (id: string, label: string, icon: ReactNode, run: () => void, shortcut?: ActionId) =>
     items.push({ id: `extra-${id}`, group: msg.palette.groupActions, label, icon, run, shortcut });
   if (!c.hasTerminal) return items;
-  if (c.onDetails) add("details", msgI.details.action, <IconInfo size={16} />, c.onDetails);
   add("copy", msgI.palette.copy, <IconCopy size={16} />, c.onCopy, "copy");
   add("paste", msgI.palette.paste, <IconClipboardPaste size={16} />, c.onPaste, "paste");
   add("show-history", msgI.panel.showHistory, <IconHistory size={16} />, () => c.onShowSection("history"));

@@ -179,9 +179,9 @@ the session is open, that server (and anyone with administrator rights on it) ca
 host's key**, and only that key, to sign in to other servers as you. It is never forwarded to
 jump hosts, and the server cannot add or remove keys or see any other key.
 
-To see what happened while connecting, choose **Connection details…** in the command palette,
-or **Show connection details** on a failed connection. **Copy** puts the lines on the clipboard;
-they never contain passwords, passphrases or keys.
+To see what happened while connecting, choose **Show connection log** in the command palette,
+or **Connection log** on a failed connection. **Copy** puts the lines on the clipboard; they
+never contain passwords, passphrases or keys.
 
 ## Keys
 

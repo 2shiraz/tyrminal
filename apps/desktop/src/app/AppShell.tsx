@@ -49,7 +49,6 @@ import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
 import { useSlowPatternNotice } from "../features/highlight/useSlowPatternNotice";
 import { extraPaletteItems } from "../features/commands/extraActions";
-import { ConnectionDetails } from "../features/connection/ConnectionDetails";
 import { ConnectionPanel, type PanelSection } from "../features/sidepanel/ConnectionPanel";
 import { NewHostFromTerminal } from "../features/tokens/NewHostFromTerminal";
 import { type BroadcastMembers, memberPanes, pruneMembers, relayTargets, withTab, withoutTab } from "../features/broadcast/members";
@@ -167,8 +166,6 @@ function Shell() {
   // Broadcast starts only after the user reviewed exactly which panes receive input (P-13).
   const [reviewing, setReviewing] = useState<{ tabId: number; targets: BroadcastTarget[] } | null>(null);
   const [statuses, setStatuses] = useState<Record<number, PaneStatus>>({});
-  // terminal input: the connection details dialog (CON-15)
-  const [details, setDetails] = useState<{ sessionId: string; label: string } | null>(null);
   const [deploying, setDeploying] = useState<{ sessionId: string; hostId: string } | null>(null);
   // privilege prompts (KEY-18)
   const [inserting, setInserting] = useState<{ sessionId: string; hostId: string } | null>(null);
@@ -972,13 +969,6 @@ function Shell() {
             onCopy: () => void focusedHandle()?.copy(),
             onPaste: () => focusedHandle()?.paste(),
             onShowSection: showSection,
-            onDetails:
-              pane?.target.kind === "ssh" && focusedHandle()?.sessionId()
-                ? () => {
-                    const sessionId = focusedHandle()?.sessionId();
-                    if (sessionId) setDetails({ sessionId, label: pane.label });
-                  }
-                : undefined,
           })}
           openTabs={ws.tabs.map((t) => {
             const p = ws.panes[t.focused];
@@ -1124,17 +1114,6 @@ function Shell() {
 
       {/* terminal input: an address clicked in the output becomes a prefilled new host */}
       <NewHostFromTerminal onDone={() => focusedHandle()?.focus()} />
-
-      {details && (
-        <ConnectionDetails
-          sessionId={details.sessionId}
-          label={details.label}
-          onClose={() => {
-            setDetails(null);
-            focusedHandle()?.focus();
-          }}
-        />
-      )}
 
       {searchingSessions && (
         <SearchSessionsDialog

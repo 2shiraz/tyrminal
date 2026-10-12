@@ -27,7 +27,6 @@ import { msgMx } from "../../lib/messages-multiplexers";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { InstallKeyDialog } from "../credentials/InstallKeyDialog";
-import { ConnectionDetails } from "../connection/ConnectionDetails";
 import { TokenMenu } from "../tokens/TokenMenu";
 import type { Token } from "../tokens/tokenLinks";
 import { ConnectionLogDialog } from "./ConnectionLogDialog";
@@ -178,7 +177,6 @@ export function TerminalView(props: TerminalViewProps) {
   const [auth, setAuth] = useState<AuthPrompt | null>(null);
   const [changed, setChanged] = useState<KeyChanged | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   // Quick port forwards (P-24): ports the output named, waiting for the user.
   const [portOffers, setPortOffers] = useState<number[]>([]);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
@@ -655,7 +653,6 @@ export function TerminalView(props: TerminalViewProps) {
           onCloseTab={() => handlers.current.onClose()}
           onOpenKnownHosts={() => handlers.current.onOpenKnownHosts()}
           onOpenLog={target.kind === "ssh" ? () => setLogOpen(true) : null}
-          onOpenDetails={target.kind === "ssh" ? () => setDetailsFor(controllerRef.current?.id ?? null) : null}
           onInstallKey={target.kind === "ssh" && rejectedKey && closed?.error?.code === "AUTH_FAILED" ? () => setInstalling(true) : null}
           canReconnect={props.canReconnect !== false}
         />
@@ -701,7 +698,6 @@ export function TerminalView(props: TerminalViewProps) {
           }}
         />
       )}
-      {detailsFor && <ConnectionDetails sessionId={detailsFor} label={props.label} onClose={() => setDetailsFor(null)} />}
       {installing && target.kind === "ssh" && rejectedKey && (
         <InstallKeyDialog hostId={target.hostId} keyId={rejectedKey.keyId} onClose={() => setInstalling(false)} />
       )}

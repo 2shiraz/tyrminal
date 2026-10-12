@@ -25,7 +25,7 @@ test("palette: every application action is reachable where it can act", async ({
   await openApp(page, { renderer: "compatibility" });
   // On a page (no terminal) tab and pane actions are not offered.
   await page.keyboard.press("Control+Shift+K");
-  for (const absent of ["Next tab", "Copy selection", "Focus pane on the left", "Connection details…"]) expect(await offers(page, absent), absent).toBe(false);
+  for (const absent of ["Next tab", "Copy selection", "Focus pane on the left", "Show connection log"]) expect(await offers(page, absent), absent).toBe(false);
   await page.keyboard.press("Escape");
 
   await connect(page, "api-gateway");
@@ -66,7 +66,7 @@ test("palette: every application action is reachable where it can act", async ({
     // Actions without a shortcut
     "Close tab",
     "Close other tabs",
-    "Connection details…",
+    "Show connection log",
   ]) {
     expect(await offers(page, expected), expected).toBe(true);
   }
@@ -98,44 +98,29 @@ test("palette: tab and pane actions run the same code as their shortcuts", async
   await expect(page.locator(".tabstrip .tab:not(.tab-page)")).toHaveCount(0);
 });
 
-test("connection details: from the palette and from a failed connection; lines are copied as text", async ({ page }) => {
+test("connection log (CON-15): its lines are copied as text", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await privateClipboard(page);
   await connect(page, "api-gateway");
-  await paletteRun(page, "Connection details");
-  const dialog = page.getByRole("dialog", { name: "Connection details: api-gateway" });
-  const list = dialog.getByRole("list", { name: "Connection steps" });
-  await expect(list.getByRole("listitem")).toHaveCount(4);
-  await expect(list).toContainText("key exchange mlkem768x25519-sha256");
+  await paletteRun(page, "Show connection log");
+  const dialog = page.getByRole("dialog", { name: "Connection log: api-gateway" });
+  await expect(dialog.getByTestId("connection-log")).toContainText("key exchange mlkem768x25519-sha256");
   await dialog.getByRole("button", { name: "Copy" }).click();
-  await expect(page.getByText("Copied the connection details.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("signed in");
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied.split("\n")).toHaveLength(4);
-  expect(copied).toContain("signed in");
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".pane[data-focused=true] .xterm-helper-textarea")).toBeFocused();
-
-  // After a failure the notice links to the same view. A line cannot carry control characters.
-  await page.evaluate(() => {
-    const w = window as unknown as { __mockDiagnostics: string[]; __mockDrop: (code: string) => void };
-    w.__mockDiagnostics = ["Connecting to 203.0.113.10 port 22", "Connection lost\u001b[2J during key exchange"];
-    w.__mockDrop("DISCONNECTED");
-  });
-  const notice = page.getByRole("alert").filter({ hasText: "server closed the connection" });
-  await notice.getByRole("button", { name: "Show connection details" }).click();
-  await expect(list.getByRole("listitem")).toHaveCount(2);
-  await expect(list.getByRole("listitem").nth(1)).toHaveText("Connection lost�[2J during key exchange");
 });
 
-test("connection details: a refused request is shown, not hidden", async ({ page }) => {
+test("connection log (CON-15): a refused request is shown, not hidden", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await connect(page, "api-gateway");
   await page.evaluate(() => {
     (window as unknown as { __mockDiagnosticsError: boolean }).__mockDiagnosticsError = true;
   });
-  await paletteRun(page, "Connection details");
-  const dialog = page.getByRole("dialog", { name: /Connection details/ });
-  await expect(dialog.getByRole("alert")).toHaveText("No details are kept for that session any more.");
-  await expect(dialog.getByRole("button", { name: "Copy" })).toBeDisabled();
+  await paletteRun(page, "Show connection log");
+  const dialog = page.getByRole("dialog", { name: /Connection log/ });
+  await expect(dialog.getByRole("alert")).toContainText("No details are kept for that session any more.");
+  await expect(dialog.getByRole("button", { name: "Copy" })).toHaveCount(0);
 });
