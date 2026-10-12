@@ -150,6 +150,20 @@ sandbox. Nothing is stubbed in the UI.
   of it as plain text. The folder anchors relative path suggestions (still insert-only and
   reviewed); the last command and its status are shown in Suggestions. A server without the
   integration can print the same sequences; at worst relative path suggestions start elsewhere.
+- **Using the folder elsewhere (2026-10-12):** the files panel opens in the session's reported
+  folder (falling back to the login folder when SFTP cannot list it) and offers "Go to the shell's
+  folder". Duplicating a tab keeps the folder. A local duplicate passes it to `session_open_local`
+  as `startIn`; the core starts there only if it is an absolute path to an existing folder with
+  no control characters (4 KiB at most), else in the home folder. An SSH duplicate types exactly
+  `cd -- '<folder>'` and Enter into the new shell, single-quoted (a `'` in the name becomes
+  `'\''`), and only at the new shell's first OSC 133 A mark (so only where the integration
+  runs). It is dropped if the user types first or no mark arrives within 60 s, and reconnects
+  do not repeat it. The folder came from the same server and passed the OSC 7 checks above.
+- **Mark events for other features:** `shellContexts.onMark` delivers each validated mark
+  (`prompt`, `command_start` with the command text, `command_end` with text and status, `folder`)
+  with its session id. Listeners get only what passed the checks above, must treat it as server
+  text and must never run or send it. A listener that throws does not affect the others. Command
+  history (AUT-01) can build on it.
 - **Command names** avoid the release policy's forbidden words: `prompt_marks_status`,
   `prompt_marks_install`, `prompt_marks_remove`. Test builds edit `TYRMINAL_E2E_HOME`, never the
   real home folder.

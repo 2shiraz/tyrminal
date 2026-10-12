@@ -139,6 +139,11 @@ const COMMANDS: &[&str] = &[
     "env_get",
     "env_set",
     "env_effective",
+    "startup_get",
+    "startup_set",
+    "startup_effective",
+    "group_defaults_get",
+    "group_defaults_set",
 ];
 
 fn main() {

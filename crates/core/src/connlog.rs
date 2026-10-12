@@ -44,9 +44,30 @@ impl ConnLog {
     }
 }
 
+/// The connection-log line for environment requests (SNP-13): names only, never values.
+pub(crate) fn environment_line(sent: &[String], rejected: &[String]) -> String {
+    let accepted: Vec<&str> = sent.iter().filter(|n| !rejected.contains(n)).map(String::as_str).collect();
+    let mut line = format!("environment: {} of {} set", accepted.len(), sent.len());
+    if !accepted.is_empty() {
+        line.push_str(&format!(" ({})", accepted.join(", ")));
+    }
+    if !rejected.is_empty() {
+        line.push_str(&format!("; refused by the server (AcceptEnv): {}", rejected.join(", ")));
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn environment_lines_name_variables_and_refusals() {
+        let sent = vec!["TYR_APP".to_owned(), "LANG".to_owned(), "SECRET_TOKEN".to_owned()];
+        let line = environment_line(&sent, &["SECRET_TOKEN".to_owned()]);
+        assert_eq!(line, "environment: 2 of 3 set (TYR_APP, LANG); refused by the server (AcceptEnv): SECRET_TOKEN");
+        assert_eq!(environment_line(&sent[..1], &[]), "environment: 1 of 1 set (TYR_APP)");
+    }
 
     #[test]
     fn lines_are_bounded_timed_and_cleaned() {

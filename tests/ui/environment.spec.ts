@@ -30,7 +30,7 @@ test("group variables are inherited, host values override them, refusals are rep
     ["TYR_REGION", "eu-1"],
     ["LEGACY_MODE", "on"],
   ]);
-  await group.getByRole("button", { name: "Save variables" }).click();
+  await group.getByRole("button", { name: "Save", exact: true }).click();
   await expect(group).toHaveCount(0);
   await expect(page.getByText("Environment saved")).toBeVisible();
 
@@ -43,10 +43,10 @@ test("group variables are inherited, host values override them, refusals are rep
   // Invalid names are refused by the core and nothing is saved.
   await host.getByRole("button", { name: "Add variable" }).click();
   await host.getByLabel("Name 2").fill("1BAD");
-  await host.getByRole("button", { name: "Save variables" }).click();
+  await host.getByRole("button", { name: "Save", exact: true }).click();
   await expect(host.getByRole("alert")).toContainText("do not start with a digit");
   await host.getByRole("button", { name: "Remove 1BAD" }).click();
-  await host.getByRole("button", { name: "Save variables" }).click();
+  await host.getByRole("button", { name: "Save", exact: true }).click();
   await expect(host).toHaveCount(0);
 
   // Connecting reports the variable the server refused, by name.

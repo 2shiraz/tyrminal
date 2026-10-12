@@ -205,7 +205,16 @@ pub(crate) fn parse_putty_reg(text: &str) -> Result<Parsed, IpcError> {
         if s.proxy {
             notes.push(PROXY_NOTE.into());
         }
-        let host = ImportHost { label: s.name, address, port, username, group: String::new(), tags: Vec::new(), notes };
+        let host = ImportHost {
+            label: s.name,
+            address,
+            port,
+            username,
+            group: String::new(),
+            tags: Vec::new(),
+            notes,
+            jump_via: None,
+        };
         add(&mut out, s.line, &shown, host)?;
     }
     Ok(out)
@@ -323,6 +332,7 @@ pub(crate) fn parse_mobaxterm(text: &str) -> Result<Parsed, IpcError> {
             group: folder.clone(),
             tags: Vec::new(),
             notes,
+            jump_via: None,
         };
         add(&mut out, number, name, host)?;
     }
@@ -414,7 +424,12 @@ fn finish_crt(out: &mut Parsed, s: CrtSession) -> Result<(), IpcError> {
     }
     let group = s.path[..s.path.len().saturating_sub(1)].join("/");
     let label = if label.is_empty() { address.clone() } else { label };
-    add(out, s.line, &shown, ImportHost { label, address, port, username, group, tags: Vec::new(), notes })
+    add(
+        out,
+        s.line,
+        &shown,
+        ImportHost { label, address, port, username, group, tags: Vec::new(), notes, jump_via: None },
+    )
 }
 
 fn name_attr(start: &BytesStart<'_>) -> Result<Option<String>, IpcError> {

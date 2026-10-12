@@ -128,7 +128,14 @@ pub struct HostConnection {
     /// Outbound proxy for the connection that leaves this computer. Used when this host is the
     /// first hop (for a host behind a jump host, set it on the jump host).
     pub proxy: Option<ProxySummary>,
+    /// The host sets its own route (possibly "directly"); otherwise it uses `inherited`.
+    #[serde(default)]
+    pub own: bool,
+    /// The route of the nearest group that sets one (HST-05), whether or not the host uses it.
+    #[serde(default)]
+    pub inherited: Option<crate::InheritedRoute>,
     /// Post-quantum key exchange for this host (each hop of a chain uses its own setting).
+    #[serde(default)]
     pub key_exchange: KeyExchangeMode,
 }
 
@@ -176,6 +183,10 @@ pub struct ProxySummary {
 pub struct HostConnectionInput {
     pub jump_host_id: Option<String>,
     pub proxy: Option<ProxyInput>,
+    /// Use the nearest group's route instead (`jump_host_id` and `proxy` are then ignored and the
+    /// host's own proxy, including its password, is dropped).
+    #[serde(default)]
+    pub inherit: bool,
     #[serde(default)]
     pub key_exchange: KeyExchangeMode,
 }
@@ -198,6 +209,7 @@ impl core::fmt::Debug for HostConnectionInput {
         f.debug_struct("HostConnectionInput")
             .field("jump_host_id", &self.jump_host_id)
             .field("proxy", &self.proxy)
+            .field("inherit", &self.inherit)
             .field("key_exchange", &self.key_exchange)
             .finish()
     }
@@ -254,8 +266,13 @@ mod tests {
                 username: "u".into(),
                 password: Some("canary-proxy-secret".into()),
             }),
+            inherit: false,
         };
         let text = format!("{input:?}");
+        assert!(!text.contains("canary-proxy-secret"), "{text}");
+        // The group defaults carry the same proxy input.
+        let group = crate::GroupDefaultsInput { jump_host_id: None, proxy: input.proxy.clone(), os: None };
+        let text = format!("{group:?}");
         assert!(!text.contains("canary-proxy-secret"), "{text}");
     }
 }

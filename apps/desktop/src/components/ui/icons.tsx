@@ -61,6 +61,7 @@ export const IconSearch = svg(["path|d=m21 21-4.34-4.34", "circle|cx=11|cy=11|r=
 export const IconPlus = svg(["path|d=M5 12h14", "path|d=M12 5v14"]);
 export const IconX = svg(["path|d=M18 6 6 18", "path|d=m6 6 12 12"]);
 export const IconChevronDown = svg(["path|d=m6 9 6 6 6-6"]);
+export const IconChevronUp = svg(["path|d=m18 15-6-6-6 6"]);
 export const IconChevronRight = svg(["path|d=m9 18 6-6-6-6"]);
 export const IconChevronLeft = svg(["path|d=m15 18-6-6 6-6"]);
 export const IconEllipsis = svg(["circle|cx=12|cy=12|r=1", "circle|cx=19|cy=12|r=1", "circle|cx=5|cy=12|r=1"]);

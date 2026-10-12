@@ -508,6 +508,7 @@ async fn jump_to(f: &Fixture, host: &str, via: &str) {
     let connection = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some(via.into()),
+        inherit: false,
         key_exchange: Default::default(),
     };
     f.core.vault.set_host_connection(host, connection).await.unwrap();
@@ -634,18 +635,21 @@ async fn jump_host_settings_refuse_loops_and_survive_host_edits() {
     let looped = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some(b.clone()),
+        inherit: false,
         key_exchange: Default::default(),
     };
     assert_eq!(f.core.vault.set_host_connection(&a, looped).await.unwrap_err().code, ErrorCode::InvalidInput);
     let itself = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some(a.clone()),
+        inherit: false,
         key_exchange: Default::default(),
     };
     assert_eq!(f.core.vault.set_host_connection(&a, itself).await.unwrap_err().code, ErrorCode::InvalidInput);
     let missing = tyrminal_core::contracts::HostConnectionInput {
         proxy: None,
         jump_host_id: Some("00000000000000000000000000000000".into()),
+        inherit: false,
         key_exchange: Default::default(),
     };
     assert_eq!(f.core.vault.set_host_connection(&a, missing).await.unwrap_err().code, ErrorCode::NotFound);
@@ -745,6 +749,7 @@ fn proxy_input(port: u16, password: Option<&str>) -> tyrminal_core::contracts::H
             username: PROXY_USER.into(),
             password: password.map(Into::into),
         }),
+        inherit: false,
         key_exchange: Default::default(),
     }
 }
@@ -804,6 +809,79 @@ async fn a_host_behind_an_authenticated_proxy_connects_and_a_wrong_password_is_r
     }
     f.core.vault.set_host_connection(&host, other_user).await.unwrap();
     assert!(!f.core.vault.host_connection(&host).await.unwrap().proxy.unwrap().password_stored);
+}
+
+/// HST-05 through a real connection: a host that sets no route of its own goes through its
+/// group's jump host, with every hop verified and signed in to in order; once it sets its own
+/// route (directly), it no longer does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_goes_through_its_groups_jump_host_until_it_sets_its_own_route() {
+    use tyrminal_core::contracts::{BulkHostChange, GroupDefaultsInput, GroupInput};
+    let f = fixture().await;
+    let _log = AUTH_LOG.lock().await;
+    let user = f.lab.str("/user");
+    let bastion = f.host_at(&user, "bastion", f.lab.port_of("a")).await;
+    let inner = f.host_at(&user, "inner", f.lab.port_of("b")).await;
+    let group = f
+        .core
+        .vault
+        .save_group(GroupInput {
+            id: None,
+            name: "Internal".into(),
+            parent_id: None,
+            username: None,
+            port: None,
+            key_id: None,
+        })
+        .await
+        .unwrap();
+    f.core
+        .vault
+        .bulk_update_hosts(
+            std::slice::from_ref(&inner),
+            BulkHostChange::MoveToGroup { group_id: Some(group.id.clone()) },
+        )
+        .await
+        .unwrap();
+    f.core
+        .vault
+        .set_group_defaults(
+            &group.id,
+            GroupDefaultsInput { jump_host_id: Some(bastion.clone()), proxy: None, os: None },
+        )
+        .await
+        .unwrap();
+
+    let (session, mut events) = open_until_prompt(&f, &inner).await;
+    let SessionEvent::TrustPrompt { prompt_id, port, hop, .. } = next_decision(&mut events).await else {
+        panic!("expected the bastion's trust prompt")
+    };
+    assert_eq!(port, f.lab.port_of("a"), "the inherited jump host is contacted first");
+    assert_eq!(hop.map(|h| (h.index, h.total, h.label)), Some((1, 2, "bastion".to_owned())));
+    f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+    let SessionEvent::TrustPrompt { prompt_id, port, .. } = next_decision(&mut events).await else {
+        panic!("expected the inner host's trust prompt")
+    };
+    assert_eq!(port, f.lab.port_of("b"));
+    f.core.sessions.answer_trust(WINDOW, &session, &prompt_id, TrustDecision::Once).unwrap();
+    assert_eq!(next_decision(&mut events).await, SessionEvent::State { state: SessionState::Connected });
+    f.core.sessions.close(WINDOW, &session).unwrap();
+
+    // Its own route ("directly") replaces the group's: the first prompt is the inner server's.
+    let direct = tyrminal_core::contracts::HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        inherit: false,
+        key_exchange: Default::default(),
+    };
+    f.core.vault.set_host_connection(&inner, direct).await.unwrap();
+    let (session, mut events) = open_until_prompt(&f, &inner).await;
+    let SessionEvent::TrustPrompt { port, hop, .. } = next_decision(&mut events).await else {
+        panic!("expected the inner host's trust prompt")
+    };
+    assert_eq!((port, hop), (f.lab.port_of("b"), None));
+    f.core.sessions.close(WINDOW, &session).unwrap();
 }
 
 // ---------- session recording over SSH (LOG-01) ----------
@@ -870,7 +948,12 @@ async fn an_ssh_session_is_recorded_under_its_host_without_the_answer_to_a_hidde
 // ---------- key exchange per host (SEC-08, SEC-10) ----------
 
 fn key_exchange(mode: tyrminal_core::contracts::KeyExchangeMode) -> tyrminal_core::contracts::HostConnectionInput {
-    tyrminal_core::contracts::HostConnectionInput { jump_host_id: None, proxy: None, key_exchange: mode }
+    tyrminal_core::contracts::HostConnectionInput {
+        jump_host_id: None,
+        proxy: None,
+        key_exchange: mode,
+        inherit: false,
+    }
 }
 
 /// Opens a session and returns every event up to the shell or the close.

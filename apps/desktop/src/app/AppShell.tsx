@@ -11,7 +11,7 @@ import { HostsView } from "../features/hosts/HostsView";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
-import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
@@ -21,6 +21,7 @@ import { RecordingsView } from "../features/history/RecordingsView";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { shellContexts } from "../features/autocomplete/shellContext";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
@@ -165,8 +166,8 @@ function Shell() {
     setWs((current) => selectTab(current, null));
   }, []);
 
-  const open = useCallback((target: TerminalTarget, label: string, identity: string) => {
-    setWs((current) => openTab(current, { target, label, identity }));
+  const open = useCallback((target: TerminalTarget, label: string, identity: string, startIn?: string) => {
+    setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
   const connect = useCallback(
@@ -209,9 +210,16 @@ function Shell() {
       const handle = p ? handles.current.get(p.id) : undefined;
       const sessionId = handle?.sessionId();
       if (!p || !handle || !sessionId || !handle.connected()) return;
-      const request: SnippetRunRequest = { snippet, mode, paneId: p.id, sessionId, targetLabel: p.label, targetIdentity: p.identity };
-      const lines = snippet.text.replace(/\n$/, "").split("\n").length;
-      if (lines > 1) {
+      const request: SnippetRunRequest = {
+        snippet,
+        mode,
+        paneId: p.id,
+        sessionId,
+        targetLabel: p.label,
+        targetIdentity: p.identity,
+        environment: handle.environment(),
+      };
+      if (needsSnippetReview(request)) {
         setRunRequest(request);
       } else {
         void sendSnippet(request);
@@ -402,7 +410,11 @@ function Shell() {
           onDuplicate={(id) => {
             const t = wsRef.current.tabs.find((x) => x.id === id);
             const p = t ? wsRef.current.panes[t.focused] : undefined;
-            if (p) open(p.target, p.label, p.identity);
+            if (!p) return;
+            // The copy starts in the shell's current folder when the shell integration reports it.
+            const sessionId = handles.current.get(p.id)?.sessionId();
+            const cwd = sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
+            open(p.target, p.label, p.identity, cwd);
           }}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}

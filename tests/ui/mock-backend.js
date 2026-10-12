@@ -140,7 +140,11 @@ export function installMockBackend(options) {
         : ["connected"];
     let delay = 10;
     for (const step of steps) {
-      if (step === "connected" && kind === "ssh") setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+      if (step === "connected" && kind === "ssh") {
+        setTimeout(() => channelSend(s.events, NEGOTIATED), delay);
+        // Startup snippets are typed once the shell is open (SNP-08).
+        setTimeout(() => window.__mockRunStartup?.(s, host), delay + 40);
+      }
       // Environment variables of the host: the mock server's AcceptEnv allows TYR_* only.
       if (step === "opening_channel" && host) {
         const sent = (window.__mockEnvOf?.(host.id) ?? []).map((v) => v.name);
@@ -398,16 +402,29 @@ export function installMockBackend(options) {
         tunnel_clear_ended: () => {
           for (const [key, run] of runs) if (run.view.state !== "running") runs.delete(key);
         },
-        host_connection_get: (a) => ({
-          jumpHostId: jumps.get(a.hostId) ?? null,
-          proxy: proxies.get(a.hostId) ?? null,
-          keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
-        }),
+        host_connection_get: (a) => {
+          const own = window.__mockOwnRoute.has(a.hostId) || jumps.has(a.hostId) || proxies.has(a.hostId);
+          return {
+            jumpHostId: jumps.get(a.hostId) ?? null,
+            proxy: proxies.get(a.hostId) ?? null,
+            own,
+            inherited: window.__mockInheritedRoute(a.hostId),
+            keyExchange: keyExchanges.get(a.hostId) ?? "prefer_post_quantum",
+          };
+        },
         host_connection_set: (a) => {
           if (!["prefer_post_quantum", "require_post_quantum", "classic"].includes(a.connection.keyExchange ?? "prefer_post_quantum")) {
             throw { code: "INVALID_INPUT", message: "Unknown key exchange setting." };
           }
           keyExchanges.set(a.hostId, a.connection.keyExchange ?? "prefer_post_quantum");
+          // HST-05: inheriting drops the host's own route.
+          if (a.connection.inherit) {
+            jumps.delete(a.hostId);
+            proxies.delete(a.hostId);
+            window.__mockOwnRoute.delete(a.hostId);
+            return [];
+          }
+          window.__mockOwnRoute.add(a.hostId);
           // Loops are refused as natively; the chain is returned first hop first.
           const next = a.connection.jumpHostId;
           for (let at = next, n = 0; at; at = jumps.get(at), n += 1) {
@@ -888,22 +905,37 @@ export function installMockBackend(options) {
       state.groups = state.groups.filter((g) => g.id !== a.id);
     },
     import_preview: (a) => {
-      // A tiny stand-in for the core parser: one host per "Host <name>" line, ProxyCommand skipped.
+      // A tiny stand-in for the core parser: one host per "Host <name>" line, ProxyCommand
+      // ignored and noted, a single-hop ProxyJump to another host of the file kept as jumpVia.
       const hosts = [];
       const skipped = [];
       a.text.split("\n").forEach((line, i) => {
         const [key, value] = line.trim().split(/\s+/);
+        const last = hosts.at(-1);
         if (key?.toLowerCase() === "host" && value)
-          hosts.push({ label: value, address: value, port: 22, username: "", group: "", tags: [], notes: [] });
-        if (key?.toLowerCase() === "proxycommand")
-          skipped.push({ line: i + 1, text: line.trim(), reason: "runs a command; not imported (commands from imported files are never run)" });
+          hosts.push({ label: value, address: value, port: 22, username: "", group: "", tags: [], notes: [], jumpVia: null, jump: null });
+        if (key?.toLowerCase() === "proxycommand") {
+          skipped.push({ line: i + 1, text: line.trim(), reason: "runs a command; ignored (commands from imported files are never run)" });
+          last?.notes.push("Its ProxyCommand was ignored (commands from imported files are never run).");
+        }
+        if (key?.toLowerCase() === "proxyjump" && last) last.jump = value;
       });
+      for (const h of hosts) {
+        if (h.jump && hosts.some((x) => x.label === h.jump)) {
+          h.jumpVia = h.jump;
+          h.notes.push(`Goes through the jump host ${h.jump} (from ProxyJump).`);
+        }
+        delete h.jump;
+      }
       return { hosts, skipped, duplicates: hosts.filter((h) => state.hosts.some((x) => x.label === h.label)).map((h) => h.label) };
     },
     import_hosts: (a) => {
+      const firstId = 700 + state.hosts.length;
+      const ids = new Map(a.hosts.map((h, i) => [h.label, id(firstId + i)]));
       for (const h of a.hosts) {
+        if (h.jumpVia) window.__mockJumps.set(ids.get(h.label), ids.get(h.jumpVia));
         state.hosts.push({
-          id: id(700 + state.hosts.length),
+          id: ids.get(h.label),
           label: h.label,
           address: h.address,
           port: h.port,
@@ -952,6 +984,8 @@ export function installMockBackend(options) {
         channelSend(s.events, NEGOTIATED);
         channelSend(s.events, { type: "state", state: "connected" });
         channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+        const host = state.hosts.find((h) => h.label === s.host);
+        if (host) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
     link_open: (a) => {
@@ -959,7 +993,31 @@ export function installMockBackend(options) {
       window.__mockOpenedLinks.push(a.url);
     },
     // agent D: inventory and snippets
-    host_appearance_list: () => Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os })),
+    host_appearance_list: () => {
+      const own = Object.entries(state.os ?? {}).map(([hostId, os]) => ({ hostId, os, inherited: false }));
+      for (const h of state.hosts) {
+        if (state.os?.[h.id]) continue;
+        for (let g = state.groups.find((x) => x.id === h.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+          const os = groupDefaultsState.get(g.id)?.os;
+          if (os) {
+            own.push({ hostId: h.id, os, inherited: true });
+            break;
+          }
+        }
+      }
+      return own;
+    },
+    group_defaults_get: (a) => groupDefaultsView(a.groupId),
+    group_defaults_set: (a) => {
+      const d = a.defaults;
+      if (d.jumpHostId && !state.hosts.some((h) => h.id === d.jumpHostId)) throw { code: "NOT_FOUND", message: "That jump host no longer exists. Choose another." };
+      const before = groupDefaultsState.get(a.groupId)?.proxy;
+      const proxy = d.proxy
+        ? { kind: d.proxy.kind, host: d.proxy.host, port: d.proxy.port, username: d.proxy.username.trim(), passwordStored: d.proxy.username.trim() !== "" && (!!d.proxy.password || (d.proxy.password === null && !!before?.passwordStored)) }
+        : null;
+      groupDefaultsState.set(a.groupId, { jumpHostId: d.jumpHostId, proxy, os: d.os });
+      return groupDefaultsView(a.groupId);
+    },
     host_set_os: (a) => {
       state.os ??= {};
       for (const hostId of a.ids) {
@@ -1098,6 +1156,21 @@ export function installMockBackend(options) {
       return a.vars;
     },
     env_effective: (a) => window.__mockEnvOf(a.hostId, true),
+    startup_get: (a) => structuredClone(startupState.get(envKey(a.target)) ?? null),
+    startup_set: (a) => {
+      const ids = a.snippetIds;
+      if (ids && (ids.length > 16 || new Set(ids).size !== ids.length)) throw { code: "INVALID_INPUT", message: "Choose 16 startup snippets at most, each once." };
+      for (const sid of ids ?? []) {
+        if (!state.snippets.some((x) => x.id === sid)) throw { code: "NOT_FOUND", message: "A startup snippet no longer exists. Choose the snippets again." };
+      }
+      if (ids === null) startupState.delete(envKey(a.target));
+      else startupState.set(envKey(a.target), [...ids]);
+      return ids;
+    },
+    startup_effective: (a) => {
+      const { ids, origin } = startupOf(a.hostId);
+      return { snippets: ids.map((snippetId) => ({ snippetId, name: state.snippets.find((x) => x.id === snippetId)?.name ?? null })), origin };
+    },
     identity_list: () =>
       identityState.list.map((i) => ({
         id: i.id,
@@ -1164,6 +1237,54 @@ export function installMockBackend(options) {
   window.__mockAddFile = (path) => addNode(path, "file", 10);
   /** Environment variables in the mock, per target; hosts get their group chain's, outermost first. */
   const envState = new Map();
+  // HST-05: group route and icon defaults; hosts that set their own route.
+  const groupDefaultsState = new Map();
+  window.__mockOwnRoute = new Set();
+  const groupRoute = (groupId) => {
+    const d = groupDefaultsState.get(groupId);
+    return d && (d.jumpHostId || d.proxy) ? d : null;
+  };
+  window.__mockInheritedRoute = (hostId) => {
+    const host = state.hosts.find((h) => h.id === hostId);
+    for (let g = state.groups.find((x) => x.id === host?.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const r = groupRoute(g.id);
+      if (r) return { jumpHostId: r.jumpHostId === hostId ? null : r.jumpHostId, proxy: r.proxy, origin: { kind: "group", groupId: g.id, name: g.name } };
+    }
+    return null;
+  };
+  function groupDefaultsView(groupId) {
+    const own = groupDefaultsState.get(groupId) ?? { jumpHostId: null, proxy: null, os: null };
+    let inheritedRoute = null;
+    let inheritedOs = null;
+    const group = state.groups.find((g) => g.id === groupId);
+    for (let g = state.groups.find((x) => x.id === group?.parentId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const origin = { kind: "group", groupId: g.id, name: g.name };
+      const r = groupRoute(g.id);
+      if (!inheritedRoute && r) inheritedRoute = { jumpHostId: r.jumpHostId, proxy: r.proxy, origin };
+      const os = groupDefaultsState.get(g.id)?.os;
+      if (!inheritedOs && os) inheritedOs = [os, origin];
+    }
+    return { jumpHostId: own.jumpHostId, proxy: own.proxy, os: own.os, inheritedRoute, inheritedOs };
+  }
+  // Startup snippet lists by `host:<id>` / `group:<id>` (absent: inherit).
+  const startupState = new Map();
+  function startupOf(hostId) {
+    const own = startupState.get(`host:${hostId}`);
+    if (own) return { ids: own, origin: { kind: "host" } };
+    const host = state.hosts.find((h) => h.id === hostId);
+    for (let g = state.groups.find((x) => x.id === host?.groupId); g; g = state.groups.find((x) => x.id === g.parentId)) {
+      const list = startupState.get(`group:${g.id}`);
+      if (list) return { ids: list, origin: { kind: "group", groupId: g.id, name: g.name } };
+    }
+    return { ids: [], origin: null };
+  }
+  window.__mockRunStartup = (s, host) => {
+    if (!host) return;
+    for (const sid of startupOf(host.id).ids) {
+      const snippet = state.snippets.find((x) => x.id === sid);
+      if (snippet) write(s.id, new TextEncoder().encode(`${snippet.text.replace(/\n$/, "").replaceAll("\n", "\r")}\r`));
+    }
+  };
   function envKey(target) {
     return target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`;
   }
