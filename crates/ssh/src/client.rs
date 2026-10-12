@@ -612,10 +612,22 @@ impl VerifiedConnection {
     }
 
     pub async fn open_shell(&self, pty: &PtyRequest) -> Result<(ShellReader, ShellWriter), SshError> {
+        self.open_shell_with_env(pty, &[]).await.map(|(reader, writer, _)| (reader, writer))
+    }
+
+    /// Opens an interactive shell with a PTY after requesting environment variables (SSH `env`
+    /// requests, which the server accepts only for names its `AcceptEnv` allows). Returns the
+    /// names the server refused; they are not set.
+    pub async fn open_shell_with_env(
+        &self,
+        pty: &PtyRequest,
+        env: &[(String, Zeroizing<String>)],
+    ) -> Result<(ShellReader, ShellWriter, Vec<String>), SshError> {
         if !self.authenticated {
             return Err(SshError::NotAuthenticated);
         }
         let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        let rejected = self.request_env(&mut channel, env).await?;
         let term: String = pty.term.chars().filter(|c| c.is_ascii_graphic()).take(64).collect();
         let term = if term.is_empty() { "xterm-256color".to_owned() } else { term };
         self.bounded(
@@ -631,21 +643,50 @@ impl VerifiedConnection {
         self.bounded(Stage::OpeningChannel, channel.request_shell(true)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read, ended: false }, ShellWriter { write }))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write }, rejected))
+    }
+
+    /// Sends one `env` request per variable and waits for each reply. A refused variable is
+    /// collected, not an error: the caller reports it.
+    async fn request_env(
+        &self,
+        channel: &mut russh::Channel<client::Msg>,
+        env: &[(String, Zeroizing<String>)],
+    ) -> Result<Vec<String>, SshError> {
+        let mut rejected = Vec::new();
+        for (name, value) in env {
+            self.bounded(Stage::OpeningChannel, channel.set_env(true, name.as_str(), value.as_str())).await?;
+            match self.await_reply(channel).await {
+                Ok(()) => {}
+                Err(SshError::RequestDenied) => rejected.push(name.clone()),
+                Err(other) => return Err(other),
+            }
+        }
+        Ok(rejected)
     }
 
     /// Runs one command without a PTY and streams its output through the same bounded,
     /// backpressured reader as a shell. `command` is interpreted by the remote user's shell;
     /// callers must not build it from untrusted text.
     pub async fn open_command(&self, command: &str) -> Result<(ShellReader, ShellWriter), SshError> {
+        self.open_command_with_env(command, &[]).await.map(|(reader, writer, _)| (reader, writer))
+    }
+
+    /// [`Self::open_command`] after requesting environment variables; returns the refused names.
+    pub async fn open_command_with_env(
+        &self,
+        command: &str,
+        env: &[(String, Zeroizing<String>)],
+    ) -> Result<(ShellReader, ShellWriter, Vec<String>), SshError> {
         if !self.authenticated {
             return Err(SshError::NotAuthenticated);
         }
         let mut channel = self.bounded(Stage::OpeningChannel, self.handle.channel_open_session()).await?;
+        let rejected = self.request_env(&mut channel, env).await?;
         self.bounded(Stage::OpeningChannel, channel.exec(true, command)).await?;
         self.await_reply(&mut channel).await?;
         let (read, write) = channel.split();
-        Ok((ShellReader { read, ended: false }, ShellWriter { write }))
+        Ok((ShellReader { read, ended: false }, ShellWriter { write }, rejected))
     }
 
     /// Opens the SFTP subsystem on a new channel of this connection.

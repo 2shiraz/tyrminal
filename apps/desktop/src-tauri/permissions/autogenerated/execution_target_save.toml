@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execution-target-save"
+description = "Enables the execution_target_save command without any pre-configured scope."
+commands.allow = ["execution_target_save"]
+
+[[permission]]
+identifier = "deny-execution-target-save"
+description = "Denies the execution_target_save command without any pre-configured scope."
+commands.deny = ["execution_target_save"]

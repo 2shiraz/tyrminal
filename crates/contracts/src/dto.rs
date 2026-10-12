@@ -184,6 +184,13 @@ pub enum ImportFormat {
     OpensshConfig,
     /// CSV with a header row: label, address, port, username, group, tags.
     Csv,
+    // agent D: inventory and snippets
+    /// A Windows registry export (`.reg`) of PuTTY's saved sessions.
+    PuttyReg,
+    /// MobaXterm's `MobaXterm.ini` or an exported `.mxtsessions` file.
+    Mobaxterm,
+    /// SecureCRT's XML settings export, or one session's `.ini` file.
+    Securecrt,
 }
 
 /// A host the import would create.
@@ -636,6 +643,13 @@ pub enum SessionEvent {
     /// Pre-authentication banner from the server. Untrusted.
     Banner {
         text: String,
+    },
+    /// Environment variables were requested for this session (SNP-13). Names only, never values.
+    /// `rejected` lists those the server refused (usually not allowed by its `AcceptEnv`); they
+    /// are not set in the session.
+    Environment {
+        sent: Vec<String>,
+        rejected: Vec<String>,
     },
     /// Terminal: the session is over. `error` is `None` for a normal end.
     #[serde(rename_all = "camelCase")]
