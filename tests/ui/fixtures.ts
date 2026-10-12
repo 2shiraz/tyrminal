@@ -47,6 +47,8 @@ export interface MockOptions {
   extraHosts?: number;
   /** Add this many synthetic trusted servers (bulk-001.example, …) for the windowed Known hosts list. */
   extraKnownHosts?: number;
+  /** Serve IPC calls one at a time, each taking this long (perf specs: a vault behind one lock). */
+  ipcSerialMs?: number;
   /** Keep the browser's real clock (perf.spec.ts: the fixed clock replaces performance.now and requestAnimationFrame). */
   realClock?: boolean;
 }

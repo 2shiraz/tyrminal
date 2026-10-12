@@ -107,23 +107,32 @@ async function connectFromPalette(page: Page, host: string) {
   await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/, { timeout: 15_000 });
 }
 
-test("perf: open host shows its details within budget", async ({ page }) => {
+// Since #110 a click on a host selects it at once and opens its details only after the
+// double-click window (300 ms, so a double-click can connect instead). The immediate response is
+// the selection, so that is what is timed; the details then follow by design.
+test("perf: selecting a host shows at once, within budget", async ({ page }) => {
   await openApp(page, { realClock: true });
   await openHosts(page);
   const list = page.getByTestId("host-list");
   const names = ["edge-cache", "api-gateway"];
   await measure(
     page,
-    "open host",
+    "select host",
     (i) => {
       const name = names[Math.abs(i) % 2] as string;
       return clickToPaint(page, () => list.getByRole("button", { name, exact: true }).click(), {
-        selector: "[data-testid='host-panel']",
+        selector: "[data-testid='host-list'] [data-selected]",
       });
     },
     async () => {
-      await page.keyboard.press("Escape");
-      await expect(page.getByTestId("host-panel")).toHaveCount(0);
+      // The details panel opens after the double-click window; Escape closes it, and Escape in
+      // the list clears the selection, so the next click selects from nothing.
+      await page.waitForTimeout(400);
+      for (let n = 0; n < 3 && (await list.locator("[data-selected]").count()) > 0; n++) {
+        await list.locator("[data-selected] .host-open").first().focus();
+        await page.keyboard.press("Escape");
+      }
+      await expect(list.locator("[data-selected]")).toHaveCount(0);
     },
   );
 });
