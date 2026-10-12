@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useExit } from "../../lib/exitGhost";
 import { useFlip } from "../../lib/motion";
@@ -99,6 +99,39 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     };
   }, [shown, pause, resume]);
 
+  // A panel along the right edge (side panels, Host details) has its own footer down there: while
+  // one is open the stack sits beside it, not over it. Measured before paint, so a toast never
+  // shows over the panel first.
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    if (!shown || !stack) return;
+    let frame = 0;
+    const sizes = new ResizeObserver(() => later());
+    const measure = () => {
+      frame = 0;
+      let inset = 0;
+      for (const panel of document.querySelectorAll<HTMLElement>(PANELS)) {
+        sizes.observe(panel);
+        // Layout width, not the box: a panel still sliding in is translated a few pixels.
+        const r = panel.getBoundingClientRect();
+        if (r.height > 0 && r.right > window.innerWidth - 2) inset = Math.max(inset, panel.offsetWidth);
+      }
+      stack.style.setProperty("--toast-inset", `${inset}px`);
+    };
+    const later = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    sizes.observe(document.documentElement);
+    measure();
+    const panels = new MutationObserver(later);
+    panels.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      panels.disconnect();
+      sizes.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [shown]);
+
   const value = useMemo(() => notify, [notify]);
   return (
     <ToastContext.Provider value={value}>
@@ -111,6 +144,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     </ToastContext.Provider>
   );
 }
+
+// Exit copies (lib/exitGhost.ts) are leaving: they do not hold the stack aside.
+const PANELS = ":is(.side-panel, .host-panel):not([data-exit-ghost])";
 
 function ToastItem({ toast }: { toast: Toast }) {
   // A toast times out on its own, so it fades whichever input was last.

@@ -1290,12 +1290,13 @@ kbd,
 
 .toasts {
   position: fixed;
-  right: var(--space-4);
+  /* --toast-inset: the width of an open right-edge panel (Toasts.tsx), so its footer stays clear. */
+  right: calc(var(--toast-inset, 0px) + var(--space-4));
   bottom: calc(var(--statusbar-height) + var(--space-4));
   z-index: 70;
   display: grid;
   gap: var(--space-2);
-  width: min(380px, calc(100vw - 32px));
+  width: min(380px, calc(100vw - 32px - var(--toast-inset, 0px)));
   /* Click-through: a toast never covers a control (Toasts.tsx finds hover by hit-testing). */
   pointer-events: none;
 }
