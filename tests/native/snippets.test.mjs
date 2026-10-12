@@ -4,7 +4,7 @@
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/snippets.test.mjs
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
@@ -102,6 +102,12 @@ describe("snippets in the real application", { concurrency: false }, () => {
     assert.equal((await s.findAll(".side-panel")).length, 0);
     assert.equal((await s.findAll(".terminal-pane")).length, 0);
     for (const name of readdirSync(app.dataDir)) {
+      // The single-instance lock file holds no data, and Windows refuses reads of a file another
+      // process holds locked: check that it is empty instead of reading it.
+      if (name === "instance.lock") {
+        assert.equal(statSync(join(app.dataDir, name)).size, 0, "the instance lock file holds no data");
+        continue;
+      }
       const bytes = readFileSync(join(app.dataDir, name));
       for (const needle of ["Echo answer", "snippet-$((40+2))", "second-$((2+2))"]) {
         assert.ok(!bytes.includes(needle), `plaintext "${needle}" found in ${name}`);

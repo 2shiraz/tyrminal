@@ -405,3 +405,11 @@ test("quick unlock: turned on with the passphrase, then the unlock screen offers
   await page.getByRole("button", { name: "Unlock with this device" }).click();
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 });
+
+test("an uninitialized vault shows onboarding even when a status event beats the status request", async ({ page }) => {
+  // Seen on Windows: the first status event reached the page before vault_status returned, and
+  // the unlock screen appeared for a vault that does not exist yet.
+  await openApp(page, { scenario: "onboarding", statusEventFirst: true });
+  expect(await page.getByRole("heading", { level: 1 }).textContent()).toBe("Create your local vault");
+  await expect(page.getByRole("heading", { name: "Unlock your vault" })).toHaveCount(0);
+});

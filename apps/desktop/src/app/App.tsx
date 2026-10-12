@@ -92,7 +92,9 @@ function Root() {
       </div>
     );
   }
-  if (onboarding) return <Onboarding onDone={() => setOnboarding(false)} />;
+  // A status event can arrive before the first status request returns; an uninitialized vault
+  // always means onboarding, never the unlock screen.
+  if (onboarding || status.state === "uninitialized") return <Onboarding onDone={() => setOnboarding(false)} />;
   if (status.state === "unlocked") {
     // Keyed by generation: every lock/unlock cycle starts from a clean tree, so nothing rendered
     // from the previous unlocked period (lists, dialogs, terminals) can survive a lock.

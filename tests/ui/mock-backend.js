@@ -193,6 +193,9 @@ export function installMockBackend(options) {
     "plugin:event|listen": (a) => {
       const lid = nextListener++;
       listeners.set(lid, { event: a.event, handler: a.handler });
+      // Race seen on Windows: a status event reaches the page before the first status request
+      // returns.
+      if (options.statusEventFirst && a.event === "vault-status") setTimeout(() => emit("vault-status", state.vault), 0);
       return lid;
     },
     "plugin:event|unlisten": (a) => {
@@ -216,7 +219,8 @@ export function installMockBackend(options) {
       state.prefs = structuredClone(a.prefs);
       return structuredClone(state.prefs);
     },
-    vault_status: () => ({ ...state.vault }),
+    vault_status: () =>
+      options.statusEventFirst ? new Promise((resolve) => setTimeout(() => resolve({ ...state.vault }), 1500)) : { ...state.vault },
     vault_quick_unlock_status: () => state.quickUnlock === true,
     vault_quick_unlock_enable: (a) => {
       if (a.passphrase !== "correct horse") throw { code: "WRONG_CREDENTIAL", message: "That did not unlock the vault. Nothing was changed." };

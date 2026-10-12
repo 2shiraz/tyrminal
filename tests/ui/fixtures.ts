@@ -11,6 +11,8 @@ export interface MockOptions {
   hostKeyChangedFor?: string;
   /** Simulate a WebView without WebGL (the GPU renderer must fall back). */
   noWebgl?: boolean;
+  /** Deliver a vault status event before the first status request returns. */
+  statusEventFirst?: boolean;
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {
