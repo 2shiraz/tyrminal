@@ -99,7 +99,7 @@ a tab, and installing a public key on the connected server.
 **Hosts** lists your saved servers as a grid or a list. Each host has an address, port, user name
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
-Hosts remembers the layout (cards or list), the sort order and the group you picked, also after
+Hosts opens as a list. It remembers the layout (list or cards), the sort order and the group you picked, also after
 you visit another view or restart Tyrminal.
 
 A **group** can also give its hosts defaults: a user name, port and key, and, under

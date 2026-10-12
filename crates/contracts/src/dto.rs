@@ -567,8 +567,8 @@ pub struct HostsViewPreferences {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum HostsLayout {
-    #[default]
     Grid,
+    #[default]
     List,
 }
 

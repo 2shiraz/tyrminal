@@ -107,7 +107,7 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
 }
 
 /** How Hosts is shown until the user changes it; the choice is kept in preferences. */
-const DEFAULT_VIEW: HostsViewPreferences = { layout: "grid", sort: "name", filter: { kind: "all" } };
+const DEFAULT_VIEW: HostsViewPreferences = { layout: "list", sort: "name", filter: { kind: "all" } };
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
 function rangeBetween(order: string[], from: string, to: string): string[] {

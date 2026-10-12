@@ -275,6 +275,8 @@ mod tests {
     #[test]
     fn the_hosts_view_survives_a_restart_and_a_group_filter_must_be_an_id() {
         use tyrminal_contracts::{HostsFilter, HostsLayout, HostsSort, HostsViewPreferences};
+        // Hosts opens as a list until the user picks cards.
+        assert_eq!(HostsViewPreferences::default().layout, HostsLayout::List);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("preferences.json");
         let store = PreferencesStore::open(&path);

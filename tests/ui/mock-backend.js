@@ -25,6 +25,7 @@ export function installMockBackend(options) {
       // compromised-password check (SEC-11)
       passwordCheck: { enabled: false, endpoint: "https://api.pwnedpasswords.com/range/" },
       productionTag: options.productionTag ?? "prod",
+      ...(options.hostsLayout === null ? {} : { hostsView: { layout: options.hostsLayout ?? "grid", sort: "name", filter: { kind: "all" } } }),
       terminal: {
         scheme: options.scheme ?? "tyrminal-night",
         fontFamily: "jetbrains-mono",

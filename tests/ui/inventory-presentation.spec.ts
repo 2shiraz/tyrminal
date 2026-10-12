@@ -58,6 +58,25 @@ test("the chosen layout, sort and group filter stay after other views and a rest
   await check();
 });
 
+test("Hosts opens as a list by default; Cards, once chosen, stays after other views and a restart", async ({ page }) => {
+  await openApp(page, { hostsLayout: null });
+  await openHosts(page);
+  const layout = page.getByRole("radiogroup", { name: "Layout" });
+  await expect(layout.getByRole("radio", { name: "List" })).toBeChecked();
+  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(0);
+
+  await layout.getByText("Cards").click();
+  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(6);
+  await primary(page).getByRole("button", { name: /^Settings/ }).click();
+  await openHosts(page);
+  await expect(layout.getByRole("radio", { name: "Cards" })).toBeChecked();
+  await expect.poll(async () => (await calls(page, "prefs_set")).length).toBeGreaterThan(0);
+  await page.reload();
+  await openHosts(page);
+  await expect(layout.getByRole("radio", { name: "Cards" })).toBeChecked();
+  await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(6);
+});
+
 test("select all shown hosts and shift-click a range", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
