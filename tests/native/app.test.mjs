@@ -124,12 +124,16 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.fill("User name", lab.user, { within: HOST_PANEL });
     // A new host asks for the password unless a key is chosen.
     await chooseKey(s, "lab key");
+    const chosen = await s.execute(`return document.querySelector('${HOST_PANEL} select[aria-label="Choose a key"]')?.selectedOptions[0]?.textContent ?? ""`);
+    assert.match(chosen, /^lab key \(/, "the host signs in with the imported key");
     await app.screenshot("05-host-editor");
     await saveAndCloseHostPanel(s);
+    // A list row shows the name, protocol and user, and the address (the key shows in the
+    // details panel; the next test signs in with it, which proves it was saved).
     const hostRow = await hostText();
     assert.match(hostRow, /Lab server/);
-    assert.match(hostRow, new RegExp(`${lab.user}@127\\.0\\.0\\.1 port ${forwarder.port}`));
-    assert.match(hostRow, /Key: lab key/);
+    assert.match(hostRow, new RegExp(`\\b${lab.user}\\b`));
+    assert.match(hostRow, new RegExp(`127\\.0\\.0\\.1:${forwarder.port}\\b`));
 
     // The renderer holds no private key material anywhere in its document.
     const html = await s.execute("return document.documentElement.outerHTML");
