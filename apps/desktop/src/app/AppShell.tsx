@@ -25,6 +25,7 @@ import { SnippetsView } from "../features/snippets/SnippetsView";
 import { TunnelsView } from "../features/tunnels/TunnelsView";
 import { RecordingsView } from "../features/history/RecordingsView";
 import { msgSftp } from "../features/sftp/messages";
+import { sftpRequests } from "../features/sftp/requests";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { ConnectionLogDialog } from "../features/terminal/ConnectionLogDialog";
@@ -281,6 +282,21 @@ function Shell() {
   const openLocal = useCallback(() => open({ kind: "local" }, msg.nav.localTerminal, msg.terminal.local), [open]);
   // An SFTP tab: two file panes (this computer and a host picker); never split.
   const openSftp = useCallback(() => open({ kind: "sftp" }, msgSftp.tabTitle, msgSftp.view), [open]);
+  /**
+   * Open in SFTP: focuses the SFTP tab in front (or the first one; a new one when there is none)
+   * and shows `host` in its right pane, at `path` when given.
+   */
+  const openSftpHost = useCallback(
+    (host: { id: string; label: string }, path: string | null = null) => {
+      const current = wsRef.current;
+      const isSftp = (t: { focused: number }) => current.panes[t.focused]?.target.kind === "sftp";
+      const front = current.tabs.find((t) => t.id === current.active && isSftp(t)) ?? current.tabs.find(isSftp);
+      if (front) setWs((c) => selectTab(c, front.id));
+      else openSftp();
+      sftpRequests.push({ source: { kind: "host", hostId: host.id, label: host.label }, path });
+    },
+    [openSftp],
+  );
 
   const focusedHandle = useCallback(() => {
     const p = activePane(wsRef.current);
@@ -744,7 +760,7 @@ function Shell() {
           {!terminalVisible && destination === "home" && (
             <HomeView ws={ws} statuses={statuses} onConnect={connect} onLocal={openLocal} onSftp={openSftp} onNavigate={navigate} onSelectTab={(id) => setWs((c) => selectTab(c, id))} />
           )}
-          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} />}
+          {!terminalVisible && destination === "hosts" && <HostsView ws={ws} onConnect={connect} onOpenSftp={(host) => openSftpHost(host)} />}
           {!terminalVisible && destination === "snippets" && <SnippetsView />}
           {!terminalVisible && destination === "keychain" && <KeychainView />}
           {!terminalVisible && destination === "knownHosts" && <KnownHostsView />}
@@ -782,6 +798,7 @@ function Shell() {
                   ) : showPanel && sidePanel === "files" ? (
                     <FilesPanel
                       target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
+                      onOpenSftp={pane?.target.kind === "ssh" ? (path: string | null) => pane.target.kind === "ssh" && openSftpHost({ id: pane.target.hostId, label: pane.label }, path) : undefined}
                       others={Object.values(ws.panes).flatMap((p) => {
                         const id = p.target.kind === "ssh" && statuses[p.id]?.state === "connected" ? handles.current.get(p.id)?.sessionId() : null;
                         return id && id !== filesSession ? [{ sessionId: id, label: p.label }] : [];
@@ -871,6 +888,7 @@ function Shell() {
 
       {pickingSplit && (
         <CommandPalette
+          onSftpHost={(host) => openSftpHost(host)}
           hasTerminal={false}
           terminalConnected={false}
           pick={{
@@ -896,6 +914,7 @@ function Shell() {
 
       {paletteOpen && (
         <CommandPalette
+          onSftpHost={(host) => openSftpHost(host)}
           hasTerminal={terminalVisible && pane !== null && !sftpVisible}
           terminalConnected={paneStatus?.state === "connected"}
           onClose={() => {

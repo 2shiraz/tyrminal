@@ -133,3 +133,20 @@ the same everywhere.
   folder" with what to do (in place of the list, or above it when a folder opened from the list
   is refused); an empty folder says how to fill it; a filter with no match offers Clear filter.
 
+## Several servers at once
+
+Each SFTP pane has a row of location tabs above its toolbar. A location is this computer or a
+saved host over its own files-only connection (trust and sign-in as usual, each with its own
+prompt). "+" adds one (up to eight per pane), × closes one and its connection; the last one
+closes into the host picker. A location keeps its connection, folder, history, selection and
+scroll while another is shown, so switching neither reconnects nor lists again. Each tab shows
+its state (connecting, connected, waiting for you, dropped); a dropped location offers Reconnect.
+Copy, F5 and drag work between the locations shown in the two panes, server to server included.
+Closing the SFTP tab closes every location's connection; a vault lock ends them all in the core.
+
+**Open in SFTP** opens or focuses an SFTP tab and shows that host in its right pane (the location
+already on that host if there is one, else a new one, using an empty one first): from a host's "…"
+menu, the Host details menu, the palette ("SFTP: <host>"), and a session's Files panel ("Open in
+SFTP tab", at the folder shown). It always opens its own files-only connection; a terminal's
+session is never shared.
+

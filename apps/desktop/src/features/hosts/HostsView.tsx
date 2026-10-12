@@ -8,6 +8,7 @@ import { Menu } from "../../components/ui/Menu";
 import { useToast } from "../../components/ui/Toasts";
 import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
 import {
+  IconArrowLeftRight,
   IconCopy,
   IconEllipsis,
   IconFolder,
@@ -29,6 +30,7 @@ import {
   IconUser,
   IconX,
 } from "../../components/ui/icons";
+import { msgSftp } from "../sftp/messages";
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
@@ -105,7 +107,16 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
 
-export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
+export function HostsView({
+  ws,
+  onConnect,
+  onOpenSftp,
+}: {
+  ws: Workspace;
+  onConnect: (host: HostSummary) => void;
+  /** Open in SFTP: the host in an SFTP tab (SSH hosts). */
+  onOpenSftp?: (host: HostSummary) => void;
+}) {
   const { hosts, keys, recent, groups } = useVaultData();
   const notify = useToast();
   const [query, setQuery] = useState("");
@@ -666,6 +677,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             reload();
           }}
           onConnect={(host) => guard(() => onConnect(host))}
+          onOpenSftp={onOpenSftp}
           onDuplicate={(host) => void duplicate(host)}
           onCopyAddress={(host) => {
             // A user-initiated copy of non-secret data.
@@ -686,6 +698,9 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           onClose={() => setMenu(null)}
           items={[
             { label: msg.hosts.connect, icon: <IconPlay size={15} />, onSelect: () => onConnect(menu.host) },
+            ...(onOpenSftp && menu.host.protocol.type === "ssh"
+              ? [{ label: msgSftp.openIn, icon: <IconArrowLeftRight size={15} />, onSelect: () => onOpenSftp(menu.host) }]
+              : []),
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => openPanel({ kind: "edit", host: menu.host }) },
             {
               label: msg.hosts.duplicate,

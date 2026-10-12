@@ -1,72 +1,38 @@
-import type { HostSummary, RemoteEntry, SessionEvent, SessionState } from "@tyrminal/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { HostSummary } from "@tyrminal/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Dialog } from "../../components/ui/Dialog";
-import { Menu, type MenuEntry } from "../../components/ui/Menu";
-import { EmptyState, ErrorNotice } from "../../components/ui/controls";
-import {
-  IconArrowLeftRight,
-  IconChevronDown,
-  IconFolderOpen,
-  IconHardDrive,
-  IconRefreshCw,
-  IconSearch,
-  IconServer,
-  IconShieldAlert,
-  IconShieldCheck,
-  IconTriangleAlert,
-  IconUnplug,
-} from "../../components/ui/icons";
-import { files as filesApi, sessions, toAppError } from "../../lib/ipc";
-import { msg } from "../../lib/messages";
-import { useAction } from "../../lib/useAsync";
-import { FILE_DRAG, type FileDrag, FilePane, type PaneBackend, type PaneView, emptyView, localBackend, remoteBackend } from "../files/FilePane";
-import { AuthDialog, Fingerprint } from "../terminal/TerminalView";
-import { HopNotice } from "../tunnels/HopNotice";
-import { msgFiles } from "../files/messages";
+import { IconButton } from "../../components/ui/controls";
+import { IconArrowLeftRight, IconHardDrive, IconPlus, IconServer, IconX } from "../../components/ui/icons";
 import { msgSftp } from "./messages";
-import type { Endpoint, Loc } from "./model";
+import type { Endpoint } from "./model";
+import { type LocationStatus, type PaneHealth, type PaneTransfers, SftpLocation, type Side, type Source } from "./SftpLocation";
 
-export type Side = "left" | "right";
+export { TrustDialog } from "./SftpLocation";
+export type { PaneHealth, PaneTransfers, Side, Source } from "./SftpLocation";
 
-export type Source = { kind: "none" } | { kind: "local" } | { kind: "host"; hostId: string; label: string };
+/** Locations one pane keeps open at most. */
+export const MAX_LOCATIONS = 8;
 
-type Trust = Extract<SessionEvent, { type: "trust_prompt" }>;
-type Auth = Extract<SessionEvent, { type: "auth_prompt" }>;
-type Changed = Extract<SessionEvent, { type: "host_key_changed" }>;
-
-interface Connection {
-  sessionId: string | null;
-  state: SessionState | "starting";
-  trust: Trust | null;
-  auth: Auth | null;
-  changed: Changed | null;
-  banner: string | null;
-  error: { code: string; message: string } | null;
+/** Asks a pane to show a location: an open one with that host, else a new one. */
+export interface LocationRequest {
+  source: Source;
+  path: string | null;
+  seq: number;
 }
 
-/** How a pane is doing, for the tab's indicator. */
-export type PaneHealth = "idle" | "busy" | "ok" | "bad" | "attention";
-
-/** What the tab offers a pane for moving items (it runs the transfer queue). */
-export interface PaneTransfers {
-  /** "Copy to <the other pane>", or null while the other pane shows nothing. */
-  copyLabel: string | null;
-  copy: (entries: RemoteEntry[]) => void;
-  /** Items dragged here from the other pane. */
-  dropFrom: (entries: RemoteEntry[]) => void;
-  /** Files dropped here from the desktop (a server pane only). */
-  dropFiles: (files: DataTransfer) => void;
-  download: (entries: RemoteEntry[]) => void;
-  upload: () => void;
-  uploadFolder: () => void;
-  duplicate: (entries: RemoteEntry[]) => void;
+interface Location {
+  id: number;
+  initial: Source;
+  startPath: string | null;
+  go: { path: string; seq: number } | null;
 }
+
+const RANK: PaneHealth[] = ["idle", "ok", "busy", "bad", "attention"];
 
 /**
- * One side of the SFTP tab: this computer (a folder the user chose) or a saved host over a
- * files-only connection, browsed with the same pane as the Files panel. The connection belongs
- * to this pane; it is closed when the pane changes source or the tab closes.
+ * One side of the SFTP tab: a row of location tabs (this computer or saved hosts, several open at
+ * once) above the location shown. Every location keeps its own connection, folder and history
+ * while another one is shown; "+" adds one (up to eight) and × closes one with its connection.
  */
 export function SftpPane({
   paneId,
@@ -77,432 +43,205 @@ export function SftpPane({
   active,
   refreshKey,
   transfers,
+  request = null,
   onFocusIn,
   onEndpoint,
   onHealth,
+  onFull,
   onOpenKnownHosts,
 }: {
   /** Stays with the pane when the panes swap sides (drag payloads name it). */
   paneId: string;
   side: Side;
   initial: Source;
-  /** Saved SSH hosts, for the picker. */
   hosts: HostSummary[];
-  /** Prompts appear only while the tab is in front. */
   visible: boolean;
-  /** This pane has the keyboard (or was used last): it is marked, the other one is muted. */
   active: boolean;
-  /** Bumped by the tab when a transfer into this pane's folder finished. */
   refreshKey: number;
   transfers: PaneTransfers;
+  /** Open in SFTP: show this host (focusing a location already on it). */
+  request?: LocationRequest | null;
   onFocusIn: () => void;
+  /** The shown location's folder, for copying to and from the other pane. */
   onEndpoint: (endpoint: Endpoint | null) => void;
   onHealth: (health: PaneHealth) => void;
+  /** A request could not open another location (eight already). */
+  onFull: () => void;
   onOpenKnownHosts: () => void;
 }) {
   const sideLabel = side === "left" ? msgSftp.left : msgSftp.right;
-  const [source, setSource] = useState<Source>(initial);
-  const [conn, setConn] = useState<Connection | null>(null);
-  const [root, setRoot] = useState<(Loc & { kind: "local" }) | null>(null);
-  const [view, setView] = useState<PaneView>(emptyView);
-  const [sourceMenu, setSourceMenu] = useState<HTMLElement | null>(null);
-  const { pending, error, run, clearError } = useAction();
-  const sessionRef = useRef<string | null>(null);
-  const attempt = useRef(0);
+  const nextId = useRef(1);
+  const [locations, setLocations] = useState<Location[]>(() => [{ id: nextId.current++, initial, startPath: null, go: null }]);
+  const [shown, setShown] = useState(1);
+  const [status, setStatus] = useState<Record<number, LocationStatus>>({});
+  const [endpoints, setEndpoints] = useState<Record<number, Endpoint | null>>({});
+  const tabRefs = useRef(new Map<number, HTMLButtonElement>());
+  /** Per-location refresh counters: a finished transfer refreshes the location shown only. */
+  const [bumps, setBumps] = useState<Record<number, number>>({});
+  const seenRefresh = useRef(refreshKey);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new refresh goes to the location shown then.
+  useEffect(() => {
+    if (refreshKey === seenRefresh.current) return;
+    seenRefresh.current = refreshKey;
+    setBumps((b) => ({ ...b, [shown]: (b[shown] ?? 0) + 1 }));
+  }, [refreshKey]);
 
-  // ---------- connection ----------
-
-  const closeSession = useCallback(() => {
-    const id = sessionRef.current;
-    sessionRef.current = null;
-    if (id) void sessions.close(id).catch(() => undefined);
-  }, []);
-
-  // The connection lives as long as this pane shows its host.
-  useEffect(() => closeSession, [closeSession]);
-
-  const connect = useCallback(
-    (hostId: string) => {
-      closeSession();
-      const mine = ++attempt.current;
-      setView(emptyView());
-      clearError();
-      setConn({ sessionId: null, state: "starting", trust: null, auth: null, changed: null, banner: null, error: null });
-      const patch = (change: Partial<Connection>) => {
-        if (mine === attempt.current) setConn((c) => (c ? { ...c, ...change } : c));
-      };
-      const onEvent = (event: SessionEvent) => {
-        if (mine !== attempt.current) return;
-        switch (event.type) {
-          case "state":
-            patch({ state: event.state });
-            break;
-          case "trust_prompt":
-            patch({ trust: event });
-            break;
-          case "auth_prompt":
-            patch({ auth: event });
-            break;
-          case "host_key_changed":
-            patch({ changed: event });
-            break;
-          case "banner":
-            patch({ banner: event.text });
-            break;
-          case "closed":
-            sessionRef.current = null;
-            setConn((c) =>
-              c && mine === attempt.current
-                ? { ...c, sessionId: null, state: event.error ? "failed" : "closed", trust: null, auth: null, error: event.error }
-                : c,
-            );
-            setView(emptyView());
-            break;
-          default:
-            break;
-        }
-      };
-      sessions
-        .openFiles(hostId, onEvent)
-        .then((opened) => {
-          if (mine !== attempt.current) {
-            void sessions.close(opened.sessionId).catch(() => undefined);
-            return;
-          }
-          sessionRef.current = opened.sessionId;
-          setConn((c) => (c ? { ...c, sessionId: opened.sessionId } : c));
-        })
-        .catch((caught) => {
-          const e = toAppError(caught);
-          patch({ state: "failed", error: { code: e.code, message: e.message } });
-        });
+  const add = useCallback(
+    (source: Source, startPath: string | null = null, replacing: number | null = null) => {
+      if (replacing === null && locations.length >= MAX_LOCATIONS) return false;
+      const id = nextId.current++;
+      setLocations((list) => [...list.filter((l) => l.id !== replacing), { id, initial: source, startPath, go: null }]);
+      setShown(id);
+      return true;
     },
-    [closeSession, clearError],
+    [locations.length],
   );
 
-  function choose(next: Source) {
-    attempt.current += 1;
-    closeSession();
-    setConn(null);
-    setRoot(null);
-    setView(emptyView());
-    clearError();
-    setSource(next);
-    if (next.kind === "host") connect(next.hostId);
+  function close(id: number) {
+    const index = locations.findIndex((l) => l.id === id);
+    const rest = locations.filter((l) => l.id !== id);
+    // The last location closes into an empty one with the picker; a pane is never empty.
+    const next = rest.length > 0 ? rest : [{ id: nextId.current++, initial: { kind: "none" } as Source, startPath: null, go: null }];
+    setLocations(next);
+    setStatus(({ [id]: _, ...others }) => others);
+    setEndpoints(({ [id]: _, ...others }) => others);
+    if (shown === id) setShown((next[Math.min(index, next.length - 1)] as Location).id);
   }
 
-  // A host given at the start connects at once.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only the first source.
+  // Open in SFTP: a location already on that host is shown (and goes to the folder), else a new one.
+  const seen = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each request is handled once.
   useEffect(() => {
-    if (initial.kind === "host") connect(initial.hostId);
-  }, []);
-
-  async function chooseLocalFolder() {
-    const pick = await run(() => filesApi.pickFolder());
-    if (!pick) return;
-    const listing = await run(() => filesApi.localList(pick.token, []));
-    if (listing) {
-      setRoot({ kind: "local", token: listing.token, rootName: listing.rootName, path: [] });
-      setView(emptyView());
+    if (!request || request.seq === seen.current) return;
+    seen.current = request.seq;
+    const { source, path } = request;
+    const open = source.kind === "host" ? locations.find((l) => status[l.id]?.hostId === source.hostId) : undefined;
+    if (open) {
+      setShown(open.id);
+      if (path) setLocations((list) => list.map((l) => (l.id === open.id ? { ...l, go: { path, seq: request.seq } } : l)));
+    } else {
+      // An empty location (still on the host picker) is used rather than left beside the new one.
+      const empty = locations.find((l) => (status[l.id]?.kind ?? l.initial.kind) === "none");
+      if (!add(source, path, empty?.id ?? null)) onFull();
     }
-  }
+  }, [request]);
 
-  // ---------- what the pane browses, and what the tab sees ----------
-
-  const connected = source.kind === "host" && conn?.sessionId && conn.state === "connected" ? conn.sessionId : null;
-  const backend: PaneBackend | null = useMemo(() => {
-    if (source.kind === "host") return connected ? remoteBackend(connected, source.label) : null;
-    if (source.kind === "local") return root ? localBackend(root) : null;
-    return null;
-  }, [source, connected, root]);
-
-  const folder = view.folder;
-  const endpoint: Endpoint | null = useMemo(() => {
-    if (!folder || !backend) return null;
-    if (folder.loc.kind === "local") return { kind: "local", token: folder.loc.token, rootName: folder.loc.rootName, path: folder.loc.path };
-    if (source.kind === "host" && connected) return { kind: "remote", sessionId: connected, label: source.label, path: folder.loc.path };
-    return null;
-  }, [folder, backend, source, connected]);
-
-  useEffect(() => onEndpoint(endpoint), [endpoint, onEndpoint]);
-
-  const health: PaneHealth =
-    source.kind !== "host" || !conn
-      ? "idle"
-      : conn.trust || conn.auth
-        ? "attention"
-        : conn.state === "connected"
-          ? "ok"
-          : conn.state === "failed"
-            ? "bad"
-            : conn.state === "closed"
-              ? "idle"
-              : "busy";
+  const shownEndpoint = endpoints[shown] ?? null;
+  useEffect(() => onEndpoint(shownEndpoint), [shownEndpoint, onEndpoint]);
+  const health = RANK[Math.max(...locations.map((l) => RANK.indexOf(status[l.id]?.health ?? "idle")))] ?? "idle";
   useEffect(() => onHealth(health), [health, onHealth]);
 
-  const sshHosts = hosts.filter((h) => h.protocol.type === "ssh");
-  const sourceItems: MenuEntry[] = [
-    { label: msgSftp.thisComputer, icon: <IconHardDrive size={15} />, onSelect: () => choose({ kind: "local" }) },
-    ...(sshHosts.length > 0 ? (["separator"] as MenuEntry[]) : []),
-    ...sshHosts.map((h) => ({ label: h.label, icon: <IconServer size={15} />, onSelect: () => choose({ kind: "host", hostId: h.id, label: h.label }) })),
-  ];
-  const menuExtras: MenuEntry[] = [
-    ...(source.kind === "local" ? [{ label: msgSftp.localChange, icon: <IconFolderOpen size={15} />, onSelect: () => void chooseLocalFolder() }] : []),
-    ...(source.kind === "host" && conn?.sessionId ? [{ label: msgSftp.closeConnection, icon: <IconUnplug size={15} />, onSelect: () => choose({ kind: "none" }) }] : []),
-  ];
-  const sourceLabel = source.kind === "local" ? msgSftp.thisComputer : source.kind === "host" ? source.label : msgSftp.connectTitle;
-  const remote = backend?.kind === "remote";
-  const where = endpoint ? (endpoint.kind === "local" ? msgSftp.thisComputer : endpoint.label) : "";
+  // Stable callbacks per location, so a location does not report again on every render.
+  const callbacks = useRef(new Map<number, { endpoint: (e: Endpoint | null) => void; status: (s: LocationStatus) => void }>());
+  const callbacksFor = (id: number) => {
+    let c = callbacks.current.get(id);
+    if (!c) {
+      c = {
+        endpoint: (e) => setEndpoints((all) => (all[id] === e ? all : { ...all, [id]: e })),
+        status: (s) =>
+          setStatus((all) => {
+            const old = all[id];
+            return old && old.label === s.label && old.kind === s.kind && old.health === s.health && old.hostId === s.hostId ? all : { ...all, [id]: s };
+          }),
+      };
+      callbacks.current.set(id, c);
+    }
+    return c;
+  };
 
-  // ---------- render ----------
-
-  const placeholder = (
-    <div className="sftp-body">
-      <ErrorNotice error={error} />
-      {source.kind === "none" && <HostPicker hosts={sshHosts} onLocal={() => choose({ kind: "local" })} onHost={(h) => choose({ kind: "host", hostId: h.id, label: h.label })} />}
-      {source.kind === "local" && (
-        <EmptyState icon={<IconHardDrive size={28} />} title={msgSftp.localTitle} body={msgSftp.localBody} headingLevel={3}>
-          <button type="button" className="btn btn-primary" onClick={() => void chooseLocalFolder()} disabled={pending}>
-            <IconFolderOpen size={15} /> {msgSftp.localChoose}
-          </button>
-        </EmptyState>
-      )}
-      {source.kind === "host" && conn && (
-        <ConnectionState label={source.label} conn={conn} onReconnect={() => connect(source.hostId)} onOther={() => choose({ kind: "none" })} onOpenKnownHosts={onOpenKnownHosts} />
-      )}
-    </div>
-  );
+  /** Left/Right move between location tabs (the tab row is one stop for Tab, as tabs are). */
+  function onTabKey(event: React.KeyboardEvent, index: number) {
+    const here = locations[index];
+    if ((event.key === "Delete" || event.key === "Backspace") && here) {
+      event.preventDefault();
+      const next = locations[index + 1] ?? locations[index - 1];
+      close(here.id);
+      if (next) window.requestAnimationFrame(() => tabRefs.current.get(next.id)?.focus());
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const last = locations.length - 1;
+    const to = event.key === "Home" ? 0 : event.key === "End" ? last : event.key === "ArrowLeft" ? (index === 0 ? last : index - 1) : index === last ? 0 : index + 1;
+    const target = locations[to];
+    if (!target) return;
+    setShown(target.id);
+    tabRefs.current.get(target.id)?.focus();
+  }
 
   return (
     <section className="sftp-pane" aria-label={sideLabel} data-active={active || undefined} onFocus={onFocusIn} onPointerDown={onFocusIn}>
-      <header className="sftp-head">
-        <button type="button" className="sftp-source" aria-haspopup="menu" aria-label={`${msgSftp.source}: ${sourceLabel}`} onClick={(e) => setSourceMenu(e.currentTarget)}>
-          <span className="sftp-source-icon" data-kind={source.kind} aria-hidden="true">
-            {source.kind === "host" ? <IconServer size={15} /> : source.kind === "local" ? <IconHardDrive size={15} /> : <IconArrowLeftRight size={15} />}
-          </span>
-          <span className="sftp-source-label">{sourceLabel}</span>
-          {source.kind === "host" && conn && (
-            <span className="status-dot" data-tone={health === "ok" ? "ok" : health === "bad" ? "bad" : health === "attention" ? "attention" : "busy"} aria-hidden="true" />
-          )}
-          <IconChevronDown size={14} />
-        </button>
-      </header>
+      <div className="sftp-locations">
+        <div className="sftp-tabs" role="tablist" aria-label={msgSftp.locations(sideLabel)}>
+          {locations.map((l, index) => {
+            const s = status[l.id];
+            const label = s?.label ?? msgSftp.newLocation;
+            const tone = s?.kind === "host" ? (s.health === "ok" ? "ok" : s.health === "bad" ? "bad" : s.health === "attention" ? "attention" : s.health === "busy" ? "busy" : null) : null;
+            const selected = l.id === shown;
+            return (
+              <div key={l.id} className="sftp-tab" role="presentation" data-selected={selected || undefined}>
+                <button
+                  ref={(el) => {
+                    if (el) tabRefs.current.set(l.id, el);
+                    else tabRefs.current.delete(l.id);
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`sftp-${paneId}-tab-${l.id}`}
+                  aria-selected={selected}
+                  aria-controls={`sftp-${paneId}-loc-${l.id}`}
+                  aria-keyshortcuts="Delete"
+                  aria-description={msgSftp.closeHint}
+                  tabIndex={selected ? 0 : -1}
+                  className="sftp-tab-main"
+                  onClick={() => setShown(l.id)}
+                  onKeyDown={(e) => onTabKey(e, index)}
+                >
+                  <span className="sftp-tab-icon" data-kind={s?.kind ?? "none"} aria-hidden="true">
+                    {s?.kind === "host" ? <IconServer size={13} /> : s?.kind === "local" ? <IconHardDrive size={13} /> : <IconArrowLeftRight size={13} />}
+                  </span>
+                  <span className="sftp-tab-label">{label}</span>
+                  {tone && <span className="status-dot" data-tone={tone} role="img" aria-label={msgSftp.health[tone]} />}
+                </button>
+                {/* A tab list holds tabs only: the × is for the pointer; the keyboard closes with Delete. */}
+                <button type="button" className="sftp-tab-close" aria-hidden="true" tabIndex={-1} title={msgSftp.closeLocation(label)} onClick={() => close(l.id)}>
+                  <IconX size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <IconButton
+          size="sm"
+          className="sftp-tab-add"
+          data-tooltip-side="bottom-end"
+          label={locations.length >= MAX_LOCATIONS ? msgSftp.locationsFull(MAX_LOCATIONS) : msgSftp.addLocation}
+          disabled={locations.length >= MAX_LOCATIONS}
+          onClick={() => add({ kind: "none" })}
+        >
+          <IconPlus size={14} />
+        </IconButton>
+      </div>
 
-      <FilePane
-        id={paneId}
-        label={source.kind === "host" ? msgFiles.serverPane(source.label) : source.kind === "local" ? msgFiles.serverPane(msgSftp.thisComputerLower) : msgSftp.connectTitle}
-        backend={backend}
-        view={view}
-        setView={setView}
-        start={source.kind === "local" ? root : null}
-        inactive={!active}
-        refreshKey={refreshKey}
-        placeholder={placeholder}
-        menuExtras={menuExtras}
-        onDownload={remote ? (entries) => transfers.download(entries) : undefined}
-        onUpload={remote ? () => transfers.upload() : undefined}
-        onUploadFolder={remote ? () => transfers.uploadFolder() : undefined}
-        onDuplicate={remote ? (entries) => transfers.duplicate(entries) : undefined}
-        copyOther={transfers.copyLabel ? { label: transfers.copyLabel, run: (entries) => transfers.copy(entries) } : null}
-        drop={{
-          accepts: (types) => types.includes(FILE_DRAG) || (remote && types.includes("Files")),
-          onDrop: (data) => {
-            const raw = data.getData(FILE_DRAG);
-            if (raw) {
-              const dragged = JSON.parse(raw) as FileDrag;
-              if (dragged.pane !== paneId) transfers.dropFrom(dragged.entries);
-            } else if (remote) transfers.dropFiles(data);
-          },
-          hint: msgSftp.dropHere(where),
-        }}
-        emptyHint={transfers.copyLabel ? msgSftp.emptyDrop : undefined}
-      />
-
-      {sourceMenu && <Menu anchor={sourceMenu} items={sourceItems} label={msgSftp.source} onClose={() => setSourceMenu(null)} />}
-
-      {visible && conn?.trust && (
-        <TrustDialog
-          trust={conn.trust}
-          onAnswer={(decision) => {
-            const id = conn.sessionId ?? sessionRef.current;
-            const promptId = conn.trust?.promptId;
-            setConn((c) => (c ? { ...c, trust: null } : c));
-            if (id && promptId) void sessions.answerTrust(id, promptId, decision).catch(() => undefined);
-          }}
-        />
-      )}
-      {visible && conn?.auth && !conn.trust && (
-        <AuthDialog
-          key={conn.auth.promptId}
-          prompt={conn.auth}
-          banner={conn.banner}
-          onAnswer={(secret) => {
-            const id = conn.sessionId ?? sessionRef.current;
-            const promptId = conn.auth?.promptId;
-            setConn((c) => (c ? { ...c, auth: null } : c));
-            if (id && promptId) void sessions.answerAuth(id, promptId, secret).catch(() => undefined);
-          }}
-        />
-      )}
+      {locations.map((l) => (
+        <div key={l.id} id={`sftp-${paneId}-loc-${l.id}`} role="tabpanel" aria-labelledby={`sftp-${paneId}-tab-${l.id}`} className="sftp-location-panel" hidden={l.id !== shown}>
+          <SftpLocation
+            paneId={paneId}
+            initial={l.initial}
+            startPath={l.startPath}
+            hosts={hosts}
+            visible={visible}
+            shown={l.id === shown}
+            active={active}
+            refreshKey={bumps[l.id] ?? 0}
+            transfers={transfers}
+            goRequest={l.go}
+            onEndpoint={callbacksFor(l.id).endpoint}
+            onStatus={callbacksFor(l.id).status}
+            onOpenKnownHosts={onOpenKnownHosts}
+          />
+        </div>
+      ))}
     </section>
   );
 }
-
-function HostPicker({ hosts, onLocal, onHost }: { hosts: HostSummary[]; onLocal: () => void; onHost: (host: HostSummary) => void }) {
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
-  const shown = hosts.filter((h) => !needle || h.label.toLowerCase().includes(needle) || h.address.toLowerCase().includes(needle));
-  return (
-    <div className="sftp-picker">
-      <div className="sftp-picker-head">
-        <span className="sftp-picker-art" aria-hidden="true">
-          <IconArrowLeftRight size={22} />
-        </span>
-        <h3>{msgSftp.connectTitle}</h3>
-        <p>{msgSftp.connectBody}</p>
-      </div>
-      <div className="sftp-picker-list" role="group" aria-label={msgSftp.selectHost}>
-        {hosts.length > 6 && (
-          <label className="sftp-filter sftp-picker-search">
-            <IconSearch size={13} aria-hidden="true" />
-            <input className="input" type="search" aria-label={msgSftp.searchHosts} placeholder={msgSftp.searchHosts} value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
-        )}
-        <button type="button" className="sftp-host" onClick={onLocal}>
-          <span className="sftp-host-icon" data-kind="local" aria-hidden="true">
-            <IconHardDrive size={15} />
-          </span>
-          <span className="sftp-host-text">
-            <span>{msgSftp.thisComputer}</span>
-          </span>
-        </button>
-        {hosts.length === 0 && <p className="muted sftp-empty">{msgSftp.noHosts}</p>}
-        {shown.map((h) => (
-          <button key={h.id} type="button" className="sftp-host" onClick={() => onHost(h)}>
-            <span className="sftp-host-icon" aria-hidden="true">
-              <IconServer size={15} />
-            </span>
-            <span className="sftp-host-text">
-              <span>{h.label}</span>
-              <span className="faint mono">{msg.hosts.destination(h.username, h.address, h.port)}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ConnectionState({
-  label,
-  conn,
-  onReconnect,
-  onOther,
-  onOpenKnownHosts,
-}: {
-  label: string;
-  conn: Connection;
-  onReconnect: () => void;
-  onOther: () => void;
-  onOpenKnownHosts: () => void;
-}) {
-  if (conn.state !== "failed" && conn.state !== "closed") {
-    const step = conn.state === "starting" ? msgSftp.state.connecting : (msgSftp.state[conn.state] ?? "");
-    return (
-      <div className="sftp-status" role="status" aria-live="polite">
-        <span className="spinner" aria-hidden="true" />
-        <span>
-          {msgSftp.connecting(label)}
-          <span className="faint"> · {step}</span>
-        </span>
-      </div>
-    );
-  }
-  if (conn.changed) {
-    return (
-      <div className="sftp-card" role="alert">
-        <div className="dialog-head">
-          <span className="dialog-icon" data-tone="danger" aria-hidden="true">
-            <IconShieldAlert size={18} />
-          </span>
-          <h3>{msgSftp.changedTitle}</h3>
-        </div>
-        <HopNotice hop={conn.changed.hop} />
-        <p>{msgSftp.changedBody}</p>
-        <div className="stack-xs">
-          <span className="label">{msg.terminal.changedPresented}</span>
-          <Fingerprint value={conn.changed.presentedFingerprint} />
-        </div>
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onOther}>
-            {msgSftp.otherHost}
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onOpenKnownHosts}>
-            {msgSftp.openKnownHosts}
-          </button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="sftp-card" role={conn.error ? "alert" : "status"}>
-      <div className="dialog-head">
-        <span className="dialog-icon" data-tone={conn.error ? "warning" : "accent"} aria-hidden="true">
-          <IconTriangleAlert size={18} />
-        </span>
-        <h3>{conn.error ? msgSftp.failedTitle : msgSftp.endedTitle}</h3>
-      </div>
-      {conn.error && <p>{conn.error.message}</p>}
-      <div className="dialog-actions">
-        <button type="button" className="btn" onClick={onOther}>
-          {msgSftp.otherHost}
-        </button>
-        <button type="button" className="btn btn-primary" onClick={onReconnect}>
-          <IconRefreshCw size={15} /> {msgSftp.reconnect}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Host-key decision for a new server. The safe choice has initial focus. */
-export function TrustDialog({ trust, onAnswer }: { trust: Trust; onAnswer: (decision: "cancel" | "once" | "always") => void }) {
-  return (
-    <Dialog title={msg.terminal.trustTitle} role="alertdialog" icon={<IconShieldCheck size={18} />} onDismiss={() => onAnswer("cancel")}>
-      <HopNotice hop={trust.hop} />
-      <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-        {msg.terminal.trustIntro}
-      </p>
-      <dl className="kv">
-        <dt>{msg.terminal.host}</dt>
-        <dd>
-          {trust.host} : {trust.port}
-        </dd>
-        {trust.resolvedAddress && trust.resolvedAddress !== trust.host && (
-          <>
-            <dt>{msg.terminal.resolved}</dt>
-            <dd>{trust.resolvedAddress}</dd>
-          </>
-        )}
-        <dt>{msg.terminal.algorithm}</dt>
-        <dd>{trust.algorithm}</dd>
-      </dl>
-      <div className="stack-xs">
-        <span className="label">{msg.terminal.fingerprint}</span>
-        <Fingerprint value={trust.fingerprint} />
-      </div>
-      <div className="dialog-actions">
-        <button type="button" className="btn" onClick={() => onAnswer("cancel")} autoFocus data-autofocus>
-          {msg.terminal.trustCancel}
-        </button>
-        <button type="button" className="btn" onClick={() => onAnswer("once")}>
-          {msg.terminal.trustOnce}
-        </button>
-        <button type="button" className="btn btn-primary" onClick={() => onAnswer("always")}>
-          {msg.terminal.trustAlways}
-        </button>
-      </div>
-    </Dialog>
-  );
-}
-
