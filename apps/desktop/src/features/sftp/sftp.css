@@ -105,7 +105,7 @@
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   cursor: pointer;
-  transition: background var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+  transition: background var(--duration-press) var(--ease-out), border-color var(--duration-press) var(--ease-out);
 }
 
 .sftp-source:hover {

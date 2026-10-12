@@ -1,4 +1,6 @@
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+
+import { openedBy } from "../../lib/inputModality";
 
 interface DialogProps {
   title: string;
@@ -20,6 +22,8 @@ interface DialogProps {
  */
 export function Dialog({ title, onDismiss, children, role = "dialog", icon, tone = "accent", wide = false, aside }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Opened from the keyboard, a dialog is simply there (motion.md principle 1).
+  const [opened] = useState(openedBy);
   const titleId = useId();
 
   useEffect(() => {
@@ -39,7 +43,8 @@ export function Dialog({ title, onDismiss, children, role = "dialog", icon, tone
   return (
     <dialog
       ref={ref}
-      className={`dialog ${wide ? "dialog-wide" : ""}`}
+      className={`dialog m-dialog ${wide ? "dialog-wide" : ""}`}
+      data-opened-by={opened}
       role={role}
       aria-labelledby={titleId}
       onCancel={(event) => {

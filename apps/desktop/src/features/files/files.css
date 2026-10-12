@@ -134,7 +134,7 @@ th.ft-col-size .ft-head {
 
 .ft-table tbody tr:hover td {
   background: var(--bg-hover);
-  transition: background var(--motion-fast) var(--ease-out);
+  transition: background var(--duration-press) var(--ease-out);
 }
 
 .ft-table tbody tr.is-selected td {
@@ -621,6 +621,8 @@ button.pathbar-crumb:hover {
   inset: 0;
   background: var(--accent);
   transform-origin: left;
+  /* Glides between progress ticks instead of stepping (linear: it is a measure, not a gesture). */
+  transition: transform var(--duration-progress) var(--ease-linear);
 }
 
 /* Without a known size: a still, faint fill, not a moving bar. */

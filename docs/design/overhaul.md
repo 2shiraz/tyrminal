@@ -16,7 +16,7 @@ What is in this change:
 | `docs/design/after/` | Screenshots of the prototype, same viewport (1360×860) |
 | `docs/design/prototype/` | The static prototype (`index.html?screen=hosts&theme=dark&palette=fjord`), its sketch CSS, icon sprite and screenshot script |
 | `apps/desktop/src/styles/tokens.css` | The new tokens and the six themes, applied to the existing components (foundations, step 1 below) |
-| `apps/desktop/src/styles/next/motion.css` | Motion tokens and utilities. **Not imported yet** |
+| `apps/desktop/src/styles/motion.css` | Motion utilities (`.m-*`), imported from `global.css`; tokens in `tokens.css` (docs/design/motion.md) |
 | `scripts/check-contrast.mjs` | WCAG AA check now covers all six themes (746 pairs with the terminal schemes, passing) |
 | `tests/ui/design-capture.ts`, `design-capture-first.ts` + `design-capture.config.ts` | Re-take the before screenshots from the real UI build: the main screens, and the first-impression flows (onboarding, unlock, every connecting step, trust and auth prompts, failures, empty states). Not part of the suite (it matches `*.spec.ts` only) |
 
@@ -255,7 +255,7 @@ it is 13 or 12.
 
 ## 4. Motion
 
-Tokens and utilities: `apps/desktop/src/styles/next/motion.css`.
+Utilities: `apps/desktop/src/styles/motion.css`; tokens in `tokens.css`. The second pass is planned in `docs/design/motion.md`.
 
 | Token | Value | For |
 |---|---|---|
