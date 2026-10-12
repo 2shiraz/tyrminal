@@ -855,7 +855,11 @@ async fn connection_events_arrive_in_order_for_a_direct_host_and_a_two_hop_chain
     let inner = v.save_host(keyed("inner", "b")).await.unwrap();
     v.set_host_connection(
         &inner.id,
-        tyrminal_core::contracts::HostConnectionInput { proxy: None, jump_host_id: Some(bastion.id.clone()) },
+        tyrminal_core::contracts::HostConnectionInput {
+            proxy: None,
+            jump_host_id: Some(bastion.id.clone()),
+            inherit: false,
+        },
     )
     .await
     .unwrap();

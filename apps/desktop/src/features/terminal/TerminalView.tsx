@@ -56,11 +56,20 @@ export interface PaneHandle {
   broadcastable(): boolean;
   /** Input typed in another pane of a broadcasting tab. */
   receiveBroadcast(bytes: Uint8Array): void;
+  /** SSH only: environment variables requested on this connection, and those the server refused. */
+  environment(): SessionEnvironment | null;
+}
+
+export interface SessionEnvironment {
+  sent: string[];
+  rejected: string[];
 }
 
 interface TerminalViewProps {
   paneId: number;
   target: TerminalTarget;
+  /** Folder to start the first attempt in (a duplicated tab's); reconnects start as usual. */
+  startIn?: string | undefined;
   /** Where this session goes, as configured by the user (not supplied by the server). */
   identity: string;
   label: string;
@@ -112,6 +121,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
+  const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findCount, setFindCount] = useState({ index: 0, total: 0 });
   const clipboardAllowed = useRef(false);
@@ -140,6 +150,7 @@ export function TerminalView(props: TerminalViewProps) {
     setChanged(null);
     setBanner(null);
     setClosed(null);
+    environment.current = null;
     clipboardAllowed.current = false;
     publish({ state: "connecting", clipboardAllowed: false });
 
@@ -190,6 +201,7 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           // Environment variables the server refused are always reported (SNP-13).
           case "environment":
+            environment.current = { sent: event.sent, rejected: event.rejected };
             if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
           case "negotiated":
@@ -213,7 +225,7 @@ export function TerminalView(props: TerminalViewProps) {
     });
     controllerRef.current = controller;
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
-    const timer = window.setTimeout(() => void controller.start(target), 0);
+    const timer = window.setTimeout(() => void controller.start(target, attempt === 0 ? (props.startIn ?? null) : null), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();
@@ -261,6 +273,7 @@ export function TerminalView(props: TerminalViewProps) {
       receiveBroadcast: (bytes) => {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
+      environment: () => environment.current,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

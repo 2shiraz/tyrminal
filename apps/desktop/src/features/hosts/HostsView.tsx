@@ -118,6 +118,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const [bulk, setBulk] = useState<"move" | "add_tag" | "remove_tag" | "delete" | null>(null);
   const [importing, setImporting] = useState(false);
   const [osOf, setOsOf] = useState<Map<string, HostOs>>(new Map());
+  // Hosts whose icon comes from a group default (HST-05) rather than their own setting.
+  const [osInherited, setOsInherited] = useState<Set<string>>(new Set());
   const [settingOs, setSettingOs] = useState<{ ids: string[]; initial: HostOs | null } | null>(null);
   const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null } | null>(null);
   // Identities (KEY-17): which one every host and group uses.
@@ -151,7 +153,9 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     appearanceApi
       .list()
       .then((list) => {
-        if (live) setOsOf(new Map(list.map((a) => [a.hostId, a.os])));
+        if (!live) return;
+        setOsOf(new Map(list.map((a) => [a.hostId, a.os])));
+        setOsInherited(new Set(list.filter((a) => a.inherited).map((a) => a.hostId)));
       })
       .catch(() => {
         if (live) setOsOf(new Map());
@@ -577,7 +581,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             {
               label: msgD.inventory.setOs,
               icon: <IconServer size={15} />,
-              onSelect: () => setSettingOs({ ids: [menu.host.id], initial: osOf.get(menu.host.id) ?? null }),
+              onSelect: () => setSettingOs({ ids: [menu.host.id], initial: osInherited.has(menu.host.id) ? null : (osOf.get(menu.host.id) ?? null) }),
             },
             "separator",
             {
