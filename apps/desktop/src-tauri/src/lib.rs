@@ -97,6 +97,14 @@ pub fn run() {
                         let _ = handle.emit_to("main", VAULT_STATUS_EVENT, current);
                     }
                 });
+                // The vault locks when the OS locks the screen (where the platform reports it).
+                let vault = std::sync::Arc::clone(&core.vault);
+                let _ = tyrminal_core::watch_screen_lock(std::sync::Arc::new(move || {
+                    let vault = std::sync::Arc::clone(&vault);
+                    tauri::async_runtime::spawn(async move {
+                        let _ = vault.lock().await;
+                    });
+                }));
                 // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
                 tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }

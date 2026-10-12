@@ -5972,6 +5972,7 @@ dependencies = [
  "keyring-core",
  "thiserror 2.0.21",
  "windows-native-keyring-store",
+ "zbus",
  "zbus-secret-service-keyring-store",
  "zeroize",
 ]
