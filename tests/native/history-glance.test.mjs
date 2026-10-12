@@ -11,7 +11,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { KEYS, PASSPHRASE, ui } from "./flows.mjs";
+import { KEYS, PASSPHRASE, ui, waitUnlocked } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -141,7 +141,7 @@ describe("command history and the server panel in the real application", { concu
     }
     await s.fill("Passphrase", PASSPHRASE);
     await s.clickButton("Unlock");
-    await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "home after unlock" });
 
     await t.connect("Lab");
     await openSuggestions();

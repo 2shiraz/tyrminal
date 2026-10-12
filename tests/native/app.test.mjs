@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { chooseKey, HOST_PANEL, KEYS, saveAndCloseHostPanel } from "./flows.mjs";
+import { chooseKey, HOST_PANEL, KEYS, saveAndCloseHostPanel, waitUnlocked } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab, startForwarder } from "./harness.mjs";
 
 const PASSPHRASE = "native e2e passphrase 42";
@@ -56,8 +56,8 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
   const hostText = () => s.until(() => s.execute(`return document.querySelector('[data-testid="host-list"] li')?.innerText ?? null`), { describe: "a host entry" });
   // Read in one step in the page, so a re-render cannot invalidate an element handle mid-read.
   const heading = () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" });
-  // The host's own Connect button: other buttons on the page may also read "Connect".
-  const connectHost = async (label) => s.click(await s.waitFor(`[data-testid="host-list"] button[aria-label="Connect to ${label}"]`));
+  // Rows have no Connect button: Enter on the host connects (as a keyboard user would).
+  const connectHost = (label) => s.openHost('[data-testid="host-list"]', label);
   const listItemText = () => s.until(() => s.execute(`return document.querySelector("ul.list li")?.innerText ?? null`), { describe: "a list row" });
 
   before(async () => {
@@ -95,9 +95,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.type(field, recoveryKey.split("-")[group - 1]);
     await s.clickButton("I have saved it");
 
-    // A new vault is empty, so Home settles on its welcome heading ("Home" shows only while loading).
-    await s.until(async () => (await heading()) === "Welcome to Tyrminal", { describe: "main window" });
-    assert.match(await s.execute("return document.body.innerText"), /Welcome to Tyrminal/);
+    await waitUnlocked(s, { describe: "main window" });
     await app.screenshot("03-home-empty");
     await nav("Hosts");
     assert.match(await s.execute("return document.body.innerText"), /No hosts yet/);
@@ -229,7 +227,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.clickButton("Use recovery key instead");
     await s.fill("Recovery key", recoveryKey.toLowerCase().replaceAll("-", " "));
     await s.clickButton("Unlock");
-    await s.until(async () => (await heading()) === "Home", { describe: "main window after recovery unlock", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "main window after recovery unlock" });
     await nav("Hosts");
     assert.match(await hostText(), /Lab server/);
 
@@ -346,7 +344,7 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     await s.click(await s.waitFor('nav.sidebar [data-nav="lock"]'));
     await s.until(async () => (await heading()) === "Unlock your vault", { describe: "locked" });
     await s.clickButton("Unlock with this device");
-    await s.until(async () => (await heading()) === "Home", { describe: "unlocked by the device", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "unlocked by the device" });
     // Turn it off again so the test leaves no keychain item behind.
     await s.click(await s.waitFor('nav.sidebar [data-nav="settings"]'));
     await s.clickButton("Vault and unlock", { within: "nav.settings-nav" });
