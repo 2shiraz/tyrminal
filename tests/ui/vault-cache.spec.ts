@@ -15,7 +15,7 @@ test("cache: switching views does not list hosts, keys, groups or identities aga
   const before = { hosts: await count(page, "host_list"), keys: await count(page, "key_list"), groups: await count(page, "group_list") };
   expect(before).toEqual({ hosts: 1, keys: 1, groups: 1 });
 
-  for (const view of [/^Hosts/, /^Known hosts/, /^Keychain/, /^Home/, /^Hosts/, /^Known hosts/]) {
+  for (const view of [/^Hosts/, /^Known hosts/, /^Keychain/, /^Settings/, /^Hosts/, /^Known hosts/]) {
     await nav(page, view).click();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   }

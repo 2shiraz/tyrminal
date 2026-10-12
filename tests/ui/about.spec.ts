@@ -101,7 +101,7 @@ test("about: the sidebar version opens Settings → About", async ({ page }) => 
   await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "About" })).toHaveAttribute("aria-current", "page");
 
   // Opening Settings from the navigation afterwards starts at the top again.
-  await primary.getByRole("button", { name: "Home" }).click();
+  await primary.getByRole("button", { name: /^Hosts/ }).click();
   await primary.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Appearance" })).toHaveAttribute("aria-current", "page");
 });

@@ -1,11 +1,11 @@
-// Vault-backed lists shared by several views (home, hosts, known hosts, keychain, palette, snippets
+// Vault-backed lists shared by several views (hosts, known hosts, keychain, palette, snippets
 // panel). They load once per unlock: they live under AppShell, which is keyed by the vault
 // generation, so a lock discards all of them. The native side sends no change events for vault
 // records (only "vault-status"), so the views that edit a record reload the list it belongs to
 // after the edit, and identities reload on `identityEvents`.
 
 import type { GroupSummary, HostSummary, IdentitySummary, KeySummary, SnippetSummary } from "@tyrminal/contracts";
-import { type ReactNode, createContext, useContext, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, createContext, useContext, useEffect, useMemo } from "react";
 
 import { identityEvents } from "../features/credentials/identityEvents";
 import { groups as groupsApi, hosts as hostsApi, identities as identitiesApi, keys as keysApi, snippets as snippetsApi } from "../lib/ipc";
@@ -20,8 +20,6 @@ interface VaultData {
   snippets: Loaded<SnippetSummary[]>;
   groups: Loaded<GroupSummary[]>;
   identities: Loaded<IdentitySummary[]>;
-  /** Derived, non-secret results computed once per unlock (Home's security review counts). */
-  memo: Map<string, unknown>;
 }
 
 const Context = createContext<VaultData | null>(null);
@@ -35,10 +33,9 @@ export function VaultDataProvider({ children }: { children: ReactNode }) {
   const identities = useLoaded(identitiesApi.list);
   const reloadIdentities = identities.reload;
   useEffect(() => identityEvents.subscribe(() => void reloadIdentities()), [reloadIdentities]);
-  const memo = useRef(new Map<string, unknown>()).current;
   const value = useMemo(
-    () => ({ hosts, recent, keys, snippets, groups, identities, memo }),
-    [hosts, recent, keys, snippets, groups, identities, memo],
+    () => ({ hosts, recent, keys, snippets, groups, identities }),
+    [hosts, recent, keys, snippets, groups, identities],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

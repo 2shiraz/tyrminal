@@ -786,7 +786,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
 });
 
 describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
-  test("a host connected once is offered on Home and in the new-tab menu, and both reconnect", async () => {
+  test("a host connected once is offered on Hosts and in the new-tab menu, and both reconnect", async () => {
     const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     try {
       const s = app.session;
@@ -803,15 +803,15 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
       };
       const labTabs = () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].filter((e) => e.textContent.includes("Lab")).length`);
 
-      // Home lists it under Recent once the core has recorded the connection.
-      await t.nav("Home");
-      await s.until(() => s.execute(`return [...document.querySelectorAll("table.home-hosts .home-host")].some((b) => b.textContent.trim() === "Lab")`), {
-        describe: "Lab among the hosts on Home",
+      // Hosts offers it (Enter on the host connects) once the core has recorded the connection.
+      await t.nav("Hosts");
+      await s.until(() => s.execute(`return [...document.querySelectorAll('[data-testid="host-list"] .host-open')].some((b) => b.textContent.trim() === "Lab")`), {
+        describe: "Lab on Hosts",
         timeout: 20_000,
       });
-      await s.openHost("table.home-hosts", "Lab");
+      await s.openHost('[data-testid="host-list"]', "Lab");
       await trustOnce();
-      await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Home" });
+      await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Hosts" });
 
       // The new-tab menu offers it too.
       await s.click(await s.waitFor(".tabstrip button.tab-new"));

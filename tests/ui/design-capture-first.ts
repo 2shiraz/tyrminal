@@ -174,9 +174,9 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.getByRole("alert")).toBeVisible();
     });
 
-    // First run: empty Home, hosts, keychain, snippets.
+    // First run: empty hosts (the first page), keychain, snippets.
     await openApp(page, { scenario: "empty", theme });
-    await t("first-run-home", async () => {});
+    await t("first-run-hosts", async () => {});
     await t("empty-keychain", () => nav(page, "Keychain"));
     await t("empty-snippets", () => nav(page, /^Snippets/));
     await t("empty-known-hosts", () => nav(page, "Known hosts"));

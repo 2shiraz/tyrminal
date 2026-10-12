@@ -405,7 +405,7 @@ test("quick unlock: turned on with the passphrase, then the unlock screen offers
   await page.keyboard.press("Control+Shift+L");
   await expect(page.getByRole("heading", { name: "Unlock your vault" })).toBeVisible();
   await page.getByRole("button", { name: "Unlock with this device" }).click();
-  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Hosts" })).toBeVisible();
 });
 
 test("an uninitialized vault shows onboarding even when a status event beats the status request", async ({ page }) => {

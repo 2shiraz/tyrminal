@@ -58,7 +58,7 @@ test("a group's jump host and icon reach its hosts and subgroups; a host can set
   await expect.poll(async () => (await calls(page, "host_connection_set")).at(-1)?.args).toMatchObject({ connection: { inherit: true } });
 
   // The icon of a host in the subgroup is the inherited Debian one.
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Home/ }).first().click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Snippets/ }).first().click();
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).first().click();
   await expect(page.getByTestId("host-list").getByRole("article", { name: /db-primary/ }).locator('[data-os="debian"]')).toHaveCount(1);
 });

@@ -16,7 +16,6 @@ import {
   IconAppWindow,
   IconArrowUpRight,
   IconCopy,
-  IconHouse,
   IconHardDrive,
   IconLayoutGrid,
   IconLayoutTemplate,
@@ -408,7 +407,6 @@ export function CommandPalette({
       shortcut,
       run: () => onNavigate(d),
     });
-    list.push(nav("home", <IconHouse size={16} />));
     list.push(nav("hosts", <IconServer size={16} />));
     list.push(nav("snippets", <IconScrollText size={16} />));
     list.push(nav("keychain", <IconKeyRound size={16} />));
