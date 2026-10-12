@@ -39,6 +39,7 @@ use crate::edits;
 use crate::error::{err, from_ssh, internal, invalid, not_found};
 use crate::files::{self, Download, TransferSink, Upload, from_file};
 use crate::folders;
+use crate::handoff::{HANDOFF_TTL, Relay};
 use crate::validate;
 use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
 
@@ -52,7 +53,10 @@ pub trait SessionSink: Send + Sync + 'static {
 enum Input {
     Data(Vec<u8>),
     Resize(u16, u16),
-    Ack(usize),
+    /// Bytes the owning window processed, with the handoff epoch it was authorized in.
+    Ack(usize, u64),
+    /// Re-evaluate flow control (a handoff changed the outstanding count).
+    Wake,
 }
 
 #[derive(Default)]
@@ -62,8 +66,11 @@ struct Prompts {
 }
 
 struct Entry {
-    owner: String,
+    /// The window that may use the session; changes only by an accepted handoff.
+    owner: Mutex<String>,
     generation: u32,
+    /// Where output and events go, with the flow-control count (see `handoff`).
+    relay: Arc<Relay>,
     input: mpsc::Sender<Input>,
     close: watch::Sender<bool>,
     prompts: Mutex<Prompts>,
@@ -78,6 +85,17 @@ impl Entry {
     fn prompts(&self) -> std::sync::MutexGuard<'_, Prompts> {
         self.prompts.lock().unwrap_or_else(|p| p.into_inner())
     }
+
+    fn owner(&self) -> std::sync::MutexGuard<'_, String> {
+        self.owner.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// A pending offer to move a session to another window.
+struct Offer {
+    session_id: String,
+    to: String,
+    expires: tokio::time::Instant,
 }
 
 /// A running transfer: the window that started it and its cancel switch.
@@ -91,6 +109,8 @@ pub struct Sessions {
     transfers: Arc<Mutex<HashMap<String, Transfer>>>,
     /// Remote files open in local applications.
     edits: edits::Edits,
+    /// Pending window handoffs by single-use token.
+    offers: Mutex<HashMap<String, Offer>>,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -123,6 +143,7 @@ impl Sessions {
             connect_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTS)),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             edits: edits::Edits::default(),
+            offers: Mutex::new(HashMap::new()),
         })
     }
 
@@ -132,20 +153,40 @@ impl Sessions {
 
     /// Looks up a session for a caller. Ownership and generation are checked on every call.
     fn authorize(&self, owner: &str, session_id: &str) -> Result<Arc<Entry>, IpcError> {
-        let entry = self.entries().get(session_id).cloned().ok_or_else(denied)?;
-        if entry.owner != owner || entry.generation != self.vault.generation() {
-            return Err(denied());
-        }
-        Ok(entry)
+        self.authorize_epoch(owner, session_id).map(|(entry, _)| entry)
     }
 
-    fn register(&self, owner: &str, generation: u32) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
+    /// As `authorize`, also returning the handoff epoch read under the same ownership check, so
+    /// a request from a window that has just handed the session on can never count for the next.
+    fn authorize_epoch(&self, owner: &str, session_id: &str) -> Result<(Arc<Entry>, u64), IpcError> {
+        let entry = self.entries().get(session_id).cloned().ok_or_else(denied)?;
+        let current = entry.owner();
+        if *current != owner || entry.generation != self.vault.generation() {
+            return Err(denied());
+        }
+        let epoch = entry.relay.epoch();
+        drop(current);
+        Ok((entry, epoch))
+    }
+
+    fn offers(&self) -> std::sync::MutexGuard<'_, HashMap<String, Offer>> {
+        self.offers.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn register(
+        &self,
+        owner: &str,
+        generation: u32,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<(String, Arc<Entry>, mpsc::Receiver<Input>), IpcError> {
         let id = random_token()?;
         let (input, input_rx) = mpsc::channel(64);
         let (close, _) = watch::channel(false);
         let entry = Arc::new(Entry {
-            owner: owner.to_owned(),
+            owner: Mutex::new(owner.to_owned()),
             generation,
+            relay: Relay::new(sink),
             input,
             close,
             prompts: Mutex::new(Prompts::default()),
@@ -176,7 +217,8 @@ impl Sessions {
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
         let plan = self.vault.connection_plan(host_id).await?;
-        let (id, entry, input_rx) = self.register(owner, plan.generation)?;
+        let (id, entry, input_rx) = self.register(owner, plan.generation, sink)?;
+        let sink: Arc<dyn SessionSink> = entry.relay.clone();
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
@@ -212,11 +254,13 @@ impl Sessions {
         let shell = shell
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
-        let (id, entry, input_rx) = self.register(owner, generation)?;
+        let (id, entry, input_rx) = self.register(owner, generation, sink)?;
+        let relay = Arc::clone(&entry.relay);
+        let sink: Arc<dyn SessionSink> = relay.clone();
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let body = run_local(&sink, cols, rows, shell, input_rx);
+            let body = run_local(&sink, &relay, cols, rows, shell, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -731,8 +775,8 @@ impl Sessions {
 
     /// The renderer reports that its terminal has processed `bytes` of output.
     pub async fn ack(&self, owner: &str, session_id: &str, bytes: u32) -> Result<(), IpcError> {
-        let entry = self.authorize(owner, session_id)?;
-        entry.input.send(Input::Ack(bytes as usize)).await.map_err(|_| denied())
+        let (entry, epoch) = self.authorize_epoch(owner, session_id)?;
+        entry.input.send(Input::Ack(bytes as usize, epoch)).await.map_err(|_| denied())
     }
 
     pub fn close(&self, owner: &str, session_id: &str) -> Result<(), IpcError> {
@@ -743,9 +787,92 @@ impl Sessions {
 
     /// Closes every session a window owns (the window was closed or destroyed).
     pub fn close_all_for_owner(&self, owner: &str) {
-        for entry in self.entries().values().filter(|e| e.owner == owner) {
+        for entry in self.entries().values().filter(|e| *e.owner() == owner) {
             entry.close.send_replace(true);
         }
+        // Offers to this window lapse now; their sessions stay with the windows that own them.
+        let lapsed: Vec<String> = self.offers().iter().filter(|(_, o)| o.to == owner).map(|(t, _)| t.clone()).collect();
+        for token in lapsed {
+            self.lapse_offer(&token);
+        }
+    }
+
+    /// Offers a session the caller owns to the window labelled `to`. Returns a single-use token
+    /// for that window to accept within `HANDOFF_TTL`; until then output is held for it and the
+    /// caller keeps the session (and its input) as before.
+    pub fn offer_handoff(self: &Arc<Self>, owner: &str, session_id: &str, to: &str) -> Result<String, IpcError> {
+        self.offer_handoff_within(owner, session_id, to, HANDOFF_TTL)
+    }
+
+    /// As `offer_handoff` with a shorter expiry (never longer than `HANDOFF_TTL`).
+    pub fn offer_handoff_within(
+        self: &Arc<Self>,
+        owner: &str,
+        session_id: &str,
+        to: &str,
+        ttl: Duration,
+    ) -> Result<String, IpcError> {
+        let ttl = ttl.min(HANDOFF_TTL);
+        if to.is_empty() || to.len() > 64 || to == owner {
+            return Err(invalid("A session can only be moved to another window."));
+        }
+        let entry = self.authorize(owner, session_id)?;
+        let token = random_token()?;
+        {
+            let mut offers = self.offers();
+            if offers.values().any(|o| o.session_id == session_id) {
+                return Err(err(ErrorCode::InUse, "This session is already being moved to another window."));
+            }
+            let expires = tokio::time::Instant::now() + ttl;
+            offers.insert(token.clone(), Offer { session_id: session_id.to_owned(), to: to.to_owned(), expires });
+            entry.relay.hold();
+        }
+        let this = Arc::clone(self);
+        let lapse = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(ttl).await;
+            this.lapse_offer(&lapse);
+        });
+        Ok(token)
+    }
+
+    /// Withdraws a pending offer (if still pending): held output goes back to the owner.
+    fn lapse_offer(&self, token: &str) {
+        let Some(offer) = self.offers().remove(token) else { return };
+        if let Some(entry) = self.entries().get(&offer.session_id).cloned() {
+            entry.relay.release();
+        }
+    }
+
+    /// Takes over a session offered to the calling window: from now on only the caller may use
+    /// it, and its output (starting with whatever was held) goes to `sink`. The token is
+    /// single-use and refused for any other window, after it expires, or once the session ended.
+    pub fn accept_handoff(&self, caller: &str, token: &str, sink: Arc<dyn SessionSink>) -> Result<String, IpcError> {
+        let refused = || err(ErrorCode::AccessDenied, "That session is no longer waiting to move to this window.");
+        let offer = {
+            let mut offers = self.offers();
+            match offers.get(token) {
+                // A token presented by the wrong window stays valid for the right one.
+                Some(o) if o.to == caller => offers.remove(token).ok_or_else(refused)?,
+                _ => return Err(refused()),
+            }
+        };
+        let entry = self.entries().get(&offer.session_id).cloned();
+        let Some(entry) = entry.filter(|e| e.generation == self.vault.generation()) else {
+            return Err(refused());
+        };
+        if tokio::time::Instant::now() >= offer.expires {
+            entry.relay.release();
+            return Err(refused());
+        }
+        {
+            let mut owner = entry.owner();
+            *owner = caller.to_owned();
+            entry.relay.switch(sink);
+        }
+        // Flow control changed; if the queue is full, queued input wakes the task anyway.
+        let _ = entry.input.try_send(Input::Wake);
+        Ok(offer.session_id)
     }
 
     pub fn answer_trust(
@@ -1098,7 +1225,7 @@ async fn run_ssh(
             tokio::spawn(async move {
                 let _ = vault.mark_connected(generation, &host_id).await;
             });
-            let outcome = pump(Transport::Ssh { reader, writer }, &ctx.sink, input).await;
+            let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
             ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()).take();
             if let Ok(conn) = Arc::try_unwrap(conn) {
@@ -1144,6 +1271,7 @@ async fn connect_ssh(
 
 async fn run_local(
     sink: &Arc<dyn SessionSink>,
+    relay: &Relay,
     cols: u16,
     rows: u16,
     shell: Option<std::path::PathBuf>,
@@ -1163,7 +1291,7 @@ async fn run_local(
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
             sink.event(SessionEvent::State { state: SessionState::Connected });
-            pump(Transport::Local { reader, handle, recheck_size: None }, sink, input).await
+            pump(Transport::Local { reader, handle, recheck_size: None }, relay, input).await
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
     }
@@ -1247,8 +1375,7 @@ fn lost() -> Outcome {
 }
 
 /// Moves bytes between the transport and the renderer until either side ends.
-async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: mpsc::Receiver<Input>) -> Outcome {
-    let mut unacked = 0usize;
+async fn pump(mut transport: Transport, sink: &Relay, mut input: mpsc::Receiver<Input>) -> Outcome {
     let mut exit_status = None;
     loop {
         let recheck = transport.recheck_deadline();
@@ -1263,13 +1390,14 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                     }
                 }
                 Some(Input::Resize(cols, rows)) => transport.resize(cols, rows).await,
-                Some(Input::Ack(bytes)) => unacked = unacked.saturating_sub(bytes),
+                Some(Input::Ack(bytes, epoch)) => sink.ack(epoch, bytes),
+                Some(Input::Wake) => {}
             },
             () = async { tokio::time::sleep_until(recheck.unwrap_or_else(tokio::time::Instant::now)).await }, if recheck.is_some() => {
                 transport.recheck();
             }
             // Not polled while the renderer is behind: this is what applies backpressure.
-            event = transport.next(), if unacked < MAX_UNACKED_OUTPUT => match event {
+            event = transport.next(), if sink.unacked() < MAX_UNACKED_OUTPUT => match event {
                 None => return Outcome::ended(exit_status),
                 Some(TransportEvent::Exit(code)) => exit_status = code,
                 Some(TransportEvent::Lost) => return lost(),
@@ -1287,7 +1415,6 @@ async fn pump(mut transport: Transport, sink: &Arc<dyn SessionSink>, mut input: 
                             Err(_) => break,
                         }
                     }
-                    unacked += batch.len();
                     // The output that arrived before a drop is still shown.
                     if !sink.output(batch) {
                         return Outcome::ended(exit_status);

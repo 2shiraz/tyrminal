@@ -165,6 +165,8 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_trust_answer,
             commands::sessions::session_auth_answer,
+            commands::sessions::session_handoff_offer,
+            commands::sessions::session_attach,
             commands::files::files_pick_upload,
             commands::files::files_pick_folder,
             commands::files::files_pick_upload_folder,

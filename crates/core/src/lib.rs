@@ -10,6 +10,7 @@ mod edits;
 mod error;
 mod files;
 mod folders;
+mod handoff;
 mod import;
 // agent C: workspaces
 mod inventory;

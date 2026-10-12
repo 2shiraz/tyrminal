@@ -128,6 +128,8 @@ struct Client {
     auto_ack: bool,
     /// The last `Negotiated` event, which arrives just before `Connected`.
     negotiated: Option<SessionEvent>,
+    /// The window this stand-in plays.
+    window: &'static str,
 }
 
 impl Client {
@@ -142,6 +144,7 @@ impl Client {
             received: 0,
             auto_ack: true,
             negotiated: None,
+            window: WINDOW,
         }
     }
 
@@ -156,6 +159,7 @@ impl Client {
             received: 0,
             auto_ack: true,
             negotiated: None,
+            window: WINDOW,
         }
     }
 
@@ -178,10 +182,10 @@ impl Client {
         // app, xterm.js answers it.)
         let queries = bytes.windows(4).filter(|w| *w == b"\x1b[6n").count();
         for _ in 0..queries {
-            let _ = self.core.sessions.write(WINDOW, &self.session, b"\x1b[1;1R".to_vec()).await;
+            let _ = self.core.sessions.write(self.window, &self.session, b"\x1b[1;1R".to_vec()).await;
         }
         if self.auto_ack {
-            let _ = self.core.sessions.ack(WINDOW, &self.session, bytes.len() as u32).await;
+            let _ = self.core.sessions.ack(self.window, &self.session, bytes.len() as u32).await;
         }
     }
 
@@ -233,15 +237,18 @@ impl Client {
     /// ConPTY submits only on CR; Unix terminal drivers turn CR into NL).
     async fn send(&self, text: &str) {
         let keys = text.replace('\n', "\r");
-        self.core.sessions.write(WINDOW, &self.session, keys.into_bytes()).await.expect("write");
+        self.core.sessions.write(self.window, &self.session, keys.into_bytes()).await.expect("write");
     }
 
     fn trust(&self, prompt_id: &str, decision: TrustDecision) {
-        self.core.sessions.answer_trust(WINDOW, &self.session, prompt_id, decision).expect("answer trust");
+        self.core.sessions.answer_trust(self.window, &self.session, prompt_id, decision).expect("answer trust");
     }
 
     fn answer(&self, prompt_id: &str, secret: Option<&str>) {
-        self.core.sessions.answer_auth(WINDOW, &self.session, prompt_id, secret.map(Into::into)).expect("answer auth");
+        self.core
+            .sessions
+            .answer_auth(self.window, &self.session, prompt_id, secret.map(Into::into))
+            .expect("answer auth");
     }
 }
 
@@ -1687,6 +1694,7 @@ async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_e
         received: 0,
         auto_ack: true,
         negotiated: None,
+        window: WINDOW,
     };
     client.until_connected().await;
     client.send("echo \"SHELL-[$0]\"\n").await;
@@ -1713,6 +1721,7 @@ async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_e
         received: 0,
         auto_ack: true,
         negotiated: None,
+        window: WINDOW,
     };
     client.until_connected().await;
     client.send("echo LOGIN-$((40+2))\n").await;
@@ -1849,4 +1858,96 @@ async fn copying_between_two_servers_streams_files_and_folders_without_partial_r
         }
         s.remove_file(WINDOW, session, base, name).await.unwrap();
     }
+}
+
+/// A stand-in for another window that has just accepted a session.
+fn attached(f: &Fixture, window: &'static str, session: String, inbox: mpsc::UnboundedReceiver<Message>) -> Client {
+    Client {
+        core: f.core.clone(),
+        session,
+        inbox,
+        text: String::new(),
+        received: 0,
+        auto_ack: true,
+        negotiated: None,
+        window,
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_session_moves_to_another_window_and_only_that_window_can_use_it() {
+    const NEW: &str = "detached-1";
+    const THIRD: &str = "detached-2";
+    let f = fixture().await;
+    let s = &f.core.sessions;
+    let mut old = Client::open_local(&f.core).await;
+    old.until_connected().await;
+    old.send("echo BEFORE-$((1+1))\n").await;
+    old.output_until("BEFORE-2").await;
+    let id = old.session.clone();
+
+    // Only the owner may offer, only to another window, one offer at a time.
+    assert!(s.offer_handoff(THIRD, &id, NEW).is_err());
+    assert!(s.offer_handoff(WINDOW, &id, WINDOW).is_err());
+    let token = s.offer_handoff(WINDOW, &id, NEW).unwrap();
+    assert!(s.offer_handoff(WINDOW, &id, THIRD).is_err());
+
+    // Until it is accepted the owner keeps the session; its output is held for the new window.
+    old.send("echo HELD-$((2+2))\n").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A third window cannot take it (and does not use up the token).
+    let (tx3, _inbox3) = mpsc::unbounded_channel();
+    assert_eq!(s.accept_handoff(THIRD, &token, Arc::new(ChannelSink(tx3))).unwrap_err().code, ErrorCode::AccessDenied);
+
+    let (tx, inbox) = mpsc::unbounded_channel();
+    assert_eq!(s.accept_handoff(NEW, &token, Arc::new(ChannelSink(tx))).unwrap(), id);
+    let mut new = attached(&f, NEW, id.clone(), inbox);
+    new.output_until("HELD-4").await;
+    // Nothing produced after the offer reached the old window.
+    while let Ok(message) = old.inbox.try_recv() {
+        if let Message::Output(bytes) = message {
+            assert!(!String::from_utf8_lossy(&bytes).contains("HELD"), "held output leaked to the old window");
+        }
+    }
+
+    // The token is single-use.
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    assert!(s.accept_handoff(NEW, &token, Arc::new(ChannelSink(tx))).is_err());
+
+    // The old window is denied everything from now on.
+    let denied =
+        |r: Result<(), tyrminal_core::contracts::IpcError>| assert_eq!(r.unwrap_err().code, ErrorCode::AccessDenied);
+    denied(s.write(WINDOW, &id, b"echo NO\r".to_vec()).await);
+    denied(s.resize(WINDOW, &id, 80, 24).await);
+    denied(s.ack(WINDOW, &id, 1).await);
+    denied(s.close(WINDOW, &id));
+    assert!(s.offer_handoff(WINDOW, &id, THIRD).is_err());
+
+    // The new window uses it, and closing the old window ends nothing it no longer owns.
+    new.send("echo AFTER-$((3+3))\n").await;
+    new.output_until("AFTER-6").await;
+    s.close_all_for_owner(WINDOW);
+    new.send("echo STILL-$((4+4))\n").await;
+    new.output_until("STILL-8").await;
+
+    // An offer that is not accepted in time lapses: the token is refused and what was held
+    // goes to the owner after all.
+    let late = s.offer_handoff_within(NEW, &id, THIRD, Duration::from_millis(300)).unwrap();
+    new.send("echo LAPSED-$((5+5))\n").await;
+    new.output_until("LAPSED-10").await;
+    let (tx, _inbox) = mpsc::unbounded_channel();
+    assert!(s.accept_handoff(THIRD, &late, Arc::new(ChannelSink(tx))).is_err());
+
+    // An offer whose target window closes lapses at once.
+    let _gone = s.offer_handoff(NEW, &id, THIRD).unwrap();
+    new.send("echo CLOSED-$((6+6))\n").await;
+    s.close_all_for_owner(THIRD);
+    new.output_until("CLOSED-12").await;
+
+    // Closing the window that now owns it ends the session.
+    s.close_all_for_owner(NEW);
+    new.until_closed().await;
+    assert_eq!(s.count(), 0);
 }
