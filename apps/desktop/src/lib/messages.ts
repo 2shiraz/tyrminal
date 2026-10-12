@@ -329,6 +329,8 @@ export const msg = {
     reason: "Why is the key expected to change?",
     reasonHint: "Kept in the vault as a note for later.",
     endpoint: (host: string, port: number) => (port === 22 ? host : `${host} port ${port}`),
+    createHost: "Create host",
+    createHostFor: (endpoint: string) => `Create a host for ${endpoint}`,
   },
   settings: {
     title: "Settings",

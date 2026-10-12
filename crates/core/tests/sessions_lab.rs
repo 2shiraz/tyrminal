@@ -2208,3 +2208,28 @@ async fn agent_forwarding_is_off_by_default_and_offers_only_the_host_key_when_on
     let log = f.core.sessions.diagnostics(WINDOW, &client.session).unwrap().join("\n");
     assert!(log.contains("agent forwarding is on") && log.contains("used your forwarded key"), "{log}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_host_created_from_a_trusted_record_connects_without_a_new_trust_prompt() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let user = f.lab.str("/user");
+    let first = f.host("first", f.lab.port("a"), &user, HostAuthInput::Key { key_id: key_id.clone() }).await;
+    let mut client = Client::open_ssh(&f.core, &first).await;
+    let (_, prompt) = client.until_not_state().await;
+    client.trust(&trust_prompt_id(&prompt), TrustDecision::Always);
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+
+    // What Known hosts → Create host does: a new host for the trusted record's address and port.
+    let known = f.core.vault.list_known_hosts().await.unwrap();
+    let record = known.iter().find(|k| k.port == f.lab.port("a")).expect("trusted record");
+    let created = f.host("from known host", record.port, &user, HostAuthInput::Key { key_id }).await;
+    assert_eq!(f.core.vault.list_known_hosts().await.unwrap().len(), known.len(), "creating a host adds no trust");
+    let mut client = Client::open_ssh(&f.core, &created).await;
+    client.until_connected().await;
+    f.core.sessions.close(WINDOW, &client.session).unwrap();
+    client.until_closed().await;
+}

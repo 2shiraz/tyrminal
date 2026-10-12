@@ -77,3 +77,22 @@ test("settings: diagnostics are off by default, keep only command and code, and 
   );
   expect(opened).toEqual(["https://github.com/2shiraz/tyrminal/releases"]);
 });
+
+test("known hosts: a trusted server without a saved host can become one, prefilled", async ({ page }) => {
+  await openApp(page, { orphanKnownHost: true });
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Known hosts" }).click();
+  // Servers that already have a host offer no button.
+  await expect(page.getByRole("button", { name: /^Create a host for/ })).toHaveCount(1);
+  await page.getByRole("button", { name: "Create a host for 198.51.100.7 port 2200" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Address")).toHaveValue("198.51.100.7");
+  await dialog.getByLabel("User name").fill("admin");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toBeHidden();
+  const saves = await page.evaluate(() =>
+    (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((c) => c.cmd === "host_save"),
+  );
+  expect(saves.at(-1)?.args).toMatchObject({ host: { address: "198.51.100.7", port: 2200, username: "admin" } });
+  // Now that a host points at it, the button is gone.
+  await expect(page.getByRole("button", { name: /^Create a host for/ })).toHaveCount(0);
+});

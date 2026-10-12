@@ -82,7 +82,8 @@ The first time you connect to a server, Tyrminal shows its host-key fingerprint 
 to trust it: **once** or **always**. Compare the fingerprint with one your server administrator
 gave you. If a server's key later changes, the connection is stopped **before any password or
 key is sent**, and you see the old and new fingerprints. Settings → Known hosts lists trusted
-keys and removes one when you give a reason.
+keys and removes one when you give a reason. A trusted server that no saved host points at
+has a **Create host** button that opens the host editor with its address and port filled in.
 
 The status bar shows the negotiated cipher and key exchange. A dropped connection reconnects
 with growing pauses between attempts.
