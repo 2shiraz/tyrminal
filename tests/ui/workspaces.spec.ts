@@ -700,3 +700,42 @@ test(`accessibility (axe, WCAG 2.2 AA, ${theme}): focus layout, broadcast review
   await expect(page.getByRole("dialog", { name: "Character encoding for this session" })).toBeVisible();
   await audit();
 });
+
+test("OSC 7 parsing keeps only safe absolute paths; cd quoting cannot be broken out of", async () => {
+  const { parseOsc7, cdCommand } = await import("../../apps/desktop/src/features/terminal/terminalPolicy");
+  expect(parseOsc7("file://web-1/srv/app")).toBe("/srv/app");
+  expect(parseOsc7("file:///home/tyr/My%20Docs")).toBe("/home/tyr/My Docs");
+  for (const bad of ["/srv/app", "http://x/srv", "file://h/a%0Arm%20-rf", "file://h/a%1B]0;x%07", "file://h/a%E2%80%AEb", "file://h/%E0%A4%A", `file://h/${"a".repeat(5000)}`]) {
+    expect(parseOsc7(bad), bad).toBeNull();
+  }
+  expect(cdCommand("/srv/it's here")).toBe("cd -- '/srv/it'\\''s here'");
+  expect(cdCommand("/a; rm -rf ~")).toBe("cd -- '/a; rm -rf ~'");
+});
+
+test("templates: the reported directory is saved; after Connect a return is offered and sent only on request", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await output(page, "\u001b]7;file://api-gateway/srv/it's%20app\u0007");
+  // A hostile report is ignored (control characters): the safe one above stays.
+  await output(page, "\u001b]7;file://api-gateway/tmp%0Aevil\u0007");
+  await paletteRun(page, "Save layout as");
+  await page.getByRole("dialog").getByLabel("Layout name").fill("Dirs");
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("button", { name: /^Layout: Dirs$/ })).toBeVisible();
+  const [save] = await calls(page, "layout_save");
+  expect((save!.args as { layout: { tabs: { directories?: (string | null)[] }[] } }).layout.tabs[0]!.directories).toEqual(["/srv/it's app"]);
+
+  await page.getByRole("tab", { name: /api-gateway/ }).locator(".tab-close").click();
+  await paletteRun(page, "Open layout “Dirs”");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  const offer = page.getByRole("group", { name: "Return to the saved directory" });
+  await expect(offer).toBeVisible();
+  await expect(offer.getByTestId("restore-command")).toHaveText("cd -- '/srv/it'\\''s app'");
+  // Nothing was sent by the offer itself.
+  await page.waitForTimeout(200);
+  const typed = async () => (await page.locator(".pane:not([hidden]) .xterm-rows").innerText()).includes("cd --");
+  expect(await typed()).toBe(false);
+  await offer.getByRole("button", { name: "Send" }).click();
+  await expect(offer).toHaveCount(0);
+  await expect(page.locator(".pane:not([hidden]) .xterm-rows")).toContainText("cd -- '/srv/it'\\''s app': synthetic output");
+});

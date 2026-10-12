@@ -450,11 +450,11 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
   });
 
   test("a saved layout restores disconnected; only Connect opens a new session", async () => {
-    const runCommand = async (name) => {
+    const runCommand = async (name, expect = name) => {
       await s.chord(PALETTE);
       const input = await s.waitFor("dialog.palette input");
       await s.type(input, name);
-      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(name)}) || null`), { describe: name });
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
       await s.chord([KEYS.enter]);
       await s.waitGone("dialog.palette");
     };
@@ -472,7 +472,7 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
 
     await s.click(await s.waitFor(".tabstrip .tab-close"));
     await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
-    await runCommand("Open layout “Lab layout”");
+    await runCommand("Open layout Lab", "Lab layout");
     await s.waitFor(".pane:not([hidden]) .overlay-card");
     // No session exists for the restored pane: no terminal, no xterm, nothing received.
     const restored = await s.execute(`return { xterm: document.querySelectorAll(".pane:not([hidden]) .xterm").length, status: document.querySelector(".statusbar")?.textContent ?? "" }`);
@@ -487,6 +487,48 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     await t.waitForText(/\$/, "a prompt");
     assert.doesNotMatch(await t.terminalText(), /NOT-IN-TEMPLATE-9/);
     await app.screenshot("w04-layout-restored");
+  });
+
+  test("a saved directory (OSC 7) is offered after Connect and only changes directory when sent", async () => {
+    const runCommand = async (name, expect = name) => {
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, name);
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes(${JSON.stringify(expect)}) || null`), { describe: name });
+      await s.chord([KEYS.enter]);
+      await s.waitGone("dialog.palette");
+    };
+    for (let i = 0; i < 8 && (await s.find(".tabstrip .tab-close")); i += 1) await s.click(await s.find(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "no panes" });
+    await t.connect("Lab");
+    // The report shells with OSC 7 support send (the lab account's sh does not, so it is sent here).
+    await t.type(`mkdir -p /tmp/tyr-osc7; cd /tmp/tyr-osc7; printf '\\033]7;file://%s%s\\007' "$(hostname)" "$PWD"; echo OSC7-$((1+1))\n`);
+    await t.waitForText("OSC7-2");
+    // The report comes with the next prompt.
+    await s.until(() => s.execute(`return document.querySelector('.pane:not([hidden])[data-has-directory]') !== null || null`), { describe: "directory reported" }).catch(async (e) => {
+      throw new Error(`${e.message}\n${(await t.terminalText()).split("\n").slice(-8).join("\n")}`);
+    });
+    await runCommand("Save layout as");
+    await s.fill("Layout name", "Dir layout", { within: "dialog" });
+    await s.clickButton("Save", { within: "dialog" });
+    await s.waitGone("dialog");
+    await s.click(await s.waitFor(".tabstrip .tab-close"));
+    await s.until(() => s.execute(`return document.querySelectorAll(".pane").length === 0 || null`), { describe: "tab closed" });
+    await runCommand("Open layout Dir", "Dir layout");
+    await s.clickButton("Connect", { within: ".pane:not([hidden]) .overlay-card" });
+    await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+    await s.clickButton("Trust once", { within: "dialog" });
+    await s.waitGone("dialog");
+    const offered = await s.until(() => s.execute(`return document.querySelector('[data-testid="restore-command"]')?.textContent ?? null`), { describe: "directory offer" });
+    assert.equal(offered, "cd -- '/tmp/tyr-osc7'");
+    // Not sent yet: the new shell is still in its login directory.
+    await t.type("echo AT-$PWD-END\n");
+    await t.waitForText(/AT-.*-END/);
+    assert.doesNotMatch(await t.terminalText(), /AT-\/tmp\/tyr-osc7-END/);
+    await s.clickButton("Send", { within: ".pane:not([hidden]) .term-banner" });
+    await t.type("echo NOW-$PWD-END\n");
+    await t.waitForText("NOW-/tmp/tyr-osc7-END");
+    await app.screenshot("w06-directory-restored");
   });
 });
 

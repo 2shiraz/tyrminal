@@ -26,7 +26,7 @@ import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import { SessionEncoding } from "./encoding";
 import { OutputHighlighter } from "./highlight";
 import { schemeById } from "./schemes";
-import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
+import { decodeOsc52, ligatureRanges, needsPasteReview, parseOsc7, sanitizeTitle } from "./terminalPolicy";
 
 export type TerminalTarget = { kind: "ssh"; hostId: string } | { kind: "local" };
 
@@ -50,6 +50,8 @@ export interface TerminalCallbacks {
   onOutput?(): void;
   /** Typed characters the session's encoding cannot represent; they were not sent. */
   onUnencodable?(chars: string[]): void;
+  /** The shell reported its working directory (OSC 7), already validated. */
+  onDirectory?(path: string): void;
 }
 
 const INPUT_CHUNK = 32 * 1024;
@@ -227,6 +229,13 @@ export class TerminalController {
     this.term.parser.registerOscHandler(52, (data) => {
       const decoded = decodeOsc52(data);
       if (decoded !== null) this.callbacks.onClipboardWrite(decoded);
+      return true;
+    });
+
+    // OSC 7: the shell's working directory, remembered for layout templates only.
+    this.term.parser.registerOscHandler(7, (data) => {
+      const path = parseOsc7(data);
+      if (path !== null) this.callbacks.onDirectory?.(path);
       return true;
     });
 
@@ -548,6 +557,11 @@ export class TerminalController {
 
   get encodingId(): string {
     return this.encoding.option.id;
+  }
+
+  /** Sends a command the user confirmed (for example returning to a saved directory). */
+  sendConfirmedCommand(command: string): void {
+    this.sendText(`${command}\r`);
   }
 
   private sendText(text: string): void {

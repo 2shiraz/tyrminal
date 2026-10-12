@@ -42,7 +42,7 @@ export function PaneGrid({
   prefs: TerminalPreferences;
   workspace?: WorkspacePreferences | undefined;
   panel: ReactNode;
-  onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator">>) => void;
+  onPatch: (pane: number, patch: Partial<Pick<Pane, "remoteTitle" | "indicator" | "directory">>) => void;
   onStatus: (pane: number, status: PaneStatus) => void;
   onFocus: (pane: number) => void;
   /** Brings a pane to the front explicitly (the focus layout's pane list). */
@@ -97,6 +97,7 @@ export function PaneGrid({
               className="pane"
               hidden={!visible}
               data-pane-id={id}
+              data-has-directory={pane.directory ? true : undefined}
               data-focused={focused}
               data-broadcast={broadcasting.has(tab.id) || undefined}
               data-drop={dragPane && dragPane.over === id && dragPane.from !== id ? "swap" : undefined}
@@ -182,6 +183,8 @@ export function PaneGrid({
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                   pending={pane.pending}
+                  restoreDirectory={pane.target.kind === "ssh" ? pane.restoreDirectory : undefined}
+                  onDirectory={(directory) => onPatch(id, { directory })}
                   attachToken={pane.attachToken}
                   canReconnect={canOpen}
                   onConnect={() => onConnect([id])}
