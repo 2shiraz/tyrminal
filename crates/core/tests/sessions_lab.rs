@@ -46,6 +46,10 @@ impl Lab {
     fn port(&self, server: &str) -> u16 {
         self.0.pointer(&format!("/servers/{server}/port")).and_then(Value::as_u64).unwrap() as u16
     }
+    /// The lab server's operating system (`process.platform` naming; Linux in the container lab).
+    fn server_os(&self) -> &str {
+        self.0.pointer("/serverOs").and_then(Value::as_str).unwrap_or("linux")
+    }
     fn addr(&self, server: &str) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], self.port(server)))
     }
@@ -2891,42 +2895,58 @@ async fn a_startup_snippet_with_a_line_too_long_for_the_terminal_is_skipped_and_
 }
 
 // server at a glance
-fn glance_stats(glance: tyrminal_core::contracts::ServerGlance) -> tyrminal_core::contracts::ServerStats {
-    match glance {
-        tyrminal_core::contracts::ServerGlance::Available { stats } => stats,
-        other => panic!("expected values from the Linux lab server, got {other:?}"),
+/// What the panel gets from the lab server: values from a Linux server, "not Linux" from any
+/// other (the macOS lab runs the Mac's own sshd). `None` for the latter.
+fn glance_stats(
+    lab: &Lab,
+    glance: tyrminal_core::contracts::ServerGlance,
+) -> Option<tyrminal_core::contracts::ServerStats> {
+    use tyrminal_core::contracts::{GlanceUnavailable, ServerGlance};
+    match (lab.server_os(), glance) {
+        ("linux", ServerGlance::Available { stats }) => Some(stats),
+        (os, ServerGlance::NotAvailable { reason: GlanceUnavailable::NotLinux }) if os != "linux" => None,
+        (os, other) => panic!("unexpected answer from the {os} lab server: {other:?}"),
     }
 }
 
-/// Server at a glance (P-32) reads a real Linux server over its own channel, asks it at most every
-/// 5 s, stays within the owning window, and can be turned off for the host.
+/// Server at a glance (P-32) reads a real server over its own channel, asks it at most every
+/// 5 s, stays within the owning window, and can be turned off for the host. A Linux lab server
+/// gives values; another system is reported as not Linux, with nothing guessed.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn server_glance_reads_the_lab_server_at_most_every_five_seconds() {
     use tyrminal_core::contracts::ServerGlance;
     let f = fixture().await;
     let key_id = f.import("ed25519", None, false).await;
-    let client = connected(&f, "a", &key_id).await;
+    let mut client = connected(&f, "a", &key_id).await;
     let s = &f.core.sessions;
 
-    let first = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    let uptime = first.uptime_seconds.expect("uptime");
-    assert!(uptime > 0);
-    let load = first.load.expect("load");
-    assert!(load.iter().all(|v| v.is_finite() && *v >= 0.0));
-    let memory = first.memory.expect("memory");
-    assert!(memory.available_kib <= memory.total_kib && memory.total_kib > 0);
-    let disks = first.disks.expect("disks");
-    assert!(disks.iter().any(|d| d.mount == "/"), "{disks:?}");
-    assert!(disks.iter().all(|d| d.used_kib <= d.total_kib && d.mount.starts_with('/')));
+    if let Some(first) = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()) {
+        let uptime = first.uptime_seconds.expect("uptime");
+        assert!(uptime > 0);
+        let load = first.load.expect("load");
+        assert!(load.iter().all(|v| v.is_finite() && *v >= 0.0));
+        match first.memory {
+            Some(memory) => assert!(memory.available_kib <= memory.total_kib && memory.total_kib > 0),
+            // Unavailable only when the server has no MemAvailable line (WSL 1 has none): the
+            // panel does not estimate it.
+            None => {
+                client.send("echo mem-available-$(grep -c '^MemAvailable:' /proc/meminfo)\n").await;
+                client.output_until("mem-available-0").await;
+            }
+        }
+        let disks = first.disks.expect("disks");
+        assert!(disks.iter().any(|d| d.mount == "/"), "{disks:?}");
+        assert!(disks.iter().all(|d| d.used_kib <= d.total_kib && d.mount.starts_with('/')));
 
-    // Asked again within 5 s, the server is not asked again: the answer is the same, to the second.
-    tokio::time::sleep(Duration::from_millis(1_500)).await;
-    let cached = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    assert_eq!(cached.uptime_seconds, Some(uptime));
-    tokio::time::sleep(Duration::from_millis(4_000)).await;
-    let fresh = glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
-    assert!(fresh.uptime_seconds.unwrap() >= uptime + 5, "{fresh:?}");
+        // Asked again within 5 s, the server is not asked again: the answer is the same, to the second.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        let cached = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()).unwrap();
+        assert_eq!(cached.uptime_seconds, Some(uptime));
+        tokio::time::sleep(Duration::from_millis(4_000)).await;
+        let fresh = glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap()).unwrap();
+        assert!(fresh.uptime_seconds.unwrap() >= uptime + 5, "{fresh:?}");
+    }
 
     // Another window learns nothing, the same as for a guessed session.
     let foreign = s.server_glance("detached-1", &client.session).await.unwrap_err();
@@ -2939,7 +2959,7 @@ async fn server_glance_reads_the_lab_server_at_most_every_five_seconds() {
     assert!(!f.core.vault.glance_enabled(&host_id).await.unwrap());
     assert_eq!(s.server_glance(WINDOW, &client.session).await.unwrap(), ServerGlance::Off);
     f.core.vault.set_glance_enabled(&host_id, true).await.unwrap();
-    glance_stats(s.server_glance(WINDOW, &client.session).await.unwrap());
+    glance_stats(&f.lab, s.server_glance(WINDOW, &client.session).await.unwrap());
 }
 
 /// Nothing is read for a session that is not SSH, after it closes, or once the vault locks.
@@ -2957,7 +2977,7 @@ async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
 
     let key_id = f.import("ed25519", None, false).await;
     let mut closing = connected(&f, "a", &key_id).await;
-    glance_stats(s.server_glance(WINDOW, &closing.session).await.unwrap());
+    glance_stats(&f.lab, s.server_glance(WINDOW, &closing.session).await.unwrap());
     s.close(WINDOW, &closing.session).unwrap();
     closing.until_closed().await;
     assert_eq!(s.server_glance(WINDOW, &closing.session).await.unwrap_err().code, ErrorCode::AccessDenied);
@@ -2975,7 +2995,7 @@ async fn server_glance_is_refused_without_ssh_and_after_close_or_lock() {
     };
     f.core.vault.lock().await;
     match racing.await.unwrap() {
-        Ok(glance) => drop(glance_stats(glance)),
+        Ok(glance) => drop(glance_stats(&f.lab, glance)),
         Err(e) => {
             assert!([ErrorCode::VaultLocked, ErrorCode::Cancelled, ErrorCode::AccessDenied].contains(&e.code), "{e:?}")
         }
