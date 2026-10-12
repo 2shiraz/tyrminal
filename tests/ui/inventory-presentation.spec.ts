@@ -32,6 +32,32 @@ test("hosts sort by name, address and group", async ({ page }) => {
   expect(await labels(page)).toEqual(["api-gateway", "build-runner-03", "db-primary", "edge-cache", "Home lab", "staging-web"]);
 });
 
+test("the chosen layout, sort and group filter stay after other views and a restart", async ({ page }) => {
+  await openApp(page);
+  await openHosts(page);
+  await page.getByRole("radiogroup", { name: "Layout" }).getByText("List").click();
+  await page.getByRole("radiogroup", { name: "Sort" }).getByText("Address").click();
+  await page.getByRole("button", { name: "Lab", exact: true }).click();
+  const check = async () => {
+    await expect(page.getByRole("radiogroup", { name: "Layout" }).getByRole("radio", { name: "List" })).toBeChecked();
+    await expect(page.getByRole("radiogroup", { name: "Sort" }).getByRole("radio", { name: "Address" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Lab", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("host-list").getByRole("article")).toHaveCount(0);
+    await expect(page.getByTestId("host-list").getByRole("listitem")).toHaveCount(1);
+  };
+  await check();
+
+  await primary(page).getByRole("button", { name: /^Settings/ }).click();
+  await openHosts(page);
+  await check();
+
+  // Saved like other preferences, so a restart keeps it too.
+  await expect.poll(async () => (await calls(page, "prefs_set")).length).toBeGreaterThan(0);
+  await page.reload();
+  await openHosts(page);
+  await check();
+});
+
 test("select all shown hosts and shift-click a range", async ({ page }) => {
   await openApp(page);
   await openHosts(page);

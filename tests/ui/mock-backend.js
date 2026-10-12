@@ -845,9 +845,19 @@ export function installMockBackend(options) {
       setTimeout(() => emit("vault-status", state.vault), 10);
       return { createdAt: 1760140800, hosts: state.hosts.length, keys: 2, knownHosts: 3, snippets: 5 };
     },
-    prefs_get: () => structuredClone(state.prefs),
+    prefs_get: () => {
+      // Like the preferences file, what was saved survives a reload of the page.
+      try {
+        const saved = sessionStorage.getItem("tyrminal-mock-prefs");
+        if (saved) state.prefs = JSON.parse(saved);
+      } catch {}
+      return structuredClone(state.prefs);
+    },
     prefs_set: (a) => {
       state.prefs = structuredClone(a.prefs);
+      try {
+        sessionStorage.setItem("tyrminal-mock-prefs", JSON.stringify(state.prefs));
+      } catch {}
       return structuredClone(state.prefs);
     },
     vault_status: () =>

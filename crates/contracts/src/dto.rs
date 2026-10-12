@@ -547,6 +547,53 @@ pub struct Preferences {
     /// Hosts carrying this tag are production hosts (P-26), like hosts with the production flag.
     /// Empty: no tag marks production hosts.
     pub production_tag: String,
+    /// How Hosts is shown (layout, sort, group filter), kept across views and restarts. Absent
+    /// in files written before it existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hosts_view: Option<HostsViewPreferences>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct HostsViewPreferences {
+    pub layout: HostsLayout,
+    pub sort: HostsSort,
+    pub filter: HostsFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HostsLayout {
+    #[default]
+    Grid,
+    List,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HostsSort {
+    #[default]
+    Name,
+    Recent,
+    Address,
+    Group,
+}
+
+/// Which hosts Hosts shows: all, those in no group, or one group with its subgroups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+#[ts(export)]
+pub enum HostsFilter {
+    #[default]
+    All,
+    None,
+    Group {
+        id: String,
+    },
 }
 
 /// The default production tag (P-26).
@@ -564,6 +611,7 @@ impl Default for Preferences {
             workspace: None,
             password_check: crate::PasswordCheckPreferences::default(),
             production_tag: DEFAULT_PRODUCTION_TAG.to_owned(),
+            hosts_view: None,
         }
     }
 }

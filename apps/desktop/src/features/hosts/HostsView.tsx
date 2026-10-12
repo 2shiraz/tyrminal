@@ -1,6 +1,19 @@
-import type { BulkHostChange, GroupSummary, HostOs, HostSummary, IdentityAssignment, KeySummary, SettingsTarget } from "@tyrminal/contracts";
+import type {
+  BulkHostChange,
+  GroupSummary,
+  HostOs,
+  HostSummary,
+  HostsFilter,
+  HostsLayout,
+  HostsSort,
+  HostsViewPreferences,
+  IdentityAssignment,
+  KeySummary,
+  SettingsTarget,
+} from "@tyrminal/contracts";
 import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
 import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
@@ -82,8 +95,6 @@ function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number
   return out;
 }
 
-type GroupFilter = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
-
 function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
   const tone = host.auth.kind === "key" && !keys.some((k) => host.auth.kind === "key" && k.id === host.auth.keyId) ? "badge-danger" : "";
@@ -95,8 +106,8 @@ function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   );
 }
 
-type Layout = "grid" | "list";
-type Sort = "name" | "recent" | "address" | "group";
+/** How Hosts is shown until the user changes it; the choice is kept in preferences. */
+const DEFAULT_VIEW: HostsViewPreferences = { layout: "grid", sort: "name", filter: { kind: "all" } };
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
 function rangeBetween(order: string[], from: string, to: string): string[] {
@@ -112,9 +123,17 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const isProduction = useIsProduction();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
-  const [layout, setLayout] = useState<Layout>("grid");
-  const [sort, setSort] = useState<Sort>("name");
-  const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
+  // Layout, sort and group filter live in preferences, so they survive other views and restarts.
+  const { prefs, update } = usePreferences();
+  const view = prefs.hostsView ?? DEFAULT_VIEW;
+  const { layout, sort } = view;
+  const setView = useCallback(
+    (change: Partial<HostsViewPreferences>) => update((p) => ({ ...p, hostsView: { ...(p.hostsView ?? DEFAULT_VIEW), ...change } })),
+    [update],
+  );
+  const setLayout = (next: HostsLayout) => setView({ layout: next });
+  const setSort = (next: HostsSort) => setView({ sort: next });
+  const setFilter = (next: HostsFilter) => setView({ filter: next });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Host details panel: what it shows, a counter that rebuilds it after a save, and the guard state.
   const [panel, setPanel] = useState<{ target: PanelTarget; version: number; justSaved: boolean } | null>(null);
@@ -148,6 +167,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const action = useAction();
   const keyList = keys.value ?? [];
   const groupList = groups.value ?? [];
+  // A remembered group that no longer exists shows every host.
+  const savedFilter = view.filter;
+  const filter: HostsFilter =
+    savedFilter.kind === "group" && groups.value && !groups.value.some((g) => g.id === savedFilter.id) ? { kind: "all" } : savedFilter;
   const tree = useMemo(() => groupTree(groupList), [groupList]);
 
   // Hosts with an open session, from the user's own tabs (no probing of servers).
@@ -472,7 +495,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                 />
               </div>
               <span className="spacer" />
-              <Segmented<Sort>
+              <Segmented<HostsSort>
                 label={msg.hosts.sort}
                 value={sort}
                 onChange={setSort}
@@ -483,7 +506,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                   { value: "group", label: msgD.inventory.sortGroup },
                 ]}
               />
-              <Segmented<Layout>
+              <Segmented<HostsLayout>
                 label={msg.hosts.view}
                 value={layout}
                 onChange={setLayout}

@@ -67,6 +67,13 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
         .map_err(|_| invalid("Use a production tag like those on hosts: 32 bytes at most, no commas."))?
         .pop()
         .unwrap_or_default();
+    if let Some(tyrminal_contracts::HostsViewPreferences {
+        filter: tyrminal_contracts::HostsFilter::Group { id },
+        ..
+    }) = &prefs.hosts_view
+    {
+        crate::validate::id(id)?;
+    }
     Ok(prefs)
 }
 
@@ -263,5 +270,26 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn the_hosts_view_survives_a_restart_and_a_group_filter_must_be_an_id() {
+        use tyrminal_contracts::{HostsFilter, HostsLayout, HostsSort, HostsViewPreferences};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let store = PreferencesStore::open(&path);
+        let view = HostsViewPreferences {
+            layout: HostsLayout::List,
+            sort: HostsSort::Address,
+            filter: HostsFilter::Group { id: "0123456789abcdef0123456789abcdef".into() },
+        };
+        store.set(Preferences { hosts_view: Some(view.clone()), ..Preferences::default() }).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().hosts_view, Some(view));
+
+        let bad = HostsViewPreferences { filter: HostsFilter::Group { id: "../x".into() }, ..Default::default() };
+        assert!(store.set(Preferences { hosts_view: Some(bad), ..Preferences::default() }).is_err());
+        // Files from before the setting existed read as the default view.
+        std::fs::write(&path, br#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(PreferencesStore::open(&path).get().hosts_view, None);
     }
 }
