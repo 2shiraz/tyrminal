@@ -63,6 +63,11 @@ export function ui(s) {
   const api = {
     heading: () => s.until(() => s.execute(`return document.querySelector("h1")?.textContent ?? null`), { describe: "a heading" }),
     nav: async (label) => s.click(await s.waitFor(`nav.sidebar [data-nav="${NAV_IDS[label]}"]`)),
+    /** Settings shows one section at a time: open Settings on the named section. */
+    settings: async (section) => {
+      await api.nav("Settings");
+      await s.clickButton(section, { within: "nav.settings-nav" });
+    },
     statusText: async () => s.text(await s.waitFor(".statusbar")),
     /** Visible terminal text (DOM renderer), with non-breaking spaces normalized. */
     terminalText: () =>
@@ -134,8 +139,7 @@ export function ui(s) {
     /** Connects to the host card labelled `label`, trusting the server once. */
     async connect(label) {
       await api.nav("Hosts");
-      const button = await s.waitFor(`[data-testid="host-list"] button[aria-label="Connect to ${label}"]`);
-      await s.click(button);
+      await s.openHost('[data-testid="host-list"]', label);
       await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
       await s.clickButton("Trust once", { within: "dialog" });
       await s.waitGone("dialog");

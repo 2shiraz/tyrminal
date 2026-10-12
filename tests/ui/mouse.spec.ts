@@ -3,11 +3,11 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 import { inputs, privateClipboard, sentSince } from "./input-helpers";
 
 async function settings(page: Page) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Keyboard shortcuts");
   await expect(page.getByRole("heading", { name: "Keyboard shortcuts" })).toBeVisible();
 }
 

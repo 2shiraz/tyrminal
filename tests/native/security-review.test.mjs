@@ -49,8 +49,7 @@ describe("security review in the real application", { concurrency: false }, () =
     );
 
   async function openReview() {
-    await t.nav("Settings");
-    await s.clickButton("Security review", { within: "nav.settings-nav" });
+    await t.settings("Security review");
     await s.waitFor(`${REVIEW} [role="status"]`);
   }
 

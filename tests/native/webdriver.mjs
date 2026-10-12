@@ -157,6 +157,20 @@ export class Session {
     return this.#call("POST", "/execute/async", { script, args });
   }
 
+  /**
+   * Opens a saved host from the keyboard: focuses the button named `label` inside `container` (a
+   * host name on Hosts, a tile on Home) and presses Enter. Rows, cards and tiles have no Connect
+   * button; Enter and double-click connect.
+   */
+  async openHost(container, label) {
+    const focus = `const b = [...document.querySelectorAll(arguments[0] + " button")].find((x) => (x.getAttribute("aria-label") ?? x.textContent.trim()) === arguments[1]);
+      if (!b) return false;
+      b.focus();
+      return document.activeElement === b;`;
+    await this.until(() => this.execute(focus, [container, label]), { describe: `${label} in ${container}` });
+    await this.chord(["\uE007"]);
+  }
+
   /** W3C actions: real key and pointer input dispatched by the WebDriver server. */
   async performActions(actions) {
     await this.#call("POST", "/actions", { actions });

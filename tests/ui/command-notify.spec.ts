@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { openApp, openSettings } from "./fixtures";
 
 const START = new Date("2026-10-11T12:00:00Z").getTime();
 const OSC = (s: string) => `\u001b]133;${s}\u0007`;
@@ -73,7 +73,7 @@ test("no notification for a short command, for the tab in view, without marks, o
   expect(await notices(page)).toEqual([]);
 
   // Turned off in Settings.
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Terminal");
   await page.getByLabel("Notify when a long command finishes").uncheck();
   await page.getByRole("tab", { name: /Local/ }).click();
   await command(page, 0, "sleep 600", 700, 0);
@@ -83,7 +83,7 @@ test("no notification for a short command, for the tab in view, without marks, o
 
 test("the minimum duration is a setting", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Settings" }).click();
+  await openSettings(page, "Terminal");
   await page.getByLabel(/For commands that run at least/).fill("3");
   await expect.poll(() => page.evaluate(() => (window as unknown as { __mockState: { prefs: { commandNotifications: { minSeconds: number } } } }).__mockState.prefs.commandNotifications.minSeconds)).toBe(3);
   await connect(page);
