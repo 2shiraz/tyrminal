@@ -80,6 +80,9 @@ const COMMANDS: &[&str] = &[
     "host_appearance_list",
     "host_set_os",
     "import_known_hosts_preview",
+    "key_certificate_list",
+    "key_certificate_attach",
+    "key_certificate_remove",
 ];
 
 fn main() {

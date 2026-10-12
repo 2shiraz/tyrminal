@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-certificate-attach"
+description = "Enables the key_certificate_attach command without any pre-configured scope."
+commands.allow = ["key_certificate_attach"]
+
+[[permission]]
+identifier = "deny-key-certificate-attach"
+description = "Denies the key_certificate_attach command without any pre-configured scope."
+commands.deny = ["key_certificate_attach"]

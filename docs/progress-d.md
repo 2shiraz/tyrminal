@@ -12,8 +12,8 @@ Updated: 2026-10-12.
 |---|---|
 | 1. Inventory presentation (HST-13) and group-wide connection (HST-06) | Done, tested (core + UI mock) |
 | 2. PuTTY / MobaXterm / SecureCRT importers (IMP-04..06), known-host conversion (SEC-03) | Done, tested (core, lab, UI mock); cloud discovery IMP-07..13 BLOCKED (third-party APIs) |
-| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Next |
-| 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Queued |
+| 3. Key generation (ECDSA, RSA), PuTTY PPK v3 (KEY-14), certificates (KEY-07), algorithm controls (SEC-08..10) | Done except certificate sign-in and the per-host PQ switch (after B); hardware keys and SEC-09 BLOCKED |
+| 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Next |
 | 5. After agent B merges: identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), IMP-02, HST-05 | Waiting on B |
 
 ## Design notes
@@ -40,6 +40,14 @@ Updated: 2026-10-12.
 - **Known-host conversion** offers hosts for trusted records without a host entry, through the
   same preview and transactional import.
 
+- **Keys** (ADR 0006): ECDSA/RSA generation, PPK v2/v3 import with the file's Argon2 cost bounded,
+  key files chosen in the page, OpenSSH user certificates checked and stored per key (record kind
+  201). Fixtures made with puttygen 0.81 in `tests/fixtures/keys/` (passphrase
+  `fixture passphrase`); certificates in tests are signed by the real `ssh-keygen`.
+- **SEC-08:** the lab test asserts `mlkem768x25519-sha256` with OpenSSH ≥ 9.9. The Docker lab
+  (10.0p1) cannot be built in this sandbox (no trusted route to the Alpine mirror from the image
+  build), so only the 9.6 fallback branch has run here.
+
 ## Evidence
 
 - `cargo test -p tyrminal-core --test inventory` — includes
@@ -48,6 +56,7 @@ Updated: 2026-10-12.
 - `cargo test -p tyrminal-core --test inventory_lab -- --ignored` (lab): known-host conversion.
 - `node scripts/ui-container.mjs` — full suite green, including `inventory-presentation.spec.ts`.
 - `pnpm verify:fast` 7/7; `cargo test -p tyrminal-core --test sessions_lab -- --ignored --skip two_gib` 20/20 against the local lab (OpenSSH 9.6p1).
+- `cargo test -p tyrminal-ssh --test lab -- --ignored`: 16/17; `ipv6_loopback_endpoint_…` cannot bind `[::1]` in this sandbox (EAFNOSUPPORT, no IPv6 in the container), unrelated to these changes.
 
 ## Next commands
 

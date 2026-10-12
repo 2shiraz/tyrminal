@@ -76,6 +76,9 @@
     "allow-backup-restore",
     "allow-host-appearance-list",
     "allow-host-set-os",
-    "allow-import-known-hosts-preview"
+    "allow-import-known-hosts-preview",
+    "allow-key-certificate-list",
+    "allow-key-certificate-attach",
+    "allow-key-certificate-remove"
   ]
 }

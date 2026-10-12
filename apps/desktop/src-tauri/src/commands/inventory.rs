@@ -32,8 +32,16 @@ pub async fn key_import(state: State<'_, AppState>, key: KeyImportInput) -> Resu
 }
 
 #[tauri::command]
-pub async fn key_generate(state: State<'_, AppState>, label: String) -> Result<KeySummary, IpcError> {
-    state.core()?.vault.generate_key(&label).await
+pub async fn key_generate(
+    state: State<'_, AppState>,
+    label: String,
+    kind: Option<tyrminal_core::contracts::KeyKind>,
+) -> Result<KeySummary, IpcError> {
+    // agent D: the key type is optional; without it the key is Ed25519, as before.
+    match kind {
+        Some(kind) => state.core()?.vault.generate_key_of(&label, kind).await,
+        None => state.core()?.vault.generate_key(&label).await,
+    }
 }
 
 #[tauri::command]
@@ -145,4 +153,25 @@ pub async fn host_set_os(
 #[tauri::command]
 pub async fn import_known_hosts_preview(state: State<'_, AppState>) -> Result<ImportPreview, IpcError> {
     state.core()?.vault.known_host_import_preview().await
+}
+
+#[tauri::command]
+pub async fn key_certificate_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<tyrminal_core::contracts::KeyCertificate>, IpcError> {
+    state.core()?.vault.list_key_certificates().await
+}
+
+#[tauri::command]
+pub async fn key_certificate_attach(
+    state: State<'_, AppState>,
+    key_id: String,
+    certificate: String,
+) -> Result<tyrminal_core::contracts::KeyCertificate, IpcError> {
+    state.core()?.vault.attach_key_certificate(&key_id, &certificate).await
+}
+
+#[tauri::command]
+pub async fn key_certificate_remove(state: State<'_, AppState>, key_id: String) -> Result<(), IpcError> {
+    state.core()?.vault.remove_key_certificate(&key_id).await
 }

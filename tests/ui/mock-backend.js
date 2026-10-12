@@ -615,6 +615,30 @@ export function installMockBackend(options) {
       }
       return a.ids.length;
     },
+    key_generate: (a) => {
+      const algorithms = { ed25519: "ssh-ed25519", ecdsa_p256: "ecdsa-sha2-nistp256", ecdsa_p384: "ecdsa-sha2-nistp384", ecdsa_p521: "ecdsa-sha2-nistp521", rsa3072: "ssh-rsa", rsa4096: "ssh-rsa" };
+      const algorithm = algorithms[a.kind ?? "ed25519"];
+      const key = { id: id(800 + state.keys.length), label: a.label, algorithm, fingerprint: `SHA256:synthetic${state.keys.length}`, publicKey: `${algorithm} AAAASynthetic ${a.label}`, passphraseProtected: false, passphraseStored: false, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      return key;
+    },
+    key_import: (a) => {
+      if (a.key.privateKey.startsWith("PuTTY-User-Key-File-3") && !a.key.passphrase) throw { code: "KEY_INVALID", message: "This private key is encrypted. Enter its passphrase to import it." };
+      const key = { id: id(850 + state.keys.length), label: a.key.label, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:imported", publicKey: `ecdsa-sha2-nistp256 AAAAImported ${a.key.label}`, passphraseProtected: Boolean(a.key.passphrase), passphraseStored: a.key.rememberPassphrase, usedBy: 0 };
+      state.keys = [...state.keys, key];
+      return key;
+    },
+    key_certificate_list: () => Object.values(state.certificates ?? {}),
+    key_certificate_attach: (a) => {
+      if (!a.certificate.includes("-cert-v01@openssh.com")) throw { code: "KEY_INVALID", message: "That is not a valid OpenSSH certificate, or its signature does not check out." };
+      state.certificates ??= {};
+      const cert = { keyId: a.keyId, algorithm: a.certificate.split(" ")[0], certKeyId: "synthetic-user", principals: ["tyr"], validAfter: now - 60, validBefore: null, caFingerprint: "SHA256:syntheticCA" };
+      state.certificates[a.keyId] = cert;
+      return cert;
+    },
+    key_certificate_remove: (a) => {
+      delete state.certificates?.[a.keyId];
+    },
     import_known_hosts_preview: () => {
       const used = new Set(state.hosts.map((h) => `${h.address}:${h.port}`));
       const hosts = state.knownHosts

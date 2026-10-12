@@ -40,8 +40,8 @@ use crate::records::{
 };
 use crate::validate;
 // agent D: inventory and snippets
-use crate::records::{HostAppearanceRecord, KIND_HOST_APPEARANCE};
-use tyrminal_contracts::{HostAppearance, HostOs};
+use crate::records::{HostAppearanceRecord, KIND_HOST_APPEARANCE, KIND_KEY_CERTIFICATE, KeyCertificateRecord};
+use tyrminal_contracts::{HostAppearance, HostOs, KeyCertificate, KeyKind};
 
 struct Stored<T> {
     revision: u64,
@@ -59,6 +59,7 @@ struct Open {
     groups: BTreeMap<Id, Stored<GroupRecord>>,
     // agent D: inventory and snippets
     appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
+    certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
 }
 
 impl Open {
@@ -72,6 +73,7 @@ impl Open {
             groups: BTreeMap::new(),
             // agent D: inventory and snippets
             appearances: BTreeMap::new(),
+            certificates: BTreeMap::new(),
         }
     }
 }
@@ -461,6 +463,7 @@ impl VaultService {
                 KIND_GROUP => load!(GroupRecord, open.groups),
                 // agent D: inventory and snippets
                 KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
+                KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1519,7 +1522,23 @@ impl VaultService {
         if open.groups.values().any(|g| g.record.key_id.as_deref() == Some(key_text.as_str())) {
             return Err(err(ErrorCode::InUse, "Groups still use this key. Change their default key first."));
         }
-        self.write::<KeyRecord>(open, key_id, KIND_KEY, revision, None).await?;
+        // agent D: the key's certificate goes in the same transaction.
+        let certificate =
+            open.certificates.iter().find(|(_, c)| c.record.key_id == key_text).map(|(id, c)| (*id, c.revision));
+        let mut rows = vec![self.seal_row::<KeyRecord>(open, key_id, KIND_KEY, revision, None)?];
+        if let Some((cert_id, cert_revision)) = certificate {
+            rows.push(self.seal_row::<KeyCertificateRecord>(
+                open,
+                cert_id,
+                KIND_KEY_CERTIFICATE,
+                cert_revision + 1,
+                None,
+            )?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        if let Some((cert_id, _)) = certificate {
+            open.certificates.remove(&cert_id);
+        }
         open.ssh_keys.remove(&key_id);
         Ok(())
     }
@@ -1757,6 +1776,109 @@ impl VaultService {
             }
         }
         Ok(preview)
+    }
+
+    /// Generates a key of `kind` inside the vault. RSA generation runs off the async runtime.
+    pub async fn generate_key_of(&self, label: &str, kind: KeyKind) -> Result<KeySummary, IpcError> {
+        let label = validate::label(label)?;
+        let kind = match kind {
+            KeyKind::Ed25519 => tyrminal_ssh::KeyKind::Ed25519,
+            KeyKind::EcdsaP256 => tyrminal_ssh::KeyKind::EcdsaP256,
+            KeyKind::EcdsaP384 => tyrminal_ssh::KeyKind::EcdsaP384,
+            KeyKind::EcdsaP521 => tyrminal_ssh::KeyKind::EcdsaP521,
+            KeyKind::Rsa3072 => tyrminal_ssh::KeyKind::Rsa3072,
+            KeyKind::Rsa4096 => tyrminal_ssh::KeyKind::Rsa4096,
+        };
+        let key = tokio::task::spawn_blocking(move || ClientKey::generate(kind))
+            .await
+            .map_err(|_| internal())?
+            .map_err(from_key)?;
+        let record = KeyRecord {
+            label,
+            private_key: key.to_openssh().map_err(from_key)?,
+            passphrase: None,
+            passphrase_protected: false,
+            algorithm: key.algorithm(),
+            fingerprint: key.fingerprint(),
+            public_key: key.public_key_openssh().map_err(from_key)?,
+        };
+        self.store_key(record).await
+    }
+
+    fn certificate_summary(record: &KeyCertificateRecord) -> KeyCertificate {
+        KeyCertificate {
+            key_id: record.key_id.clone(),
+            algorithm: record.algorithm.clone(),
+            cert_key_id: record.cert_key_id.clone(),
+            principals: record.principals.clone(),
+            valid_after: record.valid_after,
+            valid_before: (record.valid_before != u64::MAX).then_some(record.valid_before),
+            ca_fingerprint: record.ca_fingerprint.clone(),
+        }
+    }
+
+    pub async fn list_key_certificates(&self) -> Result<Vec<KeyCertificate>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.certificates.values().map(|c| Self::certificate_summary(&c.record)).collect();
+        list.sort_by(|a, b| a.key_id.cmp(&b.key_id));
+        Ok(list)
+    }
+
+    /// Attaches (or replaces) the user certificate of a key after checking it against the key:
+    /// valid CA signature, a user certificate, for exactly this public key, not expired. An
+    /// encrypted key without its stored passphrase is checked against its stored public key.
+    pub async fn attach_key_certificate(&self, key_id: &str, certificate: &str) -> Result<KeyCertificate, IpcError> {
+        let id = validate::id(key_id)?;
+        let key_text = validate::id_text(&id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let key = &open.ssh_keys.get(&id).ok_or_else(|| not_found("That key no longer exists."))?.record;
+        let info = tyrminal_ssh::check_user_certificate(&key.public_key, certificate, now_unix()).map_err(from_key)?;
+        let record = KeyCertificateRecord {
+            key_id: key_text.clone(),
+            certificate: info.text,
+            algorithm: info.algorithm,
+            cert_key_id: info.key_id,
+            principals: info.principals,
+            valid_after: info.valid_after,
+            valid_before: info.valid_before,
+            ca_fingerprint: info.ca_fingerprint,
+        };
+        let content_len = record.certificate.len()
+            + record.algorithm.len()
+            + record.cert_key_id.len()
+            + record.principals.iter().map(String::len).sum::<usize>()
+            + record.ca_fingerprint.len()
+            + record.key_id.len();
+        let (record_id, revision) = match open.certificates.iter().find(|(_, c)| c.record.key_id == key_text) {
+            Some((id, c)) => (*id, c.revision + 1),
+            None => {
+                if open.certificates.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of certificates."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        self.write(open, record_id, KIND_KEY_CERTIFICATE, revision, Some((&record, content_len))).await?;
+        let summary = Self::certificate_summary(&record);
+        open.certificates.insert(record_id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn remove_key_certificate(&self, key_id: &str) -> Result<(), IpcError> {
+        let key_text = validate::id_text(&validate::id(key_id)?);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (record_id, revision) = open
+            .certificates
+            .iter()
+            .find(|(_, c)| c.record.key_id == key_text)
+            .map(|(id, c)| (*id, c.revision + 1))
+            .ok_or_else(|| not_found("That key has no certificate."))?;
+        self.write::<KeyCertificateRecord>(open, record_id, KIND_KEY_CERTIFICATE, revision, None).await?;
+        open.certificates.remove(&record_id);
+        Ok(())
     }
 
     /// The OS recorded for each host that has one.

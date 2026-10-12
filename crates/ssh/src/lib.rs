@@ -28,3 +28,5 @@ pub use host_trust::{
     canonical_host, evaluate,
 };
 pub use sftp::{FileError, RemoteAttrs, RemoteDirEntry, RemoteKind, RemoteReader, RemoteWriter, SFTP_CHUNK, Sftp};
+// agent D: key formats and certificates
+pub use auth::{CertificateInfo, KeyKind, check_user_certificate};

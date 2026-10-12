@@ -422,3 +422,133 @@ async fn putty_mobaxterm_and_securecrt_exports_preview_then_import_in_one_transa
     assert_eq!(code(v.import_hosts(tampered, None).await), ErrorCode::InvalidInput);
     assert_eq!(v.list_hosts().await.unwrap().len(), 6);
 }
+
+fn key_fixture(name: &str) -> String {
+    std::fs::read_to_string(format!("{}/../../tests/fixtures/keys/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+}
+
+#[tokio::test]
+async fn ecdsa_and_rsa_keys_are_generated_and_putty_keys_import() {
+    use tyrminal_core::contracts::{KeyImportInput, KeyKind};
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    for (kind, algorithm) in [
+        (KeyKind::EcdsaP256, "ecdsa-sha2-nistp256"),
+        (KeyKind::EcdsaP384, "ecdsa-sha2-nistp384"),
+        (KeyKind::EcdsaP521, "ecdsa-sha2-nistp521"),
+        (KeyKind::Rsa3072, "ssh-rsa"),
+    ] {
+        let key = v.generate_key_of(&format!("{kind:?}"), kind).await.unwrap();
+        assert_eq!(key.algorithm, algorithm);
+        assert!(key.public_key.starts_with(algorithm));
+    }
+
+    // PuTTY v3, encrypted: refused without the passphrase, stored protected with it.
+    let ppk = key_fixture("ecdsa-v3-enc.ppk");
+    let input = |passphrase: Option<&str>, remember| KeyImportInput {
+        label: "putty".into(),
+        private_key: ppk.clone(),
+        passphrase: passphrase.map(Into::into),
+        remember_passphrase: remember,
+    };
+    assert_eq!(code(v.import_key(input(None, false)).await), ErrorCode::KeyInvalid);
+    assert_eq!(code(v.import_key(input(Some("nope"), false)).await), ErrorCode::WrongCredential);
+    let imported = v.import_key(input(Some("fixture passphrase"), false)).await.unwrap();
+    assert!(imported.passphrase_protected && !imported.passphrase_stored);
+    assert_eq!(imported.algorithm, "ecdsa-sha2-nistp256");
+    let v2 = KeyImportInput {
+        label: "putty v2".into(),
+        private_key: key_fixture("rsa-v2-enc.ppk"),
+        passphrase: Some("fixture passphrase".into()),
+        remember_passphrase: true,
+    };
+    assert!(v.import_key(v2).await.unwrap().passphrase_stored);
+    let plain = KeyImportInput {
+        label: "putty plain".into(),
+        private_key: key_fixture("ed25519-v3.ppk"),
+        passphrase: None,
+        remember_passphrase: false,
+    };
+    assert!(!v.import_key(plain).await.unwrap().passphrase_protected);
+}
+
+/// Signs `public_key` with a fresh CA using the real `ssh-keygen`; returns (certificate, CA key).
+fn sign_with_ssh_keygen(dir: &std::path::Path, public_key: &str, cert_type_host: bool, validity: &str) -> String {
+    use std::process::Command;
+    let ca = dir.join("ca");
+    if !ca.exists() {
+        let ok = Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-C", "synthetic-ca", "-f"])
+            .arg(&ca)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+    }
+    let user = dir.join("user.pub");
+    std::fs::write(&user, format!("{public_key}\n")).unwrap();
+    let mut cmd = Command::new("ssh-keygen");
+    cmd.args(["-q", "-s"]).arg(&ca).args(["-I", "synthetic-user", "-n", "tyr", "-V", validity]);
+    if cert_type_host {
+        cmd.arg("-h");
+    }
+    assert!(cmd.arg(&user).status().unwrap().success());
+    std::fs::read_to_string(dir.join("user-cert.pub")).unwrap()
+}
+
+#[tokio::test]
+async fn certificates_attach_only_to_their_key_and_go_with_it() {
+    use tyrminal_core::contracts::{KeyImportInput, KeyKind};
+    let dir = TempDir::new().unwrap();
+    let work = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v.generate_key_of("certified", KeyKind::Ed25519).await.unwrap();
+    let other = v.generate_key("other").await.unwrap();
+    // The summary's public key ends with the label; the key itself is the first two fields.
+    let public: String = key.public_key.split(' ').take(2).collect::<Vec<_>>().join(" ");
+
+    let cert = sign_with_ssh_keygen(work.path(), &public, false, "-5m:+1h");
+    assert_eq!(code(v.attach_key_certificate(&other.id, &cert).await), ErrorCode::KeyInvalid);
+    assert_eq!(
+        code(v.attach_key_certificate(&key.id, "ssh-ed25519-cert-v01@openssh.com AAAA").await),
+        ErrorCode::KeyInvalid
+    );
+    let host_cert = sign_with_ssh_keygen(work.path(), &public, true, "-5m:+1h");
+    assert_eq!(code(v.attach_key_certificate(&key.id, &host_cert).await), ErrorCode::KeyInvalid);
+    let expired = sign_with_ssh_keygen(work.path(), &public, false, "20200101:20200102");
+    assert_eq!(code(v.attach_key_certificate(&key.id, &expired).await), ErrorCode::KeyInvalid);
+    assert!(v.list_key_certificates().await.unwrap().is_empty());
+
+    let attached = v.attach_key_certificate(&key.id, &cert).await.unwrap();
+    assert_eq!(attached.principals, ["tyr"]);
+    assert_eq!(attached.cert_key_id, "synthetic-user");
+    assert_eq!(attached.algorithm, "ssh-ed25519-cert-v01@openssh.com");
+    // Replacing keeps one certificate per key.
+    v.attach_key_certificate(&key.id, &sign_with_ssh_keygen(work.path(), &public, false, "-5m:+2h")).await.unwrap();
+    assert_eq!(v.list_key_certificates().await.unwrap().len(), 1);
+
+    // An encrypted key takes a certificate without its passphrase (checked against the public key).
+    let ppk = v
+        .import_key(KeyImportInput {
+            label: "putty".into(),
+            private_key: key_fixture("ecdsa-v3-enc.ppk"),
+            passphrase: Some("fixture passphrase".into()),
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let ppk_public: String = ppk.public_key.split(' ').take(2).collect::<Vec<_>>().join(" ");
+    v.attach_key_certificate(&ppk.id, &sign_with_ssh_keygen(work.path(), &ppk_public, false, "-5m:+1h")).await.unwrap();
+
+    // Deleting a key deletes its certificate in the same transaction; it survives a reopen.
+    v.delete_key(&key.id).await.unwrap();
+    v.lock().await;
+    v.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let left = v.list_key_certificates().await.unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].key_id, ppk.id);
+    v.remove_key_certificate(&ppk.id).await.unwrap();
+    assert!(v.list_key_certificates().await.unwrap().is_empty());
+    assert_eq!(code(v.remove_key_certificate(&ppk.id).await), ErrorCode::NotFound);
+}

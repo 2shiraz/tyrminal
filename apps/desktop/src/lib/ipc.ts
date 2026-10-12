@@ -270,3 +270,12 @@ export const appearance = {
 export const knownHostImport = {
   preview: () => call<ImportPreview>("import_known_hosts_preview"),
 };
+
+/** Key types beyond Ed25519, and OpenSSH user certificates for keys in the keychain. */
+export const keysD = {
+  generate: (label: string, kind: import("@tyrminal/contracts").KeyKind) => call<KeySummary>("key_generate", { label, kind }),
+  certificates: () => call<import("@tyrminal/contracts").KeyCertificate[]>("key_certificate_list"),
+  attachCertificate: (keyId: string, certificate: string) =>
+    call<import("@tyrminal/contracts").KeyCertificate>("key_certificate_attach", { keyId, certificate }),
+  removeCertificate: (keyId: string) => call<void>("key_certificate_remove", { keyId }),
+};

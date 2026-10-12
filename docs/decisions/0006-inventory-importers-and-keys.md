@@ -10,6 +10,7 @@ parallel branches never assign the same number.
 | Kind | Record | Notes |
 |---|---|---|
 | 200 | `HostAppearanceRecord` (host id, OS) | One per host; deleted with the host and copied with it in the same transaction. Kept apart from `HostRecord` so host fields wait for agent B's (work-split ordering). |
+| 201 | `KeyCertificateRecord` (key id, certificate line, parsed fields) | One per key; deleted with the key in the same transaction. Public data, still encrypted like every record. |
 
 ## Dependencies
 
@@ -51,3 +52,39 @@ is nothing to un-hash.
 AWS, DigitalOcean and Azure discovery need those providers' APIs and real accounts. Agents must
 not contact third parties, so these rows are BLOCKED until the owner authorizes a provider
 sandbox. Nothing is stubbed in the UI.
+
+## Keys (KEY-01, KEY-02, KEY-07, KEY-14) — slice 3
+
+- **Generation:** Ed25519 (default), ECDSA P-256/P-384/P-521 and RSA 3072/4096 through `ssh-key`
+  (already a dependency via russh). RSA runs on a blocking thread. No DSA, no RSA below 3072.
+- **ML-DSA keys: BLOCKED.** There is no SSH standard for ML-DSA user keys, OpenSSH does not
+  accept them, and neither russh nor ssh-key implements them. We do not invent SSH algorithms
+  (spec §4.5).
+- **PuTTY PPK v2/v3:** decoded by `ssh-key`'s `ppk` feature (already enabled). A PPK v3 file names
+  its own Argon2 parameters and the library applies them unchecked, so `auth.rs` reads the header
+  first and refuses more than 256 MiB of memory, 64 passes or 16 lanes before any work is done
+  (PuTTY's defaults are 8 MiB, ~20 passes, 1 lane). Encryption is detected from the header, so an
+  encrypted PPK asks for its passphrase like an encrypted OpenSSH key. The original text is
+  stored, so the bound applies again at every decode.
+- **Certificates:** an OpenSSH user certificate is attached to a key after checking that its CA
+  signature verifies, it is a user (not host) certificate, it certifies exactly that key's public
+  half and it has not expired. The check uses the stored public key, so an encrypted key needs no
+  passphrase. CA trust and principals are the server's decision and are only displayed.
+  **Using** the certificate to sign in needs a change on the connection path (vault
+  `connection_plan`, `sessions.rs`), which agent B owns and is changing for jump hosts; it lands
+  after B merges, with a lab CA (`TrustedUserCAKeys`) test.
+- **Hardware keys (KEY-08..13): BLOCKED** — no FIDO2 device or platform key store is available to
+  test, and the spec forbids advertising them untested.
+
+## Algorithms (SEC-08..10)
+
+- `mlkem768x25519-sha256` is first in the offer (`crates/ssh/src/algorithms.rs`); servers without
+  it (OpenSSH < 9.9) negotiate `curve25519-sha256`. The lab test asserts the PQ exchange for
+  OpenSSH ≥ 9.9 and the Curve25519 fallback otherwise. The sandbox lab is OpenSSH 9.6; the Docker
+  lab (10.0p1) could not be built here because its image build has no trusted route to the Alpine
+  mirror, so the PQ branch runs where that lab runs (CI).
+- **SEC-09: BLOCKED** — russh 0.64 has no `sntrup761x25519-sha512`, no `mlkem1024nistp384-sha384`
+  and no ML-DSA.
+- **SEC-10:** a per-host switch that removes the PQ exchange from the offer is a host setting on
+  the connection path; it follows agent B's merge. Disabling PQ never adds weaker algorithms: the
+  remaining list is the same modern one.

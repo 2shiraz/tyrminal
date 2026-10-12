@@ -126,6 +126,23 @@ pub(crate) struct HostAppearanceRecord {
     pub os: tyrminal_contracts::HostOs,
 }
 
+pub(crate) const KIND_KEY_CERTIFICATE: u16 = 201;
+
+/// An OpenSSH user certificate for a key in the keychain (public data), checked against the key
+/// when attached. At most one per key; deleting the key deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct KeyCertificateRecord {
+    pub key_id: String,
+    /// The certificate line (`<type> <base64> [comment]`).
+    pub certificate: String,
+    pub algorithm: String,
+    pub cert_key_id: String,
+    pub principals: Vec<String>,
+    pub valid_after: u64,
+    pub valid_before: u64,
+    pub ca_fingerprint: String,
+}
+
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does
 /// not leave partial copies behind in freed heap blocks.
 struct FixedWriter {

@@ -188,6 +188,9 @@ pub fn run() {
             commands::inventory::host_appearance_list,
             commands::inventory::host_set_os,
             commands::inventory::import_known_hosts_preview,
+            commands::inventory::key_certificate_list,
+            commands::inventory::key_certificate_attach,
+            commands::inventory::key_certificate_remove,
         ])
         .build(tauri::generate_context!());
 

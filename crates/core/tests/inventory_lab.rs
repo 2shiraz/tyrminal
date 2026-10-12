@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-use tyrminal_core::contracts::{HostAuthInput, HostInput, SessionEvent, TrustDecision};
+use tyrminal_core::contracts::{HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, TrustDecision};
 use tyrminal_core::{Core, SessionSink};
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -147,4 +147,65 @@ async fn known_hosts_trusted_on_real_connections_become_hosts_after_a_preview() 
     assert!(matches!(next_prompt(&mut inbox).await, SessionEvent::AuthPrompt { .. }), "no trust prompt expected");
     core.sessions.close(WINDOW, &opened.session_id).unwrap();
     assert!(v.known_host_import_preview().await.unwrap().hosts.is_empty());
+}
+
+/// (major, minor) from "OpenSSH_9.6p1 Ubuntu-3", "OpenSSH 10.0p1 (Alpine …)" or "OpenSSH_for_Windows_9.5p1".
+fn openssh_version(text: &str) -> (u32, u32) {
+    let start = text.find(|c: char| c.is_ascii_digit()).unwrap_or_else(|| panic!("no version in {text:?}"));
+    let mut parts = text[start..].split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
+    (parts.next().and_then(|p| p.parse().ok()).unwrap_or(0), parts.next().and_then(|p| p.parse().ok()).unwrap_or(0))
+}
+
+/// SEC-08: the hybrid post-quantum key exchange is used whenever the server implements it
+/// (OpenSSH 9.9 and later), and otherwise the strongest classical exchange, never a weak one.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn hybrid_post_quantum_key_exchange_is_negotiated_when_the_server_supports_it() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let key = core
+        .vault
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let host = core
+        .vault
+        .save_host(HostInput {
+            username: lab.str("/user"),
+            auth: HostAuthInput::Key { key_id: key.id },
+            ..host("lab a", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, &host.id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let mut negotiated = None;
+    loop {
+        match tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed") {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            event @ SessionEvent::Negotiated { .. } => negotiated = Some(event),
+            SessionEvent::State { state: SessionState::Connected } => break,
+            SessionEvent::Closed { error, .. } => panic!("closed: {error:?}"),
+            _ => {}
+        }
+    }
+    core.sessions.close(WINDOW, &opened.session_id).unwrap();
+    let Some(SessionEvent::Negotiated { kex, .. }) = negotiated else { panic!("no negotiated algorithms") };
+    let version = lab.str("/serverVersion");
+    if openssh_version(&version) >= (9, 9) {
+        assert_eq!(kex, "mlkem768x25519-sha256", "{version} implements the hybrid exchange");
+    } else {
+        // The server predates ML-KEM: the client's preference falls to Curve25519, never further.
+        assert_eq!(kex, "curve25519-sha256", "{version}");
+    }
+    let offer = tyrminal_ssh::negotiation_summary();
+    assert!(offer.lines().next().unwrap().starts_with("kex=mlkem768x25519-sha256,"), "{offer}");
 }

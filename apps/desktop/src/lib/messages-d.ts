@@ -2,7 +2,7 @@
 // original set), kept apart from messages.ts so parallel branches never edit the same object.
 // Same rules: stable keys, interpolation through functions.
 
-import type { HostOs } from "@tyrminal/contracts";
+import type { HostOs, KeyKind } from "@tyrminal/contracts";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `${n} ${one}` : `${n} ${many}`);
 
@@ -62,5 +62,37 @@ export const msgD = {
     securecrtHint: "Choose the XML file from Tools → Export Settings, or one session's .ini file. SSH2 sessions become hosts in their folders; saved passwords are never imported.",
     knownHostsHint: "Servers whose keys you trusted on a connection but that have no host entry. Each becomes a host; set its user name before connecting.",
     knownHostsNone: "Every trusted known host already has a host entry.",
+  },
+  keys: {
+    emptyBody: "Generate an Ed25519, ECDSA or RSA key here, or import an existing private key.",
+    kind: "Key type",
+    kinds: {
+      ed25519: "Ed25519 (recommended)",
+      ecdsa_p256: "ECDSA P-256",
+      ecdsa_p384: "ECDSA P-384",
+      ecdsa_p521: "ECDSA P-521",
+      rsa3072: "RSA 3072",
+      rsa4096: "RSA 4096",
+    } satisfies Record<KeyKind, string>,
+    generateBody: "Creates the key inside the vault. Install its public key on your servers to sign in with it.",
+    rsaSlow: "RSA keys take a few seconds to generate.",
+    importBody: "Paste or choose an OpenSSH, PEM or PuTTY (.ppk) private key. It is checked and then stored encrypted in the vault.",
+    chooseFile: "Choose key file",
+    fileTooLarge: "That file is larger than 1 MiB.",
+    certificate: "Certificate",
+    certificateFor: (label: string) => `Certificate for “${label}”`,
+    addCertificate: "Add certificate",
+    replaceCertificate: "Replace certificate",
+    removeCertificate: "Remove certificate",
+    certificateBody:
+      "Paste or choose the OpenSSH user certificate (…-cert.pub) your CA signed for this key. Tyrminal checks the signature, that it certifies this key and that it has not expired; the server decides whether it trusts the CA.",
+    certificateText: "Certificate",
+    chooseCertificate: "Choose certificate file",
+    certificateBadge: (principals: string[]) => (principals.length === 0 ? "Certificate: any principal" : `Certificate: ${principals.join(", ")}`),
+    certificateExpires: (when: string) => `expires ${when}`,
+    certificateNoExpiry: "does not expire",
+    certificateAttached: "Certificate added",
+    certificateRemoved: "Certificate removed",
+    certificateUseNote: "Signing in with the certificate is not used yet: it arrives with the connection changes of the jump-host work.",
   },
 };
