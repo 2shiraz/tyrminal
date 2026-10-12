@@ -192,9 +192,16 @@ jobs:
       # The optimized release build (thin LTO, one codegen unit) is the slowest step; pull
       # requests check the release policy statically and main, schedules and the release
       # workflow build and inspect the real binary.
+      # The same overlay the Release workflow uses, without secrets: an ad-hoc signature on
+      # macOS (a sealed bundle), nothing elsewhere. The installer smoke test below then checks
+      # the bundle that releases ship, which `codesign --verify --deep --strict` accepts.
+      - name: Signing configuration (no secrets; ad-hoc on macOS)
+        id: signing
+        if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
+        run: node scripts/ci/release-signing.mjs
       - name: Release build (unsigned)
         if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
-        run: pnpm run build:desktop
+        run: pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
       - name: Release policy against the built binary
         if: steps.changed.outputs.code == 'true' && (github.event_name != 'pull_request')
         run: node scripts/check-release.mjs --require-binary
