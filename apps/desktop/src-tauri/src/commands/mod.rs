@@ -4,6 +4,7 @@
 pub mod backup;
 pub mod files;
 pub mod inventory;
+pub mod output;
 pub mod sessions;
 pub mod settings;
 pub mod snippets;

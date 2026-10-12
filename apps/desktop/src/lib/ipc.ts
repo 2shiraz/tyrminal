@@ -339,6 +339,11 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** P-29: saves one command's output through the system save dialog; the file name, or null if cancelled. */
+export const terminalOutput = {
+  save: (text: string) => call<string | null>("terminal_output_save", { text }),
+};
+
 /** Group defaults for route and appearance (HST-05). */
 export const groupDefaults = {
   get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),

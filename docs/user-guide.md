@@ -145,6 +145,16 @@ Safety features:
   answered.
 - Pasting several lines, or a lot of text, shows the text first.
 
+**Search all sessions** (command palette) finds text in the scrollback of every open terminal
+and lists the matches by tab; choosing one brings its tab to the front and selects the match.
+The search runs in memory only: nothing is saved or logged.
+
+**Copy or save a command's output** (command palette) lists the commands the shell integration
+marked in the focused terminal, newest first. Copy or save the output of one of them, without
+the prompt and the command line. Saving always asks where, in the system save dialog. Without
+the shell integration the action is not offered, because Tyrminal does not guess where output
+starts and ends.
+
 **Duplicate tab** (tab menu) opens the same destination again. When the shell integration
 (Suggestions → shell integration) reports the shell's current folder, the copy starts there:
 
