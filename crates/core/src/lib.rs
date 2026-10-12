@@ -28,6 +28,10 @@ mod vault;
 // agent B: tunnels and history
 mod recording;
 mod tunnels;
+// agent D: inventory and snippets
+mod importers;
+pub mod shell_integration;
+mod snippet_runs;
 
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use files::{TransferSink, list_local, local_within};
@@ -41,6 +45,8 @@ pub use tyrminal_platform::{
 };
 pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
+// agent D: inventory and snippets
+pub use importers::key_text_is_encrypted;
 
 use std::path::Path;
 use std::sync::Arc;

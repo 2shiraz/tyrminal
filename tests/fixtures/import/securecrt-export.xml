@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VanDyke version="3.0">
+  <key name="Sessions">
+    <key name="Default">
+      <string name="Hostname"></string>
+      <string name="Protocol Name">SSH2</string>
+    </key>
+    <key name="Production">
+      <key name="EU &amp; UK">
+        <key name="api-eu-1">
+          <string name="Hostname">api-eu-1.example</string>
+          <dword name="[SSH2] Port">22</dword>
+          <string name="Username">deploy</string>
+          <string name="Protocol Name">SSH2</string>
+          <string name="Password V2">02:SYNTHETIC0000NOTAREALPASSWORD</string>
+          <string name="Identity Filename V2">C:\Users\Synthetic\keys\api.pub::rawkey</string>
+          <string name="Firewall Name">None</string>
+        </key>
+      </key>
+      <key name="legacy-box">
+        <string name="Hostname">legacy.example</string>
+        <string name="Protocol Name">SSH1</string>
+      </key>
+    </key>
+    <key name="Lab">
+      <key name="nas">
+        <string name="Hostname">admin@nas.lab.example</string>
+        <dword name="[SSH2] Port">2200</dword>
+        <string name="Protocol Name">SSH2</string>
+        <string name="Firewall Name">Session:jump</string>
+      </key>
+      <key name="console">
+        <string name="Protocol Name">Serial</string>
+      </key>
+    </key>
+  </key>
+</VanDyke>

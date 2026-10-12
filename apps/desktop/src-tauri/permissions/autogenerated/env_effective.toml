@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-env-effective"
+description = "Enables the env_effective command without any pre-configured scope."
+commands.allow = ["env_effective"]
+
+[[permission]]
+identifier = "deny-env-effective"
+description = "Denies the env_effective command without any pre-configured scope."
+commands.deny = ["env_effective"]

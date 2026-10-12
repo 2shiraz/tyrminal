@@ -42,3 +42,5 @@ pub use forward::{
 };
 pub use jump::HopStream;
 pub use proxy::{ProxyError, ProxyKind, ProxySpec, connect_via_proxy};
+// agent D: key formats and certificates
+pub use auth::{CertificateInfo, KeyKind, check_user_certificate, host_key_from_openssh};

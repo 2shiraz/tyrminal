@@ -125,6 +125,9 @@ pub struct Sessions {
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
     pub(crate) recordings: crate::recording::Recordings,
+    // agent D: inventory and snippets
+    /// Snippet runs on exec channels, with their cancel switches.
+    snippet_runs: crate::snippet_runs::Runs,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -163,6 +166,8 @@ impl Sessions {
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
             recordings: crate::recording::Recordings::new(logs_dir),
+            // agent D: inventory and snippets
+            snippet_runs: crate::snippet_runs::Runs::default(),
         })
     }
 
@@ -1501,6 +1506,7 @@ async fn connect_ssh(
     // authentication, in order: nothing is sent to a hop before its key is trusted, and nothing
     // is sent to the next hop before the previous one is (INV-02 for every hop).
     // A proxy applies to the connection that leaves this computer: the first hop's own setting.
+    let env = plan.env;
     let first = (plan.label, plan.endpoint, plan.username, plan.auth, plan.proxy, plan.key_exchange);
     let total = u32::try_from(plan.jumps.len() + 1).unwrap_or(u32::MAX);
     let hops = plan
@@ -1619,8 +1625,12 @@ async fn connect_ssh(
 
     ctx.state(SessionState::OpeningChannel);
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
-    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
+    let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
     ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
+    if !env.is_empty() {
+        ctx.sink.event(SessionEvent::Environment { sent: env.iter().map(|(n, _)| n.clone()).collect(), rejected });
+    }
     Ok((Linked { conn, hops: chain }, reader, writer))
 }
 
@@ -1905,6 +1915,66 @@ async fn pump(
                 }
             },
         }
+    }
+}
+
+// agent D: inventory and snippets
+impl Sessions {
+    /// Runs a saved snippet non-interactively on an exec channel of a session the caller owns
+    /// (multi-host and existing-session execution). The text is read from the vault under the
+    /// session's generation. `run_id` lets the caller cancel with [`Sessions::cancel_snippet_run`].
+    pub async fn exec_snippet(
+        &self,
+        owner: &str,
+        session_id: &str,
+        snippet_id: &str,
+        run_id: &str,
+    ) -> Result<tyrminal_contracts::SnippetExecResult, IpcError> {
+        // Ownership first: a wrong window learns nothing about which snippets exist.
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let env = match &entry.host_id {
+            Some(host_id) => self.vault.session_env(host_id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let cancel = self.snippet_runs.start(owner, run_id)?;
+        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
+        self.snippet_runs.finish(run_id);
+        result
+    }
+
+    pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
+        self.snippet_runs.cancel(owner, run_id);
+    }
+
+    /// Shell integration on the server of a session the caller owns: what `~/.bashrc` holds.
+    pub async fn integration_status(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_status(&conn).await
+    }
+
+    /// Writes the shell integration block into the server's `~/.bashrc` (explicit user action).
+    pub async fn integration_install(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_install(&conn).await
+    }
+
+    /// Removes the shell integration block from the server's `~/.bashrc`.
+    pub async fn integration_remove(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_remove(&conn).await
     }
 }
 

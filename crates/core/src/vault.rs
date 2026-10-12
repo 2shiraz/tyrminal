@@ -52,6 +52,16 @@ use tyrminal_contracts::{
 const MAX_KEEP_PER_HOST: u32 = 100;
 const MAX_LOG_MIB: u32 = 512;
 pub(crate) const MAX_LOG_COMMENT_LEN: usize = 2000;
+// agent D: inventory and snippets
+use crate::records::{
+    ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
+    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
+};
+use tyrminal_contracts::{
+    EffectiveEnvVar, EnvVar, ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment,
+    IdentityInput, IdentitySummary, KeyCertificate, KeyKind, KnownHostImportEntry, KnownHostImportPreview,
+    KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
+};
 
 struct Stored<T> {
     revision: u64,
@@ -72,6 +82,12 @@ struct Open {
     session_logs: BTreeMap<Id, Stored<SessionLogRecord>>,
     /// The one settings record, if the user ever saved settings.
     recording_settings: Option<(Id, Stored<RecordingSettingsRecord>)>,
+    // agent D: inventory and snippets
+    appearances: BTreeMap<Id, Stored<HostAppearanceRecord>>,
+    certificates: BTreeMap<Id, Stored<KeyCertificateRecord>>,
+    targets: BTreeMap<Id, Stored<ExecutionTargetRecord>>,
+    identities: BTreeMap<Id, Stored<IdentityRecord>>,
+    workflows: BTreeMap<Id, Stored<WorkflowRecord>>,
 }
 
 impl Open {
@@ -87,6 +103,12 @@ impl Open {
             tunnels: BTreeMap::new(),
             session_logs: BTreeMap::new(),
             recording_settings: None,
+            // agent D: inventory and snippets
+            appearances: BTreeMap::new(),
+            certificates: BTreeMap::new(),
+            targets: BTreeMap::new(),
+            identities: BTreeMap::new(),
+            workflows: BTreeMap::new(),
         }
     }
 }
@@ -114,6 +136,8 @@ pub(crate) struct ConnectionPlan {
     pub key_exchange: tyrminal_ssh::KeyExchangePolicy,
     /// Trusted keys with their display fingerprints.
     pub known_hosts: Vec<(KnownHost, String)>,
+    /// Environment variables to request for the shell (the host's own, with inherited ones).
+    pub env: Vec<(String, Zeroizing<String>)>,
     pub generation: u32,
 }
 
@@ -530,6 +554,12 @@ impl VaultService {
                     Decoded::Tombstone if row.deleted => {}
                     _ => return Err(damaged()),
                 },
+                // agent D: inventory and snippets
+                KIND_HOST_APPEARANCE => load!(HostAppearanceRecord, open.appearances),
+                KIND_KEY_CERTIFICATE => load!(KeyCertificateRecord, open.certificates),
+                KIND_EXECUTION_TARGET => load!(ExecutionTargetRecord, open.targets),
+                KIND_IDENTITY => load!(IdentityRecord, open.identities),
+                KIND_WORKFLOW => load!(WorkflowRecord, open.workflows),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -1052,7 +1082,28 @@ impl VaultService {
         }
         let record = HostRecord { label, last_connected_at: None, ..copy_host(source) };
         let id = random_id().map_err(from_vault)?;
-        self.write(open, id, KIND_HOST, 1, Some((&record, host_content_len(&record)))).await?;
+        // agent D: the copy keeps the source's appearance, written in the same transaction.
+        let appearance = Self::appearance_of(open, &validate::id_text(&source_id))
+            .map(|(_, s)| HostAppearanceRecord { host_id: validate::id_text(&id), os: s.record.os });
+        let appearance_id = random_id().map_err(from_vault)?;
+        let mut rows = vec![self.seal_row(open, id, KIND_HOST, 1, Some((&record, host_content_len(&record))))?];
+        if let Some(a) = &appearance {
+            rows.push(self.seal_row(open, appearance_id, KIND_HOST_APPEARANCE, 1, Some((a, a.host_id.len())))?);
+        }
+        // The copy also keeps the source's identity and other workflow settings.
+        let workflow = Self::workflow_of_host(open, &validate::id_text(&source_id))
+            .map(|(_, s)| WorkflowRecord { host_id: Some(validate::id_text(&id)), ..s.record.clone() });
+        let workflow_id = random_id().map_err(from_vault)?;
+        if let Some(w) = &workflow {
+            rows.push(self.seal_row(open, workflow_id, KIND_WORKFLOW, 1, Some((w, w.content_len())))?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        if let Some(record) = appearance {
+            open.appearances.insert(appearance_id, Stored { revision: 1, record });
+        }
+        if let Some(record) = workflow {
+            open.workflows.insert(workflow_id, Stored { revision: 1, record });
+        }
         let summary = host_summary(&group_index(open), &id, &record);
         open.hosts.insert(id, Stored { revision: 1, record });
         Ok(summary)
@@ -1063,7 +1114,18 @@ impl VaultService {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
         let revision = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.revision + 1;
-        self.write::<HostRecord>(open, id, KIND_HOST, revision, None).await?;
+        // agent D: the host's appearance record goes in the same transaction.
+        let (mut rows, appearance_ids) = self.appearance_tombstones(open, &[id])?;
+        let (workflow_rows, workflow_ids) = self.workflow_tombstones(open, &[id], &[])?;
+        rows.extend(workflow_rows);
+        rows.push(self.seal_row::<HostRecord>(open, id, KIND_HOST, revision, None)?);
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        for appearance in appearance_ids {
+            open.appearances.remove(&appearance);
+        }
+        for workflow in workflow_ids {
+            open.workflows.remove(&workflow);
+        }
         open.hosts.remove(&id);
         Ok(())
     }
@@ -1118,13 +1180,32 @@ impl VaultService {
             };
             writes.push((*id, stored.revision + 1, next));
         }
-        let rows = writes
+        let mut rows = writes
             .iter()
             .map(|(id, revision, record)| {
                 self.seal_row(open, *id, KIND_HOST, *revision, record.as_ref().map(|r| (r, host_content_len(r))))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // agent D: deleted hosts take their appearance records with them, in the same transaction.
+        let (appearance_rows, appearance_ids) = if matches!(change, BulkHostChange::Delete) {
+            self.appearance_tombstones(open, &ids)?
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        rows.extend(appearance_rows);
+        let (workflow_rows, workflow_ids) = if matches!(change, BulkHostChange::Delete) {
+            self.workflow_tombstones(open, &ids, &[])?
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        rows.extend(workflow_rows);
         self.db.put_records(rows).await.map_err(from_storage)?;
+        for appearance in appearance_ids {
+            open.appearances.remove(&appearance);
+        }
+        for workflow in workflow_ids {
+            open.workflows.remove(&workflow);
+        }
         let changed = writes.len() as u32;
         for (id, revision, record) in writes {
             match record {
@@ -1175,6 +1256,10 @@ impl VaultService {
         let parsed = match format {
             ImportFormat::OpensshConfig => import::parse_openssh(text)?,
             ImportFormat::Csv => import::parse_csv(text)?,
+            // agent D: inventory and snippets
+            ImportFormat::PuttyReg => crate::importers::parse_putty_reg(text)?,
+            ImportFormat::Mobaxterm => crate::importers::parse_mobaxterm(text)?,
+            ImportFormat::Securecrt => crate::importers::parse_securecrt(text)?,
         };
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
@@ -1382,7 +1467,13 @@ impl VaultService {
         {
             return Err(err(ErrorCode::InUse, "The group is not empty. Move its hosts and subgroups first."));
         }
-        self.write::<GroupRecord>(open, group_id, KIND_GROUP, revision, None).await?;
+        // The group's workflow settings (identity, ...) go in the same transaction.
+        let (mut rows, workflow_ids) = self.workflow_tombstones(open, &[], &[group_id])?;
+        rows.push(self.seal_row::<GroupRecord>(open, group_id, KIND_GROUP, revision, None)?);
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        for workflow in workflow_ids {
+            open.workflows.remove(&workflow);
+        }
         open.groups.remove(&group_id);
         Ok(())
     }
@@ -1570,7 +1661,26 @@ impl VaultService {
         if open.groups.values().any(|g| g.record.key_id.as_deref() == Some(key_text.as_str())) {
             return Err(err(ErrorCode::InUse, "Groups still use this key. Change their default key first."));
         }
-        self.write::<KeyRecord>(open, key_id, KIND_KEY, revision, None).await?;
+        if open.identities.values().any(|i| i.record.key_id.as_deref() == Some(key_text.as_str())) {
+            return Err(err(ErrorCode::InUse, "Identities still use this key. Change their key first."));
+        }
+        // agent D: the key's certificate goes in the same transaction.
+        let certificate =
+            open.certificates.iter().find(|(_, c)| c.record.key_id == key_text).map(|(id, c)| (*id, c.revision));
+        let mut rows = vec![self.seal_row::<KeyRecord>(open, key_id, KIND_KEY, revision, None)?];
+        if let Some((cert_id, cert_revision)) = certificate {
+            rows.push(self.seal_row::<KeyCertificateRecord>(
+                open,
+                cert_id,
+                KIND_KEY_CERTIFICATE,
+                cert_revision + 1,
+                None,
+            )?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        if let Some((cert_id, _)) = certificate {
+            open.certificates.remove(&cert_id);
+        }
         open.ssh_keys.remove(&key_id);
         Ok(())
     }
@@ -1687,7 +1797,10 @@ impl VaultService {
                 (known, k.record.fingerprint.clone())
             })
             .collect();
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let env = Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect();
         Ok(ConnectionPlan {
+            env,
             host_id: validate::id_text(&id),
             endpoint: target.endpoint,
             username: target.username,
@@ -1706,7 +1819,13 @@ impl VaultService {
         let host = &open.hosts.get(id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         let groups = group_index(open);
         let effective = inventory::effective(&groups, host);
-        if effective.username.is_empty() {
+        // A host's identity, else its nearest group's when the host inherits its sign-in method,
+        // supplies the user name (when it has one) and the credentials (KEY-15/16).
+        let identity = Self::identity_for_host(open, id, host).map(|(_, record, _)| record);
+        let username = identity
+            .filter(|i| !i.username.is_empty())
+            .map_or_else(|| effective.username.clone(), |i| i.username.clone());
+        if username.is_empty() {
             return Err(invalid("Set a user name on this host or one of its groups."));
         }
         let key_plan = |key_id: &str| -> Result<PlanAuth, IpcError> {
@@ -1718,18 +1837,25 @@ impl VaultService {
                 passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
             })
         };
-        let auth = match &effective.auth {
-            EffectiveAuth::Own(StoredAuth::Password { password }) => {
-                PlanAuth::Password(Zeroizing::new(password.as_str().to_owned()))
-            }
-            EffectiveAuth::Own(StoredAuth::Key { key_id }) => key_plan(key_id)?,
-            EffectiveAuth::GroupKey(key_id) => key_plan(key_id)?,
-            EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
+        let auth = match (identity, &effective.auth) {
+            (Some(identity), _) => match (&identity.key_id, &identity.password) {
+                (Some(key_id), _) => key_plan(key_id)?,
+                (None, Some(password)) => PlanAuth::Password(Zeroizing::new(password.as_str().to_owned())),
+                (None, None) => PlanAuth::Ask,
+            },
+            (None, auth) => match auth {
+                EffectiveAuth::Own(StoredAuth::Password { password }) => {
+                    PlanAuth::Password(Zeroizing::new(password.as_str().to_owned()))
+                }
+                EffectiveAuth::Own(StoredAuth::Key { key_id }) => key_plan(key_id)?,
+                EffectiveAuth::GroupKey(key_id) => key_plan(key_id)?,
+                EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
+            },
         };
         Ok(HopPlan {
             label: host.label.clone(),
             endpoint: Endpoint::new(host.address.clone(), effective.port),
-            username: effective.username.clone(),
+            username,
             auth,
             // agent B: tunnels and history
             proxy: host.connection.proxy.as_ref().map(crate::tunnels::proxy_spec),
@@ -1960,6 +2086,943 @@ impl VaultService {
             .filter(|(_, t)| t.record.auto_start && t.record.host_id == host_id)
             .map(|(id, t)| (validate::id_text(id), t.record.clone()))
             .collect())
+    }
+}
+
+// agent D: inventory and snippets
+/// Rows ready for one `put_records` transaction.
+type SealedRows = Vec<(RecordRow, WriteCondition)>;
+
+impl VaultService {
+    /// The appearance record of a host, if it has one.
+    fn appearance_of<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<HostAppearanceRecord>)> {
+        open.appearances.iter().find(|(_, s)| s.record.host_id == host_id).map(|(id, s)| (*id, s))
+    }
+
+    /// Tombstones for the appearance records of hosts that are being deleted, so a host and
+    /// everything that belongs to it go in one transaction. Returns the rows and the record ids
+    /// to drop from memory once they are written.
+    fn appearance_tombstones(&self, open: &Open, host_ids: &[Id]) -> Result<(SealedRows, Vec<Id>), IpcError> {
+        let texts: std::collections::HashSet<String> = host_ids.iter().map(validate::id_text).collect();
+        let mut rows = Vec::new();
+        let mut ids = Vec::new();
+        for (id, stored) in open.appearances.iter().filter(|(_, s)| texts.contains(&s.record.host_id)) {
+            rows.push(self.seal_row::<HostAppearanceRecord>(
+                open,
+                *id,
+                KIND_HOST_APPEARANCE,
+                stored.revision + 1,
+                None,
+            )?);
+            ids.push(*id);
+        }
+        Ok((rows, ids))
+    }
+
+    /// Hosts for trusted known-host records that no host entry uses yet (same address and
+    /// effective port), as an import preview. Only records the user already trusted are offered,
+    /// and nothing is written until the preview is imported (`import_hosts`, one transaction).
+    pub async fn known_host_import_preview(&self) -> Result<ImportPreview, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let groups = group_index(open);
+        let used: std::collections::HashSet<(String, u16)> = open
+            .hosts
+            .values()
+            .map(|h| (h.record.address.to_lowercase(), inventory::effective(&groups, &h.record).port))
+            .collect();
+        let labels: std::collections::HashSet<String> =
+            open.hosts.values().map(|h| h.record.label.to_lowercase()).collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut known: Vec<&KnownHostRecord> = open.known_hosts.values().map(|k| &k.record).collect();
+        known.sort_by_key(|k| (k.host.to_lowercase(), k.port));
+        let mut preview = ImportPreview { hosts: Vec::new(), skipped: Vec::new(), duplicates: Vec::new() };
+        for record in known {
+            let key = (record.host.to_lowercase(), record.port);
+            if used.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            let label = if record.port == inventory::DEFAULT_PORT {
+                record.host.clone()
+            } else if record.host.contains(':') {
+                format!("[{}]:{}", record.host, record.port)
+            } else {
+                format!("{}:{}", record.host, record.port)
+            };
+            let candidate = ImportHost {
+                label,
+                address: record.host.clone(),
+                port: record.port,
+                username: String::new(),
+                group: String::new(),
+                tags: Vec::new(),
+                notes: vec![format!("Trusted {} key {}", record.algorithm, record.fingerprint)],
+            };
+            match import::checked(candidate) {
+                Ok(host) => {
+                    if labels.contains(&host.label.to_lowercase()) {
+                        preview.duplicates.push(host.label.clone());
+                    }
+                    preview.hosts.push(host);
+                }
+                Err(reason) => preview.skipped.push(tyrminal_contracts::ImportSkipped {
+                    line: 0,
+                    text: record.host.chars().filter(|c| !c.is_control()).take(120).collect(),
+                    reason,
+                }),
+            }
+        }
+        Ok(preview)
+    }
+
+    /// Generates a key of `kind` inside the vault. RSA generation runs off the async runtime.
+    pub async fn generate_key_of(&self, label: &str, kind: KeyKind) -> Result<KeySummary, IpcError> {
+        let label = validate::label(label)?;
+        let kind = match kind {
+            KeyKind::Ed25519 => tyrminal_ssh::KeyKind::Ed25519,
+            KeyKind::EcdsaP256 => tyrminal_ssh::KeyKind::EcdsaP256,
+            KeyKind::EcdsaP384 => tyrminal_ssh::KeyKind::EcdsaP384,
+            KeyKind::EcdsaP521 => tyrminal_ssh::KeyKind::EcdsaP521,
+            KeyKind::Rsa3072 => tyrminal_ssh::KeyKind::Rsa3072,
+            KeyKind::Rsa4096 => tyrminal_ssh::KeyKind::Rsa4096,
+        };
+        let key = tokio::task::spawn_blocking(move || ClientKey::generate(kind))
+            .await
+            .map_err(|_| internal())?
+            .map_err(from_key)?;
+        let record = KeyRecord {
+            label,
+            private_key: key.to_openssh().map_err(from_key)?,
+            passphrase: None,
+            passphrase_protected: false,
+            algorithm: key.algorithm(),
+            fingerprint: key.fingerprint(),
+            public_key: key.public_key_openssh().map_err(from_key)?,
+        };
+        self.store_key(record).await
+    }
+
+    fn certificate_summary(record: &KeyCertificateRecord) -> KeyCertificate {
+        KeyCertificate {
+            key_id: record.key_id.clone(),
+            algorithm: record.algorithm.clone(),
+            cert_key_id: record.cert_key_id.clone(),
+            principals: record.principals.clone(),
+            valid_after: record.valid_after,
+            valid_before: (record.valid_before != u64::MAX).then_some(record.valid_before),
+            ca_fingerprint: record.ca_fingerprint.clone(),
+        }
+    }
+
+    pub async fn list_key_certificates(&self) -> Result<Vec<KeyCertificate>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.certificates.values().map(|c| Self::certificate_summary(&c.record)).collect();
+        list.sort_by(|a, b| a.key_id.cmp(&b.key_id));
+        Ok(list)
+    }
+
+    /// Attaches (or replaces) the user certificate of a key after checking it against the key:
+    /// valid CA signature, a user certificate, for exactly this public key, not expired. An
+    /// encrypted key without its stored passphrase is checked against its stored public key.
+    pub async fn attach_key_certificate(&self, key_id: &str, certificate: &str) -> Result<KeyCertificate, IpcError> {
+        let id = validate::id(key_id)?;
+        let key_text = validate::id_text(&id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let key = &open.ssh_keys.get(&id).ok_or_else(|| not_found("That key no longer exists."))?.record;
+        let info = tyrminal_ssh::check_user_certificate(&key.public_key, certificate, now_unix()).map_err(from_key)?;
+        let record = KeyCertificateRecord {
+            key_id: key_text.clone(),
+            certificate: info.text,
+            algorithm: info.algorithm,
+            cert_key_id: info.key_id,
+            principals: info.principals,
+            valid_after: info.valid_after,
+            valid_before: info.valid_before,
+            ca_fingerprint: info.ca_fingerprint,
+        };
+        let content_len = record.certificate.len()
+            + record.algorithm.len()
+            + record.cert_key_id.len()
+            + record.principals.iter().map(String::len).sum::<usize>()
+            + record.ca_fingerprint.len()
+            + record.key_id.len();
+        let (record_id, revision) = match open.certificates.iter().find(|(_, c)| c.record.key_id == key_text) {
+            Some((id, c)) => (*id, c.revision + 1),
+            None => {
+                if open.certificates.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of certificates."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        self.write(open, record_id, KIND_KEY_CERTIFICATE, revision, Some((&record, content_len))).await?;
+        let summary = Self::certificate_summary(&record);
+        open.certificates.insert(record_id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn remove_key_certificate(&self, key_id: &str) -> Result<(), IpcError> {
+        let key_text = validate::id_text(&validate::id(key_id)?);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let (record_id, revision) = open
+            .certificates
+            .iter()
+            .find(|(_, c)| c.record.key_id == key_text)
+            .map(|(id, c)| (*id, c.revision + 1))
+            .ok_or_else(|| not_found("That key has no certificate."))?;
+        self.write::<KeyCertificateRecord>(open, record_id, KIND_KEY_CERTIFICATE, revision, None).await?;
+        open.certificates.remove(&record_id);
+        Ok(())
+    }
+
+    // ---------- saved execution targets (SNP-06) ----------
+
+    fn target_summary(open: &Open, id: &Id, record: &ExecutionTargetRecord) -> ExecutionTarget {
+        let (live, missing): (Vec<&String>, Vec<&String>) =
+            record.host_ids.iter().partition(|h| validate::id(h).ok().is_some_and(|id| open.hosts.contains_key(&id)));
+        ExecutionTarget {
+            id: validate::id_text(id),
+            name: record.name.clone(),
+            host_ids: live.into_iter().cloned().collect(),
+            missing: missing.len() as u32,
+        }
+    }
+
+    pub async fn list_execution_targets(&self) -> Result<Vec<ExecutionTarget>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> = open.targets.iter().map(|(id, t)| Self::target_summary(open, id, &t.record)).collect();
+        list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+        Ok(list)
+    }
+
+    /// Saves a host selection. Every host must exist now; duplicates are dropped.
+    pub async fn save_execution_target(&self, input: ExecutionTargetInput) -> Result<ExecutionTarget, IpcError> {
+        let name = validate::label(&input.name)?;
+        if input.host_ids.is_empty() {
+            return Err(invalid("Choose at least one host."));
+        }
+        if input.host_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one target."));
+        }
+        let ids: Vec<Id> = input.host_ids.iter().map(|h| validate::id(h)).collect::<Result<_, _>>()?;
+        let existing = input.id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut host_ids: Vec<String> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            if !open.hosts.contains_key(id) {
+                return Err(not_found("A selected host no longer exists."));
+            }
+            let text = validate::id_text(id);
+            if !host_ids.contains(&text) {
+                host_ids.push(text);
+            }
+        }
+        let (id, revision) = match existing {
+            Some(id) => {
+                (id, open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1)
+            }
+            None => {
+                if open.targets.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of targets."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record = ExecutionTargetRecord { name, host_ids };
+        let content_len = record.name.len() + record.host_ids.iter().map(String::len).sum::<usize>();
+        self.write(open, id, KIND_EXECUTION_TARGET, revision, Some((&record, content_len))).await?;
+        let summary = Self::target_summary(open, &id, &record);
+        open.targets.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    pub async fn delete_execution_target(&self, id: &str) -> Result<(), IpcError> {
+        let id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision = open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1;
+        self.write::<ExecutionTargetRecord>(open, id, KIND_EXECUTION_TARGET, revision, None).await?;
+        open.targets.remove(&id);
+        Ok(())
+    }
+
+    // ---------- snippet organization (SNP-10) ----------
+
+    /// Moves snippets into `folder` (or, with `copy`, adds copies there), all in one transaction.
+    /// Returns the moved or created snippets.
+    pub async fn move_snippets(
+        &self,
+        ids: &[String],
+        folder: &str,
+        copy: bool,
+    ) -> Result<Vec<SnippetSummary>, IpcError> {
+        if ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many snippets for one change."));
+        }
+        let folder = validate::folder(folder)?;
+        let ids: Vec<Id> = ids.iter().map(|id| validate::id(id)).collect::<Result<_, _>>()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if copy && open.snippets.len() + ids.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many snippets."));
+        }
+        let mut writes: Vec<(Id, u64, SnippetRecord)> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let stored = open.snippets.get(id).ok_or_else(|| not_found("A selected snippet no longer exists."))?;
+            let record = SnippetRecord {
+                name: stored.record.name.clone(),
+                folder: folder.clone(),
+                text: stored.record.text.clone(),
+                updated_at: now_unix(),
+            };
+            if copy {
+                writes.push((random_id().map_err(from_vault)?, 1, record));
+            } else if !writes.iter().any(|(w, _, _)| w == id) {
+                writes.push((*id, stored.revision + 1, record));
+            }
+        }
+        self.write_snippets(open, writes).await
+    }
+
+    /// Renames a folder: every snippet in it or in its subfolders moves under the new path.
+    pub async fn rename_snippet_folder(&self, from: &str, to: &str) -> Result<u32, IpcError> {
+        let from = validate::folder(from)?;
+        let to = validate::folder(to)?;
+        if from.is_empty() {
+            return Err(invalid("Choose a folder to rename."));
+        }
+        if to == from || to.starts_with(&format!("{from}/")) {
+            return Err(invalid("A folder cannot be moved into itself."));
+        }
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut writes = Vec::new();
+        for (id, stored) in &open.snippets {
+            let folder = &stored.record.folder;
+            let rest = if *folder == from {
+                Some("")
+            } else {
+                folder.strip_prefix(&format!("{from}/")).map(|_| &folder[from.len()..])
+            };
+            let Some(rest) = rest else { continue };
+            let moved = validate::folder(&format!("{to}{rest}"))?;
+            writes.push((
+                *id,
+                stored.revision + 1,
+                SnippetRecord {
+                    name: stored.record.name.clone(),
+                    folder: moved,
+                    text: stored.record.text.clone(),
+                    updated_at: now_unix(),
+                },
+            ));
+        }
+        if writes.is_empty() {
+            return Err(not_found("That folder is empty or no longer exists."));
+        }
+        Ok(self.write_snippets(open, writes).await?.len() as u32)
+    }
+
+    async fn write_snippets(
+        &self,
+        open: &mut Open,
+        writes: Vec<(Id, u64, SnippetRecord)>,
+    ) -> Result<Vec<SnippetSummary>, IpcError> {
+        let rows = writes
+            .iter()
+            .map(|(id, revision, r)| {
+                self.seal_row(
+                    open,
+                    *id,
+                    KIND_SNIPPET,
+                    *revision,
+                    Some((r, r.name.len() + r.folder.len() + r.text.len())),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let mut out = Vec::with_capacity(writes.len());
+        for (id, revision, record) in writes {
+            out.push(snippet_summary(&id, &record));
+            open.snippets.insert(id, Stored { revision, record });
+        }
+        Ok(out)
+    }
+
+    // ---------- known_hosts file import (IMP-01) ----------
+
+    fn known_host_status(
+        open: &Open,
+        host: &str,
+        port: u16,
+        key: &tyrminal_ssh::PresentedHostKey,
+    ) -> KnownHostImportStatus {
+        let same_endpoint = || open.known_hosts.values().filter(|k| k.record.host == host && k.record.port == port);
+        if same_endpoint().any(|k| k.record.public_key == key.public_key) {
+            KnownHostImportStatus::AlreadyTrusted
+        } else if same_endpoint().any(|k| k.record.algorithm == key.algorithm) {
+            KnownHostImportStatus::Conflict
+        } else {
+            KnownHostImportStatus::New
+        }
+    }
+
+    /// Reads an OpenSSH `known_hosts` file into a preview: which keys would become trusted, which
+    /// are trusted already, which conflict with a different trusted key, and what is skipped.
+    pub async fn known_hosts_file_preview(&self, text: &str) -> Result<KnownHostImportPreview, IpcError> {
+        let (lines, parsed) = crate::importers::parse_known_hosts(text)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut entries: Vec<KnownHostImportEntry> = Vec::new();
+        for l in lines {
+            if entries.iter().any(|e| e.host == l.host && e.port == l.port && e.public_key == l.key.public_key) {
+                continue;
+            }
+            let status = Self::known_host_status(open, &l.host, l.port, &l.key);
+            entries.push(KnownHostImportEntry {
+                host: l.host,
+                port: l.port,
+                algorithm: l.key.algorithm,
+                fingerprint: l.key.fingerprint,
+                public_key: l.key.public_key,
+                status,
+            });
+        }
+        Ok(KnownHostImportPreview { entries, skipped: parsed.skipped })
+    }
+
+    /// Trusts the previewed keys in one transaction. Everything is checked again here (the preview
+    /// came back through the renderer); a key that conflicts with a different trusted key of the
+    /// same type refuses the whole import, since trust is only ever replaced explicitly. Keys that
+    /// are trusted already are skipped. Returns how many keys became trusted.
+    pub async fn import_known_hosts(&self, entries: Vec<KnownHostImportEntry>) -> Result<u32, IpcError> {
+        if entries.len() > MAX_IMPORT_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many keys for one import."));
+        }
+        let bad = || invalid("An imported key is not valid. Preview the file again.");
+        let mut checked: Vec<(String, u16, tyrminal_ssh::PresentedHostKey)> = Vec::with_capacity(entries.len());
+        for e in entries {
+            let host = tyrminal_ssh::canonical_host(&validate::address(&e.host).map_err(|_| bad())?);
+            let key = tyrminal_ssh::host_key_from_openssh(&e.public_key).ok_or_else(bad)?;
+            if host != e.host || e.port == 0 || key.fingerprint != e.fingerprint {
+                return Err(bad());
+            }
+            checked.push((host, e.port, key));
+        }
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut new: Vec<(Id, KnownHostRecord)> = Vec::new();
+        for (host, port, key) in checked {
+            match Self::known_host_status(open, &host, port, &key) {
+                KnownHostImportStatus::Conflict => {
+                    return Err(err(
+                        ErrorCode::Conflict,
+                        "A different key is already trusted for one of these servers. Nothing was imported; remove that trust first if the server's key really changed.",
+                    ));
+                }
+                KnownHostImportStatus::AlreadyTrusted => continue,
+                KnownHostImportStatus::New => {}
+            }
+            if new.iter().any(|(_, r)| r.host == host && r.port == port && r.public_key == key.public_key) {
+                continue;
+            }
+            if new.iter().any(|(_, r)| r.host == host && r.port == port && r.algorithm == key.algorithm) {
+                return Err(invalid(
+                    "The file lists two different keys of one type for the same server. Nothing was imported.",
+                ));
+            }
+            let record = KnownHostRecord {
+                host,
+                port,
+                public_key: key.public_key,
+                algorithm: key.algorithm,
+                fingerprint: key.fingerprint,
+                added_at: now_unix(),
+            };
+            new.push((random_id().map_err(from_vault)?, record));
+        }
+        if open.known_hosts.len() + new.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many known hosts."));
+        }
+        let rows = new
+            .iter()
+            .map(|(id, r)| {
+                let len = r.host.len() + r.public_key.len() + r.algorithm.len() + r.fingerprint.len();
+                self.seal_row(open, *id, KIND_KNOWN_HOST, 1, Some((r, len)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let count = new.len() as u32;
+        for (id, record) in new {
+            open.known_hosts.insert(id, Stored { revision: 1, record });
+        }
+        Ok(count)
+    }
+
+    /// The OS recorded for each host that has one.
+    pub async fn list_host_appearances(&self) -> Result<Vec<HostAppearance>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<HostAppearance> = open
+            .appearances
+            .values()
+            .map(|s| HostAppearance { host_id: s.record.host_id.clone(), os: s.record.os })
+            .collect();
+        list.sort_by(|a, b| a.host_id.cmp(&b.host_id));
+        Ok(list)
+    }
+
+    /// Sets (or with `None` clears) the OS of several hosts in one transaction. Every host must
+    /// exist; returns how many hosts changed.
+    pub async fn set_host_os(&self, host_ids: &[String], os: Option<HostOs>) -> Result<u32, IpcError> {
+        if host_ids.is_empty() {
+            return Ok(0);
+        }
+        if host_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one change."));
+        }
+        let ids: Vec<Id> = host_ids.iter().map(|id| validate::id(id)).collect::<Result<_, _>>()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let mut writes: Vec<(Id, u64, Option<HostAppearanceRecord>)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for id in &ids {
+            if !open.hosts.contains_key(id) {
+                return Err(not_found("A selected host no longer exists."));
+            }
+            let host_id = validate::id_text(id);
+            if !seen.insert(host_id.clone()) {
+                continue;
+            }
+            let current = Self::appearance_of(open, &host_id);
+            match (current, os) {
+                (Some((record_id, stored)), Some(os)) if stored.record.os != os => {
+                    writes.push((record_id, stored.revision + 1, Some(HostAppearanceRecord { host_id, os })));
+                }
+                (Some((record_id, stored)), None) => writes.push((record_id, stored.revision + 1, None)),
+                (None, Some(os)) => {
+                    if open.appearances.len() + writes.len() >= MAX_RECORDS_PER_KIND {
+                        return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of items."));
+                    }
+                    writes.push((random_id().map_err(from_vault)?, 1, Some(HostAppearanceRecord { host_id, os })));
+                }
+                _ => {}
+            }
+        }
+        let rows = writes
+            .iter()
+            .map(|(id, revision, record)| {
+                self.seal_row(open, *id, KIND_HOST_APPEARANCE, *revision, record.as_ref().map(|r| (r, r.host_id.len())))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.is_empty() {
+            self.db.put_records(rows).await.map_err(from_storage)?;
+        }
+        let changed = writes.len() as u32;
+        for (id, revision, record) in writes {
+            match record {
+                Some(record) => {
+                    open.appearances.insert(id, Stored { revision, record });
+                }
+                None => {
+                    open.appearances.remove(&id);
+                }
+            }
+        }
+        Ok(changed)
+    }
+}
+
+// Identities and per-host/group workflow settings (KEY-15..17).
+impl VaultService {
+    /// The target with its id in canonical form.
+    fn settings_target(target: SettingsTarget) -> Result<SettingsTarget, IpcError> {
+        Ok(match target {
+            SettingsTarget::Host { host_id } => {
+                SettingsTarget::Host { host_id: validate::id_text(&validate::id(&host_id)?) }
+            }
+            SettingsTarget::Group { group_id } => {
+                SettingsTarget::Group { group_id: validate::id_text(&validate::id(&group_id)?) }
+            }
+        })
+    }
+
+    fn require_target(open: &Open, target: &SettingsTarget) -> Result<(), IpcError> {
+        match target {
+            SettingsTarget::Host { host_id } if !open.hosts.contains_key(&validate::id(host_id)?) => {
+                Err(not_found("That host no longer exists."))
+            }
+            SettingsTarget::Group { group_id } if !open.groups.contains_key(&validate::id(group_id)?) => {
+                Err(not_found("That group no longer exists."))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Applies `change` to the target's workflow record, creating it when needed and deleting it
+    /// when nothing is left in it.
+    async fn update_workflow(
+        &self,
+        open: &mut Open,
+        target: &SettingsTarget,
+        change: impl FnOnce(WorkflowRecord) -> WorkflowRecord,
+    ) -> Result<(), IpcError> {
+        let current = Self::workflow_of(open, target).map(|(id, w)| (id, w.revision, w.record.clone()));
+        let base = current.as_ref().map(|(_, _, r)| r.clone()).unwrap_or_else(|| match target {
+            SettingsTarget::Host { host_id } => WorkflowRecord { host_id: Some(host_id.clone()), ..Default::default() },
+            SettingsTarget::Group { group_id } => {
+                WorkflowRecord { group_id: Some(group_id.clone()), ..Default::default() }
+            }
+        });
+        let next = change(base);
+        match (current, next.is_empty()) {
+            (None, true) => {}
+            (Some((wid, revision, _)), true) => {
+                self.write::<WorkflowRecord>(open, wid, KIND_WORKFLOW, revision + 1, None).await?;
+                open.workflows.remove(&wid);
+            }
+            (current, false) => {
+                if current.is_none() && open.workflows.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of host settings."));
+                }
+                let (wid, revision) = match current {
+                    Some((wid, revision, _)) => (wid, revision + 1),
+                    None => (random_id().map_err(from_vault)?, 1),
+                };
+                self.write(open, wid, KIND_WORKFLOW, revision, Some((&next, next.content_len()))).await?;
+                open.workflows.insert(wid, Stored { revision, record: next });
+            }
+        }
+        Ok(())
+    }
+
+    // ---------- environment variables (SNP-11..14) ----------
+
+    /// A host's environment: outermost group first, nearer groups and then the host override.
+    fn effective_env(open: &Open, id: &Id, host: &HostRecord) -> Vec<(String, Zeroizing<String>, SettingOrigin)> {
+        let mut out: Vec<(String, Zeroizing<String>, SettingOrigin)> = Vec::new();
+        let mut set = |name: &str, value: &Zeroizing<String>, origin: SettingOrigin| {
+            out.retain(|(n, _, _)| n != name);
+            out.push((name.to_owned(), Zeroizing::new(value.as_str().to_owned()), origin));
+        };
+        for (group_id, group) in Self::group_chain(open, host).into_iter().rev() {
+            if let Some((_, w)) = Self::workflow_of_group(open, &group_id) {
+                for e in &w.record.env {
+                    set(
+                        &e.name,
+                        &e.value,
+                        SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() },
+                    );
+                }
+            }
+        }
+        if let Some((_, w)) = Self::workflow_of_host(open, &validate::id_text(id)) {
+            for e in &w.record.env {
+                set(&e.name, &e.value, SettingOrigin::Host);
+            }
+        }
+        out
+    }
+
+    fn own_env(open: &Open, target: &SettingsTarget) -> Vec<EnvVar> {
+        Self::workflow_of(open, target)
+            .map(|(_, w)| {
+                w.record
+                    .env
+                    .iter()
+                    .map(|e| EnvVar { name: e.name.clone(), value: e.value.as_str().to_owned() })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The variables a host or group sets itself, in order.
+    pub async fn env_vars(&self, target: SettingsTarget) -> Result<Vec<EnvVar>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::own_env(open, &target))
+    }
+
+    /// Replaces the variables a host or group sets itself.
+    pub async fn set_env_vars(&self, target: SettingsTarget, vars: Vec<EnvVar>) -> Result<Vec<EnvVar>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let checked = validate::env_vars(&vars)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        let env: Vec<StoredEnv> =
+            checked.into_iter().map(|(name, value)| StoredEnv { name, value: Zeroizing::new(value) }).collect();
+        self.update_workflow(open, &target, |w| WorkflowRecord { env, ..w }).await?;
+        Ok(Self::own_env(open, &target))
+    }
+
+    /// What a host sends, with where each variable comes from (SNP-12).
+    pub async fn effective_env_vars(&self, host_id: &str) -> Result<Vec<EffectiveEnvVar>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::effective_env(open, &id, host)
+            .into_iter()
+            .map(|(name, value, origin)| EffectiveEnvVar { name, value: value.as_str().to_owned(), origin })
+            .collect())
+    }
+
+    /// The variables to request for a session to `host_id` (names and values, in order).
+    pub(crate) async fn session_env(&self, host_id: &str) -> Result<Vec<(String, Zeroizing<String>)>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    fn workflow_of_host<'a>(open: &'a Open, host_id: &str) -> Option<(Id, &'a Stored<WorkflowRecord>)> {
+        open.workflows.iter().find(|(_, s)| s.record.host_id.as_deref() == Some(host_id)).map(|(id, s)| (*id, s))
+    }
+
+    fn workflow_of_group<'a>(open: &'a Open, group_id: &str) -> Option<(Id, &'a Stored<WorkflowRecord>)> {
+        open.workflows.iter().find(|(_, s)| s.record.group_id.as_deref() == Some(group_id)).map(|(id, s)| (*id, s))
+    }
+
+    fn workflow_of<'a>(open: &'a Open, target: &SettingsTarget) -> Option<(Id, &'a Stored<WorkflowRecord>)> {
+        match target {
+            SettingsTarget::Host { host_id } => Self::workflow_of_host(open, host_id),
+            SettingsTarget::Group { group_id } => Self::workflow_of_group(open, group_id),
+        }
+    }
+
+    /// Tombstones for the workflow records of hosts and groups being deleted, so they go in the
+    /// same transaction.
+    fn workflow_tombstones(
+        &self,
+        open: &Open,
+        host_ids: &[Id],
+        group_ids: &[Id],
+    ) -> Result<(SealedRows, Vec<Id>), IpcError> {
+        let hosts: Vec<String> = host_ids.iter().map(validate::id_text).collect();
+        let groups: Vec<String> = group_ids.iter().map(validate::id_text).collect();
+        let mut rows = Vec::new();
+        let mut ids = Vec::new();
+        for (id, stored) in open.workflows.iter().filter(|(_, s)| {
+            s.record.host_id.as_ref().is_some_and(|h| hosts.contains(h))
+                || s.record.group_id.as_ref().is_some_and(|g| groups.contains(g))
+        }) {
+            rows.push(self.seal_row::<WorkflowRecord>(open, *id, KIND_WORKFLOW, stored.revision + 1, None)?);
+            ids.push(*id);
+        }
+        Ok((rows, ids))
+    }
+
+    /// The host's group and its ancestors, nearest first, with their ids.
+    fn group_chain<'a>(open: &'a Open, host: &HostRecord) -> Vec<(String, &'a GroupRecord)> {
+        let mut out = Vec::new();
+        let mut next = host.group.clone();
+        while let Some(text) = next {
+            if out.len() >= tyrminal_contracts::limits::MAX_GROUP_DEPTH {
+                break;
+            }
+            let Some(group) = validate::id(&text).ok().and_then(|id| open.groups.get(&id)) else { break };
+            next = group.record.parent.clone();
+            out.push((text, &group.record));
+        }
+        out
+    }
+
+    /// The identity a host signs in with, and where it comes from: the host's own, else the
+    /// nearest group's when the host's sign-in method is "inherit from group".
+    fn identity_for_host<'a>(
+        open: &'a Open,
+        id: &Id,
+        host: &HostRecord,
+    ) -> Option<(String, &'a IdentityRecord, SettingOrigin)> {
+        let lookup = |identity: &str| {
+            validate::id(identity).ok().and_then(|i| open.identities.get(&i)).map(|s| (identity.to_owned(), &s.record))
+        };
+        if let Some((_, own)) = Self::workflow_of_host(open, &validate::id_text(id))
+            && let Some(identity) = own.record.identity_id.as_deref()
+        {
+            return lookup(identity).map(|(i, r)| (i, r, SettingOrigin::Host));
+        }
+        if !matches!(host.auth, StoredAuth::Inherit) {
+            return None;
+        }
+        Self::group_chain(open, host).into_iter().find_map(|(group_id, group)| {
+            let identity = Self::workflow_of_group(open, &group_id)?.1.record.identity_id.clone()?;
+            lookup(&identity).map(|(i, r)| (i, r, SettingOrigin::Group { group_id, name: group.name.clone() }))
+        })
+    }
+
+    fn identity_summary(open: &Open, id: &Id, record: &IdentityRecord) -> IdentitySummary {
+        let text = validate::id_text(id);
+        let used_by =
+            open.workflows.values().filter(|w| w.record.identity_id.as_deref() == Some(text.as_str())).count();
+        IdentitySummary {
+            id: text,
+            label: record.label.clone(),
+            username: record.username.clone(),
+            has_password: record.password.is_some(),
+            key_id: record.key_id.clone(),
+            used_by: u32::try_from(used_by).unwrap_or(u32::MAX),
+        }
+    }
+
+    pub async fn list_identities(&self) -> Result<Vec<IdentitySummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let mut list: Vec<_> =
+            open.identities.iter().map(|(id, s)| Self::identity_summary(open, id, &s.record)).collect();
+        list.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+        Ok(list)
+    }
+
+    /// Creates or updates an identity. Hosts and groups that use it pick the change up on their
+    /// next connection (KEY-16).
+    pub async fn save_identity(&self, input: IdentityInput) -> Result<IdentitySummary, IpcError> {
+        let label = validate::label(&input.label)?;
+        let username =
+            if input.username.trim().is_empty() { String::new() } else { validate::username(&input.username)? };
+        let key = input.key_id.as_deref().map(validate::id).transpose()?;
+        let existing = input.id.as_deref().map(validate::id).transpose()?;
+        if let SecretChange::Set { value } = &input.password {
+            validate::secret(value)?;
+        }
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if let Some(key) = &key
+            && !open.ssh_keys.contains_key(key)
+        {
+            return Err(not_found("That key no longer exists."));
+        }
+        let (id, revision, current) = match existing {
+            Some(id) => {
+                let stored = open.identities.get(&id).ok_or_else(|| not_found("That identity no longer exists."))?;
+                (
+                    id,
+                    stored.revision + 1,
+                    stored.record.password.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+                )
+            }
+            None => {
+                if open.identities.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of identities."));
+                }
+                (random_id().map_err(from_vault)?, 1, None)
+            }
+        };
+        let password = match input.password {
+            SecretChange::Keep => current,
+            SecretChange::Clear => None,
+            SecretChange::Set { value } => Some(Zeroizing::new(value)),
+        };
+        if password.is_none() && key.is_none() && username.is_empty() {
+            return Err(invalid("Give the identity a user name, a password or a key."));
+        }
+        let record = IdentityRecord { label, username, password, key_id: key.as_ref().map(validate::id_text) };
+        let content_len = record.label.len()
+            + record.username.len()
+            + record.password.as_ref().map_or(0, |p| p.len())
+            + record.key_id.as_ref().map_or(0, String::len);
+        self.write(open, id, KIND_IDENTITY, revision, Some((&record, content_len))).await?;
+        let summary = Self::identity_summary(open, &id, &record);
+        open.identities.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    /// Deletes an identity. Hosts and groups that used it fall back to their own settings; their
+    /// references are removed in the same transaction. Returns how many were using it.
+    pub async fn delete_identity(&self, id: &str) -> Result<u32, IpcError> {
+        let id = validate::id(id)?;
+        let text = validate::id_text(&id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision =
+            open.identities.get(&id).ok_or_else(|| not_found("That identity no longer exists."))?.revision + 1;
+        let mut writes: Vec<(Id, u64, Option<WorkflowRecord>)> = Vec::new();
+        for (wid, stored) in
+            open.workflows.iter().filter(|(_, w)| w.record.identity_id.as_deref() == Some(text.as_str()))
+        {
+            let next = WorkflowRecord { identity_id: None, ..stored.record.clone() };
+            writes.push((*wid, stored.revision + 1, (!next.is_empty()).then_some(next)));
+        }
+        let mut rows = vec![self.seal_row::<IdentityRecord>(open, id, KIND_IDENTITY, revision, None)?];
+        for (wid, revision, record) in &writes {
+            rows.push(self.seal_row(
+                open,
+                *wid,
+                KIND_WORKFLOW,
+                *revision,
+                record.as_ref().map(|r| (r, r.content_len())),
+            )?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        let count = u32::try_from(writes.len()).unwrap_or(u32::MAX);
+        for (wid, revision, record) in writes {
+            match record {
+                Some(record) => {
+                    open.workflows.insert(wid, Stored { revision, record });
+                }
+                None => {
+                    open.workflows.remove(&wid);
+                }
+            }
+        }
+        open.identities.remove(&id);
+        Ok(count)
+    }
+
+    fn assignment(open: &Open, target: &SettingsTarget) -> IdentityAssignment {
+        let identity_id = Self::workflow_of(open, target).and_then(|(_, w)| w.record.identity_id.clone());
+        let (effective_identity_id, origin) = match target {
+            SettingsTarget::Host { host_id } => validate::id(host_id)
+                .ok()
+                .and_then(|id| open.hosts.get(&id).map(|h| (id, h)))
+                .and_then(|(id, h)| Self::identity_for_host(open, &id, &h.record))
+                .map_or((None, None), |(i, _, origin)| (Some(i), Some(origin))),
+            SettingsTarget::Group { .. } => (identity_id.clone(), identity_id.as_ref().map(|_| SettingOrigin::Host)),
+        };
+        IdentityAssignment { target: target.clone(), identity_id, effective_identity_id, origin }
+    }
+
+    /// Which identity every host and group uses (directly and, for hosts, in effect).
+    pub async fn list_identity_assignments(&self) -> Result<Vec<IdentityAssignment>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let hosts = open.hosts.keys().map(|id| SettingsTarget::Host { host_id: validate::id_text(id) });
+        let groups = open.groups.keys().map(|id| SettingsTarget::Group { group_id: validate::id_text(id) });
+        Ok(hosts.chain(groups).map(|t| Self::assignment(open, &t)).collect())
+    }
+
+    /// Sets (or clears, with `None`) the identity a host or group uses.
+    pub async fn set_identity(
+        &self,
+        target: SettingsTarget,
+        identity_id: Option<String>,
+    ) -> Result<IdentityAssignment, IpcError> {
+        let target = Self::settings_target(target)?;
+        let identity = identity_id.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        if let Some(identity) = &identity
+            && !open.identities.contains_key(identity)
+        {
+            return Err(not_found("That identity no longer exists."));
+        }
+        let identity_id = identity.as_ref().map(validate::id_text);
+        self.update_workflow(open, &target, |w| WorkflowRecord { identity_id, ..w }).await?;
+        Ok(Self::assignment(open, &target))
     }
 }
 

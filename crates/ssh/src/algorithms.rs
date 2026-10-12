@@ -87,6 +87,13 @@ pub(crate) fn preferred(policy: KeyExchangePolicy) -> Preferred {
     }
 }
 
+// agent D: known-host import
+/// Whether a host key of this algorithm (as named in a public key, e.g. `ssh-rsa`) can ever be
+/// accepted. RSA keys are named `ssh-rsa` whatever signature hash is negotiated.
+pub(crate) fn accepts_host_key(algorithm: &str) -> bool {
+    HOST_KEYS.iter().any(|a| a.as_str() == algorithm || (matches!(a, Algorithm::Rsa { .. }) && algorithm == "ssh-rsa"))
+}
+
 /// The exact offer this build makes, for documentation and diagnostics.
 pub fn negotiation_summary() -> String {
     let join = |names: Vec<String>| names.join(",");

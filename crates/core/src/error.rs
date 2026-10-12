@@ -152,5 +152,18 @@ pub(crate) fn from_key(e: KeyError) -> IpcError {
         KeyError::TooLarge => err(ErrorCode::LimitExceeded, "That key is larger than 1 MiB."),
         KeyError::Unsupported => err(ErrorCode::KeyInvalid, "This type of key is not supported."),
         KeyError::Malformed => err(ErrorCode::KeyInvalid, "That does not look like a private key."),
+        // agent D: key formats and certificates
+        KeyError::KdfTooCostly => err(
+            ErrorCode::KeyInvalid,
+            "This PuTTY key asks for more key-derivation memory or time than Tyrminal allows. Re-save it in PuTTYgen with default settings.",
+        ),
+        KeyError::CertificateInvalid => {
+            err(ErrorCode::KeyInvalid, "That is not a valid OpenSSH certificate, or its signature does not check out.")
+        }
+        KeyError::CertificateMismatch => err(ErrorCode::KeyInvalid, "That certificate is for a different key."),
+        KeyError::CertificateNotForUsers => {
+            err(ErrorCode::KeyInvalid, "That is a host certificate. Choose the user certificate for this key.")
+        }
+        KeyError::CertificateExpired => err(ErrorCode::KeyInvalid, "That certificate has expired."),
     }
 }

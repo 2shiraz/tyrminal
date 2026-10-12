@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prompt-marks-remove"
+description = "Enables the prompt_marks_remove command without any pre-configured scope."
+commands.allow = ["prompt_marks_remove"]
+
+[[permission]]
+identifier = "deny-prompt-marks-remove"
+description = "Denies the prompt_marks_remove command without any pre-configured scope."
+commands.deny = ["prompt_marks_remove"]

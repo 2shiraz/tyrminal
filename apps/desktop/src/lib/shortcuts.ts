@@ -28,7 +28,9 @@ export type ActionId =
   | "lock"
   | "renameTab"
   | "copy"
-  | "paste";
+  | "paste"
+  // agent D: inventory and snippets
+  | "suggest";
 
 export interface Binding {
   key: string;
@@ -62,6 +64,8 @@ const mac: Record<ActionId, Binding> = {
   renameTab: { key: "r", mod: true, shift: true },
   copy: { key: "c", mod: true },
   paste: { key: "v", mod: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", mod: true, shift: true },
 };
 
 const other: Record<ActionId, Binding> = {
@@ -88,6 +92,8 @@ const other: Record<ActionId, Binding> = {
   renameTab: { key: "r", ctrl: true, shift: true },
   copy: { key: "c", ctrl: true, shift: true },
   paste: { key: "v", ctrl: true, shift: true },
+  // agent D: inventory and snippets
+  suggest: { key: "e", ctrl: true, shift: true },
 };
 
 export const bindings: Record<ActionId, Binding> = isMac ? mac : other;
