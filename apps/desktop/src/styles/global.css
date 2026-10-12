@@ -4710,3 +4710,11 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 .skeleton-space {
   border-radius: var(--radius-sm);
 }
+
+/* ---------- optimistic edits (interaction-polish §1) ---------- */
+/* A local edit shown before the vault confirmed it. */
+.host-card[data-pending],
+.list > li[data-pending] {
+  cursor: progress;
+  opacity: 0.75;
+}
