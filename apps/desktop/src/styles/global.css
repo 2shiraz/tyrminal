@@ -2608,7 +2608,7 @@ mark {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
 }
 
 .host-card-dest {
