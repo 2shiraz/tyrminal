@@ -3,6 +3,7 @@ import { type ReactNode, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Workspace, panesOf, paneRects } from "../../app/workspace";
+import { SftpView } from "../../features/sftp/SftpView";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
 import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
@@ -97,6 +98,13 @@ export function PaneGrid({
                       </div>
                     )}
                     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+                      {pane.target.kind === "sftp" ? (
+                        <SftpView
+                          visible={visible}
+                          onIndicator={(indicator) => onPatch(id, { indicator })}
+                          onOpenKnownHosts={onOpenKnownHosts}
+                        />
+                      ) : (
                       <TerminalView
                         paneId={id}
                         target={pane.target}
@@ -116,6 +124,7 @@ export function PaneGrid({
                         onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                         pasteChecks={pasteChecks(pane)}
                       />
+                      )}
                     </div>
                   </section>
                 );

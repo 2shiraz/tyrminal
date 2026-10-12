@@ -104,7 +104,7 @@ interface TerminalViewProps {
   targetLabels?: ReactNode;
 }
 
-function Fingerprint({ value }: { value: string }) {
+export function Fingerprint({ value }: { value: string }) {
   const { algorithm, groups } = groupFingerprint(value);
   return (
     <div className="fingerprint" aria-label={value}>
@@ -718,7 +718,7 @@ function LinkDialog({ url, onClose, onOpened }: { url: string; onClose: () => vo
   );
 }
 
-function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
+export function AuthDialog({ prompt, banner, onAnswer }: { prompt: AuthPrompt; banner: string | null; onAnswer: (secret: string | null) => void }) {
   const [secret, setSecret] = useState("");
   const isPassword = prompt.kind === "password";
   const isKbd = prompt.kind === "keyboard_interactive";

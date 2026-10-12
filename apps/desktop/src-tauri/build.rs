@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     // sessions
     "session_open_ssh",
     "session_open_local",
+    "session_open_files",
     "session_write",
     "session_resize",
     "session_ack",
@@ -65,6 +66,10 @@ const COMMANDS: &[&str] = &[
     "files_upload_finish",
     "files_upload_abort",
     "files_local_list",
+    "files_local_mkdir",
+    "files_local_rename",
+    "files_local_remove",
+    "files_local_chmod",
     "files_copy",
     "files_edit_open",
     "files_edit_status",
@@ -142,6 +147,14 @@ const COMMANDS: &[&str] = &[
     "discovery_start",
     "discovery_status",
     "discovery_stop",
+    // command history
+    "history_settings_get",
+    "history_settings_set",
+    "history_add",
+    "history_suggest",
+    "history_list",
+    "history_delete",
+    "history_clear",
 ];
 
 fn main() {

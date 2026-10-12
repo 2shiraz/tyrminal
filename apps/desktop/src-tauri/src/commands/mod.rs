@@ -12,3 +12,5 @@ pub mod snippets;
 pub mod vault;
 // agent B: tunnels and history
 pub mod tunnels;
+// command history
+pub mod command_history;

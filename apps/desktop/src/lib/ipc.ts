@@ -200,6 +200,12 @@ export const sessions = {
   /** `startIn`: a folder to start in (checked natively; the home folder otherwise). */
   openLocal: (cols: number, rows: number, onOutput: OutputHandler, onEvent: EventHandler, startIn: string | null = null) =>
     call<SessionOpened>("session_open_local", { cols, rows, startIn, ...channels(onOutput, onEvent) }),
+  /** A files-only connection (SFTP, no shell). Trust and sign-in prompts arrive as events. */
+  openFiles(hostId: string, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_files", { hostId, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -286,6 +292,13 @@ export const files = {
   /** Uploads the local copy; refused with CONFLICT if the server's copy changed, unless overwrite. */
   editSave: (editId: string, overwrite: boolean) => call<EditStatus>("files_edit_save", { editId, overwrite }),
   editClose: (editId: string) => call<void>("files_edit_close", { editId }),
+  /** Changes inside a local folder the user chose (by token); names are single components. */
+  localMkdir: (token: string, path: string[], name: string) => call<void>("files_local_mkdir", { token, path, name }),
+  localRename: (token: string, path: string[], from: string, to: string) =>
+    call<void>("files_local_rename", { token, path, from, to }),
+  localRemove: (token: string, path: string[], name: string) => call<void>("files_local_remove", { token, path, name }),
+  localChmod: (token: string, path: string[], name: string, mode: number) =>
+    call<void>("files_local_chmod", { token, path, name, mode }),
 };
 
 export const snippets = {
@@ -463,4 +476,20 @@ export const discovery = {
   start: (networkId: string) => call<DiscoveryStatus>("discovery_start", { networkId }),
   status: () => call<DiscoveryStatus>("discovery_status"),
   stop: () => call<DiscoveryStatus>("discovery_stop"),
+};
+
+// command history
+type HistorySettingsDto = import("@tyrminal/contracts").HistorySettings;
+type HistoryEntryDto = import("@tyrminal/contracts").HistoryEntry;
+
+/** Command history for suggestions: opt-in, local to the vault, fed only from shell-integration marks. */
+export const history = {
+  settings: () => call<HistorySettingsDto>("history_settings_get"),
+  /** Off stops remembering and suggesting and keeps what was remembered. */
+  setSettings: (settings: HistorySettingsDto) => call<HistorySettingsDto>("history_settings_set", { settings }),
+  add: (sessionId: string, command: string) => call<void>("history_add", { sessionId, command }),
+  suggest: (sessionId: string, query: string) => call<string[]>("history_suggest", { sessionId, query }),
+  list: () => call<HistoryEntryDto[]>("history_list"),
+  remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
+  clear: () => call<number>("history_clear"),
 };

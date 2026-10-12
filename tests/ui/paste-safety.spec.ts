@@ -83,12 +83,15 @@ test("a host can lower the line and newline reviews but never the hidden-charact
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).first().click();
   await page.getByRole("button", { name: "More actions for api-gateway" }).first().click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  const editor = page.getByRole("dialog");
+  const editor = page.getByRole("complementary", { name: "Host details" });
+  await editor.getByText("Show more").click();
   await expect(editor.getByText("always reviewed, on every host")).toBeVisible();
   await editor.getByRole("switch", { name: "Paste several lines or a large text without review" }).click();
   await editor.getByRole("switch", { name: "Paste one line ending in a newline without review" }).click();
   await editor.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(editor).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __mockCalls: { cmd: string }[] }).__mockCalls.filter((c) => c.cmd === "host_save").length))
+    .toBeGreaterThan(0);
   const saved = await page.evaluate(() =>
     (window as unknown as { __mockCalls: { cmd: string; args: { host: { terminal: unknown } } }[] }).__mockCalls.filter((c) => c.cmd === "host_save").at(-1)?.args.host.terminal,
   );

@@ -127,17 +127,22 @@ export function installMockBackend(options) {
 
   function openSession(args, kind) {
     const sessionId = `${state.nextSession++}`.padStart(32, "a");
+    // "files": a files-only connection (SFTP tab): SSH trust and sign-in, no terminal output.
+    const files = kind === "files";
+    if (files) kind = "ssh";
     const host = kind === "ssh" ? state.hosts.find((h) => h.id === args.hostId) : null;
-    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "" };
+    const s = { id: sessionId, output: args.output, events: args.events, user: host?.username ?? "tyr", host: host?.label ?? "laptop", line: "", files };
+    if (files) window.__mockFileSessions.push({ sessionId, host: host?.label });
     state.sessions.set(sessionId, s);
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
     if (host?.protocol?.type === "telnet")
       setTimeout(() => channelSend(args.events, { type: "notice", text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network." }), 5);
     const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
     const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
+    const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
     const steps =
       kind === "ssh"
-        ? trustPrompt || blocked
+        ? trustPrompt || blocked || passwordPrompt
           ? ["connecting", "verifying_host"]
           : ["connecting", "verifying_host", "authenticating", "opening_channel", "connected"]
         : ["connected"];
@@ -193,7 +198,25 @@ export function installMockBackend(options) {
       );
       return { sessionId };
     }
-    setTimeout(() => channelSend(s.output, new TextEncoder().encode(banner(s)).buffer), delay + 10);
+    if (passwordPrompt) {
+      setTimeout(
+        () =>
+          channelSend(s.events, {
+            type: "auth_prompt",
+            promptId: "a1",
+            kind: "password",
+            username: host.username,
+            attempt: 1,
+            maxAttempts: 3,
+            message: null,
+            echo: false,
+            hop: null,
+          }),
+        30,
+      );
+      return { sessionId };
+    }
+    if (!files) setTimeout(() => channelSend(s.output, new TextEncoder().encode(banner(s)).buffer), delay + 10);
     return { sessionId };
   }
 
@@ -303,6 +326,52 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // command history
+    ...(() => {
+      // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).
+      const settings = { enabled: false };
+      const scopes = new Map();
+      const scopeOf = (sessionId) => {
+        const s = state.sessions.get(sessionId);
+        if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+        return state.hosts.find((h) => h.label === s.host)?.id ?? null;
+      };
+      return {
+        history_settings_get: () => ({ ...settings }),
+        history_settings_set: (a) => Object.assign(settings, a.settings) && { ...settings },
+        history_add: (a) => {
+          const scope = scopeOf(a.sessionId);
+          if (!settings.enabled || a.command.startsWith(" ") || /[\u0000-\u001f]/.test(a.command)) return;
+          const list = scopes.get(scope) ?? [];
+          const old = list.find((e) => e.command === a.command);
+          const entry = { command: a.command, lastUsed: now + list.length + 1, uses: (old?.uses ?? 0) + 1 };
+          scopes.set(scope, [...list.filter((e) => e.command !== a.command), entry]);
+        },
+        history_suggest: (a) => {
+          const scope = scopeOf(a.sessionId);
+          if (!settings.enabled) return [];
+          const recent = [...(scopes.get(scope) ?? [])].reverse().map((e) => e.command);
+          if (!a.query.trim()) return recent.slice(0, 8);
+          const q = a.query.toLowerCase();
+          const starts = recent.filter((c) => c.startsWith(a.query));
+          return [...starts, ...recent.filter((c) => !starts.includes(c) && c.toLowerCase().includes(q))].slice(0, 8);
+        },
+        history_list: () =>
+          [...scopes.entries()]
+            .flatMap(([hostId, list]) => list.map((e) => ({ hostId, hostLabel: state.hosts.find((h) => h.id === hostId)?.label ?? null, ...e })))
+            .sort((x, y) => y.lastUsed - x.lastUsed),
+        history_delete: (a) => {
+          const list = scopes.get(a.hostId) ?? [];
+          if (!list.some((e) => e.command === a.command)) throw { code: "NOT_FOUND", message: "That command is no longer remembered." };
+          scopes.set(a.hostId, list.filter((e) => e.command !== a.command));
+        },
+        history_clear: () => {
+          const n = [...scopes.values()].reduce((t, l) => t + l.length, 0);
+          scopes.clear();
+          return n;
+        },
+      };
+    })(),
     // agent B: tunnels and history
     ...(() => {
       // Synthetic rules and runs. Exposure is checked the way the native side does it, so the
@@ -502,6 +571,33 @@ export function installMockBackend(options) {
       if (a.path.some((n) => n === ".." || n.includes("/"))) fsErr("ACCESS_DENIED", "That is outside the folder you chose.");
       return { token: a.token, rootName: "Projects", path: a.path, entries: localEntries(a.path), truncated: false };
     },
+    // Changes inside the chosen local folder (the SFTP tab's local pane).
+    files_local_mkdir: (a) => {
+      if (!localPicks.has(a.token)) fsErr("ACCESS_DENIED", "Choose the file or folder again.");
+      if (!a.name || a.name.includes("/") || a.name === "..") fsErr("INVALID_INPUT", "That name cannot be used on this computer.");
+      const key = a.path.join("/");
+      const list = localTree.get(key) ?? [];
+      if (list.some((e) => e.name === a.name)) fsErr("CONFLICT", "Something with that name is already there.");
+      list.push({ name: a.name, kind: "dir" });
+      localTree.set(key, list);
+      localTree.set(key ? `${key}/${a.name}` : a.name, []);
+    },
+    files_local_rename: (a) => {
+      const list = localTree.get(a.path.join("/")) ?? [];
+      if (list.some((e) => e.name === a.to)) fsErr("CONFLICT", "Something with that name is already there.");
+      const entry = list.find((e) => e.name === a.from);
+      if (!entry) fsErr("NOT_FOUND", "The local file or folder is no longer there.");
+      entry.name = a.to;
+    },
+    files_local_remove: (a) => {
+      const key = a.path.join("/");
+      const list = localTree.get(key) ?? [];
+      const sub = key ? `${key}/${a.name}` : a.name;
+      if ((localTree.get(sub) ?? []).length > 0) fsErr("IO_ERROR", "Only an empty folder can be deleted.");
+      localTree.set(key, list.filter((e) => e.name !== a.name));
+      localTree.delete(sub);
+    },
+    files_local_chmod: () => null,
     files_edit_open: (a) => {
       const node = fs.get(childPath(a.dir, a.name));
       if (!node || node.kind !== "file") fsErr("INVALID_INPUT", "Only files can be opened for editing.");
@@ -534,7 +630,10 @@ export function installMockBackend(options) {
         .map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), ...fs.get(p) }))
         .sort((x, y) => (x.kind === "dir") === (y.kind === "dir") ? x.name.localeCompare(y.name) : x.kind === "dir" ? -1 : 1);
       const parent = dir === "/" ? null : dir.slice(0, dir.lastIndexOf("/")) || "/";
-      return { path: dir, parent, entries, truncated: false };
+      const listing = { path: dir, parent, entries, truncated: false };
+      // Tests set a delay to see the loading state of a folder being opened.
+      const delay = window.__mockListDelay ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(listing), delay)) : listing;
     },
     files_mkdir: (a) => {
       const p = childPath(a.dir, a.name);
@@ -860,6 +959,20 @@ export function installMockBackend(options) {
     },
     session_open_ssh: (a) => openSession(a, "ssh"),
     session_open_local: (a) => openSession(a, "local"),
+    session_open_files: (a) => openSession(a, "files"),
+    session_auth_answer: (a) => {
+      const s = state.sessions.get(a.sessionId);
+      if (!s) return;
+      if (a.secret === null) {
+        state.sessions.delete(s.id);
+        channelSend(s.events, { type: "state", state: "failed" });
+        channelSend(s.events, { type: "closed", error: { code: "CANCELLED", message: "The connection was cancelled." }, exitStatus: null });
+        return;
+      }
+      channelSend(s.events, NEGOTIATED);
+      channelSend(s.events, { type: "state", state: "connected" });
+      if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+    },
     session_write: (a, o) => write(o.headers["x-session"], a),
     session_diagnostics: () => ["     0.002s  connecting to 192.0.2.10:22 directly", "     0.120s  key exchange mlkem768x25519-sha256, host key ssh-ed25519, cipher chacha20-poly1305@openssh.com, strict kex on", "     0.380s  signed in", "     0.410s  shell opened (xterm-256color, 100x30)"],
     session_resize: () => null,
@@ -872,9 +985,9 @@ export function installMockBackend(options) {
       if (s && a.decision !== "cancel") {
         channelSend(s.events, NEGOTIATED);
         channelSend(s.events, { type: "state", state: "connected" });
-        channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
+        if (s.output) channelSend(s.output, new TextEncoder().encode(banner(s)).buffer);
         const host = state.hosts.find((h) => h.label === s.host);
-        if (host) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
+        if (host && !s.files) setTimeout(() => window.__mockRunStartup?.(s, host), 30);
       }
     },
     // LAN discovery: synthetic announcements (documentation addresses), never a real network.
@@ -1252,6 +1365,7 @@ export function installMockBackend(options) {
     };
   }
   window.__mockCalls = calls;
+  window.__mockFileSessions = window.__mockFileSessions ?? [];
   window.__mockOpenedLinks = [];
   window.__mockState = state;
   window.__mockEmit = emit;

@@ -134,6 +134,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
   return {
     ready,
     valid: proxyValid,
+    changed,
     inherit: usesGroup,
     setInherit,
     groupRoute,
@@ -160,7 +161,16 @@ export function routeSummary(route: { jumpHostId: string | null; proxy: ProxySum
   return parts.length > 0 ? parts.join(", ") : msgDefaults.routeDirect;
 }
 
-export function HostAdvancedSection({ host, state }: { host: HostSummary | null; state: ReturnType<typeof useHostAdvanced> }) {
+/** `embedded`: the fields only, for a container that brings its own disclosure (the host panel's "Show more"). */
+export function HostAdvancedSection({
+  host,
+  state,
+  embedded = false,
+}: {
+  host: HostSummary | null;
+  state: ReturnType<typeof useHostAdvanced>;
+  embedded?: boolean;
+}) {
   const { hosts } = useVaultData();
   const options = (hosts.value ?? []).filter((h) => h.id !== host?.id);
   const jump = options.find((h) => h.id === state.jumpHostId);
@@ -168,10 +178,8 @@ export function HostAdvancedSection({ host, state }: { host: HostSummary | null;
   const configured = state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null;
   const labelOf = (id: string) => (hosts.value ?? []).find((h) => h.id === id)?.label ?? msgB.advanced.missingJump;
   const route = state.groupRoute;
-  return (
-    <details className="advanced" open={configured ? true : undefined}>
-      <summary>{msgB.advanced.title}</summary>
-      <div className="stack-sm" style={{ paddingTop: "var(--space-3)" }}>
+  const fields = (
+      <div className="stack-sm" style={embedded ? undefined : { paddingTop: "var(--space-3)" }}>
         {/* HST-05: the group's route, or one of this host's own. */}
         {route && (
           <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }} disabled={!state.ready}>
@@ -264,6 +272,12 @@ export function HostAdvancedSection({ host, state }: { host: HostSummary | null;
           </>
         )}
       </div>
+  );
+  if (embedded) return fields;
+  return (
+    <details className="advanced" open={configured ? true : undefined}>
+      <summary>{msgB.advanced.title}</summary>
+      {fields}
     </details>
   );
 }
