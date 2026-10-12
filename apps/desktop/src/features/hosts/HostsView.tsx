@@ -11,7 +11,7 @@ import type {
   KeySummary,
   SettingsTarget,
 } from "@tyrminal/contracts";
-import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
@@ -129,7 +129,7 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
 
-export function HostsView({
+function HostsViewImpl({
   ws,
   onConnect,
   onOpenSftp,
@@ -1067,6 +1067,9 @@ export function HostsView({
     </div>
   );
 }
+
+/** Memoized: re-renders only when its own props change, not for every state change of the shell. */
+export const HostsView = memo(HostsViewImpl);
 
 /** Below this width the list and the Host details panel do not fit side by side. */
 const NARROW_WIDTH = 760;
