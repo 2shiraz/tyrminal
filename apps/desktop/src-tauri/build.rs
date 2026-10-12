@@ -142,6 +142,14 @@ const COMMANDS: &[&str] = &[
     "discovery_start",
     "discovery_status",
     "discovery_stop",
+    // command history
+    "history_settings_get",
+    "history_settings_set",
+    "history_add",
+    "history_suggest",
+    "history_list",
+    "history_delete",
+    "history_clear",
 ];
 
 fn main() {

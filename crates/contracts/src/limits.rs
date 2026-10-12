@@ -92,3 +92,10 @@ pub const MAX_ACTIVE_TUNNELS: usize = 32;
 pub const MAX_ENDED_TUNNELS: usize = 32;
 /// Hosts in one connection chain, the destination included.
 pub const MAX_CHAIN_HOPS: usize = 8;
+
+// command history
+/// Commands kept per host (and for local terminals), and the length of one command in bytes.
+pub const MAX_HISTORY_ENTRIES: usize = 1_000;
+pub const MAX_HISTORY_COMMAND_LEN: usize = 1_024;
+/// Suggestions returned for one query.
+pub const MAX_HISTORY_SUGGESTIONS: usize = 8;

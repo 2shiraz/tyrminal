@@ -155,6 +155,13 @@ Never merge these by hand; regenerate them after resolving the sources:
 
 ## Requests (one agent asking the other for a change in a file it owns)
 
+- **Command history (AUT-01) → owner of `shellContext.ts` / `SuggestDialog.tsx` (PR #10/#5), done in
+  branch `claude/session-logs`, keep when merging:** `ShellMark` `command_start` gained an optional
+  `leadingSpace` flag (the mark's `command` is trimmed, which lost the shell's "leading space = do not
+  remember" convention); `SuggestDialog.tsx` gained a "History" group, a "History…" button and the
+  history manager view, each in a block marked `command history`. `AppShell.tsx` installs the capture
+  with one marked `useEffect` line. Record kinds 60 and 61 are command history.
+
 - **A → C:** `tests/ui/accessibility.spec.ts` (axe-core, WCAG 2.2 A/AA) finds two violations in
   `TabStrip.tsx`: `aria-required-children` (the `tablist` contains elements that are not tabs) and
   `nested-interactive` (a close button inside each draggable tab). Please fix them and remove the

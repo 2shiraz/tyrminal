@@ -971,6 +971,25 @@ impl Sessions {
         entry.input.send(Input::Ack(bytes as usize, epoch)).await.map_err(|_| denied())
     }
 
+    // command history
+    /// Adds a command line, as the shell showed it between its prompt and command marks, to the
+    /// history of the session's host. Does nothing while history is off.
+    pub async fn history_add(&self, owner: &str, session_id: &str, command: &str) -> Result<(), IpcError> {
+        let entry = self.authorize(owner, session_id)?;
+        let scope = entry.host_id.as_deref().unwrap_or(crate::command_history::LOCAL_SCOPE);
+        self.vault.add_history(entry.generation, scope, command).await
+    }
+
+    /// History suggestions for `query` in a session, from its host's history.
+    pub async fn history_suggest(&self, owner: &str, session_id: &str, query: &str) -> Result<Vec<String>, IpcError> {
+        if query.len() > tyrminal_contracts::limits::MAX_HISTORY_COMMAND_LEN {
+            return Ok(Vec::new());
+        }
+        let entry = self.authorize(owner, session_id)?;
+        let scope = entry.host_id.as_deref().unwrap_or(crate::command_history::LOCAL_SCOPE);
+        self.vault.suggest_history(entry.generation, scope, query).await
+    }
+
     pub fn close(&self, owner: &str, session_id: &str) -> Result<(), IpcError> {
         let entry = self.authorize(owner, session_id)?;
         entry.close.send_replace(true);
