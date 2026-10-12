@@ -20,6 +20,8 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  /** P-30: notes by host label or group name ("host:api-gateway", "group:Production"). */
+  notes?: Record<string, { text: string; format?: "plain" | "markdown" }>;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
 }

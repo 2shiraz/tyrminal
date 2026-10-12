@@ -259,6 +259,47 @@ pub enum SettingsTarget {
     },
 }
 
+/// How a note's text is shown (P-30).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NoteFormat {
+    #[default]
+    Plain,
+    /// Rendered as text only: no HTML, scripts or remote images; links open on click.
+    Markdown,
+}
+
+/// A note on a host or group (P-30). Stored encrypted in the vault like every other record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Note {
+    pub text: String,
+    pub format: NoteFormat,
+    /// Unix seconds of the last change.
+    #[ts(type = "number")]
+    pub updated_at: u64,
+}
+
+/// A note to store. Empty (or whitespace-only) text deletes the note.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NoteInput {
+    pub text: String,
+    pub format: NoteFormat,
+}
+
+/// A note that applies to a host: its own, or one of its groups' (nearest group first).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HostNote {
+    pub note: Note,
+    pub origin: SettingOrigin,
+}
+
 /// Where an effective setting comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]

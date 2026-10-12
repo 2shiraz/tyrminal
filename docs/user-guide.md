@@ -269,6 +269,20 @@ Settings → Backup **exports** the whole vault to one encrypted file, opened wi
 passphrase or recovery key at the time of the backup. **Restore** checks every item in the file
 before replacing anything; a damaged or tampered file changes nothing.
 
+## Notes on hosts and groups
+
+Every host and group can carry a note: plain text or Markdown, up to 64 KiB. Write it in the
+Notes card of the host's details panel, or in a group's editor, and press **Save note**. Notes
+are stored encrypted in your vault like every other record, are part of encrypted backups, and
+are deleted with their host or group.
+
+While a session is open, **Notes** in the status bar shows the host's note and its groups' notes
+beside the terminal. Markdown is shown as text: HTML in a note is displayed, never run, and images
+are never loaded (only their description is shown). Links open only when you click them, after
+showing where they go; only http, https and ssh links are offered, and an ssh link only offers to
+add that server as a host. A code block in a note can be pasted into the session with **Paste
+into session**, always through the paste review and without pressing Enter for you.
+
 ## Settings, privacy and diagnostics
 
 Tyrminal makes no network connections of its own. Settings → Privacy has:

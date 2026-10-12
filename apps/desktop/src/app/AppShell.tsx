@@ -16,6 +16,7 @@ import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
 // server at a glance
 import { ServerPanel } from "../features/glance/ServerPanel";
+import { NotesPanel } from "../features/notes/NotesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -124,10 +125,10 @@ function Shell() {
   useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
-  // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
+  // The side panel beside the terminals: snippets, files, server facts or host notes, one at a time.
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | "notes" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server" | "notes") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
@@ -734,6 +735,15 @@ function Shell() {
                         focusedHandle()?.focus();
                       }}
                     />
+                  ) : showPanel && sidePanel === "notes" ? (
+                    <NotesPanel
+                      host={pane?.target.kind === "ssh" ? { id: pane.target.hostId, label: pane.label } : null}
+                      onPaste={pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (text) => focusedHandle()?.reviewPaste(text) : undefined}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
                   ) : showPanel ? (
                     <SnippetsPanel
                       target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
@@ -785,6 +795,8 @@ function Shell() {
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
           serverOpen={sidePanel === "server"}
           onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
+          notesOpen={sidePanel === "notes"}
+          onToggleNotes={terminalVisible && !sftpVisible ? () => togglePanel("notes") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}

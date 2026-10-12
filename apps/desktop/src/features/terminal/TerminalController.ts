@@ -492,6 +492,12 @@ export class TerminalController {
     }
   }
 
+  /** Offers text for pasting, always through the paste review (a note's code block, P-30). */
+  reviewPaste(text: string): void {
+    if (!text || this.disposed) return;
+    this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, () => this.term.paste(text));
+  }
+
   private activateLink(event: MouseEvent, uri: string): void {
     // Only a primary-button click activates; hovering or remote output never does.
     if (event.button !== 0) return;
