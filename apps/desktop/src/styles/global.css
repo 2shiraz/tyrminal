@@ -2386,6 +2386,10 @@ mark {
 /* ===================================================================== terminal */
 
 .terminal-host {
+  /* The fit addon sizes the grid from this element's computed width and height; with the
+     global border-box those include the padding, which gave the grid an extra row and column
+     that were drawn under the status bar and past the right edge. */
+  box-sizing: content-box;
   flex: 1;
   min-height: 0;
   min-width: 0;

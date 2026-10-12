@@ -116,14 +116,16 @@ describe("terminal with real applications", { concurrency: false }, () => {
       const host = document.querySelector(".terminal-pane:not([hidden]) .terminal-host");
       const rows = [...host.querySelectorAll(".xterm-rows > div")];
       const h = host.getBoundingClientRect();
+      const screen = host.querySelector(".xterm-screen").getBoundingClientRect();
       const last = rows.at(-1).getBoundingClientRect();
       const first = rows[0].getBoundingClientRect();
       const bar = document.querySelector(".statusbar")?.getBoundingClientRect();
-      return { count: rows.length, hostTop: h.top, hostBottom: h.bottom, firstTop: first.top, lastBottom: last.bottom,
+      return { count: rows.length, hostTop: h.top, hostBottom: h.bottom, hostRight: h.right, screenRight: screen.right, firstTop: first.top, lastBottom: last.bottom,
         rowHeight: first.height, barTop: bar?.top ?? null, dpr: devicePixelRatio,
         hit: String(document.elementFromPoint(last.left + 4, last.top + last.height / 2)?.className ?? "").slice(0, 60) };`);
     const detail = JSON.stringify(m);
     assert.ok(m.lastBottom <= m.hostBottom + 0.5, `last row ends below the terminal area: ${detail}`);
+    assert.ok(m.screenRight <= m.hostRight + 0.5, `last column ends past the terminal area: ${detail}`);
     assert.ok(m.barTop === null || m.lastBottom <= m.barTop + 0.5, `last row overlaps the status bar: ${detail}`);
     assert.doesNotMatch(m.hit, /statusbar/, detail);
   });
