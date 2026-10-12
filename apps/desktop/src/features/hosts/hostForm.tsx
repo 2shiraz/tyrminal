@@ -331,7 +331,9 @@ function AddressCard({ form, os, autoFocus }: { form: HostForm; os: HostOs | nul
         label={msg.hosts.address}
         value={form.fields.address}
         onChange={form.set.setAddress}
-        hint={msg.hosts.addressHint}
+        // A new host in the panel: says it is saved once the address is valid (in the field's own
+        // hint, so the panel does not shift when the host is created).
+        hint={form.live?.isNew ? msgAutosave.newHostHint : msg.hosts.addressHint}
         error={form.errors.address ?? (form.live && !form.live.isNew && form.fields.address.trim() === "" ? msgAutosave.addressEmpty : undefined)}
         maxLength={253}
         autoFocus={autoFocus}
@@ -604,8 +606,13 @@ function CredentialsCard({ form }: { form: HostForm }) {
 function MoreCard({ form, extra }: { form: HostForm; extra?: ReactNode }) {
   const advanced = form.advanced;
   const configured = advanced.jumpHostId !== null || advanced.proxy.kind !== "none" || advanced.groupRoute !== null;
+  // Held in state so a re-render after an autosave never folds it while the user is in it.
+  const [open, setOpen] = useState(configured);
+  useEffect(() => {
+    if (configured) setOpen(true);
+  }, [configured]);
   return (
-    <details className="host-section host-more" open={configured ? true : undefined}>
+    <details className="host-section host-more" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="host-section-title">{msgD.hostPanel.more}</summary>
       <div className="stack-sm host-more-body">
         <TerminalFields value={form.fields.terminal} onChange={form.set.setTerminal} showTerm={form.fields.protocol !== "serial"} />

@@ -11,7 +11,6 @@ import { IconCopy, IconEllipsis, IconPanelRightClose, IconPlay, IconSlidersHoriz
 import { AutosaveStatus, handleUndoKey } from "../../lib/autosave";
 import { toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
-import { msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { useHostAutosave } from "./hostAutosave";
 import { HostFormCards, type HostFormOptions, groupPath, useHostForm } from "./hostForm";
@@ -152,11 +151,6 @@ export function HostPanel({
         </div>
 
         <footer className="host-panel-foot">
-          {!created && (
-            <p className="host-panel-hint" data-testid="host-panel-hint">
-              {msgAutosave.newHostHint}
-            </p>
-          )}
           <button
             type="button"
             className="btn btn-primary btn-block host-panel-connect"

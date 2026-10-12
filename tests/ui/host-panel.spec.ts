@@ -233,7 +233,7 @@ test("a new host is created on its first valid address, never from an invalid on
   await add.click();
   const fresh = page.getByRole("complementary", { name: "New host" });
   await expect(fresh.getByLabel("Address")).toBeFocused();
-  await expect(fresh.getByTestId("host-panel-hint")).toHaveText("Enter an address to save this host. Everything you change is saved as you go.");
+  await expect(fresh.getByText("Enter an address to save this host. Everything you change is saved as you go.")).toBeVisible();
   // Only Connect: no Save, Cancel or "Save and connect".
   await expect(fresh.getByRole("button", { name: /Save|Cancel/ })).toHaveCount(0);
   await expect(fresh.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();

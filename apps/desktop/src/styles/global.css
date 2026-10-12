@@ -4065,11 +4065,6 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   margin-top: var(--space-1);
 }
 
-.host-panel-hint {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
 .dialog-actions-hint {
   margin-right: auto;
   align-self: center;
