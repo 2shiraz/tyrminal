@@ -14,6 +14,8 @@ import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews
 import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsPanel } from "../features/snippets/SnippetsPanel";
+// server at a glance
+import { ServerPanel } from "../features/glance/ServerPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
 import { TunnelsView } from "../features/tunnels/TunnelsView";
@@ -123,9 +125,9 @@ function Shell() {
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
   // The side panel beside the terminals: snippets or files, one at a time.
-  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | null>(null);
+  const [sidePanel, setSidePanel] = useState<"snippets" | "files" | "server" | null>(null);
   const panelOpen = sidePanel === "snippets";
-  const togglePanel = useCallback((which: "snippets" | "files") => setSidePanel((v) => (v === which ? null : which)), []);
+  const togglePanel = useCallback((which: "snippets" | "files" | "server") => setSidePanel((v) => (v === which ? null : which)), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The palette can instead pick the destination of a new pane (a split with another host).
   const [pickingSplit, setPickingSplit] = useState<Direction | null>(null);
@@ -602,6 +604,11 @@ function Shell() {
   const showPanel = sidePanel !== null && terminalVisible && !sftpVisible;
   const filesSession =
     pane?.target.kind === "ssh" && paneStatus?.state === "connected" ? (focusedHandle()?.sessionId() ?? null) : null;
+  // server at a glance: SSH sessions only (a negotiated SSH connection; never Telnet or serial).
+  const glanceTarget =
+    filesSession && pane?.target.kind === "ssh" && paneStatus?.security
+      ? { sessionId: filesSession, hostId: pane.target.hostId, label: pane.label }
+      : null;
 
   // agent D: inventory and snippets
   const snippetRunHost = useMemo(
@@ -699,7 +706,15 @@ function Shell() {
                 prefs={prefs.terminal}
                 workspace={workspacePrefs(prefs.workspace)}
                 panel={
-                  showPanel && sidePanel === "files" ? (
+                  showPanel && sidePanel === "server" ? (
+                    <ServerPanel
+                      target={glanceTarget}
+                      onClose={() => {
+                        setSidePanel(null);
+                        focusedHandle()?.focus();
+                      }}
+                    />
+                  ) : showPanel && sidePanel === "files" ? (
                     <FilesPanel
                       target={filesSession && pane ? { sessionId: filesSession, label: pane.label } : null}
                       others={Object.values(ws.panes).flatMap((p) => {
@@ -760,6 +775,8 @@ function Shell() {
           onTogglePanel={terminalVisible && !sftpVisible ? () => togglePanel("snippets") : undefined}
           filesOpen={sidePanel === "files"}
           onToggleFiles={terminalVisible && !sftpVisible ? () => togglePanel("files") : undefined}
+          serverOpen={sidePanel === "server"}
+          onToggleServer={terminalVisible && !sftpVisible && (glanceTarget || sidePanel === "server") ? () => togglePanel("server") : undefined}
           theme={resolvedTheme}
           onToggleTheme={() => update((p) => ({ ...p, theme: resolvedTheme === "dark" ? "light" : "dark" }))}
           broadcast={terminalVisible && tab && broadcasting.has(tab.id) ? panesOf(tab.layout).length : undefined}
