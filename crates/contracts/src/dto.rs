@@ -490,7 +490,7 @@ impl Default for TerminalPreferences {
             letter_spacing: 0.0,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
-            padding: 10,
+            padding: 12,
             scrollback: 5_000,
             ligatures: false,
             renderer: RendererPreference::Auto,

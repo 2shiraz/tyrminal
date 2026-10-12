@@ -2428,7 +2428,7 @@ mark {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  padding: var(--term-padding, 10px);
+  padding: var(--term-padding, var(--terminal-padding));
   overflow: hidden;
   transition: opacity var(--motion-base) var(--ease-out);
 }

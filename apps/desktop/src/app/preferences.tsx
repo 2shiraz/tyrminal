@@ -18,7 +18,7 @@ const DEFAULTS: Preferences = {
     letterSpacing: 0,
     cursorStyle: "block",
     cursorBlink: true,
-    padding: 10,
+    padding: 12,
     scrollback: 5000,
     ligatures: false,
     renderer: "auto",
