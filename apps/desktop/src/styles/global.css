@@ -1015,7 +1015,9 @@ kbd,
 .fingerprint {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 4px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -2484,67 +2486,189 @@ mark {
   scrollbar-width: thin;
 }
 
-.terminal-overlay {
+/* ---------- connection sheet: the steps, prompts and outcomes of a connection, in the pane ---------- */
+.connect-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
-  display: grid;
-  place-items: center;
-  padding: var(--space-5);
-  background: color-mix(in srgb, var(--bg-app) 72%, transparent);
-  backdrop-filter: blur(4px);
-  animation: fade-in var(--motion-base) var(--ease-out);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(var(--space-6), 10vh) var(--space-5) var(--space-5);
+  overflow: auto;
 }
 
-.overlay-card {
+/* After a session had connected, its output stays visible but recedes behind the sheet. */
+.connect-layer[data-dim="true"] {
+  background: color-mix(in srgb, var(--term-bg, var(--bg-app)) 70%, transparent);
+}
+
+.connection-sheet {
+  position: static;
   display: grid;
   gap: var(--space-4);
   width: min(560px, 100%);
+  margin: 0;
   padding: var(--space-5);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-dialog);
   background: var(--bg-overlay);
+  color: var(--text);
   box-shadow: var(--shadow-3);
 }
 
-.connecting {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
+.connection-sheet[data-tone="danger"] {
+  box-shadow:
+    inset 3px 0 0 var(--danger),
+    var(--shadow-3);
+}
+
+.connect-head {
   display: grid;
-  place-items: center;
-  pointer-events: none;
-}
-
-.connecting-card {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-overlay);
-  box-shadow: var(--shadow-2);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  animation: dialog-in var(--motion-slow) var(--ease-out);
-}
-
-.connect-steps {
-  display: flex;
   gap: 4px;
 }
 
-.connect-steps span {
-  width: 18px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--border-strong);
-  transition: background var(--motion-base) var(--ease-out);
+.connect-head h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
 }
 
-.connect-steps span[data-done="true"] {
-  background: var(--accent);
+.connection-sheet[data-tone="danger"] .connect-head h2 svg {
+  color: var(--danger);
+}
+
+.connect-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.connect-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connect-steps li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+}
+
+.connect-steps li.connect-hop {
+  display: block;
+  margin-top: var(--space-2);
+  padding-left: 26px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.connect-marker {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.connect-steps li[data-kind="done"] .connect-marker {
+  color: var(--success);
+}
+
+.connect-steps li[data-kind="fail"] .connect-marker {
+  color: var(--danger);
+}
+
+.connect-steps li[data-kind="pending"] {
+  color: var(--text-faint);
+}
+
+.connect-steps li[data-kind="pending"] .connect-marker::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--border-control);
+  border-radius: 50%;
+}
+
+.connect-steps li[data-kind="now"] {
+  font-weight: var(--weight-medium);
+}
+
+.connect-steps li[data-kind="now"] .cursor-block {
+  width: 7px;
+  height: 14px;
+  margin: 0;
+}
+
+.connect-detail {
+  margin-left: var(--space-2);
+  color: var(--text-faint);
+  font-weight: var(--weight-regular);
+}
+
+.connect-time {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.connect-prompt {
+  display: grid;
+  gap: var(--space-3);
+  margin-left: 26px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--bg-raised);
+}
+
+.connect-prompt h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.connect-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.connect-next {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.connect-actions .grow {
+  flex: 1;
+}
+
+.connect-log {
+  flex-basis: 100%;
+  order: 10;
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  font: var(--text-2xs) / 1.6 var(--font-mono);
+  white-space: pre-wrap;
 }
 
 .find-bar {
@@ -2620,53 +2744,37 @@ mark {
   background: var(--bg-app);
 }
 
-.auth-screen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(800px 420px at 50% -10%, var(--accent-soft), transparent 70%),
-    radial-gradient(600px 300px at 80% 110%, var(--success-soft), transparent 70%);
-  pointer-events: none;
-}
-
-.auth-screen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle at 1px 1px, var(--border-subtle) 1px, transparent 0);
-  background-size: 22px 22px;
-  mask-image: radial-gradient(ellipse at 50% 30%, black, transparent 70%);
-  pointer-events: none;
-}
-
+/* A plain column on the app background: no card, no grid of dots, no glow. */
 .auth-card {
-  position: relative;
-  z-index: 1;
   display: grid;
-  gap: var(--space-5);
-  width: min(460px, 100%);
-  padding: var(--space-6);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg-overlay) 94%, transparent);
-  box-shadow: var(--shadow-3);
-  animation: dialog-in var(--motion-slow) var(--ease-out);
+  gap: var(--space-4);
+  width: min(380px, 100%);
 }
 
 .auth-card-wide {
-  width: min(600px, 100%);
+  width: min(500px, 100%);
 }
 
 .auth-head {
   display: grid;
   justify-items: start;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.auth-head .wordmark {
+  margin-bottom: var(--space-4);
+}
+
+.auth-head h1 {
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-title);
 }
 
 .auth-head p {
   color: var(--text-muted);
   font-size: var(--text-sm);
+  max-width: 60ch;
 }
 
 .auth-version {
@@ -2680,48 +2788,124 @@ mark {
   text-align: center;
 }
 
-.auth-foot {
+.auth-steps {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-4);
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  list-style: none;
   color: var(--text-faint);
   font-size: var(--text-xs);
 }
 
-.recovery-key {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+.auth-steps li {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg-inset);
-  font: var(--weight-medium) var(--text-md) / 1 var(--font-mono);
-  letter-spacing: 0.04em;
-  user-select: text;
 }
 
+.auth-steps li[aria-current="step"] {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.auth-steps li[data-done="true"] svg {
+  color: var(--success);
+}
+
+.auth-or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.auth-or::before,
+.auth-or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ---------- the wordmark: a prompt and the cursor ---------- */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+}
+
+.wordmark-mark {
+  display: inline-flex;
+  align-items: center;
+  font: 700 15px / 1 var(--font-mono);
+  letter-spacing: -0.04em;
+}
+
+.cursor-block {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 0.14em;
+  border-radius: 1px;
+  background: var(--cursor, var(--accent));
+  box-shadow: inset 0 0 0 1.5px var(--cursor, var(--accent));
+}
+
+.cursor-block[data-hollow="true"] {
+  background: transparent;
+}
+
+/* ---------- recovery key: numbered groups in reading order ---------- */
 .recovery-key {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--bg-inset);
+  font: var(--weight-medium) 15px / 26px var(--font-mono);
+  letter-spacing: 0.06em;
+  user-select: text;
   counter-reset: group;
 }
 
 .recovery-key span {
-  padding: 8px 0;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  text-align: center;
   white-space: nowrap;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+  transition-delay: calc(var(--n, 0) * 30ms);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 /* Group numbers are generated content: visible, but not part of the key text that is copied. */
 .recovery-key span::before {
   counter-increment: group;
   content: counter(group);
-  display: block;
-  margin-bottom: 5px;
+  display: inline-block;
+  width: 1.6em;
+  margin-right: 6px;
   color: var(--text-faint);
-  font: var(--weight-medium) var(--text-2xs) / 1 var(--font-ui);
+  font: var(--weight-regular) var(--text-2xs) / 26px var(--font-ui);
   letter-spacing: 0;
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recovery-key span {
+    transition-delay: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] .recovery-key span {
+  transition-delay: 0ms;
 }
 
 .strength {
@@ -3724,6 +3908,21 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   color: var(--warning);
 }
 
+/* P-33: containers on the connected host (plain; the visual overhaul owns the look). */
+.containers {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.containers th,
+.containers td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .connection-log {
   max-height: 360px;
   overflow: auto;
@@ -4168,4 +4367,128 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
 
 .glance-usage .muted {
   font-size: var(--text-xs);
+}
+
+/* P-30: host and group notes. Plain token styling. */
+.note-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.note-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.note-view {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.note-view p,
+.note-view ul,
+.note-view ol,
+.note-view blockquote {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.note-view ul,
+.note-view ol {
+  padding-left: var(--space-5);
+}
+
+.note-view blockquote {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+}
+
+.note-view hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.note-view :not(pre) > code {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font: 0.92em var(--font-mono);
+}
+
+.note-heading[data-level="1"] {
+  font-size: var(--text-lg);
+}
+
+.note-heading[data-level="2"] {
+  font-size: var(--text-md);
+}
+
+.note-plain {
+  white-space: pre-wrap;
+}
+
+.note-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.note-image {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.note-code {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+.note-code .code-block {
+  justify-self: stretch;
+}
+
+.note-inherited {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Quick port forward suggestions (P-24) */
+.quick-forward {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-raised, var(--surface));
+  font-size: var(--text-sm);
+}
+.quick-forward-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.quick-forward-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }

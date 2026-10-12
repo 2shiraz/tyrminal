@@ -76,13 +76,21 @@ for (const theme of ["dark", "light"] as const) {
       const view = page.getByRole("region", { name: "SFTP file manager" });
       await expect(view.getByRole("heading", { name: "Connect to host" })).toBeVisible();
       await audit(page);
-      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
-      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await view.getByRole("region", { name: "Left pane", exact: true }).getByRole("button", { name: "Choose folder…" }).click();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("button", { name: /^api-gateway/ }).click();
       await expect(view.getByRole("grid", { name: /on api-gateway/ })).toBeVisible();
       await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select README.md" }).click();
       await audit(page);
-      await view.getByRole("button", { name: "Actions for the right pane" }).click();
-      await expect(page.getByRole("menu", { name: "Actions" })).toBeVisible();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("button", { name: "More", exact: true }).click();
+      await expect(page.getByRole("menu", { name: "More" })).toBeVisible();
+      await audit(page);
+      await page.keyboard.press("Escape");
+      // The row menu, and the bar for several selected items.
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+      await expect(view.getByRole("toolbar", { name: "2 selected items" })).toBeVisible();
+      await audit(page);
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });
+      await expect(page.getByRole("menu")).toBeVisible();
       await audit(page);
     });
   });

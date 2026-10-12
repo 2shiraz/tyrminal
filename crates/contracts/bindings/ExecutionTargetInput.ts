@@ -4,4 +4,4 @@ export type ExecutionTargetInput = {
 /**
  * `None` creates a target; `Some` replaces that target.
  */
-id: string | null, name: string, hostIds: Array<string>, };
+id: string | null, name: string, hostIds: Array<string>, groupIds: Array<string>, };

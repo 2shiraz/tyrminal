@@ -42,6 +42,8 @@ pub const MAX_AUTH_ATTEMPTS: u32 = 3;
 pub const MAX_SNIPPET_LEN: usize = 64 * 1024;
 /// Snippet folder path, in bytes.
 pub const MAX_FOLDER_LEN: usize = 256;
+/// A note on a host or group (P-30), in bytes.
+pub const MAX_NOTE_LEN: usize = 64 * 1024;
 /// Startup snippets on one host or group (SNP-08).
 pub const MAX_STARTUP_SNIPPETS: usize = 16;
 /// Longest line of a startup snippet, in bytes. Startup snippets are typed while the shell may not

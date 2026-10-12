@@ -2,7 +2,7 @@ import type { HostConnectionInput, HostSummary, InheritedRoute, KeyExchangeMode,
 import { useCallback, useEffect, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
-import { Notice, SecretField, TextField } from "../../components/ui/controls";
+import { Notice, SecretField, Switch, TextField } from "../../components/ui/controls";
 import { groupDefaults as groupDefaultsApi, tunnels as tunnelsApi } from "../../lib/ipc";
 import { msgB } from "../../lib/messages-b";
 import { msgAutosave } from "../../lib/messages-autosave";
@@ -19,6 +19,7 @@ export interface Loaded {
   /** HST-05: the host uses its group's route instead of its own. */
   inherit: boolean;
   keyExchange: KeyExchangeMode;
+  noPortSuggestions: boolean;
 }
 
 /**
@@ -29,8 +30,9 @@ export interface Loaded {
  * the editor) has a route, the host can use it instead of its own (HST-05).
  */
 export function useHostAdvanced(hostId: string | null, groupId: string | null = null) {
-  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, inherit: true, keyExchange: "prefer_post_quantum" });
+  const [loaded, setLoaded] = useState<Loaded>({ jumpHostId: null, proxy: null, inherit: true, keyExchange: "prefer_post_quantum", noPortSuggestions: false });
   const [keyExchange, setKeyExchange] = useState<KeyExchangeMode>("prefer_post_quantum");
+  const [noPortSuggestions, setNoPortSuggestions] = useState(false);
   const [inherit, setInherit] = useState(true);
   const [groupRoute, setGroupRoute] = useState<InheritedRoute | null>(null);
   const { groups } = useVaultData();
@@ -49,8 +51,9 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     void tunnelsApi.connection(hostId).then(
       (connection) => {
         if (!alive) return;
-        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, inherit: !connection.own, keyExchange: connection.keyExchange });
+        setLoaded({ jumpHostId: connection.jumpHostId, proxy: connection.proxy, inherit: !connection.own, keyExchange: connection.keyExchange, noPortSuggestions: connection.noPortSuggestions });
         setKeyExchange(connection.keyExchange);
+        setNoPortSuggestions(connection.noPortSuggestions);
         setInherit(!connection.own);
         setJumpHostId(connection.jumpHostId);
         if (connection.proxy) {
@@ -97,6 +100,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     (): HostConnectionInput => ({
       jumpHostId,
       keyExchange,
+      noPortSuggestions,
       proxy:
         proxyKind === "none"
           ? null
@@ -109,12 +113,13 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
             },
       inherit: usesGroup,
     }),
-    [jumpHostId, keyExchange, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
+    [jumpHostId, keyExchange, noPortSuggestions, proxyKind, proxyHost, port, proxyUser, proxyPassword, usesGroup],
   );
 
   /** The route (and key exchange) differs from the stored one, a typed proxy password aside. */
   const routeChanged =
     keyExchange !== loaded.keyExchange ||
+    noPortSuggestions !== loaded.noPortSuggestions ||
     usesGroup !== (loaded.inherit && groupRoute !== null) ||
     (!usesGroup &&
       (jumpHostId !== loaded.jumpHostId ||
@@ -136,6 +141,7 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
           jumpHostId: written.inherit ? null : written.jumpHostId,
           inherit: written.inherit,
           keyExchange: written.keyExchange,
+          noPortSuggestions: written.noPortSuggestions,
           proxy:
             written.inherit || written.proxy === null
               ? null
@@ -195,6 +201,8 @@ export function useHostAdvanced(hostId: string | null, groupId: string | null = 
     setJumpHostId,
     keyExchange,
     setKeyExchange,
+    noPortSuggestions,
+    setNoPortSuggestions,
     proxy: { kind: proxyKind, host: proxyHost, port: proxyPort, user: proxyUser, password: proxyPassword, passwordStored },
     setProxyKind,
     setProxyHost,
@@ -235,7 +243,7 @@ export function HostAdvancedSection({
   const jump = options.find((h) => h.id === state.jumpHostId);
   const p = state.proxy;
   const configured =
-    state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null || state.keyExchange !== "prefer_post_quantum";
+    state.jumpHostId !== null || p.kind !== "none" || state.groupRoute !== null || state.keyExchange !== "prefer_post_quantum" || state.noPortSuggestions;
   const labelOf = (id: string) => (hosts.value ?? []).find((h) => h.id === id)?.label ?? msgB.advanced.missingJump;
   const route = state.groupRoute;
   const fields = (
@@ -371,6 +379,12 @@ export function HostAdvancedSection({
         {live && state.routeChanged && state.valid && state.dropsPassword && (
           <DropSecretNotice text={msgAutosave.removesProxyPassword} action={msgAutosave.removeProxyPassword} onRemove={live.remove} />
         )}
+
+        <Switch
+          label={msgB.quick.hostSetting}
+          checked={!state.noPortSuggestions}
+          onChange={(on) => state.setNoPortSuggestions(!on)}
+        />
       </div>
   );
   if (embedded) return fields;

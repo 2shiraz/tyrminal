@@ -366,6 +366,22 @@ deleted later is skipped. So is a snippet with a line longer than 1000 bytes, wh
 may not be ready to read yet and a terminal would cut or garble (macOS keeps about 1 KB of an
 unfinished line); the list marks such snippets, and the connection log names the line.
 
+**Run on several hosts.** From a snippet's menu, **Run on hosts…** runs it without a terminal on
+the hosts you choose and shows each host's own result. Choose hosts one by one, a whole group
+(with its subgroups) at once, **Select all**, or a saved target; a target saved with a whole
+group keeps the group, so hosts added to it later are included. **Run on all open sessions**
+(snippet menu or command palette) goes straight to the review with every open SSH session of
+the window. The review shows the exact text and the exact hosts before anything runs.
+
+Hosts with an open session run on it. For the others Tyrminal connects just for the run and
+disconnects after: an unknown host key stops that host until you answer its trust question
+(one host at a time), a changed key fails it, and a host that needs a password you have not
+saved asks for it in turn, or is skipped if you tick **Skip hosts that need sign-in input**.
+Four hosts run at once unless you choose another number (1 to 8). **Cancel runs** stops
+everything and drops those connections; locking the vault does the same. Output (up to 512 KiB
+each of output and errors per host) stays in the window until you copy or save it; the
+connection log records only the host and how it ended.
+
 **Broadcast** sends what you type to several sessions at once. Before it starts, Tyrminal lists
 every pane of the tab; clear the box next to a pane to leave it out (it keeps its own input and
 receives nothing). A pane opened later is never added; start broadcast again to include it. The
@@ -407,6 +423,20 @@ Settings → Backup **exports** the whole vault to one encrypted file, opened wi
 passphrase or recovery key at the time of the backup. **Restore** checks every item in the file
 before replacing anything; a damaged or tampered file changes nothing.
 
+## Notes on hosts and groups
+
+Every host and group can carry a note: plain text or Markdown, up to 64 KiB. Write it in the
+Notes card of the host's details panel, or in a group's editor, and press **Save note**. Notes
+are stored encrypted in your vault like every other record, are part of encrypted backups, and
+are deleted with their host or group.
+
+While a session is open, **Notes** in the status bar shows the host's note and its groups' notes
+beside the terminal. Markdown is shown as text: HTML in a note is displayed, never run, and images
+are never loaded (only their description is shown). Links open only when you click them, after
+showing where they go; only http, https and ssh links are offered, and an ssh link only offers to
+add that server as a host. A code block in a note can be pasted into the session with **Paste
+into session**, always through the paste review and without pressing Enter for you.
+
 ## Settings, privacy and diagnostics
 
 Settings has **Appearance** (theme: system, light or dark; reduce motion), **Terminal** (color
@@ -421,7 +451,16 @@ computer and sends only its first 5 characters (for example `5BAA6`) to the serv
 shown; the match is made on your computer, and passwords, full hashes and names never leave it.
 This build cannot contact a service yet, and the page says so.
 
-Apart from that check, which only runs when you ask, Tyrminal makes no network connections of
+Settings → **Security review** (also in the command palette) checks this vault on your computer
+and lists what needs attention, most serious first: DSA keys and RSA keys under 3072 bits, keys
+with no passphrase of their own, SSH hosts that sign in with a password, user certificates that
+have expired or expire within 30 days, and trusted host keys that no host uses or that are RSA
+only. It sends nothing and changes nothing. Each item has a button for the usual fix (generate a
+key, edit the host, open the keychain, or remove the trusted key with a reason), and nothing
+happens until you complete that step. Keys Tyrminal generates are kept without a passphrase of
+their own, protected by the vault's encryption, so they are listed as a note.
+
+Apart from the compromised-password check, which only runs when you ask, Tyrminal makes no network connections of
 its own. Settings → Privacy has:
 
 - **Diagnostics** (off by default): keeps, in memory only, which action failed and its error

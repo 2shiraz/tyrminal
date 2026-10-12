@@ -65,7 +65,7 @@ use crate::records::{GlanceSettingsRecord, KIND_GLANCE_SETTINGS};
 use crate::records::StoredProxy;
 use crate::records::{
     ExecutionTargetRecord, HostAppearanceRecord, IdentityRecord, KIND_EXECUTION_TARGET, KIND_HOST_APPEARANCE,
-    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, WorkflowRecord,
+    KIND_IDENTITY, KIND_KEY_CERTIFICATE, KIND_WORKFLOW, KeyCertificateRecord, StoredEnv, StoredNote, WorkflowRecord,
 };
 use tyrminal_contracts::{
     EffectiveEnvVar, EnvVar, ExecutionTarget, ExecutionTargetInput, HostAppearance, HostOs, IdentityAssignment,
@@ -73,6 +73,7 @@ use tyrminal_contracts::{
     KnownHostImportStatus, SecretChange, SettingOrigin, SettingsTarget,
 };
 use tyrminal_contracts::{EffectiveStartup, GroupDefaults, GroupDefaultsInput, InheritedRoute, StartupSnippet};
+use tyrminal_contracts::{HostNote, Note, NoteInput};
 
 struct Stored<T> {
     revision: u64,
@@ -169,6 +170,8 @@ pub(crate) struct ConnectionPlan {
     pub known_hosts: Vec<(KnownHost, String)>,
     /// Environment variables to request for the shell (the host's own, with inherited ones).
     pub env: Vec<(String, Zeroizing<String>)>,
+    /// Offer quick forwards for ports the session's output names (P-24).
+    pub port_suggestions: bool,
     pub generation: u32,
 }
 
@@ -1896,6 +1899,20 @@ impl VaultService {
         Ok(())
     }
 
+    /// Turns quick forward suggestions on or off for one host (P-24); nothing else changes.
+    pub async fn set_port_suggestions(&self, host_id: &str, enabled: bool) -> Result<(), IpcError> {
+        let id = validate::id(host_id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let current = open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?;
+        let mut record = copy_host(&current.record);
+        record.connection.no_port_suggestions = !enabled;
+        let revision = current.revision + 1;
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
     // ---------- sessions ----------
 
     /// Snapshot of what a session needs, taken under the mutex at one generation. Later edits to
@@ -1933,6 +1950,7 @@ impl VaultService {
             proxy: target.proxy,
             label: target.label,
             key_exchange: target.key_exchange,
+            port_suggestions: !host.connection.no_port_suggestions,
             jumps,
             known_hosts,
             generation: self.generation(),
@@ -2046,6 +2064,7 @@ impl VaultService {
             own: Self::own_route(host),
             inherited: Self::inherited_route(open, &id, host),
             key_exchange: host.connection.key_exchange,
+            no_port_suggestions: host.connection.no_port_suggestions,
         })
     }
 
@@ -2077,6 +2096,7 @@ impl VaultService {
         record.connection.proxy = proxy;
         record.connection.own = !input.inherit;
         record.connection.key_exchange = input.key_exchange;
+        record.connection.no_port_suggestions = input.no_port_suggestions;
         let revision = current.revision + 1;
         // Check the chain this would make before anything is written.
         let proposed = if input.inherit {
@@ -2424,11 +2444,14 @@ impl VaultService {
     fn target_summary(open: &Open, id: &Id, record: &ExecutionTargetRecord) -> ExecutionTarget {
         let (live, missing): (Vec<&String>, Vec<&String>) =
             record.host_ids.iter().partition(|h| validate::id(h).ok().is_some_and(|id| open.hosts.contains_key(&id)));
+        let (groups, gone): (Vec<&String>, Vec<&String>) =
+            record.group_ids.iter().partition(|g| validate::id(g).ok().is_some_and(|id| open.groups.contains_key(&id)));
         ExecutionTarget {
             id: validate::id_text(id),
             name: record.name.clone(),
             host_ids: live.into_iter().cloned().collect(),
-            missing: missing.len() as u32,
+            group_ids: groups.into_iter().cloned().collect(),
+            missing: (missing.len() + gone.len()) as u32,
         }
     }
 
@@ -2440,16 +2463,17 @@ impl VaultService {
         Ok(list)
     }
 
-    /// Saves a host selection. Every host must exist now; duplicates are dropped.
+    /// Saves a selection of hosts and groups. Every one must exist now; duplicates are dropped.
     pub async fn save_execution_target(&self, input: ExecutionTargetInput) -> Result<ExecutionTarget, IpcError> {
         let name = validate::label(&input.name)?;
-        if input.host_ids.is_empty() {
-            return Err(invalid("Choose at least one host."));
+        if input.host_ids.is_empty() && input.group_ids.is_empty() {
+            return Err(invalid("Choose at least one host or group."));
         }
-        if input.host_ids.len() > MAX_BULK_HOSTS {
-            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one target."));
+        if input.host_ids.len() > MAX_BULK_HOSTS || input.group_ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts or groups for one target."));
         }
         let ids: Vec<Id> = input.host_ids.iter().map(|h| validate::id(h)).collect::<Result<_, _>>()?;
+        let group_ids: Vec<Id> = input.group_ids.iter().map(|g| validate::id(g)).collect::<Result<_, _>>()?;
         let existing = input.id.as_deref().map(validate::id).transpose()?;
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
@@ -2463,6 +2487,16 @@ impl VaultService {
                 host_ids.push(text);
             }
         }
+        let mut groups: Vec<String> = Vec::with_capacity(group_ids.len());
+        for id in &group_ids {
+            if !open.groups.contains_key(id) {
+                return Err(not_found("A selected group no longer exists."));
+            }
+            let text = validate::id_text(id);
+            if !groups.contains(&text) {
+                groups.push(text);
+            }
+        }
         let (id, revision) = match existing {
             Some(id) => {
                 (id, open.targets.get(&id).ok_or_else(|| not_found("That target no longer exists."))?.revision + 1)
@@ -2474,8 +2508,10 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1)
             }
         };
-        let record = ExecutionTargetRecord { name, host_ids };
-        let content_len = record.name.len() + record.host_ids.iter().map(String::len).sum::<usize>();
+        let record = ExecutionTargetRecord { name, host_ids, group_ids: groups };
+        let content_len = record.name.len()
+            + record.host_ids.iter().map(String::len).sum::<usize>()
+            + record.group_ids.iter().map(String::len).sum::<usize>();
         self.write(open, id, KIND_EXECUTION_TARGET, revision, Some((&record, content_len))).await?;
         let summary = Self::target_summary(open, &id, &record);
         open.targets.insert(id, Stored { revision, record });
@@ -2940,6 +2976,61 @@ impl VaultService {
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
         Ok(Self::effective_env(open, &id, host).into_iter().map(|(n, v, _)| (n, v)).collect())
+    }
+
+    // ---------- notes (P-30) ----------
+
+    fn note_view(stored: &StoredNote) -> Note {
+        Note { text: stored.text.clone(), format: stored.format, updated_at: stored.updated_at }
+    }
+
+    /// The note a host or group carries itself.
+    pub async fn note(&self, target: SettingsTarget) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        Ok(Self::workflow_of(open, &target).and_then(|(_, w)| w.record.note.as_ref().map(Self::note_view)))
+    }
+
+    /// Replaces the note of a host or group; empty text (or `None`) deletes it.
+    pub async fn set_note(&self, target: SettingsTarget, input: Option<NoteInput>) -> Result<Option<Note>, IpcError> {
+        let target = Self::settings_target(target)?;
+        let note = match input {
+            Some(input) => validate::note_text(&input.text)?.map(|text| StoredNote {
+                text,
+                format: input.format,
+                updated_at: now_unix(),
+            }),
+            None => None,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        Self::require_target(open, &target)?;
+        let view = note.as_ref().map(Self::note_view);
+        self.update_workflow(open, &target, |w| WorkflowRecord { note, ..w }).await?;
+        Ok(view)
+    }
+
+    /// The notes that apply to a host: its own first, then its groups' (nearest group first).
+    pub async fn host_notes(&self, host_id: &str) -> Result<Vec<HostNote>, IpcError> {
+        let id = validate::id(host_id)?;
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let mut out = Vec::new();
+        if let Some(note) =
+            Self::workflow_of_host(open, &validate::id_text(&id)).and_then(|(_, w)| w.record.note.as_ref())
+        {
+            out.push(HostNote { note: Self::note_view(note), origin: SettingOrigin::Host });
+        }
+        for (group_id, group) in Self::group_chain(open, host) {
+            if let Some(note) = Self::workflow_of_group(open, &group_id).and_then(|(_, w)| w.record.note.as_ref()) {
+                let origin = SettingOrigin::Group { group_id: group_id.clone(), name: group.name.clone() };
+                out.push(HostNote { note: Self::note_view(note), origin });
+            }
+        }
+        Ok(out)
     }
 
     // ---------- startup snippets (SNP-08) ----------
@@ -3837,6 +3928,84 @@ impl VaultService {
         open.glance_settings.clear();
         open.glance_settings.insert(record_id, Stored { revision, record });
         Ok(enabled)
+    }
+}
+
+// security review (P-27)
+impl VaultService {
+    /// Reviews keys, sign-in methods, certificates and known hosts as of `now` (Unix seconds).
+    /// Reads public facts only; nothing is changed and no secret leaves this function.
+    pub async fn security_review(&self, now: u64) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        use crate::security_review::{CertificateFacts, HostFacts, KeyFacts, KnownHostFacts, SignIn, review};
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let keys: Vec<_> = open
+            .ssh_keys
+            .iter()
+            .map(|(id, s)| KeyFacts {
+                id: validate::id_text(id),
+                label: s.record.label.clone(),
+                algorithm: s.record.algorithm.clone(),
+                public_key: s.record.public_key.clone(),
+                passphrase_protected: s.record.passphrase_protected,
+                passphrase_stored: s.record.passphrase.is_some(),
+            })
+            .collect();
+        let certificates: Vec<_> = open
+            .certificates
+            .values()
+            .map(|c| CertificateFacts { key_id: c.record.key_id.clone(), valid_before: c.record.valid_before })
+            .collect();
+        let groups = group_index(open);
+        let hosts: Vec<_> = open
+            .hosts
+            .iter()
+            .map(|(id, s)| {
+                let host = &s.record;
+                let effective = inventory::effective(&groups, host);
+                // The same resolution a connection uses (see `hop_plan`), without reading secrets.
+                let sign_in = match Self::identity_for_host(open, id, host).map(|(_, record, _)| record) {
+                    Some(identity) => match (&identity.key_id, &identity.password) {
+                        (Some(key_id), _) => SignIn::Key(key_id.clone()),
+                        (None, Some(_)) => SignIn::StoredPassword,
+                        (None, None) => SignIn::AskPassword,
+                    },
+                    None => match &effective.auth {
+                        EffectiveAuth::Own(StoredAuth::Password { .. }) => SignIn::StoredPassword,
+                        EffectiveAuth::Own(StoredAuth::Key { key_id }) | EffectiveAuth::GroupKey(key_id) => {
+                            SignIn::Key(key_id.clone())
+                        }
+                        EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => {
+                            SignIn::AskPassword
+                        }
+                    },
+                };
+                HostFacts {
+                    id: validate::id_text(id),
+                    label: host.label.clone(),
+                    ssh: host.protocol.is_ssh(),
+                    endpoint: (tyrminal_ssh::canonical_host(&host.address), effective.port),
+                    sign_in,
+                }
+            })
+            .collect();
+        let known_hosts: Vec<_> = open
+            .known_hosts
+            .iter()
+            .map(|(id, s)| KnownHostFacts {
+                id: validate::id_text(id),
+                host: s.record.host.clone(),
+                port: s.record.port,
+                algorithm: s.record.algorithm.clone(),
+                fingerprint: s.record.fingerprint.clone(),
+            })
+            .collect();
+        Ok(review(&keys, &certificates, &hosts, &known_hosts, now))
+    }
+
+    /// The review as of the current time.
+    pub async fn security_review_now(&self) -> Result<tyrminal_contracts::SecurityReview, IpcError> {
+        self.security_review(now_unix()).await
     }
 }
 

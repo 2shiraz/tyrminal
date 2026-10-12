@@ -14,6 +14,7 @@ import { groupDefaults as groupDefaultsApi, groups as groupsApi, toAppError } fr
 import { msg } from "../../lib/messages";
 import { msgAutosave } from "../../lib/messages-autosave";
 import { validGroupName, validPort, validUsername } from "./fieldRules";
+import { NoteCard } from "../notes/NoteCard";
 import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
 import { groupPath } from "./HostEditor";
 
@@ -264,6 +265,7 @@ export function GroupEditor({
             remove: () => void autosave.commit(async () => void (await write({ releaseProxy: true }))),
           }}
         />
+        {exists && idRef.current !== null && <NoteCard target={{ kind: "group", groupId: idRef.current }} />}
         <ErrorNotice error={autosave.state === "error" && autosave.error ? toAppError(autosave.error) : null} />
         <div className="dialog-actions">
           {idRef.current === null && <p className="hint dialog-actions-hint">{msgAutosave.newGroupHint}</p>}

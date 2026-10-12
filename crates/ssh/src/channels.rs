@@ -89,7 +89,26 @@ impl ShellReader {
 
 /// Writing half of an interactive shell channel. Cheap to share behind an `Arc`.
 pub struct ShellWriter {
-    pub(crate) write: ChannelWriteHalf<Msg>,
+    /// Always `Some` until dropped.
+    pub(crate) write: Option<ChannelWriteHalf<Msg>>,
+    /// Close the channel when this is dropped. Set for a channel on a connection that stays open
+    /// after it (a command channel next to the session's own shell): dropping alone sends nothing,
+    /// so without this the server would keep the channel, and the command, running.
+    pub(crate) close_on_drop: bool,
+}
+
+impl Drop for ShellWriter {
+    fn drop(&mut self) {
+        if !self.close_on_drop {
+            return;
+        }
+        if let (Some(write), Ok(runtime)) = (self.write.take(), tokio::runtime::Handle::try_current()) {
+            runtime.spawn(async move {
+                let _ = write.eof().await;
+                let _ = write.close().await;
+            });
+        }
+    }
 }
 
 impl core::fmt::Debug for ShellWriter {
@@ -99,27 +118,32 @@ impl core::fmt::Debug for ShellWriter {
 }
 
 impl ShellWriter {
+    /// The write half; it is taken only on drop, so this never fails while `self` is usable.
+    fn half(&self) -> Result<&ChannelWriteHalf<Msg>, SshError> {
+        self.write.as_ref().ok_or(SshError::Disconnected(Stage::Connected))
+    }
+
     /// Sends input bytes. Waits when the remote window is full.
     pub async fn write(&self, data: &[u8]) -> Result<(), SshError> {
-        self.write
+        self.half()?
             .data_bytes(Bytes::copy_from_slice(data))
             .await
             .map_err(|e| SshError::from_russh(&e, Stage::Connected))
     }
 
     pub async fn resize(&self, cols: u32, rows: u32) -> Result<(), SshError> {
-        self.write
+        self.half()?
             .window_change(clamp_dimension(cols), clamp_dimension(rows), 0, 0)
             .await
             .map_err(|e| SshError::from_russh(&e, Stage::Connected))
     }
 
     pub async fn eof(&self) -> Result<(), SshError> {
-        self.write.eof().await.map_err(|e| SshError::from_russh(&e, Stage::Connected))
+        self.half()?.eof().await.map_err(|e| SshError::from_russh(&e, Stage::Connected))
     }
 
     pub async fn close(&self) -> Result<(), SshError> {
-        self.write.close().await.map_err(|e| SshError::from_russh(&e, Stage::Connected))
+        self.half()?.close().await.map_err(|e| SshError::from_russh(&e, Stage::Connected))
     }
 }
 

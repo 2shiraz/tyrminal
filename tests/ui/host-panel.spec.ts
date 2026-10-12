@@ -391,7 +391,7 @@ test("clicking a host opens its details beside the list; Escape closes and focus
   await expect(details(page).getByLabel("Name", { exact: true })).toHaveValue("edge-cache");
   await expect(panel(page).getByTestId("host-panel-location")).toHaveText("Local vault");
   // The cards, top to bottom.
-  await expect(panel(page).locator("h3")).toHaveText(["General", "Protocol", "Credentials"]);
+  await expect(panel(page).locator("h3")).toHaveText(["General", "Protocol", "Credentials", "Notes"]);
   await expect(panel(page).getByText("Show more")).toBeVisible();
   await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toHaveAttribute("aria-current", "true");
   // The primary button is always Connect.

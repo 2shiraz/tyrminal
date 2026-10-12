@@ -27,9 +27,12 @@ export function started(s: TransferStarted): Transfer {
   return { id: s.transferId, name: s.name, direction: s.direction, total: s.total, done: 0, state: "running", rate: null, at: 0 };
 }
 
+let refusals = 0;
+
 /** A transfer refused before it started: listed with the reason, like any other failure. */
-export function refused(name: string, direction: TransferDirection, error: string, index: number): Transfer {
-  return { id: `refused-${Date.now()}-${index}`, name, direction, total: null, done: 0, state: "failed", error, rate: null, at: 0 };
+export function refused(name: string, direction: TransferDirection, error: string): Transfer {
+  refusals += 1;
+  return { id: `refused-${refusals}`, name, direction, total: null, done: 0, state: "failed", error, rate: null, at: 0 };
 }
 
 export function applyEvent<T extends Transfer>(t: T, event: TransferEvent, now = performance.now()): T {

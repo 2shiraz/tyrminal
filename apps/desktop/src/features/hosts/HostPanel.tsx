@@ -13,6 +13,7 @@ import { toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useHostAutosave } from "./hostAutosave";
+import { NoteCard } from "../notes/NoteCard";
 import { HostFormCards, type HostFormOptions, groupPath, useHostForm } from "./hostForm";
 
 export type PanelTarget = { kind: "new"; initial?: HostFormOptions["initial"] } | { kind: "edit"; host: HostSummary };
@@ -59,7 +60,9 @@ export function HostPanel({
   const heading = useRef<HTMLHeadingElement>(null);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [connecting, setConnecting] = useState(false);
-  secretRef.current = typedSecret;
+  // An unsaved note counts too: closing asks first instead of dropping it.
+  const [noteDirty, setNoteDirty] = useState(false);
+  secretRef.current = typedSecret || noteDirty;
 
   // A serial host has no address field to start in: focus goes to the panel's heading so it stays
   // inside the panel.
@@ -148,6 +151,7 @@ export function HostPanel({
             }
           />
           <ErrorNotice error={autosave.state === "error" && autosave.error ? toAppError(autosave.error) : null} />
+          {host && <NoteCard target={{ kind: "host", hostId: host.id }} onDirty={setNoteDirty} />}
         </div>
 
         <footer className="host-panel-foot">

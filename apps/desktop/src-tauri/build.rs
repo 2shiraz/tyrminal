@@ -40,6 +40,7 @@ const COMMANDS: &[&str] = &[
     "session_open_ssh",
     "session_open_local",
     "session_open_files",
+    "session_open_exec",
     "session_write",
     "session_resize",
     "session_ack",
@@ -50,6 +51,8 @@ const COMMANDS: &[&str] = &[
     "session_attach",
     "session_diagnostics",
     "session_open_key_install",
+    "containers_list",
+    "container_session_open",
     // files (SFTP)
     "files_pick_upload",
     "files_pick_folder",
@@ -117,6 +120,9 @@ const COMMANDS: &[&str] = &[
     "session_log_delete",
     "session_log_delete_all",
     "session_log_open",
+    "quick_forward_start",
+    "quick_forward_open",
+    "host_port_suggestions_set",
     // agent C: workspaces
     "layout_list",
     "layout_save",
@@ -161,11 +167,16 @@ const COMMANDS: &[&str] = &[
     // compromised-password check (SEC-11)
     "password_check_status",
     "password_check_run",
+    // security review (P-27)
+    "security_review",
     "startup_get",
     "startup_set",
     "startup_effective",
     "group_defaults_get",
     "group_defaults_set",
+    "note_get",
+    "note_set",
+    "note_for_host",
     // LAN discovery
     "discovery_networks",
     "discovery_start",

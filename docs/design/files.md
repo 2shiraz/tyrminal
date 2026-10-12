@@ -1,5 +1,9 @@
 # Files redesign: the Files panel and the SFTP tab
 
+Two steps. The first (PR #42) gave both browsers one table, path bar and transfer drawer. The
+second, "One pane" below, makes the side panel literally one pane of the same component as each
+SFTP pane, and closes the remaining items of the owner's brief.
+
 Follows `docs/design/overhaul.md` §5 "Files (SFTP)". Both file browsers now share one set of
 parts, so they look and behave the same:
 
@@ -95,3 +99,37 @@ Before: `before/dark-sftp-panes.png` · After: `after/dark-sftp-panes.png`,
 Nothing new animates. Hover is a colour change; the drawer folds without a transition; the
 progress bars are scaled with `transform` (composite-only). The indeterminate list progress bar
 already stops under reduced motion.
+
+## One pane
+
+Side by side, the Files panel and an SFTP pane on the same folder:
+`after/dark-side-by-side.png`, `after/light-side-by-side.png`.
+
+`features/files/FilePane.tsx` is the whole browser: toolbar, path, filter, table, row and folder
+menus, inline rename, the bar for several items, keyboard, states and drop highlight. The panel
+binds it to the session's own connection (one pane, or two with Show this computer); each SFTP
+pane binds it to its location. Transfers stay with the owner, through one queue
+(`useTransferQueue.tsx`, jobs in `jobs.ts`) that both use, so conflicts, cancel and Retry behave
+the same everywhere.
+
+- **One toolbar row**: Back, Forward, Up (icon buttons with tooltips), the path (crumbs; click
+  after them or Ctrl+L to type), Filter, Refresh, then New folder, Upload (menu) and "…". The "…"
+  menu holds Show hidden files, the sort (Name, Date modified, Size, Descending), Copy path and the
+  owner's entries (Show this computer, Choose another folder, Disconnect). In the narrow panel
+  Forward moves into "…" and the filter sits behind its button; every other tool stays.
+- **Columns**: Name (icon by kind), Size (right-aligned), Date Modified ("1 h ago", the exact time
+  in a tooltip), Permissions. When the pane is narrow, Permissions goes first and the date next;
+  both stay in the name's tooltip with the full name. Rows are 30 px.
+- **Row menu**: Open, Download, Copy to *the other pane* (F5), the owner's items (Edit, Copy to
+  another server), Rename (F2, in place), Duplicate, Copy path, Permissions, Delete (Del).
+  Duplicate copies within the folder through the server-to-server path and always keeps both
+  (`core-lab:duplicating_on_one_server_keeps_both_and_leaves_the_original_alone`).
+- **Several selected**: a bar above the footer with Download, Copy to, Delete and Clear.
+- **Drop**: the pane that would receive a drag is outlined and says where it copies to. Server
+  panes in the SFTP tab now take files dropped from the desktop too.
+- **Transfers**: Retry on a failed or cancelled row starts it again in that row; the folded drawer
+  is one line with the overall share.
+- **States**: placeholder rows while listing; a refused folder says "No permission to open this
+  folder" with what to do (in place of the list, or above it when a folder opened from the list
+  is refused); an empty folder says how to fill it; a filter with no match offers Clear filter.
+

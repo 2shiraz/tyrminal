@@ -114,7 +114,10 @@ export function ui(s) {
       await s.clickButton("Import key", { within: "dialog" });
       await s.waitGone("dialog");
     },
-    /** Adds a host that signs in with the key labelled `key` (the first key when omitted). */
+    /**
+     * Adds a host that signs in with the key labelled `key` (the first key when omitted). With
+     * `key: null` no key is chosen: the host asks for the password (or an identity signs it in).
+     */
     async addHost({ label, port, user, key }) {
       await api.nav("Hosts");
       await s.clickButton("Add host");
@@ -124,7 +127,7 @@ export function ui(s) {
       await s.clear(portField);
       await s.type(portField, String(port));
       await s.fill("User name", user, { within: HOST_PANEL });
-      await chooseKey(s, key);
+      if (key !== null) await chooseKey(s, key);
       await saveAndCloseHostPanel(s);
     },
     /** Connects to the host card labelled `label`, trusting the server once. */

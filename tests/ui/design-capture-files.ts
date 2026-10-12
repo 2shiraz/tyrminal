@@ -80,21 +80,21 @@ for (const theme of ["dark", "light"] as const) {
     await t("sftp-picker", () => openSftp(page));
     const view = page.getByRole("region", { name: "SFTP file manager" });
     await t("sftp-panes", async () => {
-      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: "Choose folder…" }).click();
-      await view.getByRole("region", { name: "Right pane" }).getByRole("group", { name: "Select host" }).getByRole("button", { name: /^api-gateway/ }).click();
-      await expect(view.getByRole("region", { name: "Right pane" }).getByRole("grid")).toBeVisible();
-      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /README\.md/ }).first().click();
+      await view.getByRole("region", { name: "Left pane", exact: true }).getByRole("button", { name: "Choose folder…" }).click();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("group", { name: "Select host" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await expect(view.getByRole("region", { name: "Right pane", exact: true }).getByRole("grid")).toBeVisible();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("button", { name: /README\.md/ }).first().click();
     });
     await t("sftp-path", async () => {
-      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: "Edit path" }).click();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("button", { name: "Edit path" }).click();
     });
     await page.keyboard.press("Escape");
     await t("sftp-swapped", async () => {
       await view.getByRole("button", { name: "Swap panes" }).click();
-      await view.getByRole("region", { name: "Right pane" }).getByRole("button", { name: /notes\.md/ }).first().click();
+      await view.getByRole("region", { name: "Right pane", exact: true }).getByRole("button", { name: /notes\.md/ }).first().click();
     });
     await t("sftp-menu", async () => {
-      await view.getByRole("region", { name: "Left pane" }).getByRole("button", { name: /deploy\.sh/ }).first().click({ button: "right" });
+      await view.getByRole("region", { name: "Left pane", exact: true }).getByRole("button", { name: /deploy\.sh/ }).first().click({ button: "right" });
       await expect(page.getByRole("menu")).toBeVisible();
     });
     await page.keyboard.press("Escape");

@@ -13,6 +13,8 @@ import type {
   BackupPreview,
   BulkHostChange,
   ConflictChoice,
+  ContainerEngine,
+  ContainerList,
   DiagnosticEntry,
   EditStatus,
   ErrorCode,
@@ -216,6 +218,16 @@ export const sessions = {
     events.onmessage = onEvent;
     return call<SessionOpened>("session_open_key_install", { hostId, events });
   },
+  /**
+   * A run-only connection for running a snippet on a host without an open session (exec
+   * channels, no shell). Trust and sign-in prompts arrive as events; with `interactive` false a
+   * host that needs sign-in input closes with NEEDS_SIGN_IN instead of asking.
+   */
+  openExec(hostId: string, interactive: boolean, onEvent: EventHandler) {
+    const events = new Channel<SessionEvent>();
+    events.onmessage = onEvent;
+    return call<SessionOpened>("session_open_exec", { hostId, interactive, events });
+  },
   /** Sends terminal input as a raw byte body; the session id travels in a header. */
   async write(sessionId: string, bytes: Uint8Array): Promise<void> {
     try {
@@ -229,6 +241,18 @@ export const sessions = {
   close: (sessionId: string) => call<void>("session_close", { sessionId }),
   /** What happened while the session connected (no secrets), also shortly after it ended. */
   diagnostics: (sessionId: string) => call<string[]>("session_diagnostics", { sessionId }),
+  /** P-33: running Docker or Podman containers on the host of a connected SSH session. */
+  containers: (sessionId: string) => call<ContainerList>("containers_list", { sessionId }),
+  /** P-33: a shell in a container, as a new session on the connection of `sessionId`. */
+  openContainer: (
+    sessionId: string,
+    engine: ContainerEngine,
+    containerId: string,
+    cols: number,
+    rows: number,
+    onOutput: OutputHandler,
+    onEvent: EventHandler,
+  ) => call<SessionOpened>("container_session_open", { sessionId, engine, containerId, cols, rows, ...channels(onOutput, onEvent) }),
   answerTrust: (sessionId: string, promptId: string, decision: TrustDecision) =>
     call<void>("session_trust_answer", { sessionId, promptId, decision }),
   /** `secret: null` dismisses the prompt. */
@@ -378,6 +402,15 @@ export const groupDefaults = {
   get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
   set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
     call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
+/** Quick forwards of ports a session's output names (P-24); only after the user accepts. */
+export const quickForward = {
+  start: (sessionId: string, port: number) => call<ActiveTunnelDto>("quick_forward_start", { sessionId, port }),
+  /** Opens http://127.0.0.1:<local port>/ (built natively from the forward); resolves to it. */
+  open: (runId: string) => call<string>("quick_forward_open", { runId }),
+  stop: (runId: string) => call<void>("tunnel_stop", { runId }),
+  setForHost: (hostId: string, enabled: boolean) => call<void>("host_port_suggestions_set", { hostId, enabled }),
 };
 
 export const tunnels = {
@@ -542,6 +575,12 @@ export const passwordCheck = {
   run: () => call<import("@tyrminal/contracts").PasswordCheckReport>("password_check_run"),
 };
 
+// security review (P-27)
+export const securityReview = {
+  /** Findings over the unlocked vault. Read-only, on the device; never a secret. */
+  run: () => call<import("@tyrminal/contracts").SecurityReview>("security_review"),
+};
+
 /** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
 export const startup = {
   get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
@@ -581,4 +620,13 @@ export const glance = {
   get: (sessionId: string) => call<import("@tyrminal/contracts").ServerGlance>("glance_get", { sessionId }),
   hostEnabled: (hostId: string) => call<boolean>("glance_host_get", { hostId }),
   setHostEnabled: (hostId: string, enabled: boolean) => call<boolean>("glance_host_set", { hostId, enabled }),
+};
+
+/** P-30: notes on hosts and groups, stored encrypted in the vault. Empty text deletes a note. */
+export const notes = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").Note | null>("note_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, note: import("@tyrminal/contracts").NoteInput | null) =>
+    call<import("@tyrminal/contracts").Note | null>("note_set", { target, note }),
+  /** A host's own note first, then its groups' (nearest first). */
+  forHost: (hostId: string) => call<import("@tyrminal/contracts").HostNote[]>("note_for_host", { hostId }),
 };
