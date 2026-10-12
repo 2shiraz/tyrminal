@@ -201,6 +201,7 @@ pub fn run() {
             commands::settings::terminal_choices,
             commands::settings::editor_pick_app,
             commands::settings::diagnostics_report,
+            commands::output::terminal_output_save,
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
