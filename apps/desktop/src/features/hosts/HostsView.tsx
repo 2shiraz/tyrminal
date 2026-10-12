@@ -1,14 +1,17 @@
-import type { HostSummary, KeySummary } from "@tyrminal/contracts";
-import { useMemo, useState } from "react";
+import type { BulkHostChange, GroupSummary, HostSummary, KeySummary } from "@tyrminal/contracts";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { type Workspace, panesOf } from "../../app/workspace";
 import { Dialog } from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
-import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, relativeTime } from "../../components/ui/controls";
+import { useToast } from "../../components/ui/Toasts";
+import { Avatar, EmptyState, ErrorNotice, IconButton, Segmented, SkeletonRows, TextField, relativeTime } from "../../components/ui/controls";
 import {
   IconCopy,
   IconEllipsis,
+  IconFolder,
+  IconFolderPlus,
   IconKeyRound,
   IconLayoutGrid,
   IconList,
@@ -20,11 +23,15 @@ import {
   IconServer,
   IconTextCursorInput,
   IconTrash2,
+  IconUpload,
+  IconX,
 } from "../../components/ui/icons";
-import { hosts as hostsApi } from "../../lib/ipc";
+import { groups as groupsApi, hosts as hostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
-import { HostEditor } from "./HostEditor";
+import { GroupEditor, descendantsOf } from "./GroupEditor";
+import { HostEditor, groupPath } from "./HostEditor";
+import { ImportDialog } from "./ImportDialog";
 
 export function authSummary(host: HostSummary, keys: KeySummary[]): string {
   switch (host.auth.kind) {
@@ -35,10 +42,33 @@ export function authSummary(host: HostSummary, keys: KeySummary[]): string {
     case "key": {
       const keyId = host.auth.keyId;
       const key = keys.find((k) => k.id === keyId);
-      return key ? msg.hosts.authKey(key.label) : msg.hosts.authKeyMissing;
+      const text = key ? msg.hosts.authKey(key.label) : msg.hosts.authKeyMissing;
+      return host.inherited.auth ? msg.hosts.authInherited(text) : text;
     }
   }
 }
+
+/** Groups as a depth-first tree with their nesting level, siblings by name. */
+function groupTree(groups: GroupSummary[]): { group: GroupSummary; depth: number }[] {
+  const children = new Map<string | null, GroupSummary[]>();
+  for (const g of groups) {
+    const list = children.get(g.parentId) ?? [];
+    list.push(g);
+    children.set(g.parentId, list);
+  }
+  const out: { group: GroupSummary; depth: number }[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    const list = (children.get(parent) ?? []).sort((a, b) => a.name.localeCompare(b.name));
+    for (const g of list) {
+      out.push({ group: g, depth });
+      if (depth < 16) walk(g.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
+
+type GroupFilter = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
 
 function AuthBadge({ host, keys }: { host: HostSummary; keys: KeySummary[] }) {
   const Icon = host.auth.kind === "key" ? IconKeyRound : host.auth.kind === "stored_password" ? IconLock : IconTextCursorInput;
@@ -55,15 +85,27 @@ type Layout = "grid" | "list";
 type Sort = "name" | "recent";
 
 export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: HostSummary) => void }) {
-  const { hosts, keys, recent } = useVaultData();
+  const { hosts, keys, recent, groups } = useVaultData();
+  const notify = useToast();
   const [query, setQuery] = useState("");
+  const [searched, setSearched] = useState<{ query: string; ids: Set<string> } | null>(null);
   const [layout, setLayout] = useState<Layout>("grid");
   const [sort, setSort] = useState<Sort>("name");
+  const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ host: HostSummary | null; initial?: HostSummary } | null>(null);
   const [deleting, setDeleting] = useState<HostSummary | null>(null);
   const [menu, setMenu] = useState<{ host: HostSummary; anchor: HTMLElement } | null>(null);
+  const [groupMenu, setGroupMenu] = useState<{ group: GroupSummary; anchor: HTMLElement } | null>(null);
+  const [editingGroup, setEditingGroup] = useState<{ group: GroupSummary | null; parentId?: string | null } | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<GroupSummary | null>(null);
+  const [bulk, setBulk] = useState<"move" | "add_tag" | "remove_tag" | "delete" | null>(null);
+  const [importing, setImporting] = useState(false);
   const remove = useAction();
+  const action = useAction();
   const keyList = keys.value ?? [];
+  const groupList = groups.value ?? [];
+  const tree = useMemo(() => groupTree(groupList), [groupList]);
 
   // Hosts with an open session, from the user's own tabs (no probing of servers).
   const connected = useMemo(() => {
@@ -77,22 +119,69 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
     return ids;
   }, [ws]);
 
+  // Search runs in the core (names, addresses, users, tags, group paths; tag:/group: terms).
+  useEffect(() => {
+    const text = query.trim();
+    if (!text) {
+      setSearched(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      hostsApi
+        .search(text)
+        .then((found) => {
+          if (live) setSearched({ query: text, ids: new Set(found.map((h) => h.id)) });
+        })
+        .catch(() => {
+          if (live) setSearched({ query: text, ids: new Set() });
+        });
+    }, 120);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, hosts.value]);
+
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const all = [...(hosts.value ?? [])];
+    let all = [...(hosts.value ?? [])];
+    if (filter.kind === "none") all = all.filter((h) => !h.groupId);
+    if (filter.kind === "group") {
+      const inside = descendantsOf(groupList, filter.id);
+      all = all.filter((h) => h.groupId !== null && inside.has(h.groupId));
+    }
+    if (query.trim() && searched) all = all.filter((h) => searched.ids.has(h.id));
     if (sort === "recent") all.sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0));
-    if (!needle) return all;
-    return all.filter((h) => `${h.label} ${h.address} ${h.username}`.toLowerCase().includes(needle));
-  }, [hosts.value, query, sort]);
+    return all;
+  }, [hosts.value, query, searched, sort, filter, groupList]);
 
   const total = hosts.value?.length ?? 0;
   const reload = () => {
     void hosts.reload();
     void recent.reload();
     void keys.reload();
+    void groups.reload();
   };
+  const selectedIds = [...selected].filter((id) => hosts.value?.some((h) => h.id === id));
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  async function duplicate(host: HostSummary) {
+    const copy = await action.run(() => hostsApi.duplicate(host.id));
+    if (copy) {
+      notify("success", msg.hosts.duplicated(copy.label));
+      reload();
+    }
+  }
 
   const actions = (host: HostSummary, anchor: HTMLElement) => setMenu({ host, anchor });
+  const currentGroupId = filter.kind === "group" ? filter.id : null;
+  const groupName = (id: string | null) => (id ? groupPath(groupList, id) : null);
 
   return (
     <div className="page">
@@ -102,11 +191,81 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             <h1 id="hosts-title">{msg.hosts.title}</h1>
             {total > 0 && <p>{msg.hosts.subtitle(total)}</p>}
           </div>
-          <button type="button" className="btn btn-primary" onClick={() => setEditing({ host: null })}>
-            <IconPlus size={16} />
-            {msg.hosts.add}
-          </button>
+          <div className="row-flex">
+            <button type="button" className="btn" onClick={() => setImporting(true)}>
+              <IconUpload size={15} />
+              {msg.hosts.import}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => setEditing({ host: null })}>
+              <IconPlus size={16} />
+              {msg.hosts.add}
+            </button>
+          </div>
         </div>
+
+        {(total > 0 || groupList.length > 0) && (
+          <div className="group-bar" role="navigation" aria-label={msg.hosts.groupsLabel} data-testid="group-bar">
+            <button type="button" className="chip" aria-pressed={filter.kind === "all"} onClick={() => setFilter({ kind: "all" })}>
+              {msg.hosts.allHosts}
+            </button>
+            {groupList.length > 0 && (
+              <button type="button" className="chip" aria-pressed={filter.kind === "none"} onClick={() => setFilter({ kind: "none" })}>
+                {msg.hosts.ungrouped}
+              </button>
+            )}
+            {tree.map(({ group, depth }) => (
+              <span key={group.id} className="chip-group" style={{ marginInlineStart: depth > 0 ? 4 : 0 }}>
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={filter.kind === "group" && filter.id === group.id}
+                  title={groupPath(groupList, group.id)}
+                  onClick={() => setFilter({ kind: "group", id: group.id })}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setGroupMenu({ group, anchor: event.currentTarget });
+                  }}
+                >
+                  <IconFolder size={13} />
+                  {depth > 0 ? `${"› ".repeat(Math.min(depth, 3))}${group.name}` : group.name}
+                </button>
+                <IconButton size="sm" label={msg.hosts.groupActions(group.name)} aria-haspopup="menu" onClick={(event) => setGroupMenu({ group, anchor: event.currentTarget })}>
+                  <IconEllipsis size={14} />
+                </IconButton>
+              </span>
+            ))}
+            <button type="button" className="chip chip-ghost" onClick={() => setEditingGroup({ group: null, parentId: currentGroupId })}>
+              <IconFolderPlus size={13} />
+              {msg.hosts.newGroup}
+            </button>
+          </div>
+        )}
+
+        {selectedIds.length > 0 && (
+          <div className="bulk-bar" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
+            <strong>{msg.hosts.selected(selectedIds.length)}</strong>
+            {groupList.length > 0 && (
+              <button type="button" className="btn btn-sm" onClick={() => setBulk("move")}>
+                <IconFolder size={13} />
+                {msg.hosts.moveTo}
+              </button>
+            )}
+            <button type="button" className="btn btn-sm" onClick={() => setBulk("add_tag")}>
+              {msg.hosts.addTag}
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setBulk("remove_tag")}>
+              {msg.hosts.removeTag}
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => setBulk("delete")}>
+              <IconTrash2 size={13} />
+              {msg.common.delete}
+            </button>
+            <span className="spacer" />
+            <IconButton size="sm" label={msg.hosts.clearSelection} onClick={() => setSelected(new Set())}>
+              <IconX size={14} />
+            </IconButton>
+          </div>
+        )}
 
         {total > 0 && (
           <div className="toolbar">
@@ -117,6 +276,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                 type="search"
                 placeholder={msg.common.search}
                 aria-label={msg.hosts.searchLabel}
+                title={msg.hosts.searchHelp}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -143,7 +303,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           </div>
         )}
 
-        <ErrorNotice error={hosts.error ?? remove.error} />
+        <ErrorNotice error={hosts.error ?? remove.error ?? action.error} />
 
         {hosts.value === null && !hosts.error && <SkeletonRows count={4} height={64} />}
 
@@ -174,12 +334,35 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
                       actions(host, event.currentTarget);
                     }}
                   >
+                    <input
+                      type="checkbox"
+                      className="host-select"
+                      aria-label={msg.hosts.select(host.label)}
+                      checked={selected.has(host.id)}
+                      data-visible={selected.size > 0}
+                      onChange={() => toggle(host.id)}
+                    />
                     <Avatar label={host.label} />
                     <div className="host-card-main">
                       <span className="host-card-title">
                         <span className="truncate">{host.label}</span>
                       </span>
                       <span className="host-card-dest truncate">{msg.hosts.destination(host.username, host.address, host.port)}</span>
+                      {(host.groupId || host.tags.length > 0) && (
+                        <span className="host-card-tags">
+                          {host.groupId && (
+                            <span className="tag tag-group">
+                              <IconFolder size={11} />
+                              {groupName(host.groupId)}
+                            </span>
+                          )}
+                          {host.tags.map((tag) => (
+                            <span key={tag} className="tag">
+                              {tag}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </div>
                     <div className="host-card-meta">
                       <div className="host-card-badges">
@@ -214,11 +397,14 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           <ul className="list" aria-label={msg.hosts.title} data-testid="host-list">
             {filtered.map((host) => (
               <li key={host.id}>
+                <input type="checkbox" aria-label={msg.hosts.select(host.label)} checked={selected.has(host.id)} onChange={() => toggle(host.id)} />
                 <Avatar label={host.label} />
                 <div className="row-main">
                   <span className="row-title">{host.label}</span>
                   <span className="row-sub">
                     {msg.hosts.destination(host.username, host.address, host.port)} · {authSummary(host, keyList)}
+                    {host.groupId ? ` · ${groupName(host.groupId)}` : ""}
+                    {host.tags.length > 0 ? ` · ${host.tags.join(", ")}` : ""}
                   </span>
                 </div>
                 {connected.has(host.id) && (
@@ -253,7 +439,7 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             {
               label: msg.hosts.duplicate,
               icon: <IconCopy size={15} />,
-              onSelect: () => setEditing({ host: null, initial: { ...menu.host, label: `${menu.host.label} ${msg.hosts.copySuffix}` } }),
+              onSelect: () => void duplicate(menu.host),
             },
             "separator",
             { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeleting(menu.host) },
@@ -266,9 +452,114 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
           host={editing.host}
           initial={editing.initial}
           keys={keyList}
+          groups={groupList}
+          defaultGroupId={currentGroupId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
+            reload();
+          }}
+        />
+      )}
+
+      {groupMenu && (
+        <Menu
+          label={msg.hosts.groupActions(groupMenu.group.name)}
+          anchor={groupMenu.anchor}
+          onClose={() => setGroupMenu(null)}
+          items={[
+            { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => setEditingGroup({ group: groupMenu.group }) },
+            {
+              label: msg.hosts.newGroup,
+              icon: <IconFolderPlus size={15} />,
+              onSelect: () => setEditingGroup({ group: null, parentId: groupMenu.group.id }),
+            },
+            "separator",
+            { label: msg.common.delete, icon: <IconTrash2 size={15} />, tone: "danger", onSelect: () => setDeletingGroup(groupMenu.group) },
+          ]}
+        />
+      )}
+
+      {editingGroup && (
+        <GroupEditor
+          group={editingGroup.group}
+          parentId={editingGroup.parentId ?? null}
+          groups={groupList}
+          keys={keyList}
+          onClose={() => setEditingGroup(null)}
+          onSaved={(saved) => {
+            setEditingGroup(null);
+            setFilter({ kind: "group", id: saved.id });
+            reload();
+          }}
+        />
+      )}
+
+      {deletingGroup && (
+        <Dialog
+          title={msg.hosts.deleteGroupTitle(deletingGroup.name)}
+          role="alertdialog"
+          icon={<IconTrash2 size={18} />}
+          tone="danger"
+          onDismiss={() => setDeletingGroup(null)}
+        >
+          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+            {msg.hosts.deleteGroupBody}
+          </p>
+          <ErrorNotice error={action.error} />
+          <div className="dialog-actions">
+            <button type="button" className="btn" onClick={() => setDeletingGroup(null)} autoFocus data-autofocus>
+              {msg.common.cancel}
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger-solid"
+              disabled={action.pending}
+              onClick={async () => {
+                const target = deletingGroup;
+                const done = await action.run(async () => {
+                  await groupsApi.remove(target.id);
+                  return true;
+                });
+                if (done) {
+                  setDeletingGroup(null);
+                  setFilter({ kind: "all" });
+                  reload();
+                }
+              }}
+            >
+              {msg.common.delete}
+            </button>
+          </div>
+        </Dialog>
+      )}
+
+      {bulk && (
+        <BulkDialog
+          kind={bulk}
+          count={selectedIds.length}
+          groups={groupList}
+          onClose={() => setBulk(null)}
+          onApply={async (change) => {
+            const changed = await action.run(() => hostsApi.bulk(selectedIds, change));
+            setBulk(null);
+            if (changed !== undefined && changed !== null) {
+              notify("success", msg.hosts.bulkDone(changed));
+              setSelected(new Set());
+              reload();
+            }
+          }}
+        />
+      )}
+
+      {importing && (
+        <ImportDialog
+          groups={groupList}
+          intoGroup={currentGroupId}
+          onClose={() => setImporting(false)}
+          onImported={(count) => {
+            setImporting(false);
+            notify("success", msg.hosts.importDone(count));
             reload();
           }}
         />
@@ -300,5 +591,71 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
         </Dialog>
       )}
     </div>
+  );
+}
+
+/** Confirms one bulk change: the target group, the tag, or the deletion. */
+function BulkDialog({
+  kind,
+  count,
+  groups,
+  onClose,
+  onApply,
+}: {
+  kind: "move" | "add_tag" | "remove_tag" | "delete";
+  count: number;
+  groups: GroupSummary[];
+  onClose: () => void;
+  onApply: (change: BulkHostChange) => void;
+}) {
+  const [group, setGroup] = useState("");
+  const [tag, setTag] = useState("");
+  const title =
+    kind === "move" ? msg.hosts.moveTo : kind === "add_tag" ? msg.hosts.addTag : kind === "remove_tag" ? msg.hosts.removeTag : msg.hosts.bulkDeleteTitle(count);
+  const ready = kind === "delete" || kind === "move" || tag.trim() !== "";
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!ready) return;
+    if (kind === "move") onApply({ kind: "move_to_group", groupId: group || null });
+    else if (kind === "add_tag") onApply({ kind: "add_tag", tag: tag.trim() });
+    else if (kind === "remove_tag") onApply({ kind: "remove_tag", tag: tag.trim() });
+    else onApply({ kind: "delete" });
+  }
+  return (
+    <Dialog
+      title={title}
+      {...(kind === "delete" ? { role: "alertdialog" as const, tone: "danger" as const } : {})}
+      icon={kind === "delete" ? <IconTrash2 size={18} /> : <IconFolder size={18} />}
+      onDismiss={onClose}
+    >
+      <form className="stack" onSubmit={submit}>
+        <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
+          {msg.hosts.selected(count)}
+          {kind === "delete" ? `. ${msg.hosts.deleteBody}` : ""}
+        </p>
+        {kind === "move" && (
+          <label className="field">
+            <span className="label">{msg.hosts.group}</span>
+            <select className="select" value={group} onChange={(event) => setGroup(event.target.value)} data-autofocus>
+              <option value="">{msg.hosts.noGroup}</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {groupPath(groups, g.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {(kind === "add_tag" || kind === "remove_tag") && <TextField label={msg.hosts.tagName} value={tag} onChange={setTag} autoFocus maxLength={32} />}
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={onClose} autoFocus={kind === "delete"} data-autofocus={kind === "delete" || undefined}>
+            {msg.common.cancel}
+          </button>
+          <button type="submit" className={kind === "delete" ? "btn btn-danger-solid" : "btn btn-primary"} disabled={!ready}>
+            {kind === "delete" ? msg.common.delete : msg.common.save}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

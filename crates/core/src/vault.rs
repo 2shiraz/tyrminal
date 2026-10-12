@@ -8,17 +8,19 @@
 //! Work that started earlier either completes atomically under the mutex or observes the new
 //! generation and discards its result; nothing decrypted is published after a lock.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tokio::sync::{Mutex, watch};
-use tyrminal_contracts::limits::{MAX_RECENT_HOSTS, MAX_RECORDS_PER_KIND};
+use tyrminal_contracts::limits::{
+    MAX_BULK_HOSTS, MAX_IMPORT_HOSTS, MAX_LABEL_LEN, MAX_RECENT_HOSTS, MAX_RECORDS_PER_KIND, MAX_SEARCH_LEN,
+};
 use tyrminal_contracts::{
-    BackupCredentialKind, BackupPreview, ErrorCode, HostAuth, HostAuthInput, HostInput, HostSummary, IpcError,
-    KeyImportInput, KeySummary, KnownHostSummary, RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState,
-    VaultStatus,
+    BackupCredentialKind, BackupPreview, BulkHostChange, ErrorCode, GroupInput, GroupSummary, HostAuthInput, HostInput,
+    HostSummary, ImportFormat, ImportHost, ImportPreview, IpcError, KeyImportInput, KeySummary, KnownHostSummary,
+    RecoveryKeyIssued, SnippetInput, SnippetSummary, VaultState, VaultStatus,
 };
 use tyrminal_platform::{KeystoreError, SecretStore};
 use tyrminal_ssh::{ClientKey, Endpoint, KnownHost, PresentedHostKey};
@@ -30,9 +32,11 @@ use tyrminal_vault::{
 use zeroize::Zeroizing;
 
 use crate::error::{err, from_backup, from_key, from_storage, from_vault, internal, invalid, locked, not_found};
+use crate::import;
+use crate::inventory::{self, EffectiveAuth, GroupIndex, Query, TreeError};
 use crate::records::{
-    Decoded, HostRecord, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT, KeyRecord,
-    KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
+    Decoded, GroupRecord, HostRecord, KIND_GROUP, KIND_HOST, KIND_KEY, KIND_KNOWN_HOST, KIND_SNIPPET, KIND_TRUST_EVENT,
+    KeyRecord, KnownHostRecord, SnippetRecord, StoredAuth, TrustEventRecord, decode, encode, tombstone,
 };
 use crate::validate;
 
@@ -49,6 +53,7 @@ struct Open {
     ssh_keys: BTreeMap<Id, Stored<KeyRecord>>,
     known_hosts: BTreeMap<Id, Stored<KnownHostRecord>>,
     snippets: BTreeMap<Id, Stored<SnippetRecord>>,
+    groups: BTreeMap<Id, Stored<GroupRecord>>,
 }
 
 impl Open {
@@ -59,6 +64,7 @@ impl Open {
             ssh_keys: BTreeMap::new(),
             known_hosts: BTreeMap::new(),
             snippets: BTreeMap::new(),
+            groups: BTreeMap::new(),
         }
     }
 }
@@ -121,20 +127,92 @@ fn busy() -> IpcError {
     err(ErrorCode::VaultBusy, "The vault is busy with another operation. Try again in a moment.")
 }
 
-fn host_summary(id: &Id, record: &HostRecord) -> HostSummary {
+fn group_index(open: &Open) -> GroupIndex<'_> {
+    open.groups.iter().map(|(id, s)| (validate::id_text(id), &s.record)).collect()
+}
+
+fn host_summary(groups: &GroupIndex<'_>, id: &Id, record: &HostRecord) -> HostSummary {
+    let effective = inventory::effective(groups, record);
     HostSummary {
         id: validate::id_text(id),
         label: record.label.clone(),
         address: record.address.clone(),
-        port: record.port,
-        username: record.username.clone(),
-        auth: match &record.auth {
-            StoredAuth::AskPassword => HostAuth::AskPassword,
-            StoredAuth::Password { .. } => HostAuth::StoredPassword,
-            StoredAuth::Key { key_id } => HostAuth::Key { key_id: key_id.clone() },
-        },
+        port: effective.port,
+        username: effective.username,
+        auth: inventory::auth_summary(&effective.auth),
+        inherited: effective.inherited,
+        group_id: record.group.clone(),
+        tags: record.tags.clone(),
         last_connected_at: record.last_connected_at,
     }
+}
+
+/// Host summaries for which `keep` holds, sorted by label.
+fn sorted_hosts(open: &Open, mut keep: impl FnMut(&HostRecord) -> bool) -> Vec<HostSummary> {
+    let groups = group_index(open);
+    let mut hosts: Vec<_> = open
+        .hosts
+        .iter()
+        .filter(|(_, s)| keep(&s.record))
+        .map(|(id, s)| host_summary(&groups, id, &s.record))
+        .collect();
+    hosts.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+    hosts
+}
+
+fn group_summary(id: &Id, record: &GroupRecord) -> GroupSummary {
+    GroupSummary {
+        id: validate::id_text(id),
+        name: record.name.clone(),
+        parent_id: record.parent.clone(),
+        username: record.username.clone(),
+        port: record.port,
+        key_id: record.key_id.clone(),
+    }
+}
+
+/// A field-by-field copy (the stored password is copied into a new zeroizing buffer).
+fn copy_host(record: &HostRecord) -> HostRecord {
+    let auth = match &record.auth {
+        StoredAuth::Inherit => StoredAuth::Inherit,
+        StoredAuth::AskPassword => StoredAuth::AskPassword,
+        StoredAuth::Password { password } => {
+            StoredAuth::Password { password: Zeroizing::new(password.as_str().to_owned()) }
+        }
+        StoredAuth::Key { key_id } => StoredAuth::Key { key_id: key_id.clone() },
+    };
+    HostRecord {
+        label: record.label.clone(),
+        address: record.address.clone(),
+        port: record.port,
+        username: record.username.clone(),
+        auth,
+        group: record.group.clone(),
+        tags: record.tags.clone(),
+        last_connected_at: record.last_connected_at,
+    }
+}
+
+/// Total string bytes of a host record, which bounds its encoded size.
+fn host_content_len(record: &HostRecord) -> usize {
+    let secret_len = match &record.auth {
+        StoredAuth::Password { password } => password.len(),
+        StoredAuth::Key { key_id } => key_id.len(),
+        StoredAuth::AskPassword | StoredAuth::Inherit => 0,
+    };
+    record.label.len()
+        + record.address.len()
+        + record.username.len()
+        + secret_len
+        + record.group.as_ref().map_or(0, String::len)
+        + record.tags.iter().map(|t| t.len() + 4).sum::<usize>()
+}
+
+fn group_content_len(record: &GroupRecord) -> usize {
+    record.name.len()
+        + record.parent.as_ref().map_or(0, String::len)
+        + record.username.as_ref().map_or(0, String::len)
+        + record.key_id.as_ref().map_or(0, String::len)
 }
 
 fn snippet_summary(id: &Id, record: &SnippetRecord) -> SnippetSummary {
@@ -373,6 +451,7 @@ impl VaultService {
                 KIND_KEY => load!(KeyRecord, open.ssh_keys),
                 KIND_KNOWN_HOST => load!(KnownHostRecord, open.known_hosts),
                 KIND_SNIPPET => load!(SnippetRecord, open.snippets),
+                KIND_GROUP => load!(GroupRecord, open.groups),
                 KIND_TRUST_EVENT => {
                     // Authenticated above; not needed in memory.
                 }
@@ -725,14 +804,15 @@ impl VaultService {
         Ok(RecoveryKeyIssued { recovery_key: key.to_display_string().to_string() })
     }
 
-    async fn write<T: Serialize>(
+    /// Encrypts one record (or a tombstone for `None`) into a row with its write condition.
+    fn seal_row<T: Serialize>(
         &self,
         open: &Open,
         id: Id,
         kind: u16,
         revision: u64,
         record: Option<(&T, usize)>,
-    ) -> Result<(), IpcError> {
+    ) -> Result<(RecordRow, WriteCondition), IpcError> {
         let payload = match record {
             Some((record, content_len)) => encode(record, content_len)?,
             None => tombstone(),
@@ -753,6 +833,18 @@ impl VaultService {
         } else {
             WriteCondition::Replace { expected_revision: revision - 1 }
         };
+        Ok((row, condition))
+    }
+
+    async fn write<T: Serialize>(
+        &self,
+        open: &Open,
+        id: Id,
+        kind: u16,
+        revision: u64,
+        record: Option<(&T, usize)>,
+    ) -> Result<(), IpcError> {
+        let (row, condition) = self.seal_row(open, id, kind, revision, record)?;
         self.db.put_record(row, condition).await.map_err(from_storage)
     }
 
@@ -761,22 +853,52 @@ impl VaultService {
     pub async fn list_hosts(&self) -> Result<Vec<HostSummary>, IpcError> {
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
-        let mut hosts: Vec<_> = open.hosts.iter().map(|(id, s)| host_summary(id, &s.record)).collect();
-        hosts.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
-        Ok(hosts)
+        Ok(sorted_hosts(open, |_| true))
+    }
+
+    /// Hosts matching every term of `query` (see `inventory::Query`); all hosts for an empty one.
+    pub async fn search_hosts(&self, query: &str) -> Result<Vec<HostSummary>, IpcError> {
+        if query.len() > MAX_SEARCH_LEN {
+            return Err(invalid("The search is too long."));
+        }
+        let query = Query::parse(query);
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        if query.is_empty() {
+            return Ok(sorted_hosts(open, |_| true));
+        }
+        let groups = group_index(open);
+        let mut paths: HashMap<Option<String>, String> = HashMap::new();
+        Ok(sorted_hosts(open, |record| {
+            let path = paths
+                .entry(record.group.clone())
+                .or_insert_with(|| inventory::group_path(&groups, record.group.as_deref()).to_lowercase());
+            query.matches([&record.label, &record.address, &record.username], &record.tags, path)
+        }))
     }
 
     pub async fn save_host(&self, input: HostInput) -> Result<HostSummary, IpcError> {
         let label = validate::label(&input.label)?;
         let address = validate::address(&input.address)?;
-        let port = validate::port(input.port)?;
-        let username = validate::username(&input.username)?;
+        let port = match input.port {
+            Some(port) => validate::port(port)?,
+            None => 0,
+        };
+        let username = if input.username.is_empty() { String::new() } else { validate::username(&input.username)? };
+        let tags = validate::tags(&input.tags)?;
         let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let group = input.group_id.as_deref().map(validate::id).transpose()?;
 
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
+        if let Some(group) = &group
+            && !open.groups.contains_key(group)
+        {
+            return Err(not_found("That group no longer exists. Choose another group."));
+        }
 
         let auth = match input.auth {
+            HostAuthInput::Inherit => StoredAuth::Inherit,
             HostAuthInput::AskPassword => StoredAuth::AskPassword,
             HostAuthInput::Key { key_id } => {
                 // No dangling references: the key must exist now.
@@ -813,16 +935,40 @@ impl VaultService {
                 (random_id().map_err(from_vault)?, 1, None)
             }
         };
-        let record = HostRecord { label, address, port, username, auth, last_connected_at };
-        let secret_len = match &record.auth {
-            StoredAuth::Password { password } => password.len(),
-            StoredAuth::Key { key_id } => key_id.len(),
-            StoredAuth::AskPassword => 0,
+        let record = HostRecord {
+            label,
+            address,
+            port,
+            username,
+            auth,
+            group: group.map(|g| validate::id_text(&g)),
+            tags,
+            last_connected_at,
         };
-        let content_len = record.label.len() + record.address.len() + record.username.len() + secret_len;
-        self.write(open, id, KIND_HOST, revision, Some((&record, content_len))).await?;
-        let summary = host_summary(&id, &record);
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
+        let summary = host_summary(&group_index(open), &id, &record);
         open.hosts.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    /// A copy of a host (credentials included, never connected), labelled as a copy.
+    pub async fn duplicate_host(&self, id: &str) -> Result<HostSummary, IpcError> {
+        let source_id = validate::id(id)?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if open.hosts.len() >= MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of hosts."));
+        }
+        let source = &open.hosts.get(&source_id).ok_or_else(|| not_found("That host no longer exists."))?.record;
+        let mut label = format!("{} (copy)", source.label);
+        if label.len() > MAX_LABEL_LEN {
+            label = source.label.clone();
+        }
+        let record = HostRecord { label, last_connected_at: None, ..copy_host(source) };
+        let id = random_id().map_err(from_vault)?;
+        self.write(open, id, KIND_HOST, 1, Some((&record, host_content_len(&record)))).await?;
+        let summary = host_summary(&group_index(open), &id, &record);
+        open.hosts.insert(id, Stored { revision: 1, record });
         Ok(summary)
     }
 
@@ -834,6 +980,77 @@ impl VaultService {
         self.write::<HostRecord>(open, id, KIND_HOST, revision, None).await?;
         open.hosts.remove(&id);
         Ok(())
+    }
+
+    /// Applies one change to several hosts in a single transaction: all of them change, or none
+    /// do. Returns how many hosts changed.
+    pub async fn bulk_update_hosts(&self, ids: &[String], change: BulkHostChange) -> Result<u32, IpcError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        if ids.len() > MAX_BULK_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one change."));
+        }
+        let ids: Vec<Id> = ids.iter().map(|id| validate::id(id)).collect::<Result<_, _>>()?;
+        let tag = match &change {
+            BulkHostChange::AddTag { tag } | BulkHostChange::RemoveTag { tag } => {
+                let tags = validate::tags(std::slice::from_ref(tag))?;
+                Some(tags.into_iter().next().ok_or_else(|| invalid("Enter a tag."))?)
+            }
+            _ => None,
+        };
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let target_group = match &change {
+            BulkHostChange::MoveToGroup { group_id: Some(group) } => {
+                let group = validate::id(group)?;
+                if !open.groups.contains_key(&group) {
+                    return Err(not_found("That group no longer exists."));
+                }
+                Some(validate::id_text(&group))
+            }
+            _ => None,
+        };
+        let mut writes: Vec<(Id, u64, Option<HostRecord>)> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let stored = open.hosts.get(id).ok_or_else(|| not_found("A selected host no longer exists."))?;
+            let next = match &change {
+                BulkHostChange::Delete => None,
+                BulkHostChange::MoveToGroup { .. } => {
+                    Some(HostRecord { group: target_group.clone(), ..copy_host(&stored.record) })
+                }
+                BulkHostChange::AddTag { .. } => {
+                    let mut tags = stored.record.tags.clone();
+                    tags.extend(tag.clone());
+                    Some(HostRecord { tags: validate::tags(&tags)?, ..copy_host(&stored.record) })
+                }
+                BulkHostChange::RemoveTag { .. } => {
+                    let remove = tag.as_deref().unwrap_or_default().to_lowercase();
+                    let tags = stored.record.tags.iter().filter(|t| t.to_lowercase() != remove).cloned().collect();
+                    Some(HostRecord { tags, ..copy_host(&stored.record) })
+                }
+            };
+            writes.push((*id, stored.revision + 1, next));
+        }
+        let rows = writes
+            .iter()
+            .map(|(id, revision, record)| {
+                self.seal_row(open, *id, KIND_HOST, *revision, record.as_ref().map(|r| (r, host_content_len(r))))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        let changed = writes.len() as u32;
+        for (id, revision, record) in writes {
+            match record {
+                Some(record) => {
+                    open.hosts.insert(id, Stored { revision, record });
+                }
+                None => {
+                    open.hosts.remove(&id);
+                }
+            }
+        }
+        Ok(changed)
     }
 
     /// Hosts with a recorded connection, most recent first, at most `MAX_RECENT_HOSTS`.
@@ -859,30 +1076,223 @@ impl VaultService {
             return Ok(());
         };
         let revision = stored.revision + 1;
-        let previous = &stored.record;
-        let auth = match &previous.auth {
-            StoredAuth::AskPassword => StoredAuth::AskPassword,
-            StoredAuth::Password { password } => {
-                StoredAuth::Password { password: Zeroizing::new(password.as_str().to_owned()) }
-            }
-            StoredAuth::Key { key_id } => StoredAuth::Key { key_id: key_id.clone() },
-        };
-        let record = HostRecord {
-            label: previous.label.clone(),
-            address: previous.address.clone(),
-            port: previous.port,
-            username: previous.username.clone(),
-            auth,
-            last_connected_at: Some(now_unix()),
-        };
-        let secret_len = match &record.auth {
-            StoredAuth::Password { password } => password.len(),
-            StoredAuth::Key { key_id } => key_id.len(),
-            StoredAuth::AskPassword => 0,
-        };
-        let content_len = record.label.len() + record.address.len() + record.username.len() + secret_len;
-        self.write(open, id, KIND_HOST, revision, Some((&record, content_len))).await?;
+        let record = HostRecord { last_connected_at: Some(now_unix()), ..copy_host(&stored.record) };
+        self.write(open, id, KIND_HOST, revision, Some((&record, host_content_len(&record)))).await?;
         open.hosts.insert(id, Stored { revision, record });
+        Ok(())
+    }
+
+    // ---------- import ----------
+
+    /// Parses an import source into a preview. Nothing is written.
+    pub async fn import_preview(&self, format: ImportFormat, text: &str) -> Result<ImportPreview, IpcError> {
+        let parsed = match format {
+            ImportFormat::OpensshConfig => import::parse_openssh(text)?,
+            ImportFormat::Csv => import::parse_csv(text)?,
+        };
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let existing: std::collections::HashSet<String> =
+            open.hosts.values().map(|h| h.record.label.to_lowercase()).collect();
+        let duplicates = parsed
+            .hosts
+            .iter()
+            .filter(|h| existing.contains(&h.label.to_lowercase()))
+            .map(|h| h.label.clone())
+            .collect();
+        Ok(ImportPreview { hosts: parsed.hosts, skipped: parsed.skipped, duplicates })
+    }
+
+    /// Creates the previewed hosts (and any missing groups on their paths, under `into_group`)
+    /// in one transaction: every host is created, or none is. Values are validated again here;
+    /// the preview came back through the renderer. Imported hosts ask for a password until a key
+    /// is chosen for them.
+    pub async fn import_hosts(&self, hosts: Vec<ImportHost>, into_group: Option<String>) -> Result<u32, IpcError> {
+        if hosts.len() > MAX_IMPORT_HOSTS {
+            return Err(err(ErrorCode::LimitExceeded, "Too many hosts for one import."));
+        }
+        let hosts = hosts.into_iter().map(import::revalidate).collect::<Result<Vec<_>, _>>()?;
+        let into_group = into_group.as_deref().map(validate::id).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if let Some(group) = &into_group
+            && !open.groups.contains_key(group)
+        {
+            return Err(not_found("That group no longer exists."));
+        }
+        if open.hosts.len() + hosts.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many hosts."));
+        }
+
+        // Resolve every group path, creating the missing groups in this same transaction.
+        let base = into_group.map(|g| validate::id_text(&g));
+        let mut new_groups: Vec<(Id, GroupRecord)> = Vec::new();
+        let mut resolved: HashMap<String, Option<String>> = HashMap::new();
+        for host in &hosts {
+            if resolved.contains_key(&host.group) {
+                continue;
+            }
+            let mut parent = base.clone();
+            for name in host.group.split('/').filter(|s| !s.is_empty()) {
+                let existing = open
+                    .groups
+                    .iter()
+                    .map(|(id, s)| (validate::id_text(id), &s.record))
+                    .chain(new_groups.iter().map(|(id, r)| (validate::id_text(id), r)))
+                    .find(|(_, g)| g.parent == parent && g.name.eq_ignore_ascii_case(name))
+                    .map(|(id, _)| id);
+                parent = Some(match existing {
+                    Some(id) => id,
+                    None => {
+                        let id = random_id().map_err(from_vault)?;
+                        new_groups.push((
+                            id,
+                            GroupRecord {
+                                name: name.to_owned(),
+                                parent: parent.clone(),
+                                username: None,
+                                port: None,
+                                key_id: None,
+                            },
+                        ));
+                        validate::id_text(&id)
+                    }
+                });
+            }
+            resolved.insert(host.group.clone(), parent);
+        }
+        if open.groups.len() + new_groups.len() > MAX_RECORDS_PER_KIND {
+            return Err(err(ErrorCode::LimitExceeded, "The vault cannot hold that many groups."));
+        }
+        {
+            // Depth check against the combined tree.
+            let mut groups = group_index(open);
+            let texts: Vec<(String, &GroupRecord)> =
+                new_groups.iter().map(|(id, r)| (validate::id_text(id), r)).collect();
+            for (id, record) in &texts {
+                groups.insert(id.clone(), record);
+            }
+            if texts.iter().any(|(id, _)| inventory::depth(&groups, id) > tyrminal_contracts::limits::MAX_GROUP_DEPTH) {
+                return Err(invalid("Groups can be nested 16 levels deep at most."));
+            }
+        }
+
+        let mut new_hosts: Vec<(Id, HostRecord)> = Vec::with_capacity(hosts.len());
+        for host in hosts {
+            let group = resolved.get(&host.group).cloned().flatten();
+            let record = HostRecord {
+                label: host.label,
+                address: host.address,
+                port: host.port,
+                username: host.username,
+                auth: StoredAuth::AskPassword,
+                group,
+                tags: host.tags,
+                last_connected_at: None,
+            };
+            new_hosts.push((random_id().map_err(from_vault)?, record));
+        }
+        let mut rows = Vec::with_capacity(new_groups.len() + new_hosts.len());
+        for (id, record) in &new_groups {
+            rows.push(self.seal_row(open, *id, KIND_GROUP, 1, Some((record, group_content_len(record))))?);
+        }
+        for (id, record) in &new_hosts {
+            rows.push(self.seal_row(open, *id, KIND_HOST, 1, Some((record, host_content_len(record))))?);
+        }
+        self.db.put_records(rows).await.map_err(from_storage)?;
+        let created = new_hosts.len() as u32;
+        for (id, record) in new_groups {
+            open.groups.insert(id, Stored { revision: 1, record });
+        }
+        for (id, record) in new_hosts {
+            open.hosts.insert(id, Stored { revision: 1, record });
+        }
+        Ok(created)
+    }
+
+    // ---------- groups ----------
+
+    pub async fn list_groups(&self) -> Result<Vec<GroupSummary>, IpcError> {
+        let inner = self.inner.lock().await;
+        let open = inner.open.as_ref().ok_or_else(locked)?;
+        let groups = group_index(open);
+        let mut list: Vec<(String, GroupSummary)> = open
+            .groups
+            .iter()
+            .map(|(id, s)| {
+                let id_text = validate::id_text(id);
+                let path = inventory::group_path(&groups, Some(&id_text)).to_lowercase();
+                (path, group_summary(id, &s.record))
+            })
+            .collect();
+        list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+        Ok(list.into_iter().map(|(_, g)| g).collect())
+    }
+
+    pub async fn save_group(&self, input: GroupInput) -> Result<GroupSummary, IpcError> {
+        let name = validate::label(&input.name)?;
+        if name.contains('/') {
+            return Err(invalid("Group names cannot contain \"/\"."));
+        }
+        let username = input.username.as_deref().filter(|u| !u.is_empty()).map(validate::username).transpose()?;
+        let port = input.port.map(validate::port).transpose()?;
+        let existing_id = input.id.as_deref().map(validate::id).transpose()?;
+        let parent = input.parent_id.as_deref().map(validate::id).transpose()?;
+        let key_id = input.key_id.as_deref().map(validate::id).transpose()?;
+
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        if let Some(key_id) = &key_id
+            && !open.ssh_keys.contains_key(key_id)
+        {
+            return Err(not_found("That key no longer exists. Choose another key."));
+        }
+        let parent_text = parent.map(|p| validate::id_text(&p));
+        let id_text = existing_id.map(|id| validate::id_text(&id));
+        {
+            let groups = group_index(open);
+            inventory::check_placement(&groups, id_text.as_deref(), parent_text.as_deref()).map_err(|e| match e {
+                TreeError::MissingParent => not_found("The parent group no longer exists."),
+                TreeError::Cycle => invalid("A group cannot be placed inside itself or one of its subgroups."),
+                TreeError::TooDeep => invalid("Groups can be nested 16 levels deep at most."),
+            })?;
+        }
+        let (id, revision) = match existing_id {
+            Some(id) => {
+                let current = open.groups.get(&id).ok_or_else(|| not_found("That group no longer exists."))?;
+                (id, current.revision + 1)
+            }
+            None => {
+                if open.groups.len() >= MAX_RECORDS_PER_KIND {
+                    return Err(err(ErrorCode::LimitExceeded, "The vault holds the maximum number of groups."));
+                }
+                (random_id().map_err(from_vault)?, 1)
+            }
+        };
+        let record =
+            GroupRecord { name, parent: parent_text, username, port, key_id: key_id.map(|k| validate::id_text(&k)) };
+        self.write(open, id, KIND_GROUP, revision, Some((&record, group_content_len(&record)))).await?;
+        let summary = group_summary(&id, &record);
+        open.groups.insert(id, Stored { revision, record });
+        Ok(summary)
+    }
+
+    /// Deletes an empty group. Refused while hosts or subgroups are in it: nothing changes its
+    /// effective settings or loses its place silently.
+    pub async fn delete_group(&self, id: &str) -> Result<(), IpcError> {
+        let group_id = validate::id(id)?;
+        let id_text = validate::id_text(&group_id);
+        let mut inner = self.inner.lock().await;
+        let open = inner.open.as_mut().ok_or_else(locked)?;
+        let revision =
+            open.groups.get(&group_id).ok_or_else(|| not_found("That group no longer exists."))?.revision + 1;
+        if open.hosts.values().any(|h| h.record.group.as_deref() == Some(id_text.as_str()))
+            || open.groups.values().any(|g| g.record.parent.as_deref() == Some(id_text.as_str()))
+        {
+            return Err(err(ErrorCode::InUse, "The group is not empty. Move its hosts and subgroups first."));
+        }
+        self.write::<GroupRecord>(open, group_id, KIND_GROUP, revision, None).await?;
+        open.groups.remove(&group_id);
         Ok(())
     }
 
@@ -1049,8 +1459,12 @@ impl VaultService {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_mut().ok_or_else(locked)?;
         let revision = open.ssh_keys.get(&key_id).ok_or_else(|| not_found("That key no longer exists."))?.revision + 1;
-        if open.hosts.values().any(|h| matches!(&h.record.auth, StoredAuth::Key { key_id } if key_id == id)) {
+        let key_text = validate::id_text(&key_id);
+        if open.hosts.values().any(|h| matches!(&h.record.auth, StoredAuth::Key { key_id } if *key_id == key_text)) {
             return Err(err(ErrorCode::InUse, "Hosts still use this key. Change their sign-in method first."));
+        }
+        if open.groups.values().any(|g| g.record.key_id.as_deref() == Some(key_text.as_str())) {
+            return Err(err(ErrorCode::InUse, "Groups still use this key. Change their default key first."));
         }
         self.write::<KeyRecord>(open, key_id, KIND_KEY, revision, None).await?;
         open.ssh_keys.remove(&key_id);
@@ -1152,18 +1566,27 @@ impl VaultService {
         let inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or_else(locked)?;
         let host = &open.hosts.get(&id).ok_or_else(|| not_found("That host no longer exists."))?.record;
-        let auth = match &host.auth {
-            StoredAuth::AskPassword => PlanAuth::Ask,
-            StoredAuth::Password { password } => PlanAuth::Password(Zeroizing::new(password.as_str().to_owned())),
-            StoredAuth::Key { key_id } => {
-                let key = open.ssh_keys.get(&validate::id(key_id)?).ok_or_else(|| {
-                    not_found("The key this host uses no longer exists. Edit the host to choose another.")
-                })?;
-                PlanAuth::Key {
-                    private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
-                    passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
-                }
+        let groups = group_index(open);
+        let effective = inventory::effective(&groups, host);
+        if effective.username.is_empty() {
+            return Err(invalid("Set a user name on this host or one of its groups."));
+        }
+        let key_plan = |key_id: &str| -> Result<PlanAuth, IpcError> {
+            let key = open.ssh_keys.get(&validate::id(key_id)?).ok_or_else(|| {
+                not_found("The key this host uses no longer exists. Edit the host or its group to choose another.")
+            })?;
+            Ok(PlanAuth::Key {
+                private_key: Zeroizing::new(key.record.private_key.as_str().to_owned()),
+                passphrase: key.record.passphrase.as_ref().map(|p| Zeroizing::new(p.as_str().to_owned())),
+            })
+        };
+        let auth = match &effective.auth {
+            EffectiveAuth::Own(StoredAuth::Password { password }) => {
+                PlanAuth::Password(Zeroizing::new(password.as_str().to_owned()))
             }
+            EffectiveAuth::Own(StoredAuth::Key { key_id }) => key_plan(key_id)?,
+            EffectiveAuth::GroupKey(key_id) => key_plan(key_id)?,
+            EffectiveAuth::Own(StoredAuth::AskPassword | StoredAuth::Inherit) | EffectiveAuth::Ask => PlanAuth::Ask,
         };
         let known_hosts = open
             .known_hosts
@@ -1179,8 +1602,8 @@ impl VaultService {
             .collect();
         Ok(ConnectionPlan {
             host_id: validate::id_text(&id),
-            endpoint: Endpoint::new(host.address.clone(), host.port),
-            username: host.username.clone(),
+            endpoint: Endpoint::new(host.address.clone(), effective.port),
+            username: effective.username.clone(),
             auth,
             known_hosts,
             generation: self.generation(),

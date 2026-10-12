@@ -44,7 +44,13 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `vault_rotate_recovery_key` | passphrase | new recovery key | |
 | `vault_activity` | — | — | Resets the idle auto-lock timer |
 | `host_list` / `host_recent` | — | `HostSummary[]` | Recent: by `last_connected_at`, at most 12 |
-| `host_save` / `host_delete` | `HostInput` / id | `HostSummary` / — | Optimistic concurrency per record |
+| `host_save` / `host_delete` | `HostInput` / id | `HostSummary` / — | Optimistic concurrency per record. Empty user name, `null` port or `inherit` auth: taken from the group chain |
+| `host_search` | query (≤ 256 bytes) | `HostSummary[]` | Every term must match; `tag:x`, `group:x`; runs in the core |
+| `host_duplicate` | id | `HostSummary` | Full copy including a stored password; never connected |
+| `host_bulk` | ids (≤ 10,000), `BulkHostChange` | count | One transaction: every host changes or none does |
+| `group_list` / `group_save` / `group_delete` | — / `GroupInput` / id | `GroupSummary[]` / `GroupSummary` / — | No cycles, depth ≤ 16, parent and key must exist; delete refused while not empty |
+| `import_preview` | `ImportFormat`, text (≤ 1 MiB) | `ImportPreview` | Parses only; nothing is executed, included or written |
+| `import_hosts` | `ImportHost[]`, target group or null | count | Re-validated; hosts and missing groups created in one transaction |
 | `key_list` | — | `KeySummary[]` | Never includes key material |
 | `key_import` / `key_generate` / `key_delete` | `KeyImportInput` / `KeyGenerateInput` / id | `KeySummary` / — | |
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |

@@ -78,6 +78,8 @@ export function HomeView({
         address: parsed.address,
         port: parsed.port,
         username: parsed.username,
+        groupId: null,
+        tags: [],
         auth: { kind: "ask_password" },
       });
       setQuery("");

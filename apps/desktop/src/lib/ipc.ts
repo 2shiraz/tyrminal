@@ -10,9 +10,15 @@ import type {
   BackupCredentialKind,
   BackupFile,
   BackupPreview,
+  BulkHostChange,
   ErrorCode,
+  GroupInput,
+  GroupSummary,
   HostInput,
   HostSummary,
+  ImportFormat,
+  ImportHost,
+  ImportPreview,
   IpcError,
   KeyImportInput,
   KeySummary,
@@ -101,6 +107,24 @@ export const hosts = {
   recent: () => call<HostSummary[]>("host_recent"),
   save: (host: HostInput) => call<HostSummary>("host_save", { host }),
   remove: (id: string) => call<void>("host_delete", { id }),
+  /** Every term must match: words, `tag:name`, `group:path`. */
+  search: (query: string) => call<HostSummary[]>("host_search", { query }),
+  /** A full copy (credentials included), never connected. */
+  duplicate: (id: string) => call<HostSummary>("host_duplicate", { id }),
+  /** One change to many hosts, all or nothing; resolves to how many changed. */
+  bulk: (ids: string[], change: BulkHostChange) => call<number>("host_bulk", { ids, change }),
+};
+
+export const groups = {
+  list: () => call<GroupSummary[]>("group_list"),
+  save: (group: GroupInput) => call<GroupSummary>("group_save", { group }),
+  remove: (id: string) => call<void>("group_delete", { id }),
+};
+
+export const importer = {
+  /** `text` is the content of a file the user chose; nothing is written. */
+  preview: (format: ImportFormat, text: string) => call<ImportPreview>("import_preview", { format, text }),
+  run: (hosts: ImportHost[], intoGroup: string | null) => call<number>("import_hosts", { hosts, intoGroup }),
 };
 
 export const keys = {

@@ -326,9 +326,11 @@ impl Fixture {
             id: None,
             label: label.into(),
             address: "127.0.0.1".into(),
-            port,
+            port: Some(port),
             username: username.into(),
             auth,
+            group_id: None,
+            tags: Vec::new(),
         };
         self.core.vault.save_host(input).await.unwrap().id
     }

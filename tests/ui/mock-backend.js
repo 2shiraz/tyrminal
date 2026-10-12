@@ -38,6 +38,7 @@ export function installMockBackend(options) {
     },
     keys: [],
     hosts: [],
+    groups: [],
     snippets: [],
     knownHosts: [],
     sessions: new Map(),
@@ -49,13 +50,29 @@ export function installMockBackend(options) {
       { id: id(1), label: "Deploy key", algorithm: "ssh-ed25519", fingerprint: "SHA256:3vQ0t1d7m5yY2q2y7c3n0Nq8bC8rS6mXfY1rC4b2h0A", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeSyntheticKeyForUiTests deploy-key", passphraseProtected: false, passphraseStored: false, usedBy: 3 },
       { id: id(2), label: "Legacy RSA", algorithm: "rsa-sha2-512", fingerprint: "SHA256:Q9n2p5yW1t0yX7uYb3dR8kP4mZ2cF6hJ1sL0vN8qA4E", publicKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABFakeSyntheticRsa legacy-rsa", passphraseProtected: true, passphraseStored: true, usedBy: 0 },
     ];
-    const host = (n, label, address, username, port, auth, last) => ({ id: id(100 + n), label, address, port, username, auth, lastConnectedAt: last });
+    const host = (n, label, address, username, port, auth, last, groupId = null, tags = []) => ({
+      id: id(100 + n),
+      label,
+      address,
+      port,
+      username,
+      auth,
+      inherited: { username: false, port: false, auth: false },
+      groupId,
+      tags,
+      lastConnectedAt: last,
+    });
+    state.groups = [
+      { id: id(500), name: "Production", parentId: null, username: null, port: null, keyId: id(1) },
+      { id: id(501), name: "Databases", parentId: id(500), username: "postgres", port: null, keyId: null },
+      { id: id(502), name: "Lab", parentId: null, username: null, port: null, keyId: null },
+    ];
     state.hosts = [
-      host(1, "api-gateway", "10.20.0.11", "deploy", 22, { kind: "key", keyId: id(1) }, now - 600),
-      host(2, "build-runner-03", "ci3.lab.example", "builder", 2222, { kind: "key", keyId: id(1) }, now - 3600 * 5),
-      host(3, "db-primary", "db1.internal.example", "postgres", 22, { kind: "ask_password" }, now - 86400 * 2),
+      host(1, "api-gateway", "10.20.0.11", "deploy", 22, { kind: "key", keyId: id(1) }, now - 600, id(500), ["prod", "web"]),
+      host(2, "build-runner-03", "ci3.lab.example", "builder", 2222, { kind: "key", keyId: id(1) }, now - 3600 * 5, null, ["ci"]),
+      host(3, "db-primary", "db1.internal.example", "postgres", 22, { kind: "ask_password" }, now - 86400 * 2, id(501), ["prod"]),
       host(4, "edge-cache", "203.0.113.24", "ops", 22, { kind: "stored_password" }, null),
-      host(5, "Home lab", "192.168.1.40", "pi", 22, { kind: "key", keyId: id(1) }, now - 86400 * 9),
+      host(5, "Home lab", "192.168.1.40", "pi", 22, { kind: "key", keyId: id(1) }, now - 86400 * 9, id(502)),
       host(6, "staging-web", "stg.example.net", "www", 22, { kind: "ask_password" }, null),
     ];
     const snippet = (n, name, folder, text) => ({ id: id(200 + n), name, folder, text, updatedAt: now - n * 3000 });
@@ -189,6 +206,27 @@ export function installMockBackend(options) {
     if (out) channelSend(s.output, new TextEncoder().encode(out).buffer);
   }
 
+  function groupDefaults(groupId) {
+    const out = { username: null, port: null, keyId: null };
+    let current = state.groups.find((g) => g.id === groupId);
+    for (let d = 0; current && d < 16; d += 1) {
+      out.username ??= current.username;
+      out.port ??= current.port;
+      out.keyId ??= current.keyId;
+      current = state.groups.find((g) => g.id === current.parentId);
+    }
+    return out;
+  }
+  function groupPathOf(groupId) {
+    const names = [];
+    let current = state.groups.find((g) => g.id === groupId);
+    for (let d = 0; current && d < 16; d += 1) {
+      names.unshift(current.name);
+      current = state.groups.find((g) => g.id === current.parentId);
+    }
+    return names.join("/");
+  }
+
   const handlers = {
     "plugin:event|listen": (a) => {
       const lid = nextListener++;
@@ -260,13 +298,106 @@ export function installMockBackend(options) {
     host_recent: () => structuredClone(state.hosts.filter((h) => h.lastConnectedAt).sort((a, b) => b.lastConnectedAt - a.lastConnectedAt)),
     host_save: (a) => {
       const existing = state.hosts.find((h) => h.id === a.host.id);
-      const auth = a.host.auth.kind === "stored_password" ? { kind: "stored_password" } : a.host.auth;
-      const saved = { ...a.host, id: existing?.id ?? id(400 + state.hosts.length), auth, lastConnectedAt: existing?.lastConnectedAt ?? null };
+      const defaults = groupDefaults(a.host.groupId);
+      const inherited = { username: a.host.username === "", port: a.host.port === null, auth: a.host.auth.kind === "inherit" };
+      const auth = inherited.auth
+        ? defaults.keyId
+          ? { kind: "key", keyId: defaults.keyId }
+          : { kind: "ask_password" }
+        : a.host.auth.kind === "stored_password"
+          ? { kind: "stored_password" }
+          : a.host.auth;
+      const saved = {
+        ...a.host,
+        id: existing?.id ?? id(400 + state.hosts.length),
+        username: inherited.username ? (defaults.username ?? "") : a.host.username,
+        port: inherited.port ? (defaults.port ?? 22) : a.host.port,
+        auth,
+        inherited,
+        tags: [...new Set(a.host.tags.map((t) => t.trim()).filter(Boolean))].sort(),
+        lastConnectedAt: existing?.lastConnectedAt ?? null,
+      };
       state.hosts = existing ? state.hosts.map((h) => (h.id === saved.id ? saved : h)) : [...state.hosts, saved];
       return saved;
     },
     host_delete: (a) => {
       state.hosts = state.hosts.filter((h) => h.id !== a.id);
+    },
+    host_search: (a) => {
+      const terms = a.query.toLowerCase().split(/\s+/).filter(Boolean);
+      return structuredClone(
+        state.hosts.filter((h) => {
+          const path = groupPathOf(h.groupId).toLowerCase();
+          return terms.every((t) =>
+            t.startsWith("tag:")
+              ? h.tags.some((tag) => tag.toLowerCase() === t.slice(4))
+              : t.startsWith("group:")
+                ? path.includes(t.slice(6))
+                : `${h.label} ${h.address} ${h.username} ${h.tags.join(" ")} ${path}`.toLowerCase().includes(t),
+          );
+        }),
+      );
+    },
+    host_duplicate: (a) => {
+      const source = state.hosts.find((h) => h.id === a.id);
+      const copy = { ...structuredClone(source), id: id(450 + state.hosts.length), label: `${source.label} (copy)`, lastConnectedAt: null };
+      state.hosts = [...state.hosts, copy];
+      return copy;
+    },
+    host_bulk: (a) => {
+      const ids = new Set(a.ids);
+      if (a.change.kind === "delete") state.hosts = state.hosts.filter((h) => !ids.has(h.id));
+      else
+        state.hosts = state.hosts.map((h) => {
+          if (!ids.has(h.id)) return h;
+          if (a.change.kind === "move_to_group") return { ...h, groupId: a.change.groupId };
+          if (a.change.kind === "add_tag") return { ...h, tags: [...new Set([...h.tags, a.change.tag])].sort() };
+          return { ...h, tags: h.tags.filter((t) => t.toLowerCase() !== a.change.tag.toLowerCase()) };
+        });
+      return a.ids.length;
+    },
+    group_list: () => structuredClone(state.groups),
+    group_save: (a) => {
+      const existing = state.groups.find((g) => g.id === a.group.id);
+      const saved = { ...a.group, id: existing?.id ?? id(600 + state.groups.length) };
+      state.groups = existing ? state.groups.map((g) => (g.id === saved.id ? saved : g)) : [...state.groups, saved];
+      return saved;
+    },
+    group_delete: (a) => {
+      if (state.hosts.some((h) => h.groupId === a.id) || state.groups.some((g) => g.parentId === a.id)) {
+        throw { code: "IN_USE", message: "The group is not empty. Move its hosts and subgroups first." };
+      }
+      state.groups = state.groups.filter((g) => g.id !== a.id);
+    },
+    import_preview: (a) => {
+      // A tiny stand-in for the core parser: one host per "Host <name>" line, ProxyCommand skipped.
+      const hosts = [];
+      const skipped = [];
+      a.text.split("\n").forEach((line, i) => {
+        const [key, value] = line.trim().split(/\s+/);
+        if (key?.toLowerCase() === "host" && value)
+          hosts.push({ label: value, address: value, port: 22, username: "", group: "", tags: [], notes: [] });
+        if (key?.toLowerCase() === "proxycommand")
+          skipped.push({ line: i + 1, text: line.trim(), reason: "runs a command; not imported (commands from imported files are never run)" });
+      });
+      return { hosts, skipped, duplicates: hosts.filter((h) => state.hosts.some((x) => x.label === h.label)).map((h) => h.label) };
+    },
+    import_hosts: (a) => {
+      for (const h of a.hosts) {
+        state.hosts.push({
+          id: id(700 + state.hosts.length),
+          label: h.label,
+          address: h.address,
+          port: h.port,
+          username: h.username,
+          auth: { kind: "ask_password" },
+          inherited: { username: h.username === "", port: false, auth: false },
+          groupId: a.intoGroup,
+          tags: h.tags,
+          lastConnectedAt: null,
+        });
+      }
+      return a.hosts.length;
     },
     key_list: () => structuredClone(state.keys),
     known_host_list: () => structuredClone(state.knownHosts),

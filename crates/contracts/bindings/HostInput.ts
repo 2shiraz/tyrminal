@@ -5,4 +5,12 @@ export type HostInput = {
 /**
  * `None` creates a host; `Some` edits that host.
  */
-id: string | null, label: string, address: string, port: number, username: string, auth: HostAuthInput, };
+id: string | null, label: string, address: string, 
+/**
+ * `None`: inherit from the group chain (default 22).
+ */
+port: number | null, 
+/**
+ * Empty: inherit from the group chain.
+ */
+username: string, auth: HostAuthInput, groupId: string | null, tags: Array<string>, };

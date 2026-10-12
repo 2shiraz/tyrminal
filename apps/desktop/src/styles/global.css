@@ -177,6 +177,7 @@ textarea {
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: start;
   gap: var(--space-3);
 }
 
@@ -1140,6 +1141,16 @@ kbd,
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-1);
+}
+
+/* In a dialog taller than the window, the actions stay in view while the content scrolls. */
+.dialog .dialog-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--space-5));
+  margin-inline: calc(-1 * var(--space-5));
+  margin-bottom: calc(-1 * var(--space-5));
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  background: var(--bg-overlay);
 }
 
 .menu {
@@ -2729,4 +2740,141 @@ button[data-tooltip][data-tooltip-side="right"]:focus-visible::after {
 button[data-tooltip][data-tooltip-side="top"]:hover::after,
 button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   transform: translate(0, 0);
+}
+
+/* ---------- host groups, tags, selection and import ---------- */
+
+.group-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.chip-group {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 260px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.chip-ghost {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-panel);
+  background: var(--accent-soft);
+  font-size: var(--text-sm);
+}
+
+.host-select {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.host-card:hover .host-select,
+.host-card:focus-within .host-select,
+.host-select:checked,
+.host-select[data-visible="true"] {
+  opacity: 1;
+}
+
+.host-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  max-width: 180px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-group {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.import-list {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.import-skipped summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .host-select {
+    transition: none;
+  }
 }
