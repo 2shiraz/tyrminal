@@ -86,6 +86,14 @@ recovery key (the old one stops working at once).
 and a way to sign in (password, stored password, or a key). Hosts can be put in **groups**,
 tagged, searched, duplicated and edited in bulk; a group can open all of its hosts at once.
 
+A **group** can also give its hosts defaults: a user name, port and key, and, under
+**Defaults for hosts in this group**, a route (a jump host and/or a proxy) and an icon. Hosts
+and subgroups use the nearest group's value unless they set their own, and the host editor
+names the group a value comes from. In a host's **Advanced** section, choose between the
+group's route and one for this host only (which can be "connect directly"). A group's jump
+host is never used for that jump host itself, and a change that would make hosts connect
+through each other in a loop is refused.
+
 A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
 
 - **Telnet** is for old equipment only. It is not encrypted: anything you type, including the
@@ -98,6 +106,10 @@ A host's **protocol** is SSH (the default), **Telnet** or a **serial device**:
 
 **Import** reads an OpenSSH `config` file or a CSV file. It shows a preview first and never runs
 anything from the file (`ProxyCommand`, `LocalCommand` and similar are reported, not executed).
+`ProxyJump` becomes a jump host: a hop that names another host of the file is that host, and
+any other hop (`user@host:port`) is imported as a host of its own. A chain that cannot be
+represented (a loop, more than seven jump hosts, or a host that two chains would route
+differently) is imported without a jump host, and the preview says why.
 
 ## Connecting and host keys
 
@@ -195,7 +207,22 @@ overwrite. The local copy is deleted when you close the edit, the session or Tyr
 **Snippets** (Ctrl+Shift+S, ⌘⇧S on macOS) are saved commands, kept encrypted in the vault and
 organized in folders. **Paste** inserts the text (as a bracketed paste when the terminal
 supports it); **Run** inserts it and presses Enter. The panel always shows which session it
-sends to, and nothing runs automatically.
+sends to. Nothing runs automatically except the startup snippets you choose for a host or group
+(below). A snippet with several lines, or one that uses a variable the server refused, is shown
+for review before it is sent.
+
+**Environment variables.** In the Hosts view, choose **Environment…** from a host's or group's
+menu. Hosts get their groups' variables (the nearest group wins) and can set their own. Each
+variable is requested from the server when a session opens. The server applies only names its
+configuration allows (OpenSSH: `AcceptEnv` in `sshd_config`). Any name it refuses is reported
+when you connect and is not set. Values are stored encrypted, but they are not a secret store:
+the remote shell can print them. Snippets can use them as `$NAME`; the run review lists each
+variable a snippet uses and whether this session set it.
+
+**Startup snippets.** The same dialog chooses snippets to run when a session to the host opens:
+the group's list, nothing, or a list of your own, in order. They are typed into the shell only
+after the server's host key is trusted and you are signed in, each followed by Enter. A snippet
+deleted later is skipped.
 
 **Broadcast** sends what you type to several sessions at once. The sessions that receive input
 are marked while broadcast is on.

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-certificate-list"
+description = "Enables the key_certificate_list command without any pre-configured scope."
+commands.allow = ["key_certificate_list"]
+
+[[permission]]
+identifier = "deny-key-certificate-list"
+description = "Denies the key_certificate_list command without any pre-configured scope."
+commands.deny = ["key_certificate_list"]

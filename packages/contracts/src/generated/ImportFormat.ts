@@ -3,4 +3,4 @@
 /**
  * Where imported host definitions come from.
  */
-export type ImportFormat = "openssh_config" | "csv";
+export type ImportFormat = "openssh_config" | "csv" | "putty_reg" | "mobaxterm" | "securecrt";

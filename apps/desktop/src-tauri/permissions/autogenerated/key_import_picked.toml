@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-import-picked"
+description = "Enables the key_import_picked command without any pre-configured scope."
+commands.allow = ["key_import_picked"]
+
+[[permission]]
+identifier = "deny-key-import-picked"
+description = "Denies the key_import_picked command without any pre-configured scope."
+commands.deny = ["key_import_picked"]

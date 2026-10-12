@@ -20,6 +20,7 @@ import {
 } from "../../components/ui/icons";
 import { links, sessions } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
@@ -55,6 +56,13 @@ export interface PaneHandle {
   broadcastable(): boolean;
   /** Input typed in another pane of a broadcasting tab. */
   receiveBroadcast(bytes: Uint8Array): void;
+  /** SSH only: environment variables requested on this connection, and those the server refused. */
+  environment(): SessionEnvironment | null;
+}
+
+export interface SessionEnvironment {
+  sent: string[];
+  rejected: string[];
 }
 
 interface TerminalViewProps {
@@ -111,6 +119,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [link, setLink] = useState<string | null>(null);
   const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
+  const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findCount, setFindCount] = useState({ index: 0, total: 0 });
   const clipboardAllowed = useRef(false);
@@ -139,6 +148,7 @@ export function TerminalView(props: TerminalViewProps) {
     setChanged(null);
     setBanner(null);
     setClosed(null);
+    environment.current = null;
     clipboardAllowed.current = false;
     publish({ state: "connecting", clipboardAllowed: false });
 
@@ -186,6 +196,11 @@ export function TerminalView(props: TerminalViewProps) {
             break;
           case "banner":
             setBanner(event.text);
+            break;
+          // Environment variables the server refused are always reported (SNP-13).
+          case "environment":
+            environment.current = { sent: event.sent, rejected: event.rejected };
+            if (event.rejected.length > 0) notify("danger", msgD.env.rejected(event.rejected));
             break;
           case "negotiated":
             publish({ security: { cipher: event.cipher, kex: event.kex, mac: event.mac, hostKey: event.hostKey, strictKex: event.strictKex } });
@@ -254,6 +269,7 @@ export function TerminalView(props: TerminalViewProps) {
       receiveBroadcast: (bytes) => {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
+      environment: () => environment.current,
     };
     handlers.current.register(handle);
     return () => handlers.current.register(null);

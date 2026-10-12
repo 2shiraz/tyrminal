@@ -351,6 +351,13 @@ type HostConnectionInputDto = import("@tyrminal/contracts").HostConnectionInput;
 type ChainHopDto = import("@tyrminal/contracts").ChainHop;
 
 /** Port forwarding. Rules are vault records; forwards run on a connected session of this window. */
+/** Group defaults for route and appearance (HST-05). */
+export const groupDefaults = {
+  get: (groupId: string) => call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_get", { groupId }),
+  set: (groupId: string, defaults: import("@tyrminal/contracts").GroupDefaultsInput) =>
+    call<import("@tyrminal/contracts").GroupDefaults>("group_defaults_set", { groupId, defaults }),
+};
+
 export const tunnels = {
   list: () => call<TunnelSummaryDto[]>("tunnel_list"),
   save: (tunnel: TunnelInputDto) => call<TunnelSummaryDto>("tunnel_save", { tunnel }),
@@ -368,4 +375,89 @@ export const tunnels = {
     call<ChainHopDto[]>("host_connection_set", { hostId, connection }),
   /** The hosts a connection goes through, first hop first, the host itself last. */
   chain: (hostId: string) => call<ChainHopDto[]>("host_chain", { hostId }),
+};
+
+// agent D: inventory and snippets
+
+/** Presentation settings of hosts (the OS icon), apart from their connection settings. */
+export const appearance = {
+  list: () => call<import("@tyrminal/contracts").HostAppearance[]>("host_appearance_list"),
+  /** Sets or clears (`null`) the OS of several hosts, all or nothing; resolves to how many changed. */
+  setOs: (ids: string[], os: import("@tyrminal/contracts").HostOs | null) => call<number>("host_set_os", { ids, os }),
+};
+
+/** Hosts for trusted known-host records that no host uses yet; import them with `importer.run`. */
+export const knownHostImport = {
+  preview: () => call<ImportPreview>("import_known_hosts_preview"),
+};
+
+/** Key types beyond Ed25519, and OpenSSH user certificates for keys in the keychain. */
+export const keysD = {
+  generate: (label: string, kind: import("@tyrminal/contracts").KeyKind) => call<KeySummary>("key_generate", { label, kind }),
+  certificates: () => call<import("@tyrminal/contracts").KeyCertificate[]>("key_certificate_list"),
+  attachCertificate: (keyId: string, certificate: string) =>
+    call<import("@tyrminal/contracts").KeyCertificate>("key_certificate_attach", { keyId, certificate }),
+  removeCertificate: (keyId: string) => call<void>("key_certificate_remove", { keyId }),
+  /** Native file dialog; the key stays on the native side. `null` if cancelled. */
+  pickFile: () => call<import("@tyrminal/contracts").PickedKeyFile | null>("key_import_pick_file"),
+  importPicked: (label: string, passphrase: string | null, rememberPassphrase: boolean) =>
+    call<KeySummary>("key_import_picked", { label, passphrase, rememberPassphrase }),
+  clearPicked: () => call<void>("key_import_pick_clear"),
+};
+
+/** Snippet runs without a terminal, saved host selections and snippet organization. */
+export const snippetsD = {
+  exec: (snippetId: string, sessionId: string, runId: string) =>
+    call<import("@tyrminal/contracts").SnippetExecResult>("snippet_exec", { snippetId, sessionId, runId }),
+  cancel: (runId: string) => call<void>("snippet_exec_cancel", { runId }),
+  targets: () => call<import("@tyrminal/contracts").ExecutionTarget[]>("execution_target_list"),
+  saveTarget: (target: import("@tyrminal/contracts").ExecutionTargetInput) =>
+    call<import("@tyrminal/contracts").ExecutionTarget>("execution_target_save", { target }),
+  deleteTarget: (id: string) => call<void>("execution_target_delete", { id }),
+  move: (ids: string[], folder: string, copy: boolean) => call<SnippetSummary[]>("snippet_move", { ids, folder, copy }),
+  renameFolder: (from: string, to: string) => call<number>("snippet_folder_rename", { from, to }),
+};
+
+/** Trust keys from an OpenSSH known_hosts file after a preview (text of a file the user picked). */
+export const knownHostsFile = {
+  preview: (text: string) => call<import("@tyrminal/contracts").KnownHostImportPreview>("known_hosts_import_preview", { text }),
+  run: (entries: import("@tyrminal/contracts").KnownHostImportEntry[]) => call<number>("known_hosts_import", { entries }),
+};
+
+/** Opt-in shell integration: status, and install/remove only on the user's explicit action. */
+export const promptMarks = {
+  status: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_status", { target }),
+  install: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_install", { target }),
+  remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
+    call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
+};
+
+/** Reusable identities and which hosts and groups use them. Passwords are write-only. */
+export const identities = {
+  list: () => call<import("@tyrminal/contracts").IdentitySummary[]>("identity_list"),
+  save: (identity: import("@tyrminal/contracts").IdentityInput) =>
+    call<import("@tyrminal/contracts").IdentitySummary>("identity_save", { identity }),
+  /** Resolves to how many hosts and groups were using it. */
+  remove: (id: string) => call<number>("identity_delete", { id }),
+  assignments: () => call<import("@tyrminal/contracts").IdentityAssignment[]>("identity_assignments"),
+  assign: (target: import("@tyrminal/contracts").SettingsTarget, identityId: string | null) =>
+    call<import("@tyrminal/contracts").IdentityAssignment>("identity_assign", { target, identityId }),
+};
+
+/** Environment variables of hosts and groups, and what a host ends up sending. */
+export const environment = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<import("@tyrminal/contracts").EnvVar[]>("env_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, vars: import("@tyrminal/contracts").EnvVar[]) =>
+    call<import("@tyrminal/contracts").EnvVar[]>("env_set", { target, vars }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveEnvVar[]>("env_effective", { hostId }),
+};
+
+/** Startup snippets of a host or group (SNP-08). `null`: inherit the nearest group's list. */
+export const startup = {
+  get: (target: import("@tyrminal/contracts").SettingsTarget) => call<string[] | null>("startup_get", { target }),
+  set: (target: import("@tyrminal/contracts").SettingsTarget, snippetIds: string[] | null) =>
+    call<string[] | null>("startup_set", { target, snippetIds }),
+  effective: (hostId: string) => call<import("@tyrminal/contracts").EffectiveStartup>("startup_effective", { hostId }),
 };

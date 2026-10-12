@@ -137,6 +137,11 @@ pub(crate) struct StoredConnection {
     pub jump_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<StoredProxy>,
+    /// The host's own route, even when it sets neither a jump host nor a proxy (connect
+    /// directly). Without it, a host that sets neither uses its nearest group's route (HST-05).
+    /// Absent in older records, where a host that set neither was direct and no group had a route.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own: bool,
 }
 
 /// An outbound proxy. The password is a secret held in a zeroizing buffer, like host passwords.
@@ -186,6 +191,115 @@ pub(crate) struct TunnelRecord {
     #[serde(default)]
     pub auto_start: bool,
     pub updated_at: u64,
+}
+
+// agent D: inventory and snippets
+// Agent D's record kinds start at 200 so parallel branches never pick the same number.
+pub(crate) const KIND_HOST_APPEARANCE: u16 = 200;
+
+/// Presentation settings of a host (its OS icon), apart from its connection settings. At most
+/// one per host; deleting the host deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct HostAppearanceRecord {
+    pub host_id: String,
+    pub os: tyrminal_contracts::HostOs,
+}
+
+pub(crate) const KIND_KEY_CERTIFICATE: u16 = 201;
+pub(crate) const KIND_EXECUTION_TARGET: u16 = 202;
+
+/// A saved selection of hosts to run snippets on. Host ids may outlive their hosts; readers
+/// skip the missing ones and report how many.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct ExecutionTargetRecord {
+    pub name: String,
+    pub host_ids: Vec<String>,
+}
+
+/// An OpenSSH user certificate for a key in the keychain (public data), checked against the key
+/// when attached. At most one per key; deleting the key deletes it in the same transaction.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct KeyCertificateRecord {
+    pub key_id: String,
+    /// The certificate line (`<type> <base64> [comment]`).
+    pub certificate: String,
+    pub algorithm: String,
+    pub cert_key_id: String,
+    pub principals: Vec<String>,
+    pub valid_after: u64,
+    pub valid_before: u64,
+    pub ca_fingerprint: String,
+}
+
+pub(crate) const KIND_IDENTITY: u16 = 203;
+pub(crate) const KIND_WORKFLOW: u16 = 204;
+
+/// A reusable identity: user name plus a password and/or a key reference. Hosts and groups refer
+/// to it by id, so changing it changes every host that uses it.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct IdentityRecord {
+    pub label: String,
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+}
+
+/// Settings a host or group carries apart from its connection record (identity, environment,
+/// startup snippet). Exactly one of `host_id` / `group_id` is set; at most one record per target.
+/// It is deleted with its host or group, and copied with a duplicated host.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct WorkflowRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
+    /// Environment variables sent with sessions, in order. Values are sensitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<StoredEnv>,
+    /// Snippet ids typed into the shell once it is open (SNP-08). `None` inherits the nearest
+    /// group's list; `Some([])` runs nothing. Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup: Option<Vec<String>>,
+    /// Group defaults for its hosts' route and appearance (HST-05); never set on a host's record,
+    /// whose own values live in its host and appearance records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<StoredProxy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<tyrminal_contracts::HostOs>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct StoredEnv {
+    pub name: String,
+    pub value: Zeroizing<String>,
+}
+
+impl WorkflowRecord {
+    pub fn is_empty(&self) -> bool {
+        self.identity_id.is_none()
+            && self.env.is_empty()
+            && self.startup.is_none()
+            && self.jump_host.is_none()
+            && self.proxy.is_none()
+            && self.os.is_none()
+    }
+
+    pub fn content_len(&self) -> usize {
+        self.host_id.as_ref().map_or(0, String::len)
+            + self.group_id.as_ref().map_or(0, String::len)
+            + self.identity_id.as_ref().map_or(0, String::len)
+            + self.env.iter().map(|e| e.name.len() + e.value.len() + 8).sum::<usize>()
+            + self.startup.as_ref().map_or(0, |ids| ids.iter().map(|id| id.len() + 4).sum())
+            + StoredConnection { jump_host: self.jump_host.clone(), proxy: self.proxy.clone(), own: false }
+                .content_len()
+            + 16
+    }
 }
 
 /// A writer that never reallocates: the buffer is sized up front, so serializing a secret does

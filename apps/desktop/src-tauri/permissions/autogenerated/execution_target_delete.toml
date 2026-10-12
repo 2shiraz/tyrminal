@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execution-target-delete"
+description = "Enables the execution_target_delete command without any pre-configured scope."
+commands.allow = ["execution_target_delete"]
+
+[[permission]]
+identifier = "deny-execution-target-delete"
+description = "Denies the execution_target_delete command without any pre-configured scope."
+commands.deny = ["execution_target_delete"]

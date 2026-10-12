@@ -12,14 +12,14 @@ use crate::validate;
 /// Skipped lines reported in one preview; more are summarized in a final entry.
 const MAX_SKIPPED: usize = 500;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Parsed {
     pub hosts: Vec<ImportHost>,
     pub skipped: Vec<ImportSkipped>,
 }
 
 impl Parsed {
-    fn skip(&mut self, line: usize, text: &str, reason: &str) {
+    pub(crate) fn skip(&mut self, line: usize, text: &str, reason: &str) {
         if self.skipped.len() < MAX_SKIPPED {
             let mut shown: String = text.chars().filter(|c| !c.is_control()).take(120).collect();
             if text.chars().count() > 120 {
@@ -36,7 +36,7 @@ impl Parsed {
     }
 }
 
-fn check_size(text: &str) -> Result<(), IpcError> {
+pub(crate) fn check_size(text: &str) -> Result<(), IpcError> {
     if text.len() > MAX_IMPORT_LEN {
         return Err(invalid("The file is too large to import (1 MiB at most)."));
     }
@@ -44,7 +44,7 @@ fn check_size(text: &str) -> Result<(), IpcError> {
 }
 
 /// Validates one candidate host the same way the host editor does. `Err` carries the reason.
-fn checked(mut host: ImportHost) -> Result<ImportHost, String> {
+pub(crate) fn checked(mut host: ImportHost) -> Result<ImportHost, String> {
     let message = |e: IpcError| e.message;
     host.label = validate::label(&host.label).map_err(message)?;
     host.address = validate::address(&host.address).map_err(message)?;
@@ -62,8 +62,10 @@ fn checked(mut host: ImportHost) -> Result<ImportHost, String> {
 
 /// Validates a previewed host again when it comes back from the renderer to be imported.
 pub(crate) fn revalidate(host: ImportHost) -> Result<ImportHost, IpcError> {
-    checked(ImportHost { notes: Vec::new(), ..host })
-        .map_err(|_| invalid("An imported host is not valid. Preview the file again."))
+    let jump_via = host.jump_via.as_deref().map(validate::label).transpose()?;
+    let host = checked(ImportHost { notes: Vec::new(), jump_via: None, ..host })
+        .map_err(|_| invalid("An imported host is not valid. Preview the file again."))?;
+    Ok(ImportHost { jump_via, ..host })
 }
 
 // ---------- OpenSSH client configuration ----------
@@ -71,13 +73,15 @@ pub(crate) fn revalidate(host: ImportHost) -> Result<ImportHost, IpcError> {
 /// Directives that run programs, read other files or open listeners. They are never acted on;
 /// the preview names them so the user knows what was left out.
 const NOT_IMPORTED: &[(&str, &str)] = &[
-    ("proxycommand", "runs a command; not imported (commands from imported files are never run)"),
+    (
+        "proxycommand",
+        "runs a command; ignored (commands from imported files are never run). Use ProxyJump or set a jump host or proxy in the host editor",
+    ),
     ("localcommand", "runs a command; not imported (commands from imported files are never run)"),
     ("permitlocalcommand", "allows local commands; not imported"),
     ("knownhostscommand", "runs a command; not imported (commands from imported files are never run)"),
     ("remotecommand", "runs a command on the server; not imported"),
     ("include", "reads other files; not followed"),
-    ("proxyjump", "jump hosts are not imported yet"),
     ("localforward", "port forwarding is not imported yet"),
     ("remoteforward", "port forwarding is not imported yet"),
     ("dynamicforward", "port forwarding is not imported yet"),
@@ -93,6 +97,10 @@ struct Options {
     port: Option<String>,
     user: Option<String>,
     identity_file: Option<String>,
+    /// `ProxyJump` as written: comma-separated `[user@]host[:port]` hops, or `none`.
+    proxy_jump: Option<String>,
+    /// A `ProxyCommand` applies (it is never run; the host gets a note).
+    proxy_command: bool,
 }
 
 struct Block {
@@ -182,6 +190,8 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
     let mut blocks = vec![Block { patterns: vec!["*".into()], options: Options::default() }];
     let mut aliases: Vec<(usize, String)> = Vec::new();
     let mut in_match = false;
+    // (line, host label, ProxyJump value) for hosts that have one.
+    let mut jumps: Vec<(usize, String, String)> = Vec::new();
 
     for (index, line) in text.lines().enumerate() {
         let number = index + 1;
@@ -210,12 +220,17 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
             }
             _ if in_match => out.skip(number, line, "inside a Match block; not imported"),
             _ => {
+                if keyword == "proxycommand"
+                    && let Some(block) = blocks.last_mut()
+                {
+                    block.options.proxy_command = true;
+                }
                 if let Some((_, reason)) = NOT_IMPORTED.iter().find(|(k, _)| *k == keyword) {
                     out.skip(number, line, reason);
                     continue;
                 }
                 let Some(block) = blocks.last_mut() else { continue };
-                if matches!(keyword.as_str(), "hostname" | "port" | "user") && args.len() != 1 {
+                if matches!(keyword.as_str(), "hostname" | "port" | "user" | "proxyjump") && args.len() != 1 {
                     // OpenSSH rejects these too ("garbage at end of line").
                     out.skip(number, line, "expects exactly one value; not imported");
                     continue;
@@ -226,6 +241,7 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
                     "port" => &mut block.options.port,
                     "user" => &mut block.options.user,
                     "identityfile" => &mut block.options.identity_file,
+                    "proxyjump" => &mut block.options.proxy_jump,
                     // Everything else (ciphers, timeouts, ...) is left to Tyrminal's own defaults.
                     _ => continue,
                 };
@@ -246,6 +262,8 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
             options.port = options.port.or_else(|| block.options.port.clone());
             options.user = options.user.or_else(|| block.options.user.clone());
             options.identity_file = options.identity_file.or_else(|| block.options.identity_file.clone());
+            options.proxy_jump = options.proxy_jump.or_else(|| block.options.proxy_jump.clone());
+            options.proxy_command |= block.options.proxy_command;
         }
         let address = options.host_name.unwrap_or_else(|| alias.clone()).replace("%h", &alias);
         if address.contains('%') {
@@ -266,6 +284,12 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
                 "Uses the key file {identity}, which was not imported. Import that key in the keychain and choose it for this host."
             ));
         }
+        if options.proxy_command {
+            notes.push(
+                "Its ProxyCommand was ignored (commands from imported files are never run). Set a jump host or proxy in the host editor if it needs one."
+                    .into(),
+            );
+        }
         let candidate = ImportHost {
             label: alias.clone(),
             address,
@@ -274,13 +298,180 @@ pub(crate) fn parse_openssh(text: &str) -> Result<Parsed, IpcError> {
             group: String::new(),
             tags: Vec::new(),
             notes,
+            jump_via: None,
         };
         match checked(candidate) {
-            Ok(host) => out.hosts.push(host),
+            Ok(host) => {
+                if let Some(jump) = options.proxy_jump.filter(|j| !j.eq_ignore_ascii_case("none")) {
+                    jumps.push((line, host.label.clone(), jump));
+                }
+                out.hosts.push(host);
+            }
             Err(reason) => out.skip(line, &format!("Host {alias}"), &reason),
         }
     }
+    convert_jumps(&mut out, &jumps);
     Ok(out)
+}
+
+/// One `ProxyJump` hop: `[user@]host[:port]`, `[user@][v6]:port`, or `ssh://[user@]host[:port]`.
+fn parse_hop(spec: &str) -> Option<(Option<String>, String, Option<u16>)> {
+    let spec = spec.strip_prefix("ssh://").unwrap_or(spec);
+    let (user, rest) = match spec.rsplit_once('@') {
+        Some((user, rest)) => (Some(user.to_owned()), rest),
+        None => (None, spec),
+    };
+    let (host, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let (host, after) = v6.split_once(']')?;
+        let port = match after.strip_prefix(':') {
+            Some(p) => Some(p.parse().ok()?),
+            None if after.is_empty() => None,
+            None => return None,
+        };
+        (host.to_owned(), port)
+    } else {
+        match rest.rsplit_once(':') {
+            Some((host, p)) => (host.to_owned(), Some(p.parse().ok()?)),
+            None => (rest.to_owned(), None),
+        }
+    };
+    (!host.is_empty() && user.as_deref() != Some("")).then_some((user, host, port))
+}
+
+/// Turns `ProxyJump` chains into jump hosts within the import (IMP-02). A hop that names another
+/// host of the file, as written, is that host; any other hop becomes a host of its own. A chain
+/// `a,b` for host `t` means `t` goes through `b`, and `b` through `a`. A chain that would give a
+/// host two different jump hosts, a loop or more than `MAX_CHAIN_HOPS` hosts is not converted:
+/// the host is imported without a jump host and a note says why.
+fn convert_jumps(out: &mut Parsed, jumps: &[(usize, String, String)]) {
+    use std::collections::HashMap;
+    use tyrminal_contracts::limits::MAX_CHAIN_HOPS;
+
+    let index_of = |hosts: &[ImportHost], label: &str| hosts.iter().position(|h| h.label.eq_ignore_ascii_case(label));
+    // Each host's jump host by label, decided by its own ProxyJump first.
+    let mut via: HashMap<String, String> = HashMap::new();
+    let mut chains: Vec<(usize, String, Vec<String>)> = Vec::new();
+    for (line, target, spec) in jumps {
+        let mut hops = Vec::new();
+        let mut failed = None;
+        for hop in spec.split(',') {
+            let Some((user, host, port)) = parse_hop(hop.trim()) else {
+                failed = Some(format!("its ProxyJump hop {hop:?} is not [user@]host[:port]"));
+                break;
+            };
+            // A hop that is exactly another host's name in this file is that host.
+            if user.is_none()
+                && port.is_none()
+                && let Some(i) = index_of(&out.hosts, &host)
+            {
+                hops.push(out.hosts[i].label.clone());
+                continue;
+            }
+            let label = hop.trim().trim_start_matches("ssh://").to_owned();
+            if index_of(&out.hosts, &label).is_none() {
+                let candidate = ImportHost {
+                    label: label.clone(),
+                    address: host,
+                    port: port.unwrap_or(22),
+                    username: user.unwrap_or_default(),
+                    group: String::new(),
+                    tags: Vec::new(),
+                    notes: vec![format!("Created as a jump host from the ProxyJump of {target}.")],
+                    jump_via: None,
+                };
+                match checked(candidate) {
+                    Ok(host) => out.hosts.push(host),
+                    Err(reason) => {
+                        failed = Some(format!("its ProxyJump hop {label} is not valid: {reason}"));
+                        break;
+                    }
+                }
+            }
+            hops.push(label);
+        }
+        match failed {
+            Some(reason) => note(out, target, &format!("Imported without a jump host: {reason}.")),
+            None => {
+                if let Some(last) = hops.last() {
+                    via.insert(target.to_lowercase(), last.clone());
+                }
+                chains.push((*line, target.clone(), hops));
+            }
+        }
+    }
+    // The hops of each chain must go through each other in order.
+    let mut dropped: Vec<(String, String)> = Vec::new();
+    for (_, target, hops) in &chains {
+        let mut links = Vec::new();
+        for pair in hops.windows(2) {
+            links.push((pair[1].clone(), pair[0].clone()));
+        }
+        // As in OpenSSH, the first hop is reached however its own configuration says; a later hop
+        // that has its own, different ProxyJump cannot be represented by one jump host per host.
+        let conflict = links.iter().find(|(host, through)| {
+            dropped.iter().any(|(d, _)| d.eq_ignore_ascii_case(host))
+                || via.get(&host.to_lowercase()).is_some_and(|existing| !existing.eq_ignore_ascii_case(through))
+        });
+        if let Some((host, _)) = conflict.cloned() {
+            via.remove(&target.to_lowercase());
+            dropped.push((target.clone(), format!("its ProxyJump chain disagrees with how {host} is reached")));
+            continue;
+        }
+        for (host, through) in links {
+            via.insert(host.to_lowercase(), through);
+        }
+    }
+    // Dropping one chain can break another that runs through its host: re-check until stable.
+    loop {
+        let broken = chains.iter().find(|(_, target, hops)| {
+            via.get(&target.to_lowercase()).is_some_and(|v| hops.last().is_some_and(|l| l.eq_ignore_ascii_case(v)))
+                && hops
+                    .windows(2)
+                    .any(|pair| !via.get(&pair[1].to_lowercase()).is_some_and(|v| v.eq_ignore_ascii_case(&pair[0])))
+        });
+        let Some((_, target, _)) = broken else { break };
+        via.remove(&target.to_lowercase());
+        dropped.push((target.clone(), "a jump host in its ProxyJump chain could not be converted".into()));
+    }
+    for (target, reason) in &dropped {
+        note(out, target, &format!("Imported without a jump host: {reason}."));
+    }
+    // Loops and over-long chains.
+    let mut too_long = Vec::new();
+    for host in &out.hosts {
+        let mut seen = vec![host.label.to_lowercase()];
+        let mut current = host.label.to_lowercase();
+        while let Some(next) = via.get(&current) {
+            let next = next.to_lowercase();
+            if seen.contains(&next) || seen.len() + 1 > MAX_CHAIN_HOPS {
+                too_long.push(host.label.clone());
+                break;
+            }
+            seen.push(next.clone());
+            current = next;
+        }
+    }
+    for label in too_long {
+        if via.remove(&label.to_lowercase()).is_some() {
+            note(
+                out,
+                &label,
+                "Imported without a jump host: its ProxyJump chain loops or is longer than 7 jump hosts.",
+            );
+        }
+    }
+    for host in &mut out.hosts {
+        if let Some(through) = via.get(&host.label.to_lowercase()) {
+            host.notes.push(format!("Goes through the jump host {through} (from ProxyJump)."));
+            host.jump_via = Some(through.clone());
+        }
+    }
+}
+
+fn note(out: &mut Parsed, label: &str, text: &str) {
+    if let Some(host) = out.hosts.iter_mut().find(|h| h.label.eq_ignore_ascii_case(label)) {
+        host.notes.push(text.to_owned());
+    }
 }
 
 // ---------- CSV ----------
@@ -392,6 +583,7 @@ pub(crate) fn parse_csv(text: &str) -> Result<Parsed, IpcError> {
             group: get(4),
             tags: get(5).split(';').map(str::to_owned).collect(),
             notes: Vec::new(),
+            jump_via: None,
         };
         match checked(candidate) {
             Ok(host) => out.hosts.push(host),
@@ -460,11 +652,100 @@ Host evil
         assert!(has("Match blocks are not imported"), "{reasons:?}");
         assert!(has("inside a Match block"), "{reasons:?}");
         assert!(has("not followed"), "{reasons:?}");
-        assert!(has("jump hosts"), "{reasons:?}");
         assert!(has("Port is not a number"), "{reasons:?}");
         // A HostName with extra values is reported and ignored; the alias is the address, as in ssh.
         assert!(has("expects exactly one value"), "{reasons:?}");
         assert_eq!(parsed.hosts[3].address, "evil");
+    }
+
+    #[test]
+    fn proxy_jump_chains_become_jump_hosts_and_proxy_command_is_ignored() {
+        let config = r#"
+Host bastion
+    HostName bastion.example
+    User ops
+Host inner
+    HostName 10.0.0.9
+    ProxyJump bastion
+Host deep
+    HostName 10.0.0.10
+    ProxyJump bastion,inner
+Host external
+    ProxyJump admin@edge.example:2222
+Host twice
+    ProxyJump=admin@edge.example:2222
+Host other
+Host conflict
+    ProxyJump other,inner
+Host direct
+    ProxyJump none
+Host cmd
+    ProxyCommand nc %h %p
+Host loopa
+    ProxyJump loopb
+Host loopb
+    ProxyJump loopa
+Host badhop
+    ProxyJump "bad host"
+Host v6
+    ProxyJump [2001:db8::1]:2200
+"#;
+        let parsed = parse_openssh(config).unwrap();
+        let host = |label: &str| parsed.hosts.iter().find(|h| h.label == label).unwrap_or_else(|| panic!("{label}"));
+        let via = |label: &str| host(label).jump_via.as_deref();
+        let notes = |label: &str| host(label).notes.join(" | ");
+
+        assert_eq!(via("bastion"), None);
+        assert_eq!(via("inner"), Some("bastion"));
+        // bastion,inner: deep goes through inner, which goes through bastion.
+        assert_eq!(via("deep"), Some("inner"));
+        assert!(notes("deep").contains("Goes through the jump host inner"), "{}", notes("deep"));
+
+        // A hop that is not a host of the file becomes one, once.
+        assert_eq!(via("external"), Some("admin@edge.example:2222"));
+        assert_eq!(via("twice"), Some("admin@edge.example:2222"));
+        let edge = host("admin@edge.example:2222");
+        assert_eq!((edge.address.as_str(), edge.port, edge.username.as_str()), ("edge.example", 2222, "admin"));
+        assert_eq!(parsed.hosts.iter().filter(|h| h.address == "edge.example").count(), 1);
+        assert!(edge.notes[0].contains("Created as a jump host"));
+        let v6 = host("[2001:db8::1]:2200");
+        assert_eq!((v6.address.as_str(), v6.port), ("2001:db8::1", 2200));
+
+        // inner already goes through bastion, so a chain making it go through other is not converted.
+        assert_eq!(via("conflict"), None);
+        assert!(notes("conflict").contains("disagrees with how inner is reached"), "{}", notes("conflict"));
+        assert_eq!(via("inner"), Some("bastion"), "the conflicting chain changes nothing else");
+
+        assert_eq!(via("direct"), None);
+        assert_eq!(via("loopa"), None);
+        assert_eq!(via("loopb"), None);
+        assert!(notes("loopa").contains("loops"), "{}", notes("loopa"));
+        assert_eq!(via("badhop"), None);
+        assert!(notes("badhop").contains("is not valid"), "{}", notes("badhop"));
+
+        // ProxyCommand is never run: the line is listed as ignored and the host says so.
+        assert_eq!(via("cmd"), None);
+        assert!(notes("cmd").contains("ProxyCommand was ignored"), "{}", notes("cmd"));
+        assert!(parsed.skipped.iter().any(|s| s.text.contains("ProxyCommand") && s.reason.contains("never run")));
+
+        // Every jump_via names a host of the same import.
+        for h in &parsed.hosts {
+            if let Some(through) = &h.jump_via {
+                assert!(parsed.hosts.iter().any(|x| &x.label == through), "{} -> {through}", h.label);
+            }
+        }
+    }
+
+    #[test]
+    fn proxy_jump_hops_are_parsed_strictly() {
+        assert_eq!(parse_hop("h"), Some((None, "h".into(), None)));
+        assert_eq!(parse_hop("u@h:2"), Some((Some("u".into()), "h".into(), Some(2))));
+        assert_eq!(parse_hop("ssh://u@h:22"), Some((Some("u".into()), "h".into(), Some(22))));
+        assert_eq!(parse_hop("[::1]:22"), Some((None, "::1".into(), Some(22))));
+        assert_eq!(parse_hop("[::1]"), Some((None, "::1".into(), None)));
+        for bad in ["", "@h", "h:port", "h:99999", "[::1", "[::1]x", "u@"] {
+            assert_eq!(parse_hop(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

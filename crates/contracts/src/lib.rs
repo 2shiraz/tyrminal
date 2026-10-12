@@ -14,8 +14,14 @@ mod dto;
 mod error;
 // agent B: tunnels and history
 mod tunnels;
+// agent D: inventory and snippets
+mod defaults;
+mod inventory;
 
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history
 pub use tunnels::*;
+// agent D: inventory and snippets
+pub use defaults::*;
+pub use inventory::*;

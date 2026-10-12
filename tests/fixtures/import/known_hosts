@@ -1,0 +1,9 @@
+# Synthetic known_hosts for import tests. Keys were generated for this fixture only.
+web.example.net,192.0.2.10 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICayTEJB2Vgj8ezvtzxEstS+HSkr/Rb2Z+T+kTUjEdXi
+[bastion.example.net]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC5T+GshSdrdg3SumkI550YMFONMkLa9itUHKBF1g0FP
+web.example.net ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBHrloI+si7Bxwro+3MZ/H4bN9ugvJzYRaOseFVAgXI1gL1PhcLhnUxD6h7sYGKaLXUFcDr0XomPp4V8nNfpJxcI=
+|1|c3ludGhldGljc2FsdA==|aGFzaGVkaG9zdG5hbWU= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFOYrdyUgf/OjkS724C3qZlXuZVQ9KjYdzCFNZGS9XDt
+*.internal.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFOYrdyUgf/OjkS724C3qZlXuZVQ9KjYdzCFNZGS9XDt
+@cert-authority *.example.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFOYrdyUgf/OjkS724C3qZlXuZVQ9KjYdzCFNZGS9XDt
+@revoked * ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC5T+GshSdrdg3SumkI550YMFONMkLa9itUHKBF1g0FP
+not a key line

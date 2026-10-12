@@ -42,7 +42,7 @@ use crate::folders;
 use crate::handoff::{HANDOFF_TTL, Relay};
 use crate::streams::Streams;
 use crate::validate;
-use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
+use crate::vault::{ConnectionPlan, PlanAuth, StartupItem, VaultService};
 
 /// Where a session's output and events go. Implemented by the adapter over a per-session IPC
 /// channel; `false` means the receiver is gone and the session should end.
@@ -126,6 +126,9 @@ pub struct Sessions {
     ended_logs: Mutex<std::collections::VecDeque<(String, String, Vec<String>)>>,
     // agent B: tunnels and history
     pub(crate) tunnel_runs: crate::tunnels::TunnelRuns,
+    // agent D: inventory and snippets
+    /// Snippet runs on exec channels, with their cancel switches.
+    snippet_runs: crate::snippet_runs::Runs,
 }
 
 impl core::fmt::Debug for Sessions {
@@ -163,6 +166,8 @@ impl Sessions {
             ended_logs: Mutex::new(std::collections::VecDeque::new()),
             // agent B: tunnels and history
             tunnel_runs: crate::tunnels::TunnelRuns::default(),
+            // agent D: inventory and snippets
+            snippet_runs: crate::snippet_runs::Runs::default(),
         })
     }
 
@@ -1429,7 +1434,7 @@ async fn run_ssh(
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
-        Ok((Linked { conn, hops }, reader, writer)) => {
+        Ok((Linked { conn, hops }, reader, writer, startup)) => {
             if let Some(n) = conn.negotiated() {
                 ctx.sink.event(SessionEvent::Negotiated {
                     kex: n.kex,
@@ -1461,6 +1466,7 @@ async fn run_ssh(
             tokio::spawn(async move {
                 sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
             });
+            run_startup(&ctx.entry, startup);
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -1497,16 +1503,28 @@ fn hop_error(e: &SshError) -> IpcError {
 
 async fn connect_ssh(
     ctx: &TaskContext,
-    plan: ConnectionPlan,
+    mut plan: ConnectionPlan,
     cols: u16,
     rows: u16,
-) -> Result<(Linked, ShellReader, ShellWriter), IpcError> {
+) -> Result<(Linked, ShellReader, ShellWriter, Vec<StartupItem>), IpcError> {
+    let env = std::mem::take(&mut plan.env);
+    let (generation, host_id) = (plan.generation, plan.host_id.clone());
     let Linked { conn, hops } = connect_chain(ctx, plan).await?;
+
     ctx.state(SessionState::OpeningChannel);
+    // Startup snippets (SNP-08), read only now that the host is trusted and signed in, under the
+    // plan's generation: after a lock nothing is read or typed.
+    let startup = ctx.vault.session_startup(generation, &host_id).await?;
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
-    let (reader, writer) = conn.open_shell(&pty).await.map_err(|e| from_ssh(&e))?;
+    // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
+    let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
     ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
-    Ok((Linked { conn, hops }, reader, writer))
+    if !env.is_empty() {
+        let sent: Vec<String> = env.iter().map(|(n, _)| n.clone()).collect();
+        ctx.entry.log.note(&crate::connlog::environment_line(&sent, &rejected));
+        ctx.sink.event(SessionEvent::Environment { sent, rejected });
+    }
+    Ok((Linked { conn, hops }, reader, writer, startup))
 }
 
 /// Connects, verifies and signs in to every hop and the host. Opens no channel.
@@ -1680,6 +1698,32 @@ fn sftp_open_error(e: &SshError) -> IpcError {
         }
         other => from_ssh(other),
     }
+}
+
+/// Types a host's startup snippets into its new shell, in order, each followed by Enter, through
+/// the session's own input queue (so they are encoded and ordered like typed input). Called only
+/// once the shell is open, which is after host trust and authentication. Every snippet is noted
+/// in the connection log by name; a deleted one is skipped and noted.
+fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
+    if startup.is_empty() {
+        return;
+    }
+    let entry = Arc::clone(entry);
+    tokio::spawn(async move {
+        for item in startup {
+            let Some(text) = item.text else {
+                entry.log.note("startup snippet skipped: it was deleted");
+                continue;
+            };
+            let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
+            for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+                if entry.input.send(Input::Data(chunk.to_vec())).await.is_err() {
+                    return;
+                }
+            }
+            entry.log.note(&format!("startup snippet \"{}\" typed", item.name));
+        }
+    });
 }
 
 async fn run_local(
@@ -1959,6 +2003,66 @@ async fn pump(
                 }
             },
         }
+    }
+}
+
+// agent D: inventory and snippets
+impl Sessions {
+    /// Runs a saved snippet non-interactively on an exec channel of a session the caller owns
+    /// (multi-host and existing-session execution). The text is read from the vault under the
+    /// session's generation. `run_id` lets the caller cancel with [`Sessions::cancel_snippet_run`].
+    pub async fn exec_snippet(
+        &self,
+        owner: &str,
+        session_id: &str,
+        snippet_id: &str,
+        run_id: &str,
+    ) -> Result<tyrminal_contracts::SnippetExecResult, IpcError> {
+        // Ownership first: a wrong window learns nothing about which snippets exist.
+        let (entry, conn) = self.connection(owner, session_id)?;
+        let text = self.vault.snippet_text(entry.generation, snippet_id).await?;
+        let env = match &entry.host_id {
+            Some(host_id) => self.vault.session_env(host_id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let cancel = self.snippet_runs.start(owner, run_id)?;
+        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
+        self.snippet_runs.finish(run_id);
+        result
+    }
+
+    pub fn cancel_snippet_run(&self, owner: &str, run_id: &str) {
+        self.snippet_runs.cancel(owner, run_id);
+    }
+
+    /// Shell integration on the server of a session the caller owns: what `~/.bashrc` holds.
+    pub async fn integration_status(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_status(&conn).await
+    }
+
+    /// Writes the shell integration block into the server's `~/.bashrc` (explicit user action).
+    pub async fn integration_install(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_install(&conn).await
+    }
+
+    /// Removes the shell integration block from the server's `~/.bashrc`.
+    pub async fn integration_remove(
+        &self,
+        owner: &str,
+        session_id: &str,
+    ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
+        let (_, conn) = self.connection(owner, session_id)?;
+        crate::shell_integration::remote_remove(&conn).await
     }
 }
 

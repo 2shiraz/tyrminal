@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-snippet-exec-cancel"
+description = "Enables the snippet_exec_cancel command without any pre-configured scope."
+commands.allow = ["snippet_exec_cancel"]
+
+[[permission]]
+identifier = "deny-snippet-exec-cancel"
+description = "Denies the snippet_exec_cancel command without any pre-configured scope."
+commands.deny = ["snippet_exec_cancel"]

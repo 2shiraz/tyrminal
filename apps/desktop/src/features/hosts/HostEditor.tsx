@@ -69,8 +69,8 @@ export function HostEditor({
 }) {
   const source = host ?? initial;
   // agent B: tunnels and history
-  const advanced = useHostAdvanced(host?.id ?? null);
   const [groupId, setGroupId] = useState<string | null>(host ? host.groupId : defaultGroupId);
+  const advanced = useHostAdvanced(host?.id ?? null, groupId);
   const [label, setLabel] = useState(host?.label ?? initial?.label ?? initial?.address ?? "");
   const [address, setAddress] = useState(source?.address ?? "");
   // Inherited values show as empty fields with the group's value as a hint.

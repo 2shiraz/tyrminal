@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-host-appearance-list"
+description = "Enables the host_appearance_list command without any pre-configured scope."
+commands.allow = ["host_appearance_list"]
+
+[[permission]]
+identifier = "deny-host-appearance-list"
+description = "Denies the host_appearance_list command without any pre-configured scope."
+commands.deny = ["host_appearance_list"]
