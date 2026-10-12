@@ -1943,6 +1943,57 @@ fn attached(f: &Fixture, window: &'static str, session: String, inbox: mpsc::Unb
     }
 }
 
+/// Duplicate in the file browser: a copy within one server folder through one session, which
+/// always keeps both (the next free name) and never touches the original.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn duplicating_on_one_server_keeps_both_and_leaves_the_original_alone() {
+    let f = fixture().await;
+    let key_id = f.import("ed25519", None, false).await;
+    let a = connected(&f, "a", &key_id).await;
+    let s = &f.core.sessions;
+    let home = s.list_files(WINDOW, &a.session, None).await.unwrap().path;
+    let dir_name = format!("tyr-dup-{}", std::process::id());
+    s.make_dir(WINDOW, &a.session, &home, &dir_name).await.unwrap();
+    let dir = format!("{}/{dir_name}", home.trim_end_matches('/'));
+
+    let local = TempDir::new().unwrap();
+    let data = pattern(3 * 1024 * 1024 + 11, 33);
+    std::fs::write(local.path().join("report.bin"), &data).unwrap();
+    std::fs::create_dir_all(local.path().join("site/assets")).unwrap();
+    std::fs::write(local.path().join("site/assets/a.css"), b"a{}\n").unwrap();
+    for name in ["report.bin", "site"] {
+        let (sink, mut rx) = transfer_sink();
+        s.upload(WINDOW, &a.session, local.path().join(name), &dir, name, ConflictChoice::Ask, sink).await.unwrap();
+        assert!(matches!(transfer_end(&mut rx).await, TransferEvent::Done { .. }));
+    }
+
+    for (name, copy) in [("report.bin", "report (1).bin"), ("site", "site (1)")] {
+        let (sink, mut rx) = transfer_sink();
+        let started = s
+            .copy_between(WINDOW, &a.session, &dir, name, &a.session, &dir, ConflictChoice::KeepBoth, sink)
+            .await
+            .unwrap();
+        assert_eq!(started.name, copy);
+        assert!(matches!(transfer_end(&mut rx).await, TransferEvent::Done { .. }), "{name}");
+    }
+
+    let listing = s.list_files(WINDOW, &a.session, Some(&dir)).await.unwrap();
+    let mut names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["report (1).bin", "report.bin", "site", "site (1)"]);
+    // Both files read back byte for byte; the folder copy has its contents.
+    let back = TempDir::new().unwrap();
+    for name in ["report.bin", "report (1).bin"] {
+        let (sink, mut rx) = transfer_sink();
+        s.download(WINDOW, &a.session, &dir, name, back.path().to_path_buf(), ConflictChoice::Ask, sink).await.unwrap();
+        transfer_end(&mut rx).await;
+        assert!(std::fs::read(back.path().join(name)).unwrap() == data, "{name}");
+    }
+    let inner = s.list_files(WINDOW, &a.session, Some(&format!("{dir}/site (1)/assets"))).await.unwrap();
+    assert_eq!(inner.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["a.css"]);
+}
+
 #[tokio::test]
 #[ignore = "requires the SSH lab (pnpm lab:up)"]
 async fn a_session_moves_to_another_window_and_only_that_window_can_use_it() {

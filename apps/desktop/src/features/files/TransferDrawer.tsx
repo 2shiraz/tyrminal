@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { IconButton } from "../../components/ui/controls";
-import { IconChevronDown, IconCopy, IconDownload, IconUpload, IconX } from "../../components/ui/icons";
+import { IconChevronDown, IconCopy, IconDownload, IconRefreshCw, IconUpload, IconX } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { formatSize, visibleName } from "../sftp/model";
 import { msgFiles } from "./messages";
@@ -28,13 +28,16 @@ const percent = (done: number, total: number | null) => (total ? Math.min(100, M
  * The transfer queue at the bottom of a file browser: a one-line summary with a 3 px bar that
  * opens to one row per transfer (progress, rate, Cancel, the reason a transfer failed).
  */
-export function TransferDrawer({
+export function TransferDrawer<T extends Transfer & { job?: unknown }>({
   transfers,
   onCancel,
+  onRetry,
   onClear,
 }: {
-  transfers: Transfer[];
-  onCancel: (t: Transfer) => void;
+  transfers: T[];
+  onCancel: (t: T) => void;
+  /** Starts a failed or cancelled transfer again (offered when it can be). */
+  onRetry?: ((t: T) => void) | undefined;
   onClear: () => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -76,6 +79,10 @@ export function TransferDrawer({
                         <IconX size={13} />
                       </IconButton>
                     </>
+                  ) : (t.state === "failed" || t.state === "cancelled") && onRetry && t.job ? (
+                    <IconButton size="sm" label={msgFiles.retryTransfer(t.name)} onClick={() => onRetry(t)}>
+                      <IconRefreshCw size={13} />
+                    </IconButton>
                   ) : null}
                 </span>
                 {t.state === "running" && <Bar value={pct} label={t.name} />}

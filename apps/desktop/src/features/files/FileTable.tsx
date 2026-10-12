@@ -3,7 +3,8 @@ import { type DragEvent, type KeyboardEvent, type ReactNode, useEffect, useLayou
 
 import { IconArrowUpDown, IconChevronDown, IconEllipsis, IconFile, IconFolder, IconLink2 } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
-import { type Sort, type SortKey, formatModified, formatSize, modeString, octal, visibleName } from "../sftp/model";
+import { relativeTime } from "../../components/ui/controls";
+import { type Sort, type SortKey, formatModified, formatSize, modeString, visibleName } from "../sftp/model";
 import { msgFiles } from "./messages";
 import { NO_SELECTION, type Selection, TYPE_AHEAD_MS, clickSelect, keySelect, pressFeedback, single, toggleKey, typeAhead } from "./selection";
 
@@ -40,7 +41,6 @@ export function FileTable({
   label,
   entries,
   columns,
-  modeStyle = "symbolic",
   sort,
   onSort,
   selection,
@@ -62,7 +62,6 @@ export function FileTable({
   label: string;
   entries: RemoteEntry[];
   columns: Column[];
-  modeStyle?: "octal" | "symbolic";
   sort?: Sort;
   onSort?: (key: SortKey) => void;
   selection: Selection;
@@ -193,7 +192,6 @@ export function FileTable({
       <table
         ref={tableRef}
         className="ft-table"
-        data-mode={modeStyle}
         role="grid"
         tabIndex={-1}
         aria-multiselectable="true"
@@ -212,7 +210,7 @@ export function FileTable({
           <tr>
             {columns.map((column) => {
               const key = SORTABLE[column];
-              const title = column === "mode" && modeStyle === "octal" ? msgFiles.columns.modeShort : msgFiles.columns[column];
+              const title = msgFiles.columns[column];
               return (
                 <th
                   key={column}
@@ -242,6 +240,8 @@ export function FileTable({
             const isSelected = selection.names.includes(entry.name);
             const isOpening = opening === entry.name;
             const name = visibleName(entry.name);
+            // The full name, permissions and exact date, also where a narrow list has no room for them.
+            const details = [name, modeString(entry), entry.modified != null ? formatModified(entry.modified) : null].filter(Boolean).join("\n");
             const draggable = canDrag?.(entry) ?? false;
             return (
               <tr
@@ -288,7 +288,7 @@ export function FileTable({
                                 <span className={`ft-icon ft-icon-${entry.kind}`} aria-hidden="true">
                                   {isOpening ? <span className="spinner spinner-xs" /> : <EntryIcon entry={entry} />}
                                 </span>
-                                <span className="ft-name-text" title={name}>
+                                <span className="ft-name-text" title={details}>
                                   {name}
                                 </span>
                               </button>
@@ -313,8 +313,8 @@ export function FileTable({
                       );
                     case "modified":
                       return (
-                        <td key={column} className="ft-col-modified">
-                          {formatModified(entry.modified)}
+                        <td key={column} className="ft-col-modified" title={formatModified(entry.modified)}>
+                          {entry.modified == null ? "" : relativeTime(entry.modified)}
                         </td>
                       );
                     case "size":
@@ -326,7 +326,7 @@ export function FileTable({
                     case "mode":
                       return (
                         <td key={column} className="ft-col-mode mono">
-                          {modeStyle === "octal" ? octal(entry.permissions) : modeString(entry)}
+                          {modeString(entry)}
                         </td>
                       );
                   }

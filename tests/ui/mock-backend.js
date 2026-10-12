@@ -741,9 +741,13 @@ export function installMockBackend(options) {
       const transferId = id(9000 + nextTransfer++);
       channelSend(a.events, { type: "progress", done: Math.floor((node.size ?? 0) / 2) });
       window.__mockTransfers.set(transferId, {
-        finish: () => channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 }),
+        finish: () => {
+          if (!fs.has(childPath(a.dstDir, finalName))) addNode(childPath(a.dstDir, finalName), node.kind, node.size ?? null);
+          channelSend(a.events, { type: "done", bytes: node.size ?? 0, files: 1, skipped: 0 });
+        },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: finalName, direction: "copy", total: node.size };
     },
@@ -935,6 +939,7 @@ export function installMockBackend(options) {
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: finalName, direction: "upload", total };
     },
@@ -962,6 +967,7 @@ export function installMockBackend(options) {
         },
         cancel: () => channelSend(a.events, { type: "cancelled" }),
         progress: (done) => channelSend(a.events, { type: "progress", done }),
+        fail: (message) => channelSend(a.events, { type: "failed", error: { code: "IO_ERROR", message } }),
       });
       return { transferId, name: a.name, direction: "download", total: size };
     },

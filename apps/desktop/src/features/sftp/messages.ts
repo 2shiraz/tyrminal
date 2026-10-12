@@ -10,6 +10,7 @@ export const msgSftp = {
   right: "Right pane",
   source: "Location",
   thisComputer: "This computer",
+  thisComputerLower: "this computer",
   connectTitle: "Connect to host",
   connectBody: "Choose a saved host. Tyrminal opens file access only (no terminal), after the usual host-key check and sign-in.",
   selectHost: "Select host",

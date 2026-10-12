@@ -146,14 +146,6 @@
   white-space: nowrap;
 }
 
-.sftp-nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
 .sftp-filter {
   position: relative;
   display: flex;
@@ -181,34 +173,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-
-.sftp-progress {
-  margin-bottom: -2px;
-}
-
-.sftp-footer {
-  flex: none;
-  padding: 4px var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.sftp-drop-hint {
-  position: sticky;
-  bottom: var(--space-3);
-  width: fit-content;
-  margin: var(--space-3) auto 0;
-  padding: 6px var(--space-3);
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  box-shadow: var(--shadow-2);
 }
 
 .sftp-picker {
