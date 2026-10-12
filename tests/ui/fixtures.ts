@@ -18,6 +18,8 @@ export interface MockOptions {
   statusEventFirst?: boolean;
   /** Add a trusted server that no saved host points at. */
   orphanKnownHost?: boolean;
+  /** LAN discovery: the networks the mock offers (default: one, `en0`). */
+  discoveryNetworks?: { id: string; addresses: string[] }[];
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {

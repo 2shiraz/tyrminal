@@ -1,5 +1,5 @@
 import type { BulkHostChange, GroupSummary, HostOs, HostSummary, IdentityAssignment, KeySummary, SettingsTarget } from "@tyrminal/contracts";
-import { type FormEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, type FormEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useVaultData } from "../../app/vaultData";
 import { MAX_PANES, type Workspace, paneCount, panesOf } from "../../app/workspace";
@@ -15,6 +15,7 @@ import {
   IconKeyRound,
   IconLayoutGrid,
   IconList,
+  IconNetwork,
   IconLock,
   IconPencil,
   IconPlay,
@@ -31,7 +32,9 @@ import {
 import { appearance as appearanceApi, groups as groupsApi, hosts as hostsApi, identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
+import { msgDiscovery } from "../../lib/messages-discovery";
 import { useAction } from "../../lib/useAsync";
+import { DiscoveryDialog } from "./DiscoveryDialog";
 import { GroupEditor, descendantsOf } from "./GroupEditor";
 import { HostEditor, groupPath } from "./HostEditor";
 import { ImportDialog } from "./ImportDialog";
@@ -109,7 +112,8 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
   const [sort, setSort] = useState<Sort>("name");
   const [filter, setFilter] = useState<GroupFilter>({ kind: "all" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [editing, setEditing] = useState<{ host: HostSummary | null; initial?: HostSummary } | null>(null);
+  const [editing, setEditing] = useState<{ host: HostSummary | null; initial?: ComponentProps<typeof HostEditor>["initial"] } | null>(null);
+  const [discovering, setDiscovering] = useState(false);
   const [deleting, setDeleting] = useState<HostSummary | null>(null);
   const [menu, setMenu] = useState<{ host: HostSummary; anchor: HTMLElement } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ group: GroupSummary; anchor: HTMLElement } | null>(null);
@@ -295,6 +299,10 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
             {total > 0 && <p>{msg.hosts.subtitle(total)}</p>}
           </div>
           <div className="row-flex">
+            <button type="button" className="btn" onClick={() => setDiscovering(true)}>
+              <IconNetwork size={15} />
+              {msgDiscovery.open}
+            </button>
             <button type="button" className="btn" onClick={() => setImporting(true)}>
               <IconUpload size={15} />
               {msg.hosts.import}
@@ -773,6 +781,20 @@ export function HostsView({ ws, onConnect }: { ws: Workspace; onConnect: (host: 
               notify("success", msgD.inventory.osChanged(ids.length));
               reload();
             }
+          }}
+        />
+      )}
+
+      {discovering && (
+        <DiscoveryDialog
+          onClose={() => setDiscovering(false)}
+          onAdd={(service) => {
+            setDiscovering(false);
+            // The editor shows the announced values for review; nothing is saved until Save.
+            setEditing({
+              host: null,
+              initial: { label: service.name, address: service.addresses[0] ?? service.host, port: service.port, username: "" },
+            });
           }}
         />
       )}

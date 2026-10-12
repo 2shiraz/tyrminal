@@ -125,6 +125,7 @@ pub fn run() {
                 core.sessions.close_all_for_owner(window.label());
                 // agent B: tunnels and history
                 core.sessions.stop_tunnels_for_owner(window.label());
+                core.discovery.forget(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -203,6 +204,10 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::discovery::discovery_networks,
+            commands::discovery::discovery_start,
+            commands::discovery::discovery_status,
+            commands::discovery::discovery_stop,
             commands::backup::backup_export,
             commands::backup::backup_choose,
             commands::backup::backup_preview,
