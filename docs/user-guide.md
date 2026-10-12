@@ -143,7 +143,16 @@ Safety features:
 - Links open only after you confirm the real destination (http and https only).
 - A server may write to your clipboard only if you allow it for that session; reads are never
   answered.
-- Pasting several lines, or a lot of text, shows the text first.
+- Pasting several lines, a lot of text, or one line that ends in a newline (which would run at
+  once) shows the text first, with the session it goes to.
+- Control characters, invisible characters (zero-width spaces, byte-order marks) and characters
+  that reorder text (bidirectional overrides) are always shown by name, for example ␛ or
+  `<U+202E>`, with a warning. Such a paste is reviewed on every host.
+- A paste that contains the bracketed-paste end marker (`ESC [201~`) is never sent as it is.
+  It could end the paste early and run the rest as typed input. The review lets you remove the
+  marker and paste the rest, or cancel.
+- In the host editor, **Paste review** can turn off the review of several lines and of a
+  trailing newline for that host. The review of control and invisible characters stays on.
 
 **Search all sessions** (command palette) finds text in the scrollback of every open terminal
 and lists the matches by tab; choosing one brings its tab to the front and selects the match.

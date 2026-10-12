@@ -48,6 +48,8 @@ Pre-release v0.1.0-beta.1 is published; v0.1.0-beta.2 follows once PR #6 and PR 
     WSL side are chosen inside WSL, and `wsl.exe -e` avoids a login shell re-parsing arguments.
 15. macOS: text typed through WebDriver must be ASCII (CJK and emoji never reached the shell);
     after an interrupt zsh continues a `;` list where bash abandons it.
+16. xterm.js 6 `paste()` only turns newlines into CR and wraps the text in `ESC[200~ … ESC[201~`;
+    it does not remove an end marker inside the text, so paste safety (P-25) refuses to send one.
 
 ## Next tasks, in order
 

@@ -1045,6 +1045,20 @@ kbd,
   font-variant-ligatures: none;
 }
 
+/* Paste review (P-25): hidden characters shown by name, never interpreted. */
+.paste-target {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.paste-hidden {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .banner-text {
   margin: 0;
   max-height: 160px;

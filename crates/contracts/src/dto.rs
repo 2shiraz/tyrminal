@@ -682,6 +682,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_terminal_settings_from_older_records_keep_every_paste_check() {
+        let old: HostTerminal = serde_json::from_str(r#"{"encoding":"koi8-r","term":"vt100"}"#).unwrap();
+        assert_eq!(old.encoding, TerminalEncoding::Koi8R);
+        assert!(!old.paste_skip_multiline && !old.paste_skip_trailing_newline);
+        assert!(HostTerminal::default() == serde_json::from_str("{}").unwrap());
+        let lowered: HostTerminal =
+            serde_json::from_str(r#"{"pasteSkipMultiline":true,"pasteSkipTrailingNewline":true}"#).unwrap();
+        assert!(!lowered.is_default());
+        // There is no field that turns off the control-character review.
+        let json = serde_json::to_value(lowered).unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["encoding", "pasteSkipMultiline", "pasteSkipTrailingNewline", "term"]);
+    }
+
+    #[test]
     fn secret_bearing_inputs_do_not_print_their_secrets() {
         let key = KeyImportInput {
             label: "work".into(),
@@ -971,6 +987,11 @@ impl TerminalType {
 pub struct HostTerminal {
     pub encoding: TerminalEncoding,
     pub term: TerminalType,
+    /// Paste safety (P-25): skip the review of pastes with several lines or a large size on this
+    /// host. Control and invisible characters are reviewed regardless; there is no setting for that.
+    pub paste_skip_multiline: bool,
+    /// Paste safety (P-25): skip the review of a one-line paste that ends in a newline on this host.
+    pub paste_skip_trailing_newline: bool,
 }
 
 impl HostTerminal {

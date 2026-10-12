@@ -548,8 +548,6 @@ export const msg = {
     linkCopy: "Copy link",
     linkRefused: "Only web links (http and https) can be opened from the terminal.",
     linkOpened: (url: string) => `Opened in your browser: ${url}`,
-    pasteTitle: "Paste several lines?",
-    pasteBody: (lines: number) => `This paste has ${lines} lines. In a shell, each line can run as a command.`,
     pasteBracketed: "The terminal asked for bracketed paste, so the shell should insert the text without running it.",
     pasteSend: "Paste",
     clipboardRequest: "The server wants to set your clipboard.",

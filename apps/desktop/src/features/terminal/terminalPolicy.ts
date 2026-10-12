@@ -56,11 +56,6 @@ export function lineCount(text: string): number {
   return text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").length;
 }
 
-/** A paste is reviewed when it spans several lines or is large. */
-export function needsPasteReview(text: string): boolean {
-  return lineCount(text) > 1 || text.length > PASTE_REVIEW_BYTES;
-}
-
 export interface LinkCheck {
   ok: boolean;
   /** The scheme and host exactly as the browser would see them, for the confirmation dialog. */

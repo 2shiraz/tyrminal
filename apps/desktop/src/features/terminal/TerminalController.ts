@@ -24,7 +24,8 @@ import { sessions, toAppError } from "../../lib/ipc";
 import { isMac } from "../../lib/platform";
 import { actionFor, bindings, matches, tabIndexFor } from "../../lib/shortcuts";
 import { schemeById } from "./schemes";
-import { decodeOsc52, ligatureRanges, needsPasteReview, sanitizeTitle } from "./terminalPolicy";
+import { type PasteCheck, type PasteChecks, checkPaste, hasBracketEnd } from "./pasteSafety";
+import { decodeOsc52, ligatureRanges, sanitizeTitle } from "./terminalPolicy";
 import { CommandOutputs } from "./commandOutput";
 import { type ScrollbackResult, searchLines } from "./scrollbackSearch";
 import { attachShellContext, cdCommand, shellContexts } from "../autocomplete/shellContext";
@@ -40,8 +41,8 @@ export interface TerminalCallbacks {
   onLink(url: string): void;
   /** The server asked to write `text` to the clipboard (OSC 52). */
   onClipboardWrite(text: string): void;
-  /** A paste needs review before it is sent; call `confirm` to send it. */
-  onPasteReview(text: string, bracketed: boolean, confirm: () => void): void;
+  /** A paste needs review before it is sent; `send` sends the reviewed (or cleaned) text. */
+  onPasteReview(text: string, check: PasteCheck, bracketed: boolean, send: (text: string) => void): void;
   onRenderer(kind: RendererKind, fellBack: boolean): void;
   onResize(cols: number, rows: number): void;
   onSearchResults(index: number, total: number): void;
@@ -179,6 +180,8 @@ export class TerminalController {
   private lastSize = { cols: 0, rows: 0 };
   private zoom = 0;
   private prefs: TerminalPreferences;
+  /** Paste checks for this session's host (P-25); every check is on unless the host lowers it. */
+  pasteChecks: PasteChecks = { multiline: true, trailingNewline: true };
   private readonly cleanups: (() => void)[] = [];
   /** Serializes input writes so chunks of one paste arrive in order. */
   private inputChain: Promise<void> = Promise.resolve();
@@ -445,12 +448,17 @@ export class TerminalController {
   /** Sends text as a paste (bracketed when the remote enabled it), after review if needed. */
   pasteText(text: string): void {
     if (!text || this.disposed) return;
-    const send = () => this.term.paste(text);
-    if (this.prefs.confirmMultilinePaste && needsPasteReview(text)) {
-      this.callbacks.onPasteReview(text, this.term.modes.bracketedPasteMode, send);
-    } else {
-      send();
-    }
+    const check = checkPaste(text, {
+      multiline: this.prefs.confirmMultilinePaste && this.pasteChecks.multiline,
+      trailingNewline: this.pasteChecks.trailingNewline,
+    });
+    // The bracketed-paste end marker is never sent, whatever path the text took to get here.
+    const send = (final: string) => {
+      if (this.disposed || hasBracketEnd(final)) return;
+      this.term.paste(final);
+    };
+    if (check.review) this.callbacks.onPasteReview(text, check, this.term.modes.bracketedPasteMode, send);
+    else send(text);
   }
 
   private activateLink(event: MouseEvent, uri: string): void {

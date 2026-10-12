@@ -3,7 +3,7 @@
 // show up in that review. This is the user's chance to read the exact text; nothing here decides
 // that text is safe.
 
-import { PASTE_REVIEW_BYTES } from "./terminalPolicy";
+import { PASTE_REVIEW_BYTES, lineCount } from "./terminalPolicy";
 
 /** The bracketed-paste end marker. Inside pasted text it would end the bracket early and let the
  * rest run as typed input, so it is never sent. */
@@ -88,10 +88,6 @@ export function removeBracketEnd(text: string): string {
   return out;
 }
 
-function lines(text: string): number {
-  return text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").length;
-}
-
 /** Whether `text` is reviewed before it is sent, and why. */
 export function checkPaste(text: string, checks: PasteChecks): PasteCheck {
   const reasons: PasteReason[] = [];
@@ -99,7 +95,7 @@ export function checkPaste(text: string, checks: PasteChecks): PasteCheck {
   const bracketEnd = hasBracketEnd(text);
   if (bracketEnd) reasons.push("bracket_end");
   if (hidden.length > 0) reasons.push("hidden");
-  const multi = lines(text) > 1;
+  const multi = lineCount(text) > 1;
   if (checks.multiline && multi) reasons.push("multiline");
   if (checks.multiline && text.length > PASTE_REVIEW_BYTES) reasons.push("large");
   if (checks.trailingNewline && !multi && /[\r\n]$/.test(text)) reasons.push("trailing_newline");

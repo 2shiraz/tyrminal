@@ -17,6 +17,7 @@ import {
   SerialFields,
   TelnetWarning,
   AgentForwarding,
+  PasteFields,
   TerminalFields,
 } from "./ProtocolFields";
 
@@ -184,6 +185,7 @@ export function HostEditor({
         {protocol === "telnet" && <TelnetWarning />}
         {protocol === "serial" && <SerialFields value={serial} onChange={setSerial} />}
         <TerminalFields value={terminal} onChange={setTerminal} showTerm={protocol !== "serial"} />
+        <PasteFields value={terminal} onChange={setTerminal} />
         {groups.length > 0 && (
           <label className="field">
             <span className="label">{msg.hosts.group}</span>

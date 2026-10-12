@@ -1,8 +1,10 @@
 import type { TerminalPreferences } from "@tyrminal/contracts";
 import { type ReactNode, useRef, useState } from "react";
 
+import { useVaultData } from "../../app/vaultData";
 import { type Direction, type Pane, type Workspace, panesOf, paneRects } from "../../app/workspace";
 import { type PaneHandle, type PaneStatus, TerminalView } from "../../features/terminal/TerminalView";
+import type { PasteChecks } from "../../features/terminal/pasteSafety";
 import { msg } from "../../lib/messages";
 import { IconButton } from "../ui/controls";
 import { IconColumns2, IconRows2, IconX } from "../ui/icons";
@@ -43,6 +45,15 @@ export function PaneGrid({
   broadcasting: ReadonlySet<number>;
   onUserInput: (tab: number, pane: number, bytes: Uint8Array) => void;
 }) {
+  const hosts = useVaultData().hosts.value;
+  // P-25: each SSH pane follows its host's paste settings; anything unknown keeps every check.
+  const pasteChecks = (pane: Pane): PasteChecks | undefined => {
+    if (pane.target.kind !== "ssh") return undefined;
+    const { hostId } = pane.target;
+    const terminal = hosts?.find((h) => h.id === hostId)?.terminal;
+    if (!terminal) return undefined;
+    return { multiline: !terminal.pasteSkipMultiline, trailingNewline: !terminal.pasteSkipTrailingNewline };
+  };
   return (
     <>
       {ws.tabs.map((tab) => {
@@ -103,6 +114,7 @@ export function PaneGrid({
                         onOpenKnownHosts={onOpenKnownHosts}
                         register={(handle) => register(id, handle)}
                         onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
+                        pasteChecks={pasteChecks(pane)}
                       />
                     </div>
                   </section>

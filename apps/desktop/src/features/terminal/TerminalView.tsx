@@ -1,5 +1,5 @@
 import type { IpcError, SessionEvent, SessionState, TerminalPreferences } from "@tyrminal/contracts";
-import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../../components/ui/Dialog";
 import { useToast } from "../../components/ui/Toasts";
@@ -7,7 +7,6 @@ import { IconButton, Notice, SecretField, TextField } from "../../components/ui/
 import {
   IconChevronDown,
   IconChevronLeft,
-  IconClipboardPaste,
   IconCopy,
   IconExternalLink,
   IconKeyRound,
@@ -23,11 +22,13 @@ import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 // agent B: tunnels and history
 import { HopNotice } from "../tunnels/HopNotice";
+import { PasteReviewDialog } from "./PasteReviewDialog";
 import { type RendererKind, TerminalController, type TerminalTarget } from "./TerminalController";
 import type { CommandRecord } from "./commandOutput";
+import type { PasteCheck, PasteChecks } from "./pasteSafety";
 import { schemeById } from "./schemes";
 import type { ScrollbackMatch, ScrollbackResult } from "./scrollbackSearch";
-import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, lineCount, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
+import { RECONNECT_MAX_ATTEMPTS, checkLink, groupFingerprint, reconnectDelayMs, shouldAutoReconnect } from "./terminalPolicy";
 
 type TrustPrompt = Extract<SessionEvent, { type: "trust_prompt" }>;
 type AuthPrompt = Extract<SessionEvent, { type: "auth_prompt" }>;
@@ -97,6 +98,10 @@ interface TerminalViewProps {
   register: (handle: PaneHandle | null) => void;
   /** User input typed in this pane (for broadcast). */
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
+  /** P-25: the paste checks this host keeps (all of them unless the host lowers some). */
+  pasteChecks?: PasteChecks | undefined;
+  /** P-25: extra labels for this session in the paste review (an environment label, for one). */
+  targetLabels?: ReactNode;
 }
 
 function Fingerprint({ value }: { value: string }) {
@@ -129,7 +134,7 @@ export function TerminalView(props: TerminalViewProps) {
   const [banner, setBanner] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ error: IpcError | null; exitStatus: number | null } | null>(null);
   const [link, setLink] = useState<string | null>(null);
-  const [paste, setPaste] = useState<{ text: string; bracketed: boolean; confirm: () => void } | null>(null);
+  const [paste, setPaste] = useState<{ text: string; check: PasteCheck; bracketed: boolean; send: (text: string) => void } | null>(null);
   const [clipboardAsk, setClipboardAsk] = useState<string | null>(null);
   const environment = useRef<SessionEnvironment | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -177,7 +182,7 @@ export function TerminalView(props: TerminalViewProps) {
           setClipboardAsk(text);
         }
       },
-      onPasteReview: (text, bracketed, confirm) => setPaste({ text, bracketed, confirm }),
+      onPasteReview: (text, check, bracketed, send) => setPaste({ text, check, bracketed, send }),
       onRenderer: (kind, fellBack) => {
         publish({ renderer: kind });
         if (fellBack && handlers.current.prefs.renderer === "auto" && kind === "dom" && controllerRef.current) {
@@ -245,6 +250,14 @@ export function TerminalView(props: TerminalViewProps) {
     // `target` is fixed for the life of a pane; `attempt` drives reconnects.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt]);
+
+  // The host's paste checks can change while the session is open (the user edits the host).
+  const skipMultiline = props.pasteChecks?.multiline === false;
+  const skipNewline = props.pasteChecks?.trailingNewline === false;
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (controller) controller.pasteChecks = { multiline: !skipMultiline, trailingNewline: !skipNewline };
+  }, [attempt, skipMultiline, skipNewline]);
 
   // Counts down to the next automatic attempt; cancelled by unmount, Cancel or Reconnect now.
   useEffect(() => {
@@ -542,28 +555,17 @@ export function TerminalView(props: TerminalViewProps) {
       )}
 
       {paste && (
-        <Dialog title={msg.terminal.pasteTitle} icon={<IconClipboardPaste size={18} />} tone="warning" wide onDismiss={() => setPaste(null)}>
-          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {msg.terminal.pasteBody(lineCount(paste.text))}
-          </p>
-          <pre className="code-block">{paste.text}</pre>
-          {paste.bracketed && <Notice tone="info">{msg.terminal.pasteBracketed}</Notice>}
-          <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => setPaste(null)} autoFocus data-autofocus>
-              {msg.common.cancel}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                paste.confirm();
-                setPaste(null);
-              }}
-            >
-              {msg.terminal.pasteSend}
-            </button>
-          </div>
-        </Dialog>
+        <PasteReviewDialog
+          text={paste.text}
+          check={paste.check}
+          bracketed={paste.bracketed}
+          target={{ name: label, identity, labels: props.targetLabels }}
+          onCancel={() => setPaste(null)}
+          onSend={(text) => {
+            paste.send(text);
+            setPaste(null);
+          }}
+        />
       )}
     </div>
   );

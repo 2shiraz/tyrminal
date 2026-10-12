@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { Notice, Switch, TextField } from "../../components/ui/controls";
 import { preferences as preferencesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
+import { msgPaste } from "../../lib/messages-paste";
 
 export type ProtocolKind = HostProtocol["type"];
 
@@ -136,7 +137,7 @@ const TERMS: [TerminalType, string][] = [
   ["vt100", "vt100"],
 ];
 
-export const DEFAULT_TERMINAL: HostTerminal = { encoding: "utf8", term: "xterm256color" };
+export const DEFAULT_TERMINAL: HostTerminal = { encoding: "utf8", term: "xterm256color", pasteSkipMultiline: false, pasteSkipTrailingNewline: false };
 
 /** Character encoding and terminal type (TRM-05, TRM-06); serial lines report no type. */
 export function TerminalFields({ value, onChange, showTerm }: { value: HostTerminal; onChange: (next: HostTerminal) => void; showTerm: boolean }) {
@@ -165,6 +166,24 @@ export function TerminalFields({ value, onChange, showTerm }: { value: HostTermi
         </label>
       )}
     </div>
+  );
+}
+
+/** Paste review on this host (P-25). Only the line and newline checks can be lowered here. */
+export function PasteFields({ value, onChange }: { value: HostTerminal; onChange: (next: HostTerminal) => void }) {
+  return (
+    <fieldset className="stack-sm" style={{ border: 0, margin: 0, padding: 0 }}>
+      <legend className="label">{msgPaste.hostSection}</legend>
+      <Switch label={msgPaste.hostSkipMultiline} checked={value.pasteSkipMultiline} onChange={(on) => onChange({ ...value, pasteSkipMultiline: on })} />
+      <Switch
+        label={msgPaste.hostSkipTrailingNewline}
+        checked={value.pasteSkipTrailingNewline}
+        onChange={(on) => onChange({ ...value, pasteSkipTrailingNewline: on })}
+      />
+      <p className="muted" style={{ fontSize: "var(--text-sm)", margin: 0 }}>
+        {msgPaste.hostHint}
+      </p>
+    </fieldset>
   );
 }
 
