@@ -43,6 +43,8 @@ export interface MockOptions {
   reviewFixtures?: boolean;
   /** LAN discovery: the networks the mock offers (default: one, `en0`). */
   discoveryNetworks?: { id: string; addresses: string[] }[];
+  /** Add this many synthetic trusted servers (bulk-001.example, …) for the windowed Known hosts list. */
+  extraKnownHosts?: number;
   /** Keep the browser's real clock (perf.spec.ts: the fixed clock replaces performance.now and requestAnimationFrame). */
   realClock?: boolean;
 }
