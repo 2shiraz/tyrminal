@@ -62,7 +62,7 @@ import { msg } from "../../lib/messages";
 import { type Unsaved, discardWording, msgAutosave } from "../../lib/messages-autosave";
 import { msgD } from "../../lib/messages-d";
 import { msgProduction } from "../../lib/messages-production";
-import { useWindowedList } from "../../components/ui/useWindowedList";
+import { WINDOW_THRESHOLD, useWindowedList } from "../../components/ui/useWindowedList";
 import { flashSaved, useFlip } from "../../lib/motion";
 import { msgBulk, msgHv } from "../../lib/messages-hostsview";
 import { msgSelect } from "../../lib/messages-select";
@@ -129,6 +129,9 @@ function applyBulkChange(host: HostSummary, change: Exclude<BulkHostChange, { ki
 }
 
 /** Hosts this view can mark: a checkbox click with Shift selects the range since the last click. */
+/** Search results are windowed above this many (browsing keeps WINDOW_THRESHOLD). */
+const SEARCH_WINDOW_THRESHOLD = 60;
+
 /** The address as the list shows it: the port only when it is not 22, the device for serial. */
 function shortAddress(host: HostSummary): string {
   if (host.protocol.type === "serial") return host.address;
@@ -447,8 +450,11 @@ function HostsViewImpl({
   const shownIds = filtered.map((h) => h.id);
   // Long lists are windowed: only the hosts near the visible part are in the DOM. Their rows come
   // and go as the list scrolls, so they carry no FLIP key while windowed (nothing animates in).
-  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef);
-  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef);
+  // Search results arrive all at once: windowed from a lower count, so ~100 results do not lay
+  // out in one long task.
+  const windowFrom = searching ? SEARCH_WINDOW_THRESHOLD : WINDOW_THRESHOLD;
+  const gridWindow = useWindowedList<HTMLUListElement>(layout === "grid" ? filtered.length : 0, 150, listRef, windowFrom);
+  const rowWindow = useWindowedList<HTMLUListElement>(layout === "list" ? filtered.length : 0, 52, listRef, windowFrom);
   const listWindow = layout === "grid" ? gridWindow : rowWindow;
   const windowItem = (host: HostSummary, i: number) =>
     listWindow.windowed
