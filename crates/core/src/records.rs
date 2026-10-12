@@ -285,6 +285,16 @@ pub(crate) struct WorkflowRecord {
     pub proxy: Option<StoredProxy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os: Option<tyrminal_contracts::HostOs>,
+    /// The host's or group's note (P-30). Absent in older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<StoredNote>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct StoredNote {
+    pub text: String,
+    pub format: tyrminal_contracts::NoteFormat,
+    pub updated_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -301,6 +311,7 @@ impl WorkflowRecord {
             && self.jump_host.is_none()
             && self.proxy.is_none()
             && self.os.is_none()
+            && self.note.is_none()
     }
 
     pub fn content_len(&self) -> usize {
@@ -316,6 +327,7 @@ impl WorkflowRecord {
                 ..Default::default()
             }
             .content_len()
+            + self.note.as_ref().map_or(0, |n| n.text.len() + 32)
             + 16
     }
 }
