@@ -86,6 +86,10 @@ all passing.
   manual runs and the release workflow still build and inspect the real binary.
 - Debug builds keep line tables only (`[profile.dev] debug = "line-tables-only"`): readable
   panics and backtraces with much faster compiling and linking.
+- Pull requests run the native suites on Linux only (about 6 minutes instead of 20–40). Every
+  push to `main`, manual runs and the release workflow run Linux, macOS and Windows, so a
+  platform-specific break shows up on `main` right after merge; fix it before anything else.
+  Feature rows become VERIFIED only from those full runs.
 - A pull request that changes only documentation (`docs/`, `.claude/`, Markdown) skips the native
   suites; the job still reports success. Any other file runs everything.
 - The integration, security, transfer and end-to-end steps have their own timeouts (15–25 min), so
