@@ -167,7 +167,7 @@ mod tests {
         let old_epoch = relay.epoch();
         relay.hold();
         assert!(relay.output(b"bc".to_vec()));
-        assert!(relay.event(SessionEvent::State { state: SessionState::Connected }));
+        assert!(relay.event(SessionEvent::State { state: SessionState::Connected, hop: None }));
         assert_eq!(seen(&old), ["a"], "nothing reaches the old window once held");
         relay.switch(new.clone());
         assert_eq!(seen(&new), ["bc", "event"]);
@@ -193,8 +193,8 @@ mod tests {
         assert_eq!(relay.unacked(), 1, "the owner still has to acknowledge it");
         relay.hold();
         for _ in 0..MAX_HELD_EVENTS {
-            assert!(relay.event(SessionEvent::State { state: SessionState::Connected }));
+            assert!(relay.event(SessionEvent::State { state: SessionState::Connected, hop: None }));
         }
-        assert!(!relay.event(SessionEvent::State { state: SessionState::Connected }));
+        assert!(!relay.event(SessionEvent::State { state: SessionState::Connected, hop: None }));
     }
 }

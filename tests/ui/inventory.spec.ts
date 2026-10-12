@@ -81,7 +81,7 @@ test("a host in a group may leave user, port and key to the group", async ({ pag
   await openHosts(page);
   await page.getByTestId("group-bar").getByRole("button", { name: "› Databases", exact: true }).click();
   await page.getByRole("button", { name: "Add host" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary", { name: "New host" });
   await expect(dialog.getByRole("combobox", { name: "Group" })).toHaveValue(/./);
   await dialog.getByLabel("Name", { exact: true }).fill("db-replica");
   await dialog.getByLabel("Address").fill("db2.internal.example");
@@ -91,7 +91,8 @@ test("a host in a group may leave user, port and key to the group", async ({ pag
   await expect(dialog.getByText("Currently: Deploy key.")).toBeVisible();
   await expect(dialog.getByText(/Connects to db2.internal.example on port 22 as postgres/)).toBeVisible();
   await dialog.getByLabel("Tags").fill("prod, replica");
-  await dialog.getByRole("button", { name: "Save" }).click();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Host details" }).getByTestId("host-panel-status")).toHaveText("Saved");
   const saves = await calls(page, "host_save");
   expect(saves.at(-1)?.args).toMatchObject({ host: { username: "", port: null, auth: { kind: "inherit" }, tags: ["prod", "replica"] } });
 });

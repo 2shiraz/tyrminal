@@ -6,6 +6,9 @@ import type { TerminalTarget } from "../features/terminal/TerminalController";
 
 export const MAX_PANES = 16;
 
+/** What a pane shows: a terminal, or the SFTP file manager (one pane per SFTP tab, never split). */
+export type PaneTarget = TerminalTarget | { kind: "sftp" };
+
 export type Direction = "row" | "column";
 
 export type Layout =
@@ -14,7 +17,7 @@ export type Layout =
 
 export interface Pane {
   id: number;
-  target: TerminalTarget;
+  target: PaneTarget;
   /** The user's own name for the destination (host label or "Local terminal"). */
   label: string;
   /** `user@host port N`, from the saved host, never from the server. */

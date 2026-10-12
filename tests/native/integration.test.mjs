@@ -86,6 +86,9 @@ describe("shell integration in the real application", { concurrency: false }, ()
     await s.waitGone("dialog");
     // Leave Bash, then leave the lab account as it was: no backup, and no empty startup file.
     await t.type("exit\n");
+    // Interactive Bash prints "exit" on its own line as it leaves; the cleanup is typed only once
+    // sh's prompt follows it, so it is not read (and echoed) while Bash is still exiting.
+    await t.waitForText(/^exit\s*\n[^\n]*\$\s*$/m, "back at the login shell's prompt");
     await t.type("rm -f ~/.bashrc.tyrminal-backup; [ -s ~/.bashrc ] || rm -f ~/.bashrc; echo cleaned-$((1+1))\n");
     await t.waitForText(/^cleaned-2\s*$/m, "cleanup ran");
   });
