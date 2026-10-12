@@ -102,13 +102,30 @@ pub struct WorkspacePreferences {
 
 /// Output highlighting: colors drawn over the screen only. The bytes received, shown as text,
 /// copied or sent are never changed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct HighlightPreferences {
     pub enabled: bool,
     pub ip_addresses: bool,
     pub keywords: Vec<HighlightKeyword>,
+}
+
+/// On by default: addresses and a few status words, so output is readable at a glance. Display only.
+impl Default for HighlightPreferences {
+    fn default() -> Self {
+        let word = |text: &str, tone| HighlightKeyword { text: text.into(), tone, case_sensitive: false };
+        Self {
+            enabled: true,
+            ip_addresses: true,
+            keywords: vec![
+                word("error", HighlightTone::Danger),
+                word("failed", HighlightTone::Danger),
+                word("warning", HighlightTone::Warning),
+                word("success", HighlightTone::Success),
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

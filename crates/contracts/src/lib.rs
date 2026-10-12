@@ -21,6 +21,8 @@ mod defaults;
 mod inventory;
 // command history
 mod command_history;
+// server at a glance
+mod server_glance;
 
 pub use discovery::*;
 pub use dto::*;
@@ -37,3 +39,5 @@ pub use defaults::*;
 pub use inventory::*;
 // command history
 pub use command_history::*;
+// server at a glance
+pub use server_glance::*;

@@ -37,6 +37,20 @@ export type ActionId =
   | "movePaneRight"
   | "movePaneUp"
   | "movePaneDown"
+  | "nextPane"
+  | "prevPane"
+  | "goToTab1"
+  | "goToTab2"
+  | "goToTab3"
+  | "goToTab4"
+  | "goToTab5"
+  | "goToTab6"
+  | "goToTab7"
+  | "goToTab8"
+  | "goToLastTab"
+  | "reopenClosedTab"
+  | "focusTerminal"
+  | "focusSidebar"
   // agent D: inventory and snippets
   | "suggest";
 
@@ -47,6 +61,22 @@ export interface Binding {
   shift?: boolean;
   alt?: boolean;
 }
+
+/** An action the user left without a shortcut: its key never matches. */
+const UNBOUND: Binding = { key: "" };
+
+// Go to tab 1–8 and the last tab start without a shortcut: Cmd/Alt+1–9 already switch tabs.
+const GO_TO_TAB = {
+  goToTab1: UNBOUND,
+  goToTab2: UNBOUND,
+  goToTab3: UNBOUND,
+  goToTab4: UNBOUND,
+  goToTab5: UNBOUND,
+  goToTab6: UNBOUND,
+  goToTab7: UNBOUND,
+  goToTab8: UNBOUND,
+  goToLastTab: UNBOUND,
+} as const;
 
 const mac: Record<ActionId, Binding> = {
   palette: { key: "k", mod: true },
@@ -78,6 +108,12 @@ const mac: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", mod: true, alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", mod: true, alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", mod: true, alt: true, shift: true },
+  nextPane: { key: "]", mod: true },
+  prevPane: { key: "[", mod: true },
+  ...GO_TO_TAB,
+  reopenClosedTab: { key: "t", mod: true, shift: true },
+  focusTerminal: UNBOUND,
+  focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", mod: true, shift: true },
 };
@@ -112,6 +148,12 @@ const other: Record<ActionId, Binding> = {
   movePaneRight: { key: "ArrowRight", alt: true, shift: true },
   movePaneUp: { key: "ArrowUp", alt: true, shift: true },
   movePaneDown: { key: "ArrowDown", alt: true, shift: true },
+  nextPane: { key: "]", ctrl: true, shift: true },
+  prevPane: { key: "[", ctrl: true, shift: true },
+  ...GO_TO_TAB,
+  reopenClosedTab: { key: "t", alt: true, shift: true },
+  focusTerminal: UNBOUND,
+  focusSidebar: UNBOUND,
   // agent D: inventory and snippets
   suggest: { key: "e", ctrl: true, shift: true },
 };
@@ -190,9 +232,6 @@ let recordingShortcut = false;
 export function setRecordingShortcut(on: boolean): void {
   recordingShortcut = on;
 }
-
-/** An action the user left without a shortcut: its key never matches. */
-const UNBOUND: Binding = { key: "" };
 
 export function isUnbound(binding: Binding): boolean {
   return binding.key === "";

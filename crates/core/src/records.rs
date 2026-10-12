@@ -351,6 +351,24 @@ pub(crate) struct HistorySettingsRecord {
     pub enabled: bool,
 }
 
+// server at a glance
+// Kinds 70–79 belong to server at a glance.
+/// Hosts whose server panel is turned off (one record).
+pub(crate) const KIND_GLANCE_SETTINGS: u16 = 70;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub(crate) struct GlanceSettingsRecord {
+    /// Ids of saved hosts with the panel off. Ids of deleted hosts are dropped on the next change.
+    #[serde(default)]
+    pub off_hosts: Vec<String>,
+}
+
+impl GlanceSettingsRecord {
+    pub fn content_len(&self) -> usize {
+        self.off_hosts.iter().map(|h| h.len() + 4).sum::<usize>() + 8
+    }
+}
+
 // Session recordings
 pub(crate) const KIND_SESSION_LOG: u16 = 101;
 pub(crate) const KIND_RECORDING_SETTINGS: u16 = 102;
