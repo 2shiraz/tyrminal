@@ -114,6 +114,14 @@ const COMMANDS: &[&str] = &[
     "prompt_marks_status",
     "prompt_marks_install",
     "prompt_marks_remove",
+    // command history
+    "history_settings_get",
+    "history_settings_set",
+    "history_add",
+    "history_suggest",
+    "history_list",
+    "history_delete",
+    "history_clear",
 ];
 
 fn main() {

@@ -16,6 +16,8 @@ export type { ExecutionTarget } from "./ExecutionTarget";
 export type { ExecutionTargetInput } from "./ExecutionTargetInput";
 export type { GroupInput } from "./GroupInput";
 export type { GroupSummary } from "./GroupSummary";
+export type { HistoryEntry } from "./HistoryEntry";
+export type { HistorySettings } from "./HistorySettings";
 export type { HostAppearance } from "./HostAppearance";
 export type { HostAuth } from "./HostAuth";
 export type { HostAuthInput } from "./HostAuthInput";

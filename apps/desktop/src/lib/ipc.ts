@@ -369,3 +369,19 @@ export const promptMarks = {
   remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
     call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
 };
+
+// command history
+type HistorySettingsDto = import("@tyrminal/contracts").HistorySettings;
+type HistoryEntryDto = import("@tyrminal/contracts").HistoryEntry;
+
+/** Command history for suggestions: opt-in, local to the vault, fed only from shell-integration marks. */
+export const history = {
+  settings: () => call<HistorySettingsDto>("history_settings_get"),
+  /** Off stops remembering and suggesting and keeps what was remembered. */
+  setSettings: (settings: HistorySettingsDto) => call<HistorySettingsDto>("history_settings_set", { settings }),
+  add: (sessionId: string, command: string) => call<void>("history_add", { sessionId, command }),
+  suggest: (sessionId: string, query: string) => call<string[]>("history_suggest", { sessionId, query }),
+  list: () => call<HistoryEntryDto[]>("history_list"),
+  remove: (hostId: string | null, command: string) => call<void>("history_delete", { hostId, command }),
+  clear: () => call<number>("history_clear"),
+};

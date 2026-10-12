@@ -21,6 +21,8 @@ import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
 import { shellContexts } from "../features/autocomplete/shellContext";
+// command history
+import { installHistoryCapture } from "../features/history/historyCapture";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
@@ -84,6 +86,8 @@ function Shell() {
   const data = useVaultData();
   const notify = useToast();
   const [destination, setDestination] = useState<Destination>("home");
+  // command history: remembers commands from shell-integration marks while history is on.
+  useEffect(() => installHistoryCapture(), []);
   const [ws, setWs] = useState<Workspace>(emptyWorkspace);
   const [collapsed, setCollapsed] = useState(false);
   // The side panel beside the terminals: snippets or files, one at a time.

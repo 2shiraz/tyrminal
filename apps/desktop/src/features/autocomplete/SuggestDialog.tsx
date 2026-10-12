@@ -9,11 +9,19 @@ import { msgD } from "../../lib/messages-d";
 import { pause } from "./pause";
 import { shellContexts } from "./shellContext";
 import { type PathSuggestion, isPathQuery, matchCommands, matchPaths, matchSnippets, splitPathQuery } from "./suggest";
+// command history
+import { IconHistory } from "../../components/ui/icons";
+import { history } from "../../lib/ipc";
+import { msgH } from "../../lib/messages-history";
+import { HistoryManager } from "../history/HistoryManager";
+import { historyOn } from "../history/historyCapture";
 
 type Item =
   | { kind: "snippet"; key: string; snippet: SnippetSummary }
   | { kind: "command"; key: string; name: string; description: string }
-  | { kind: "path"; key: string; path: PathSuggestion };
+  | { kind: "path"; key: string; path: PathSuggestion }
+  // command history
+  | { kind: "history"; key: string; command: string };
 
 const lines = (text: string) => text.replace(/\n$/, "").split("\n").length;
 
@@ -45,6 +53,21 @@ export function SuggestDialog({
   // With shell integration, the shell's own folder anchors relative paths (AUT-06).
   const context = useSyncExternalStore(shellContexts.subscribe, () => shellContexts.get(sessionId));
   const cwd = context?.cwd ?? null;
+  // command history: remembered commands of this session's host (none while history is off).
+  const [historyHits, setHistoryHits] = useState<string[]>([]);
+  const [managing, setManaging] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const timer = window.setTimeout(() => {
+      void historyOn()
+        .then((on) => (on ? history.suggest(sessionId, query) : []))
+        .then((hits) => live && setHistoryHits(hits), () => live && setHistoryHits([]));
+    }, 80);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, sessionId, managing]);
 
   // The login folder anchors ~ and relative paths.
   useEffect(() => {
@@ -78,13 +101,15 @@ export function SuggestDialog({
 
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
+    // command history
+    for (const command of historyHits) out.push({ kind: "history", key: `h:${command}`, command });
     if (pathQuery && listing?.dir === pathQuery.dir && listing.result) {
       for (const p of matchPaths(pathQuery.shown, pathQuery.prefix, listing.result.entries)) out.push({ kind: "path", key: `p:${p.label}`, path: p });
     }
     for (const c of matchCommands(query)) out.push({ kind: "command", key: `c:${c.name}`, ...c });
     for (const s of matchSnippets(query, snippets.value ?? [])) out.push({ kind: "snippet", key: `s:${s.id}`, snippet: s });
     return out;
-  }, [query, snippets.value, pathQuery?.dir, pathQuery?.prefix, pathQuery?.shown, listing]);
+  }, [query, snippets.value, pathQuery?.dir, pathQuery?.prefix, pathQuery?.shown, listing, historyHits]);
 
   const choose = (item: Item | undefined) => {
     if (!item) return;
@@ -92,6 +117,8 @@ export function SuggestDialog({
       if (lines(item.snippet.text) > 1) onSnippet(item.snippet);
       else onInsert(item.snippet.text.replace(/\n$/, ""));
     } else if (item.kind === "command") onInsert(`${item.name} `);
+    // command history: inserted for review, never run.
+    else if (item.kind === "history") onInsert(item.command);
     else if (!item.path.unsafe) onInsert(item.path.insert);
   };
 
@@ -132,7 +159,18 @@ export function SuggestDialog({
     );
   }
 
+  // command history
+  if (managing) {
+    return (
+      <Dialog title={msgH.title} icon={<IconHistory size={18} />} wide onDismiss={onClose}>
+        <HistoryManager onBack={() => setManaging(false)} />
+      </Dialog>
+    );
+  }
+
   const groups: [string, Item["kind"]][] = [
+    // command history
+    [msgH.group, "history"],
     [msgD.suggest.paths, "path"],
     [msgD.suggest.commands, "command"],
     [msgD.suggest.snippets, "snippet"],
@@ -205,6 +243,12 @@ export function SuggestDialog({
                           </span>
                         </>
                       )}
+                      {item.kind === "history" && (
+                        <>
+                          <IconHistory size={14} />
+                          <span className="mono truncate">{item.command}</span>
+                        </>
+                      )}
                       {item.kind === "command" && (
                         <>
                           <IconSquareTerminal size={14} />
@@ -230,6 +274,10 @@ export function SuggestDialog({
         {pathQuery && <p className="hint">{cwd ? msgD.suggest.pathsFromFolder(cwd) : msgD.suggest.pathsNote}</p>}
         <p className="hint">{msgD.suggest.hint}</p>
         <div className="dialog-actions">
+          {/* command history */}
+          <button type="button" className="btn btn-sm" onClick={() => setManaging(true)}>
+            {msgH.manage}
+          </button>
           <button type="button" className="btn btn-sm" onClick={onIntegration}>
             {msgD.suggest.integration}
           </button>

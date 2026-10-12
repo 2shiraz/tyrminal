@@ -24,6 +24,8 @@ mod tunnels;
 mod importers;
 pub mod shell_integration;
 mod snippet_runs;
+// command history
+mod command_history;
 
 pub use files::{TransferSink, list_local, local_within};
 pub use preferences::PreferencesStore;

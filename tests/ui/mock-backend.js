@@ -282,6 +282,52 @@ export function installMockBackend(options) {
     (localTree.get(path.join("/")) ?? []).map((e) => ({ name: e.name, kind: e.kind, size: e.size ?? null, permissions: null, modified: null }));
 
   const handlers = {
+    // command history
+    ...(() => {
+      // Remembered commands per host, as the native side keeps them (opt-in, prefix then substring).
+      const settings = { enabled: false };
+      const scopes = new Map();
+      const scopeOf = (sessionId) => {
+        const s = state.sessions.get(sessionId);
+        if (!s) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+        return state.hosts.find((h) => h.label === s.host)?.id ?? null;
+      };
+      return {
+        history_settings_get: () => ({ ...settings }),
+        history_settings_set: (a) => Object.assign(settings, a.settings) && { ...settings },
+        history_add: (a) => {
+          const scope = scopeOf(a.sessionId);
+          if (!settings.enabled || a.command.startsWith(" ") || /[\u0000-\u001f]/.test(a.command)) return;
+          const list = scopes.get(scope) ?? [];
+          const old = list.find((e) => e.command === a.command);
+          const entry = { command: a.command, lastUsed: now + list.length + 1, uses: (old?.uses ?? 0) + 1 };
+          scopes.set(scope, [...list.filter((e) => e.command !== a.command), entry]);
+        },
+        history_suggest: (a) => {
+          const scope = scopeOf(a.sessionId);
+          if (!settings.enabled) return [];
+          const recent = [...(scopes.get(scope) ?? [])].reverse().map((e) => e.command);
+          if (!a.query.trim()) return recent.slice(0, 8);
+          const q = a.query.toLowerCase();
+          const starts = recent.filter((c) => c.startsWith(a.query));
+          return [...starts, ...recent.filter((c) => !starts.includes(c) && c.toLowerCase().includes(q))].slice(0, 8);
+        },
+        history_list: () =>
+          [...scopes.entries()]
+            .flatMap(([hostId, list]) => list.map((e) => ({ hostId, hostLabel: state.hosts.find((h) => h.id === hostId)?.label ?? null, ...e })))
+            .sort((x, y) => y.lastUsed - x.lastUsed),
+        history_delete: (a) => {
+          const list = scopes.get(a.hostId) ?? [];
+          if (!list.some((e) => e.command === a.command)) throw { code: "NOT_FOUND", message: "That command is no longer remembered." };
+          scopes.set(a.hostId, list.filter((e) => e.command !== a.command));
+        },
+        history_clear: () => {
+          const n = [...scopes.values()].reduce((t, l) => t + l.length, 0);
+          scopes.clear();
+          return n;
+        },
+      };
+    })(),
     // agent B: tunnels and history
     ...(() => {
       // Synthetic rules and runs. Exposure is checked the way the native side does it, so the

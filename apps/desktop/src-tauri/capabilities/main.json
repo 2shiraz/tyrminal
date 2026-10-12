@@ -109,6 +109,13 @@
     "allow-known-hosts-import",
     "allow-prompt-marks-status",
     "allow-prompt-marks-install",
-    "allow-prompt-marks-remove"
+    "allow-prompt-marks-remove",
+    "allow-history-settings-get",
+    "allow-history-settings-set",
+    "allow-history-add",
+    "allow-history-suggest",
+    "allow-history-list",
+    "allow-history-delete",
+    "allow-history-clear"
   ]
 }

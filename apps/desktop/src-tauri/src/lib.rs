@@ -232,6 +232,14 @@ pub fn run() {
             commands::snippets::prompt_marks_status,
             commands::snippets::prompt_marks_install,
             commands::snippets::prompt_marks_remove,
+            // command history
+            commands::command_history::history_settings_get,
+            commands::command_history::history_settings_set,
+            commands::command_history::history_add,
+            commands::command_history::history_suggest,
+            commands::command_history::history_list,
+            commands::command_history::history_delete,
+            commands::command_history::history_clear,
         ])
         .build(tauri::generate_context!());
 
