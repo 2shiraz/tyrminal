@@ -34,7 +34,7 @@ describe("backup and restore in the real application", { concurrency: false }, (
       await s.fill("Address", "192.0.2.44", { within: HOST_PANEL });
       await s.fill("User name", "deploy", { within: HOST_PANEL });
       await saveAndCloseHostPanel(s);
-      await t.nav("Settings");
+      await t.settings("Backup");
       await s.clickButton("Save a backup…");
       await s.until(async () => /Backup saved as lab\.tyrbackup/.test(await s.execute("return document.body.innerText")), { describe: "saved toast" });
       await app.screenshot("b01-backup-saved");

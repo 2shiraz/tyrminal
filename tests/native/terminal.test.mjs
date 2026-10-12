@@ -721,7 +721,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
       let s = app.session;
       let t = ui(s);
       await t.createVault();
-      await t.nav("Settings");
+      await t.settings("Keyboard shortcuts");
       // Find in terminal → Ctrl+Shift+G (Cmd+Shift+G on macOS), recorded from real key events.
       await s.click(await s.waitFor('.shortcut-list li[data-action="find"] button[aria-label="Change shortcut for Find in terminal"]'));
       await s.until(() => s.execute(`return document.querySelector('.shortcut-list li[data-action="find"] .shortcut-keys')?.textContent.includes("Press") || null`), {
@@ -761,7 +761,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
       await s.clickButton("Unlock");
       await s.until(async () => (await t.heading()) === "Home", { describe: "home after unlock", timeout: 20_000 });
 
-      await t.nav("Settings");
+      await t.settings("Keyboard shortcuts");
       const shown = await s.until(
         () =>
           s.execute(`const r = document.querySelector('[role="radiogroup"][aria-label="Right click"] label:nth-child(2) input');

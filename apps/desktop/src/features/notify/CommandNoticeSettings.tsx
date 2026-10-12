@@ -7,9 +7,9 @@ import { msgN } from "../../lib/messages-notify";
 export function CommandNoticeSettings({ value, onChange }: { value: CommandNotifications; onChange: (value: CommandNotifications) => void }) {
   return (
     <>
-      <Switch label={msgN.settingTitle} hint={msgN.settingHint} checked={value.enabled} onChange={(enabled) => onChange({ ...value, enabled })} />
+      <Switch id="command-notifications" label={msgN.settingTitle} hint={msgN.settingHint} checked={value.enabled} onChange={(enabled) => onChange({ ...value, enabled })} />
       {value.enabled && (
-        <SettingRow label={msgN.minSeconds}>
+        <SettingRow label={msgN.minSeconds} id="command-notifications-min">
           <span className="row-flex">
             <input
               className="input input-sm"
