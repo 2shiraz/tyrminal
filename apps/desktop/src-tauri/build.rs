@@ -86,6 +86,8 @@ const COMMANDS: &[&str] = &[
     "layout_list",
     "layout_save",
     "layout_delete",
+    "window_detach",
+    "window_detach_take",
 ];
 
 fn main() {

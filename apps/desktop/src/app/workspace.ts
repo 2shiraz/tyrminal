@@ -2,7 +2,7 @@
 // tree of splits. Panes are rendered flat and positioned from `paneRects`, so changing the tree
 // never remounts a terminal (its session survives splits, closes and moves).
 
-import type { LayoutNode, LayoutTab, LayoutTarget } from "@tyrminal/contracts";
+import type { DetachTabInput, LayoutNode, LayoutTab, LayoutTarget } from "@tyrminal/contracts";
 
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 
@@ -28,6 +28,8 @@ export interface Pane {
   unread: boolean;
   /** Restored from a layout template: no session until the user chooses Connect. */
   pending: boolean;
+  /** In a detached window: the single-use token for taking over this pane's session. */
+  attachToken?: string;
 }
 
 /**
@@ -537,4 +539,35 @@ export function connectPanes(ws: Workspace, ids: number[]): Workspace {
   const panes = { ...ws.panes };
   for (const id of pending) panes[id] = { ...(panes[id] as Pane), pending: false, indicator: "busy" };
   return { ...ws, panes };
+}
+
+// ---------- detaching a tab into its own window ----------
+
+/** The request that moves `tab` (every pane with its live session) into a new window. */
+export function detachInput(ws: Workspace, tab: Tab, sessionOf: (pane: number) => string): DetachTabInput {
+  const ids = panesOf(tab.layout);
+  const index = new Map(ids.map((id, i) => [id, i]));
+  return {
+    title: tab.customTitle,
+    layout: toNode(tab.layout, index),
+    panes: ids.map((id) => {
+      const p = ws.panes[id] as Pane;
+      return { sessionId: sessionOf(id), label: p.label, identity: p.identity, target: toTarget(p.target) };
+    }),
+    focused: index.get(tab.focused) ?? 0,
+  };
+}
+
+/** A detached window's workspace: the one tab it was given, each pane taking over its session. */
+export function detachedWorkspace(tab: import("@tyrminal/contracts").DetachedTab): Workspace {
+  let ws: Workspace = { ...emptyWorkspace };
+  const ids: number[] = [];
+  for (const p of tab.panes) {
+    const target: TerminalTarget = p.target.kind === "ssh" ? { kind: "ssh", hostId: p.target.hostId } : { kind: "local" };
+    const [next, id] = newPane(ws, { target, label: p.label, identity: p.identity });
+    ws = { ...next, panes: { ...next.panes, [id]: { ...(next.panes[id] as Pane), attachToken: p.token } } };
+    ids.push(id);
+  }
+  const t: Tab = { id: ws.nextId, customTitle: tab.title, layout: fromNode(tab.layout, ids), focused: ids[tab.focused] ?? (ids[0] as number), focusMode: false };
+  return { ...ws, tabs: [t], active: t.id, nextId: t.id + 1 };
 }

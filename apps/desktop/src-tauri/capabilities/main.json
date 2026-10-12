@@ -82,6 +82,7 @@
     "allow-backup-restore",
     "allow-layout-list",
     "allow-layout-save",
-    "allow-layout-delete"
+    "allow-layout-delete",
+    "allow-window-detach"
   ]
 }

@@ -32,6 +32,8 @@ pub use tyrminal_platform::{
 };
 pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
+// agent C: workspaces
+pub use layouts::validate_detach;
 
 use std::path::Path;
 use std::sync::Arc;

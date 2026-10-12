@@ -138,3 +138,49 @@ pub struct KeyBindingPreference {
     /// Cmd on macOS.
     pub meta: bool,
 }
+
+// ---------- detaching a tab into its own window (TRM-02) ----------
+
+/// One pane of a tab being moved to a new window: its live session and what the pane shows.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DetachPaneInput {
+    pub session_id: String,
+    pub label: String,
+    pub identity: String,
+    pub target: LayoutTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DetachTabInput {
+    pub title: Option<String>,
+    /// Leaves name panes by their index in `panes`.
+    pub layout: LayoutNode,
+    pub panes: Vec<DetachPaneInput>,
+    pub focused: u32,
+}
+
+/// What the new window receives once: the arrangement and, per pane, the single-use token that
+/// lets that window (and only it) take over the session.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DetachedPane {
+    pub token: String,
+    pub label: String,
+    pub identity: String,
+    pub target: LayoutTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DetachedTab {
+    pub title: Option<String>,
+    pub layout: LayoutNode,
+    pub panes: Vec<DetachedPane>,
+    pub focused: u32,
+}

@@ -7,6 +7,7 @@ import { msgC } from "../../lib/messages-c";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { IconButton, Shortcut } from "../ui/controls";
 import {
+  IconAppWindow,
   IconColumns2,
   IconCopy,
   IconFingerprint,
@@ -44,6 +45,7 @@ export function TabStrip({
   onMove,
   onSplit,
   onDuplicate,
+  onDetach,
   onNewLocal,
   onOpenPalette,
   layout,
@@ -59,6 +61,7 @@ export function TabStrip({
   onMove: (from: number, to: number) => void;
   onSplit: (id: number, dir: Direction) => void;
   onDuplicate: (id: number) => void;
+  onDetach?: ((id: number) => void) | undefined;
   onNewLocal: () => void;
   onOpenPalette: () => void;
   /** The layout template the open tabs follow, and whether they changed since it was saved. */
@@ -121,6 +124,7 @@ export function TabStrip({
     return [
       { label: msg.nav.renameTab, icon: <IconPencil size={15} />, shortcut: <Shortcut action="renameTab" />, onSelect: () => onRenaming(id) },
       { label: msg.nav.duplicate, icon: <IconCopy size={15} />, onSelect: () => onDuplicate(id) },
+      ...(onDetach ? [{ label: msgC.detach.action, icon: <IconAppWindow size={15} />, onSelect: () => onDetach(id) }] : []),
       "separator",
       { label: msg.palette.splitRight, icon: <IconColumns2 size={15} />, shortcut: <Shortcut action="splitRight" />, onSelect: () => onSplit(id, "row") },
       { label: msg.palette.splitDown, icon: <IconRows2 size={15} />, shortcut: <Shortcut action="splitDown" />, onSelect: () => onSplit(id, "column") },

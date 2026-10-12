@@ -207,6 +207,31 @@ pub(crate) fn summary(id: &Id, record: &LayoutRecord) -> LayoutTemplateSummary {
     }
 }
 
+// ---------- detaching a tab into its own window ----------
+
+/// Validates a request to move a tab into a new window: the same tree rules as a template, a
+/// well-formed session id per pane (ownership is checked by the handoff itself) and display-safe
+/// texts, since the new window shows them.
+pub fn validate_detach(tab: &tyrminal_contracts::DetachTabInput) -> Result<(), IpcError> {
+    let shape = LayoutTab {
+        title: tab.title.clone(),
+        panes: tab.panes.iter().map(|p| p.target.clone()).collect(),
+        layout: tab.layout.clone(),
+        focused: tab.focused,
+        focus_mode: false,
+    };
+    // Destinations are for display and reconnecting only; the sessions already exist.
+    validate_tabs(std::slice::from_ref(&shape), |_| true)?;
+    for pane in &tab.panes {
+        validate::id(&pane.session_id)?;
+        validate::label(&pane.label)?;
+        if !pane.identity.is_empty() {
+            validate::label(&pane.identity)?;
+        }
+    }
+    Ok(())
+}
+
 // ---------- workspace preferences ----------
 
 pub(crate) const MAX_HIGHLIGHT_KEYWORDS: usize = 32;
@@ -488,5 +513,29 @@ mod tests {
         let old: Preferences = serde_json::from_str(r#"{"theme":"dark","reduceMotion":false}"#).unwrap();
         assert_eq!(old.workspace, None);
         assert!(crate::preferences::sanitize(old).is_ok());
+    }
+
+    #[test]
+    fn a_detach_request_is_validated_like_a_template() {
+        use tyrminal_contracts::{DetachPaneInput, DetachTabInput};
+        let pane = |session: &str, label: &str| DetachPaneInput {
+            session_id: session.into(),
+            label: label.into(),
+            identity: "deploy@web port 22".into(),
+            target: LayoutTarget::Local,
+        };
+        let ok = DetachTabInput {
+            title: None,
+            layout: split(0.5, leaf(0), leaf(1)),
+            panes: vec![pane(HOST, "a"), pane(HOST, "b")],
+            focused: 1,
+        };
+        assert!(validate_detach(&ok).is_ok());
+        let bad_session = DetachTabInput { panes: vec![pane("../x", "a"), pane(HOST, "b")], ..ok.clone() };
+        assert!(validate_detach(&bad_session).is_err());
+        let bad_label = DetachTabInput { panes: vec![pane(HOST, "a\u{1b}]0;x"), pane(HOST, "b")], ..ok.clone() };
+        assert!(validate_detach(&bad_label).is_err());
+        let bad_tree = DetachTabInput { layout: leaf(0), ..ok };
+        assert!(validate_detach(&bad_tree).is_err());
     }
 }

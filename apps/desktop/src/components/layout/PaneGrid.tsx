@@ -32,6 +32,7 @@ export function PaneGrid({
   onFocusMode,
   onToNewTab,
   onConnect,
+  canOpen = true,
   onOpenKnownHosts,
   register,
   broadcasting,
@@ -55,6 +56,8 @@ export function PaneGrid({
   onToNewTab: (pane: number) => void;
   /** Explicit Connect for restored panes that are waiting. */
   onConnect: (panes: number[]) => void;
+  /** False in a detached window, which cannot open sessions: no split, no reconnect. */
+  canOpen?: boolean;
   onOpenKnownHosts: () => void;
   register: (pane: number, handle: PaneHandle | null) => void;
   /** Tabs whose typed input goes to every pane (an explicit, unsaved mode). */
@@ -131,9 +134,11 @@ export function PaneGrid({
                     {pane.label}
                     <span style={{ opacity: 0.7 }}> · {pane.identity}</span>
                   </span>
-                  <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>
-                    <IconArrowUpRight size={13} />
-                  </IconButton>
+                  {canOpen && (
+                    <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>
+                      <IconArrowUpRight size={13} />
+                    </IconButton>
+                  )}
                   <IconButton
                     size="sm"
                     label={focusLayout ? msgC.panes.leaveFocus : msgC.panes.focusLayout}
@@ -142,12 +147,16 @@ export function PaneGrid({
                   >
                     {focusLayout ? <IconMinimize2 size={13} /> : <IconMaximize2 size={13} />}
                   </IconButton>
-                  <IconButton size="sm" label={msg.palette.splitRight} onClick={() => onSplit(id, "row")}>
-                    <IconColumns2 size={13} />
-                  </IconButton>
-                  <IconButton size="sm" label={msg.palette.splitDown} onClick={() => onSplit(id, "column")}>
-                    <IconRows2 size={13} />
-                  </IconButton>
+                  {canOpen && (
+                    <>
+                      <IconButton size="sm" label={msg.palette.splitRight} onClick={() => onSplit(id, "row")}>
+                        <IconColumns2 size={13} />
+                      </IconButton>
+                      <IconButton size="sm" label={msg.palette.splitDown} onClick={() => onSplit(id, "column")}>
+                        <IconRows2 size={13} />
+                      </IconButton>
+                    </>
+                  )}
                   <IconButton size="sm" label={msg.palette.closePane} onClick={() => onClose(id)}>
                     <IconX size={13} />
                   </IconButton>
@@ -173,6 +182,8 @@ export function PaneGrid({
                   register={(handle) => register(id, handle)}
                   onUserInput={(bytes) => onUserInput(tab.id, id, bytes)}
                   pending={pane.pending}
+                  attachToken={pane.attachToken}
+                  canReconnect={canOpen}
                   onConnect={() => onConnect([id])}
                   onConnectAll={
                     panesOf(tab.layout).filter((p) => ws.panes[p]?.pending).length > 1 ? () => onConnect(panesOf(tab.layout)) : undefined

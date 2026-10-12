@@ -486,3 +486,48 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
     await app.screenshot("w04-layout-restored");
   });
 });
+
+describe("a tab moved to its own window", { concurrency: false }, () => {
+  test("the live SSH session moves with it and keeps delivering output there; the main window lets it go", async () => {
+    const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
+    try {
+      const s = app.session;
+      const t = ui(s);
+      await t.createVault();
+      await t.importKey(lab.keys.ed25519);
+      await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
+      await t.connect("Lab");
+      await t.type("export PS1='tyr$ '; echo BEFORE-$((2+3))\n");
+      await t.waitForText("BEFORE-5");
+      const main = await s.windowHandle();
+      // Started here, printed after the move: the same shell keeps running in the new window.
+      await t.type("sleep 4; echo LATE-$((5+6))\n");
+
+      await s.chord(PALETTE);
+      const input = await s.waitFor("dialog.palette input");
+      await s.type(input, "Move tab to a new window");
+      await s.until(() => s.execute(`return document.querySelector('dialog.palette [role="option"][aria-selected="true"]')?.textContent?.includes("Move tab") || null`), {
+        describe: "palette match",
+      });
+      await s.chord([KEYS.enter]);
+      // The tab leaves the main window without ending its session.
+      await s.until(() => s.execute(`return document.querySelectorAll(".tabstrip .tab:not(.tab-page)").length === 0 || null`), { describe: "tab gone from main" });
+      const handles = await s.until(async () => {
+        const list = await s.windowHandles();
+        return list.length === 2 ? list : null;
+      }, { describe: "a second window", timeout: 20_000 });
+      await s.switchToWindow(handles.find((h) => h !== main));
+      await s.until(() => s.execute(`return document.querySelector(".detached-head")?.textContent?.includes("Lab") || null`), { describe: "detached window shows the tab", timeout: 20_000 });
+      await t.waitForText("LATE-11", "output of the moved session arrives in the new window", 20_000);
+      // A fresh terminal here: earlier screen contents do not move with the tab.
+      assert.doesNotMatch(await t.terminalText(), /BEFORE-5/);
+      await app.screenshot("w05-detached");
+      // The embedded WebDriver sends keys to the main window only, so typing here is covered by
+      // the UI test and the core lab test (only the new window may write after the handoff).
+      await s.switchToWindow(main);
+      assert.equal(await s.execute(`return document.querySelectorAll(".pane").length`), 0, "the main window holds no pane of the moved tab");
+    } finally {
+      await app.quit();
+    }
+  });
+});

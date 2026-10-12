@@ -9,6 +9,7 @@ import {
   IconColumns2,
   IconCornerDownLeft,
   IconFingerprint,
+  IconAppWindow,
   IconArrowUpRight,
   IconCopy,
   IconHouse,
@@ -127,6 +128,7 @@ export function CommandPalette({
         onPaneToNewTab: () => void;
         onSplitWith: (dir: Direction) => void;
         onEncoding: () => void;
+        onDetach: () => void;
       }
     | undefined;
   /** Saved layout templates and the actions on them. */
@@ -225,6 +227,7 @@ export function CommandPalette({
       list.push(action("split-down-with", msgC.panes.splitDownWith, <IconRows2 size={16} />, () => workspace.onSplitWith("column")));
       list.push(action("duplicate-tab", msgC.tabs.duplicate, <IconCopy size={16} />, workspace.onDuplicate));
       list.push(action("encoding", msgC.encoding.action, <IconType size={16} />, workspace.onEncoding));
+      list.push(action("detach-tab", msgC.detach.action, <IconAppWindow size={16} />, workspace.onDetach));
       if (workspace.split) {
         list.push(
           action(

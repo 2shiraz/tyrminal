@@ -556,3 +556,82 @@ test("tab strip structure: the tablist holds only tabs, and no tab contains a fo
   await page.keyboard.press("Delete");
   await expect(terminalTabs(page)).toHaveCount(1);
 });
+
+test("detach: a tab moves to a new window with its live sessions; nothing is closed here", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
+  await page.keyboard.press("Control+Shift+T");
+  await expect(terminalTabs(page)).toHaveCount(2);
+  await page.getByRole("tab", { name: /api-gateway/ }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Move tab to a new window" }).click();
+  await expect(page.getByText(/Moved “api-gateway” to a new window/)).toBeVisible();
+  await expect(terminalTabs(page)).toHaveCount(1);
+  await expect(terminalTabs(page).first()).toHaveText(/Local terminal/);
+  // The sessions were handed over, not ended.
+  expect(await calls(page, "session_close")).toHaveLength(0);
+  const sent = await page.evaluate(() => (window as unknown as { __mockDetached: { panes: { sessionId: string; label: string }[]; layout: unknown } }).__mockDetached);
+  const opened = (await page.evaluate(() => [...(window as unknown as { __mockState: { sessions: Map<string, unknown> } }).__mockState.sessions.keys()])) as string[];
+  expect(sent.panes.map((p) => p.label)).toEqual(["api-gateway", "api-gateway"]);
+  expect(sent.panes.map((p) => p.sessionId).every((id) => opened.includes(id))).toBe(true);
+  expect(sent.layout).toMatchObject({ kind: "split", dir: "row", a: { kind: "leaf", pane: 0 }, b: { kind: "leaf", pane: 1 } });
+});
+
+test("detach: a tab with a pane that is not connected stays here", async ({ page }) => {
+  await openApp(page);
+  await connectFromPalette(page, "api-gateway");
+  await page.keyboard.press("Alt+Shift+Equal");
+  await expect(page.locator('.pane .status-dot[data-tone="ok"]')).toHaveCount(2);
+  await drop(page);
+  await paletteRun(page, "Move tab to a new window");
+  await expect(page.getByText("Only a tab whose panes are all connected can move to a new window.")).toBeVisible();
+  expect(await calls(page, "window_detach")).toHaveLength(0);
+  await expect(terminalTabs(page)).toHaveCount(1);
+});
+
+async function openDetached(page: Page, tab: unknown) {
+  const { installMockBackend } = await import("./mock-backend.js");
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.addInitScript(installMockBackend, { renderer: "compatibility", windowLabel: "detached-0000000000000001", detached: tab });
+  await page.goto("/");
+}
+
+const detachedTab = (hostId: string, tokens: [string, string]) => ({
+  title: "prod",
+  layout: { kind: "split", dir: "row", ratio: 0.5, a: { kind: "leaf", pane: 0 }, b: { kind: "leaf", pane: 1 } },
+  panes: [
+    { token: tokens[0], label: "api-gateway", identity: "deploy@10.20.0.11 port 22", target: { kind: "ssh", hostId } },
+    { token: tokens[1], label: "db-primary", identity: "postgres@10.20.0.30 port 22", target: { kind: "ssh", hostId } },
+  ],
+  focused: 1,
+});
+
+test("detached window: takes over the handed sessions, opens none of its own, offers no split or reconnect", async ({ page }) => {
+  await openDetached(page, detachedTab("0".repeat(31) + "1", ["token-a", "token-b"]));
+  await expect(page.locator(".detached-head")).toHaveText("prod");
+  await expect(page.locator(".pane")).toHaveCount(2);
+  await expect.poll(async () => (await calls(page, "session_attach")).map((c) => (c.args as { token: string }).token).sort()).toEqual(["token-a", "token-b"]);
+  expect(await calls(page, "session_open_ssh")).toHaveLength(0);
+  expect(await calls(page, "session_open_local")).toHaveLength(0);
+  // Nothing that would open a session is offered here.
+  await expect(page.getByRole("button", { name: "Split pane right" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Move pane to a new tab" })).toHaveCount(0);
+  // The vault UI is not part of this window.
+  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  // Input reaches the session that was handed over.
+  await expect(page.locator('.pane[data-focused="true"] .xterm-helper-textarea')).toBeFocused();
+  await page.keyboard.type("whoami");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('.pane[data-focused="true"] .xterm-rows')).toContainText("whoami: synthetic output");
+});
+
+test("detached window: a refused token fails closed, with no way to reconnect from here", async ({ page }) => {
+  await openDetached(page, detachedTab("0".repeat(31) + "1", ["stolen", "token-b"]));
+  await expect(page.locator(".pane")).toHaveCount(2);
+  const refused = page.locator('.pane[aria-label="api-gateway"]');
+  await expect(refused.getByText("That session is not available to this window.")).toBeVisible();
+  await expect(refused.getByRole("button", { name: /Reconnect/ })).toHaveCount(0);
+  await expect(refused.getByText("To connect again, open the host from the main window.")).toBeVisible();
+  expect(await calls(page, "session_open_ssh")).toHaveLength(0);
+});

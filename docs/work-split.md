@@ -208,3 +208,14 @@ Never merge these by hand; regenerate them after resolving the sources:
   (keyboard: Delete or the tab menu). You can drop the `.exclude(".tabstrip")` line in
   `tests/ui/accessibility.spec.ts` when your PR lands; `tests/ui/workspaces.spec.ts` checks the
   same structure meanwhile.
+- **C → A (done by C, keep it when merging):** detach-to-window adds a second capability file,
+  `capabilities/detached.json` (windows `detached-*`, ten permissions: take its tab, attach and use
+  handed-over sessions, read preferences, report activity). `tauri.conf.json` enables
+  `["main","detached"]`, and `scripts/check-release.mjs` checks that file against an explicit
+  allowlist, keeps "build.rs = granted commands" over both files, and refuses
+  `allow-window-detach-take` in `main.json`. C cherry-picked your handoff commit 636f104 to build on;
+  it is identical to yours, so the merge is clean.
+- **C → A (done by C, keep it when merging):** `tauri.e2e.conf.json` lists the `detached`
+  capability too and lets the test-only `e2e-automation` capability reach `detached-*` windows;
+  `tests/native/webdriver.mjs` gains `windowHandles`/`windowHandle`/`switchToWindow` in a marked
+  block; `tests/ui/mock-backend.js` takes `options.windowLabel` for a page playing a detached window.

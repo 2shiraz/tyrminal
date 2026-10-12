@@ -62,6 +62,8 @@ export interface PaneHandle {
   /** The session's character encoding (kept across reconnects of this pane). */
   encoding(): string;
   setEncoding(id: string): void;
+  /** Marks the session as moving to another window, so unmounting this pane leaves it running. */
+  release(on: boolean): void;
 }
 
 interface TerminalViewProps {
@@ -88,6 +90,10 @@ interface TerminalViewProps {
   onUserInput?: ((bytes: Uint8Array) => void) | undefined;
   /** Output arrived while this pane's tab was hidden (reported once until it is shown again). */
   onUnread?: (() => void) | undefined;
+  /** A session handed to this (detached) window: taken over instead of opened. */
+  attachToken?: string | undefined;
+  /** False where this window cannot open sessions (a detached window): no reconnect. */
+  canReconnect?: boolean | undefined;
   /** Restored from a layout: no session is opened until the user chooses Connect. */
   pending?: boolean | undefined;
   onConnect?: (() => void) | undefined;
@@ -232,7 +238,7 @@ export function TerminalView(props: TerminalViewProps) {
             setAuth(null);
             setClipboardAsk(null);
             setClosed({ error: event.error, exitStatus: event.exitStatus });
-            if (shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
+            if (handlers.current.canReconnect !== false && shouldAutoReconnect(target.kind, everConnected.current, event.error?.code ?? null) && autoAttempts.current < RECONNECT_MAX_ATTEMPTS) {
               autoAttempts.current += 1;
               setAutoRetry({ attempt: autoAttempts.current, dueAt: Date.now() + reconnectDelayMs(autoAttempts.current) });
             }
@@ -245,7 +251,9 @@ export function TerminalView(props: TerminalViewProps) {
     if (handlers.current.workspace) controller.setWorkspace(handlers.current.workspace);
     controller.setEncoding(encodingRef.current);
     // Deferred one tick so a development double-mount is cancelled before it connects anywhere.
-    const timer = window.setTimeout(() => void controller.start(target), 0);
+    // A handed-over session is taken over once; a later attempt (reconnect) never reuses the token.
+    const token = attempt === 0 ? handlers.current.attachToken : undefined;
+    const timer = window.setTimeout(() => void controller.start(target, token), 0);
     return () => {
       window.clearTimeout(timer);
       controller.dispose();
@@ -295,6 +303,7 @@ export function TerminalView(props: TerminalViewProps) {
         if (status.current.state === "connected") controllerRef.current?.receiveBroadcast(bytes);
       },
       encoding: () => encodingRef.current,
+      release: (on) => controllerRef.current?.release(on),
       setEncoding: (id) => {
         encodingRef.current = encodingById(id).id;
         setEncodingId(encodingRef.current);
@@ -493,7 +502,11 @@ export function TerminalView(props: TerminalViewProps) {
               <button type="button" className="btn" onClick={() => handlers.current.onClose()}>
                 {msg.terminal.closeTab}
               </button>
-              {changed ? (
+              {props.canReconnect === false ? (
+                <span className="faint" style={{ fontSize: "var(--text-sm)" }}>
+                  {msgC.detach.reconnectInMain}
+                </span>
+              ) : changed ? (
                 <button type="button" className="btn btn-primary" onClick={() => handlers.current.onOpenKnownHosts()}>
                   {msg.terminal.openKnownHosts}
                 </button>

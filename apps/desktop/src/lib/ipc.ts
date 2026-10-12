@@ -292,3 +292,14 @@ export const layouts = {
     call<import("@tyrminal/contracts").LayoutTemplateSummary>("layout_save", { layout }),
   remove: (id: string) => call<void>("layout_delete", { id }),
 };
+
+/** Moving a tab with its live sessions into a new window (TRM-02). */
+export const detach = {
+  /** Main window: opens the window and hands the tab's sessions to it; returns its label. */
+  open: (tab: import("@tyrminal/contracts").DetachTabInput) => call<string>("window_detach", { tab }),
+  /** Detached window: the tab it was opened for (once). */
+  take: () => call<import("@tyrminal/contracts").DetachedTab>("window_detach_take"),
+  /** Detached window: takes over one handed-over session with this window's own channels. */
+  attach: (token: string, onOutput: OutputHandler, onEvent: EventHandler) =>
+    call<string>("session_attach", { token, ...channels(onOutput, onEvent) }),
+};

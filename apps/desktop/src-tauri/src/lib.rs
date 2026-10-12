@@ -202,6 +202,8 @@ pub fn run() {
             commands::layouts::layout_list,
             commands::layouts::layout_save,
             commands::layouts::layout_delete,
+            commands::layouts::window_detach,
+            commands::layouts::window_detach_take,
         ])
         .build(tauri::generate_context!());
 

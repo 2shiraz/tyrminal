@@ -10,7 +10,7 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 | 1 | Tab duplicate/reorder, session status indicators | Done: UI tests and native test on Linux |
 | 2 | Layouts: multi-host splits, grid/focus layouts, pane reorder, 16 panes | Done: UI tests and native 16-pane test on Linux |
 | 3 | Named layout templates in the vault, explicit save, unsaved indicator, restore by explicit action | Done: core, UI and native tests on Linux |
-| 4 | Detach a tab into its own window (scoped capability, session handoff bound to the window label) | Waiting on agent A (handoff request in work-split.md) |
+| 4 | Detach a tab into its own window (scoped capability, session handoff bound to the window label) | Done on A's handoff (636f104, cherry-picked); UI, native and lab tests on Linux |
 | 5 | Keyboard customization, encodings/emulation (honest limits), output highlighting, palette/recent polish, broadcast target review (P-13) | Mostly done; palette/recent polish (UX-03/04) next |
 
 ## Slice 1 (2026-10-12)
@@ -76,6 +76,21 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
 - Encodings (TRM-05): per-session output decoding and exact input encoding; characters the
   encoding lacks are not sent and the user is told. TRM-06 is BLOCKED (see the matrix).
 
+## Slice 4 (2026-10-12)
+
+- "Move tab to a new window" (tab menu, palette): only when every pane is connected. The main
+  window releases its panes (unmounting them no longer closes the sessions) and calls
+  `window_detach`, which validates the tab, creates a `detached-<random>` window and offers each
+  session to it (A's handoff); the tokens are kept natively and only that window can collect them
+  (`window_detach_take`, once, 60 s). If any offer fails, the window is destroyed and the tab stays.
+- The detached window runs a terminal-only shell with its own capability (`capabilities/detached.json`:
+  take its tab, attach and use those sessions, read preferences, report activity). It cannot open
+  sessions: no split, new tab or reconnect there. The release policy checks that capability
+  against an explicit allowlist and keeps the take permission out of the main window.
+- Limits: the screen contents do not move (a new terminal starts; full-screen apps redraw on the
+  resize); typing in the detached window is not driven natively (the WebDriver plugin sends keys
+  to the main window only), so it is covered by the UI test and A's lab test.
+
 ## Findings
 
 1. A Playwright `filter({ hasNot })` checks descendants only; the page tab is excluded by class.
@@ -89,6 +104,11 @@ Rows: `TRM-*`, `WSP-*`, `UX-03`, `UX-04`, `P-13`.
    passing tail, so the errors were not captured. Not reproduced in 4 reruns. Watching CI for it.
 8. CI: on macOS the palette is Cmd+K (native tests used Ctrl+Shift+K); Windows' local shell does
    not expand `$((…))`. Native tests now use the platform chord and a literal token.
+9. The e2e build replaces the capability list (`tauri.e2e.conf.json`); new capabilities must be
+   listed there too, and the test-only automation capability must name the new windows.
+10. The handoff sends no state event; an attached pane marks itself connected (only connected
+    tabs move) and the new window may ask for its tab before the offers exist (the native take
+    waits up to 5 s).
 5. WHATWG `TextDecoder("iso-8859-1")` is Windows-1252; offered as one choice.
 6. xterm drops an invalid UTF-8 byte rather than showing U+FFFD.
 4. The broadcast UI test typed while the focused terminal was still answering a cursor-position

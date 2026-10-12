@@ -150,4 +150,14 @@ export const msgC = {
     badge: (name: string) => `This session uses ${name}`,
     unencodable: (chars: string, name: string) => `Not sent: ${chars} cannot be written in ${name}.`,
   },
+  detach: {
+    action: "Move tab to a new window",
+    notConnected: "Only a tab whose panes are all connected can move to a new window.",
+    failed: (why: string) => `The tab stayed here: ${why}`,
+    moved: (title: string) => `Moved “${title}” to a new window.`,
+    reconnectInMain: "To connect again, open the host from the main window.",
+    loading: "Taking over the sessions…",
+    gone: "The tab for this window is no longer available. Close this window and move the tab again.",
+    ended: "Every session in this window has ended. You can close it.",
+  },
 };

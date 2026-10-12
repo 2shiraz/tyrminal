@@ -296,6 +296,22 @@ export function installMockBackend(options) {
     layout_delete: (a) => {
       state.layouts = (state.layouts ?? []).filter((l) => l.id !== a.id);
     },
+    // Detach: the main window hands sessions to a new window. The mock records the request; a
+    // page opened as a detached window (options.detached) receives that tab and attaches.
+    window_detach: (a) => {
+      window.__mockDetached = a.tab;
+      return "detached-0000000000000001";
+    },
+    window_detach_take: () => {
+      const tab = options.detached;
+      if (!tab) throw { code: "NOT_FOUND", message: "The tab for this window is no longer available." };
+      options.detached = null;
+      return tab;
+    },
+    session_attach: (a) => {
+      if (!/^token-/.test(a.token)) throw { code: "ACCESS_DENIED", message: "That session is not available to this window." };
+      return openSession({ ...a }, "local").sessionId;
+    },
     files_copy: (a) => {
       if (!state.sessions.has(a.srcSession) || !state.sessions.has(a.dstSession)) fsErr("ACCESS_DENIED", "That session is not available to this window.");
       const node = fs.get(childPath(a.srcDir, a.name));
@@ -704,7 +720,11 @@ export function installMockBackend(options) {
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   window.__TAURI_INTERNALS__ = {
-    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    // agent C: workspaces — a page can play a detached window (options.windowLabel).
+    metadata: {
+      currentWindow: { label: options.windowLabel ?? "main" },
+      currentWebview: { windowLabel: options.windowLabel ?? "main", label: options.windowLabel ?? "main" },
+    },
     transformCallback(callback, once = false) {
       const cid = nextCallback++;
       callbacks.set(cid, (payload) => {

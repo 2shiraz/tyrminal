@@ -18,7 +18,7 @@ import { SnippetsView } from "../features/snippets/SnippetsView";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
 import { snippets as snippetsApi, vault } from "../lib/ipc";
-import { layouts as layoutsApi } from "../lib/ipc";
+import { detach as detachApi, layouts as layoutsApi } from "../lib/ipc";
 import { useLoaded } from "../lib/useAsync";
 import { SaveLayoutDialog } from "../features/layouts/SaveLayoutDialog";
 import { type BroadcastTarget, BroadcastReview } from "../features/layouts/BroadcastReview";
@@ -41,6 +41,7 @@ import {
   closePane,
   closeTab,
   connectPanes,
+  detachInput,
   cycleTab,
   duplicateTab,
   emptyWorkspace,
@@ -288,6 +289,32 @@ function Shell() {
     [notify, savedLayouts],
   );
 
+  /** Moves a tab, with its live sessions, into a new window. Its panes unmount here without closing. */
+  const detachTab = useCallback(
+    async (tabId: number) => {
+      const t = wsRef.current.tabs.find((x) => x.id === tabId);
+      if (!t) return;
+      const ids = panesOf(t.layout);
+      const live = ids.map((id) => handles.current.get(id)).filter((h) => h?.connected() && h.sessionId());
+      if (live.length !== ids.length) {
+        notify("danger", msgC.detach.notConnected);
+        return;
+      }
+      const input = detachInput(wsRef.current, t, (id) => handles.current.get(id)?.sessionId() ?? "");
+      for (const h of live) h?.release(true);
+      try {
+        await detachApi.open(input);
+        setBroadcasting((current) => new Set([...current].filter((x) => x !== tabId)));
+        setWs((current) => closeTab(current, tabId));
+        notify("success", msgC.detach.moved(tabTitle(wsRef.current, t)));
+      } catch (error) {
+        for (const h of live) h?.release(false);
+        notify("danger", msgC.detach.failed((error as Error).message));
+      }
+    },
+    [notify],
+  );
+
   const arrange = useCallback((arrangement: Arrangement) => {
     const t = activeTab(wsRef.current);
     if (t) setWs((current) => arrangeTab(current, t.id, arrangement));
@@ -500,6 +527,7 @@ function Shell() {
             split(dir, undefined, t.focused);
           }}
           onDuplicate={duplicate}
+          onDetach={(id) => void detachTab(id)}
           onNewLocal={openLocal}
           onOpenPalette={() => setPaletteOpen(true)}
           layout={
@@ -659,6 +687,7 @@ function Shell() {
                     if (p) setWs((current) => paneToNewTab(current, p.id));
                   },
                   onSplitWith: (dir) => setPickingSplit(dir),
+                  onDetach: () => void detachTab(tab.id),
                   onEncoding: () => {
                     const p = activePane(wsRef.current);
                     const h = p ? handles.current.get(p.id) : undefined;

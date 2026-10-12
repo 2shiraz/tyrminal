@@ -3356,3 +3356,30 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   gap: 2px;
   align-self: stretch;
 }
+
+.detached-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-app);
+}
+
+.detached-head {
+  display: flex;
+  align-items: center;
+  height: var(--tabstrip-height);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+  font-size: var(--text-sm);
+}
+
+.detached-shell .content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.detached-note {
+  padding: var(--space-5);
+}
