@@ -4,10 +4,12 @@
 # against a release binary. The Docker lab remains available to developers (`pnpm lab:up`).
 name: Native
 
+# Not run on pull requests (owner decision): they get the quick checks in ci.yml and
+# security.yml. Every push to main runs this on all three platforms, so a regression shows up
+# right after merge.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
   workflow_call:
 
