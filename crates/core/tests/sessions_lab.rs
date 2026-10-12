@@ -1732,6 +1732,48 @@ async fn a_local_terminal_runs_the_chosen_installed_shell_and_ignores_anything_e
     assert!(!client.text.contains("PWNED"));
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires the SSH lab (pnpm lab:up)"]
+async fn a_duplicated_local_terminal_starts_in_the_given_folder_and_only_a_real_one() {
+    let f = fixture().await;
+    let folder = std::fs::canonicalize(f._dir.path()).unwrap().join("start here");
+    std::fs::create_dir(&folder).unwrap();
+    let open_in = |start_in: String| {
+        let core = f.core.clone();
+        async move {
+            let (tx, inbox) = mpsc::unbounded_channel();
+            let opened = core
+                .sessions
+                .open_local_in(WINDOW, 100, 30, None, Some(start_in), Arc::new(ChannelSink(tx)))
+                .await
+                .unwrap();
+            let mut client = Client {
+                core: core.clone(),
+                session: opened.session_id,
+                inbox,
+                text: String::new(),
+                received: 0,
+                auto_ack: true,
+                negotiated: None,
+                window: WINDOW,
+            };
+            client.until_connected().await;
+            // The arithmetic makes the end marker appear only in the output, not the echoed line.
+            client.send("echo \"PWD-[$PWD]-$((40+2))\"\n").await;
+            client.output_until("]-42").await;
+            client
+        }
+    };
+    let client = open_in(folder.to_string_lossy().into_owned()).await;
+    assert!(client.text.contains(&format!("PWD-[{}]-42", folder.display())), "{:?}", client.text);
+
+    // A folder that does not exist (or is not absolute) starts in the home folder instead.
+    let missing = folder.join("gone").to_string_lossy().into_owned();
+    let client = open_in(missing.clone()).await;
+    assert!(!client.text.contains(&format!("PWD-[{missing}]-42")), "{:?}", client.text);
+}
+
 /// Connects to a lab server with an already imported key, accepting its host key once.
 async fn connected(f: &Fixture, server: &str, key_id: &str) -> Client {
     let host = f

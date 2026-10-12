@@ -145,6 +145,13 @@ Safety features:
   answered.
 - Pasting several lines, or a lot of text, shows the text first.
 
+**Duplicate tab** (tab menu) opens the same destination again. When the shell integration
+(Suggestions → shell integration) reports the shell's current folder, the copy starts there:
+
+- A local terminal starts directly in that folder (if it still exists).
+- An SSH tab types `cd -- '<folder>'` into the new shell at its first prompt. It does this only
+  when that prompt carries the integration's mark, and not if you start typing first.
+
 ## Files (SFTP)
 
 Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH session. You can:
@@ -155,6 +162,9 @@ Open the **Files** panel (Ctrl+Shift+O, ⌘⇧O on macOS) on a connected SSH ses
 - drop files from your desktop onto the panel to upload them into the folder shown;
 - **Copy to another server** between two connected sessions, without saving anything on this
   computer.
+
+A session opens in its shell's current folder when the shell integration reports one, otherwise
+in the login folder. The terminal-folder button returns to the shell's folder.
 
 The panel remembers each session's place: switch to another tab and back and you find the same
 folder, selection, scroll position, toggles and transfers, without the folder being listed
