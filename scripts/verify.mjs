@@ -81,6 +81,8 @@ const SUITES = {
     { name: "tunnels, jump hosts and proxies through the core (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "tunnels_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
     // agent D: inventory and snippets
     { name: "inventory, keys and snippets against OpenSSH lab", cmd: cargo("test", "-p", "tyrminal-core", "--test", "inventory_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
+    // privilege prompts (KEY-18)
+    { name: "explicit identity password insertion (lab)", cmd: cargo("test", "-p", "tyrminal-core", "--test", "privilege_lab", "--quiet", "--", "--ignored"), blockedBy: needsLab },
   ],
   security: [
     { name: "vault format: tamper, swap, bounds, known answers", cmd: cargo("test", "-p", "tyrminal-vault", "--quiet") },
@@ -104,6 +106,8 @@ const SUITES = {
     { name: "search across sessions and command output (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/output.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "startup snippets and environment (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/startup.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     { name: "shell integration through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/integration.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
+    // privilege prompts (KEY-18)
+    { name: "identity password insertion through the real application (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/privilege.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
     // command history and server at a glance
     { name: "command history and server panel (lab)", cmd: headless(node("--test", "--test-concurrency=1", "--test-timeout=300000", "tests/native/history-glance.test.mjs")), blockedBy: () => needsLab() ?? needsE2e() },
   ],

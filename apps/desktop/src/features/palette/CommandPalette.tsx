@@ -46,6 +46,8 @@ import { msgD } from "../../lib/messages-d";
 import { msgOutput } from "../../lib/messages-output";
 import { keyLabels } from "../../lib/platform";
 import type { ActionId } from "../../lib/shortcuts";
+// privilege prompts (KEY-18)
+import { msgP } from "../../lib/messages-privilege";
 import { requestShortcutsSection } from "../layouts/WorkspaceSettings";
 import { msgSftp } from "../sftp/messages";
 
@@ -113,6 +115,7 @@ export function CommandPalette({
   pick,
   openTabs,
   onShellIntegration,
+  onInsertPassword,
   onConnectionLog,
   onSearchSessions,
   onCommandOutput,
@@ -164,6 +167,9 @@ export function CommandPalette({
   pick?: { title: string; onPick: (choice: HostSummary | "local") => void } | undefined;
   /** Shell integration setup; present when the focused pane is a connected terminal (SSH or local). */
   onShellIntegration?: (() => void) | undefined;
+  // privilege prompts (KEY-18)
+  /** Present only when the focused pane is a connected SSH session. */
+  onInsertPassword?: (() => void) | undefined;
   /** The focused SSH pane's connection log; present when it has a session. */
   onConnectionLog?: (() => void) | undefined;
   /** P-28: search every open terminal's scrollback; present while any terminal is open. */
@@ -338,6 +344,8 @@ export function CommandPalette({
     if (onToggleBroadcast)
       list.push(action("broadcast", broadcast ? msg.palette.broadcastOff : msg.palette.broadcastOn, <IconRadio size={16} />, onToggleBroadcast));
     if (onDeployKey) list.push(action("deploy-key", msg.palette.deployKey, <IconKeyRound size={16} />, onDeployKey));
+    // privilege prompts (KEY-18)
+    if (onInsertPassword) list.push(action("insert-password", msgP.insert.palette, <IconKeyRound size={16} />, onInsertPassword, "insertPassword"));
     list.push(action("theme", msg.palette.toggleTheme, <IconSun size={16} />, onToggleTheme));
     list.push(action("sidebar", msg.palette.toggleSidebar, <IconSidebar size={16} />, () => onAction("toggleSidebar"), "toggleSidebar"));
     list.push(action("lock", msg.nav.lock, <IconLock size={16} />, () => onAction("lock"), "lock"));

@@ -8,6 +8,8 @@ import { identities as identitiesApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
+// identity deletion (BUILD_SPEC §10.2)
+import { DeleteIdentityDialog } from "../identities/DeleteIdentityDialog";
 
 /** Notifies views that show identities (hosts, keychain) that they changed. */
 const listeners = new Set<() => void>();
@@ -96,27 +98,17 @@ export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {
         />
       )}
 
+      {/* identity deletion (BUILD_SPEC §10.2): an identity in use needs an explicit choice. */}
       {deleting && (
-        <Dialog title={msgD.identities.deleteTitle(deleting.label)} role="alertdialog" icon={<IconTrash2 size={18} />} tone="danger" onDismiss={() => setDeleting(null)}>
-          <p className="muted">{msgD.identities.deleteBody(deleting.usedBy)}</p>
-          <div className="dialog-actions">
-            <button type="button" className="btn" onClick={() => setDeleting(null)} data-autofocus>
-              {msg.common.cancel}
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger-solid"
-              onClick={async () => {
-                const target = deleting;
-                setDeleting(null);
-                await remove.run(() => identitiesApi.remove(target.id));
-                identityEvents.changed();
-              }}
-            >
-              {msg.common.delete}
-            </button>
-          </div>
-        </Dialog>
+        <DeleteIdentityDialog
+          identity={deleting}
+          others={(list ?? []).filter((i) => i.id !== deleting.id)}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            identityEvents.changed();
+          }}
+        />
       )}
     </section>
   );
