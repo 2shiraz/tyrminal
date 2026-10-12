@@ -45,21 +45,27 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* ---------- radius, by hierarchy, capped at 10 ---------- */
-  --radius-inner: 3px; /* key hints, checkboxes, tags */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-control: 6px; /* buttons, inputs, rows, tabs, menu items */
-  --radius-panel: 8px; /* grouped lists, menus, popovers, toasts */
-  --radius-dialog: 10px; /* dialogs and the command palette */
-  --radius-pill: 999px; /* switches and status dots only */
+  /* ---------- radius, by hierarchy (docs/design/revamp.md §3): boxes, not cards ---------- */
+  --radius-inner: 2px; /* tags, badges, chips, checkboxes, key hints, inner icon buttons */
+  --radius-xs: 2px;
+  --radius-sm: 3px; /* small buttons, segmented thumbs */
+  --radius-control: 4px; /* buttons, inputs, selects, segmented, menu items, tabs */
+  --radius-panel: 4px; /* page boxes, popovers, notices */
+  --radius-dialog: 6px; /* dialogs, the palette, toasts, menus */
+  --radius-pill: 999px; /* switch tracks and status dots only */
   --radius-round: 999px;
+  --radius-box: 4px; /* .box on a page */
+  --radius-edge: 0; /* panes attached to a window edge */
 
   /* ---------- sizes ---------- */
   --control-height: 30px;
   --control-height-sm: 24px;
   --row-height: 36px;
   --row-height-2: 48px;
+  --row-dense: 28px; /* panels, the palette, file tables */
+  --row-setting: 44px; /* a settings row with a label and a hint */
+  --strip-height: 32px; /* box header strips */
+  --strip-height-pane: 44px; /* pane heads (SFTP, Files, settings sections) */
   --icon: 16px;
   --icon-sm: 14px;
   --icon-stroke: 1.5;
@@ -72,6 +78,17 @@
   --page-gutter: 32px;
   /* Inner space around the terminal grid, painted in the scheme background (Settings can change it). */
   --terminal-padding: 12px;
+
+  /* ---------- boxes: rectangles that share edges, labelled by a strip, filled with rows ---------- */
+  --box-border: 1px solid var(--border);
+  --box-rule: 1px solid var(--border-subtle);
+  --box-gap: 1px; /* shared-edge grids: the grid background shows through as the rule */
+  --bg-strip: var(--bg-surface);
+  --bg-box: var(--bg-raised);
+  /* State is an edge, never a glow or a coloured fill. */
+  --edge-select: inset 2px 0 0 var(--accent);
+  --edge-live: inset 0 2px 0 var(--accent);
+  --edge-danger: inset 2px 0 0 var(--danger);
 
   /* ---------- focus: one ring everywhere ---------- */
   --focus-width: 2px;

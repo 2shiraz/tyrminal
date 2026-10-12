@@ -34,7 +34,7 @@
   min-height: 0;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-inner);
   background: var(--bg-raised);
   transform: translateX(-50%);
 }
@@ -185,32 +185,18 @@
 
 .sftp-picker-head {
   display: grid;
-  justify-items: center;
-  gap: var(--space-2);
-  text-align: center;
+  gap: var(--space-1);
 }
 
 .sftp-picker-head h3 {
-  margin: var(--space-1) 0 0;
-  font-size: var(--text-lg);
+  margin: 0;
+  font-size: var(--text-md);
 }
 
 .sftp-picker-head p {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
-}
-
-.sftp-picker-art {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-raised);
-  color: var(--accent-text);
-  box-shadow: var(--shadow-1);
 }
 
 .sftp-picker-list {

@@ -1,0 +1,230 @@
+/*
+ * Boxes (docs/design/revamp.md §4): the one container pattern, lifted from the SFTP and Files panes.
+ * A box groups rows under a strip label. It has a 1 px border, a small radius (none when attached to
+ * a window edge), no shadow and no inner padding: rows touch its edges. State is an edge.
+ */
+
+/* ===================================================================== box */
+
+.box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--bg-box);
+  overflow: hidden;
+}
+
+/* Attached to a window edge: no radius and no side borders. */
+.box[data-edge] {
+  border-right: 0;
+  border-left: 0;
+  border-radius: var(--radius-edge);
+}
+
+/* Inside a .box-grid: the grid draws the shared rules. */
+.box[data-flush] {
+  border: 0;
+  border-radius: 0;
+}
+
+/* The current or live box: a 2 px accent line on the top edge (as the active SFTP pane). */
+.box[data-live] {
+  box-shadow: var(--edge-live);
+}
+
+/* ===================================================================== strip */
+
+.box-strip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--strip-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+}
+
+.box-strip h2,
+.box-strip h3 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.box-count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.box-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.box[data-live] > .box-strip {
+  /* Keep the live line above the strip fill. */
+  box-shadow: var(--edge-live);
+}
+
+/* ===================================================================== empty row */
+
+/* One sentence and at most one action, left-aligned inside the box. */
+.box-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--row-height);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.box-empty p {
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* ===================================================================== shared-edge grid */
+
+.box-grid {
+  display: grid;
+  gap: var(--box-gap);
+  border: var(--box-border);
+  border-radius: var(--radius-box);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.box-grid > * {
+  min-width: 0;
+  background: var(--bg-box);
+}
+
+/* ===================================================================== data table */
+
+/* .dt generalises the Files table (.ft-table): a sticky strip of column headers, single-line rows,
+   hairlines between rows on pages, selection as a left accent edge. */
+.dt {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.dt thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-bottom: var(--box-rule);
+  background: var(--bg-strip);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dt tbody td {
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dt[data-dense] tbody td {
+  height: var(--row-dense);
+}
+
+.dt tbody tr + tr td {
+  border-top: var(--box-rule);
+}
+
+/* Panels: dense rows without hairlines, as the Files table. */
+.dt[data-dense] tbody tr + tr td {
+  border-top: 0;
+}
+
+.dt tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+.dt tbody tr[aria-selected="true"] td,
+.dt tbody tr.is-selected td {
+  background: var(--bg-selected);
+}
+
+.dt tbody tr[aria-selected="true"] td:first-child,
+.dt tbody tr.is-selected td:first-child {
+  box-shadow: var(--edge-select);
+}
+
+.dt tbody tr[data-tone="danger"] td:first-child {
+  box-shadow: var(--edge-danger);
+}
+
+/* Inside an overflow-hidden box the ring is drawn inward, so it is never clipped. */
+.dt tbody tr:focus-visible,
+.dt tbody tr :focus-visible,
+.box :focus-visible {
+  outline-offset: -2px;
+}
+
+/* ===================================================================== button strip */
+
+/* Joined buttons: neighbours share an edge, only the outer corners are rounded. */
+.btn-strip {
+  display: inline-flex;
+  flex-wrap: wrap;
+}
+
+.btn-strip > .btn {
+  border-radius: 0;
+}
+
+.btn-strip > .btn + .btn {
+  margin-left: -1px;
+}
+
+.btn-strip > .btn:first-child {
+  border-top-left-radius: var(--radius-control);
+  border-bottom-left-radius: var(--radius-control);
+}
+
+.btn-strip > .btn:last-child {
+  border-top-right-radius: var(--radius-control);
+  border-bottom-right-radius: var(--radius-control);
+}
+
+/* A hovered or focused button draws its own border over its neighbour's. */
+.btn-strip > .btn:hover,
+.btn-strip > .btn:focus-visible {
+  z-index: 1;
+}
+
+/* ===================================================================== forced colours */
+
+/* Edges are box-shadows, which contrast themes drop: give live and selected an outline instead. */
+@media (forced-colors: active) {
+  .box[data-live],
+  .dt tbody tr[aria-selected="true"],
+  .dt tbody tr.is-selected {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

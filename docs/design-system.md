@@ -21,10 +21,28 @@ bundled, and the CSP forbids loading anything from the network.
 |---|---|
 | Type | `--font-ui` (system UI stack), `--font-mono` (bundled JetBrains Mono + Symbols Nerd Font Mono); sizes `--text-2xs` 11 → `--text-2xl` 26 px; weights 450/550/620/680 |
 | Space | `--space-1` 4 px … `--space-7` 48 px (4-px base) |
-| Radius | `--radius-xs` 4, `--radius-sm` 6, `--radius-control` 8, `--radius-panel` 12, `--radius-dialog` 16, `--radius-pill` |
+| Radius | `--radius-inner`/`--radius-xs` 2, `--radius-sm` 3, `--radius-control` 4, `--radius-panel` 4, `--radius-box` 4, `--radius-dialog` 6, `--radius-edge` 0; `--radius-pill` for switch tracks and status dots only |
+| Boxes | `--strip-height` 32, `--strip-height-pane` 44, `--row-dense` 28, `--row-height` 36, `--row-setting` 44; `--box-border`, `--box-rule`, `--box-gap`, `--bg-strip`, `--bg-box`; edges `--edge-select`, `--edge-live`, `--edge-danger` |
 | Layout | `--control-height` 34, `--control-height-sm` 28, `--sidebar-width` 240 / collapsed 60, `--tabstrip-height` 42, `--statusbar-height` 28, `--panel-width` 340 |
 | Motion | `--motion-fast` 120 ms, `--motion-base` 180 ms, `--motion-slow` 260 ms; `--ease-out`, `--ease-spring` |
 | Color | Surfaces `--bg-app`, `--bg-sidebar`, `--bg-surface`, `--bg-raised(-hover)`; text, border, accent and status tones (`ok`, `warning`, `danger`, `info`) per theme |
+
+## Boxes
+
+The one container pattern (docs/design/revamp.md), taken from the SFTP and Files panes: rectangles
+that share edges, labelled by a strip, filled with rows. Colour marks state only, as an edge.
+
+- `.box` (1 px border, 4 px radius, no shadow, no padding); `data-edge` for panes attached to a
+  window edge, `data-flush` inside a `.box-grid`, `data-live` for a 2 px accent top line.
+- `.box-strip`: 32 px label strip with an `h2`/`h3`, an optional `.box-count` and `.box-actions`
+  (small ghost buttons).
+- `.dt`: data table with a sticky 28 px header strip, 36 px rows (28 with `data-dense`), hairlines
+  between rows on pages, selection as `--bg-selected` plus a 2 px left accent edge.
+- `.box-grid`: children share 1 px edges. `.btn-strip`: joined buttons.
+- Only floating surfaces (menus, dialogs, palette, toasts) keep a shadow.
+- Under forced colours, live and selected get an outline, since contrast themes drop box-shadows.
+
+`styles/box.css`; `components/ui/Box.tsx` (`Box`) and `BoxEmpty` in `controls.tsx`.
 
 ## Motion
 
@@ -43,7 +61,7 @@ A generated subset of Lucide (ISC license, `lucide-static` 1.47.0) in
 
 `components/ui/controls.tsx`: `TextField`, `SecretField`, `TextArea`, `Switch`, `Segmented`,
 `RangeField`, `SettingRow`, `IconButton` (requires a label; shows it as a tooltip), `Shortcut`
-and `Keys` (platform-aware key caps), `Avatar`, `EmptyState`, `SkeletonRows`, `ErrorNotice`,
+and `Keys` (one platform-aware text hint, such as "Ctrl+Shift+K" or "⌘K", not key caps), `Avatar`, `EmptyState`, `BoxEmpty`, `SkeletonRows`, `ErrorNotice`,
 `Notice`. `Dialog.tsx` (native `<dialog>`, focus trap, `data-autofocus`), `Menu.tsx`,
 `Toasts.tsx` (polite live region; cleared on lock). `features/hosts/HostPanel.tsx` is the non-modal side panel
 pattern for editing a record next to its list: focus moves into it on open and back to the opener
