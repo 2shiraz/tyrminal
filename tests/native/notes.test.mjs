@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 
-import { HOST_PANEL, KEYS, PASSPHRASE, ui } from "./flows.mjs";
+import { HOST_PANEL, KEYS, PASSPHRASE, ui, waitUnlocked } from "./flows.mjs";
 import { App, DOM_RENDERER_PREFS, loadLab } from "./harness.mjs";
 
 const lab = loadLab();
@@ -98,7 +98,7 @@ describe("notes in the real application", { concurrency: false }, () => {
     await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock screen" });
     await s.fill("Passphrase", PASSPHRASE);
     await s.clickButton("Unlock");
-    await s.until(async () => (await t.heading()) === "Home", { describe: "home", timeout: 20_000 });
+    await waitUnlocked(s, { describe: "home" });
     await openHostPanel();
     assert.match(await s.text(await noteView()), /echo note-\$\(\(6\*7\)\)/);
   });

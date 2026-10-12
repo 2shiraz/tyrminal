@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { HOST_PANEL, PASSPHRASE, saveAndCloseHostPanel, ui } from "./flows.mjs";
+import { HOST_PANEL, PASSPHRASE, saveAndCloseHostPanel, ui, waitUnlocked } from "./flows.mjs";
 import { App } from "./harness.mjs";
 
 describe("backup and restore in the real application", { concurrency: false }, () => {
@@ -77,7 +77,7 @@ describe("backup and restore in the real application", { concurrency: false }, (
       await s.until(async () => (await t.heading()) === "Unlock your vault", { describe: "unlock after restore", timeout: 20_000 });
       await s.fill("Passphrase", PASSPHRASE);
       await s.clickButton("Unlock");
-      await s.until(async () => (await t.heading()) === "Home", { describe: "home", timeout: 20_000 });
+      await waitUnlocked(s, { describe: "home" });
       await t.nav("Hosts");
       await s.until(() => s.execute(`return [...document.querySelectorAll('[data-testid="host-list"] .host-open')].some((b) => b.textContent.trim() === "backup-host-alpha")`), {
         describe: "the restored host on Hosts",

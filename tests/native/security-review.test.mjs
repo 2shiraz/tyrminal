@@ -55,7 +55,7 @@ describe("security review in the real application", { concurrency: false }, () =
 
   test("a generated key and a password host are reviewed, and choosing the key clears the host's finding", async () => {
     // A host added while the keychain is empty asks for its password.
-    await t.addHost({ label: "review-target", port: 2222, user: "tyr" });
+    await t.addHost({ label: "review-target", port: 2222, user: "tyr", key: null });
 
     await t.nav("Keychain");
     await s.clickButton("Generate key");

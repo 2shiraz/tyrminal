@@ -58,6 +58,22 @@ export async function saveAndCloseHostPanel(s) {
   await s.waitGone(HOST_PANEL);
 }
 
+/**
+ * Resolves once the vault is open: the primary navigation is shown and no vault screen (create,
+ * recovery key, unlock) is. It does not depend on which page opens first or on its heading.
+ */
+export async function waitUnlocked(s, { describe = "vault open", timeout = 20_000 } = {}) {
+  const vaultScreens = ["Create your local vault", "Save your recovery key", "Unlock your vault"];
+  await s.until(
+    () =>
+      s.execute(
+        `return (document.querySelector('nav.sidebar [data-nav="hosts"]') !== null && !arguments[0].includes(document.querySelector("h1")?.textContent.trim() ?? "")) || null`,
+        [vaultScreens],
+      ),
+    { describe, timeout },
+  );
+}
+
 export function ui(s) {
   const NAV_IDS = { Home: "home", Hosts: "hosts", Snippets: "snippets", Keychain: "keychain", "Known hosts": "knownHosts", Settings: "settings" };
   const api = {
@@ -108,7 +124,7 @@ export function ui(s) {
       const group = Number(/group (\d+)/.exec(prompt)[1]);
       await s.fill(prompt, key[group - 1]);
       await s.clickButton("I have saved it");
-      await s.until(async () => (await api.heading()) === "Home", { describe: "home" });
+      await waitUnlocked(s);
       return key.join("-");
     },
     async importKey(path, label = "lab key") {
