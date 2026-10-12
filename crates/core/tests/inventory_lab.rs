@@ -698,3 +698,80 @@ async fn environment_variables_are_inherited_sent_and_refusals_reported() {
         ErrorCode::InvalidInput
     );
 }
+
+/// SNP-05/07: a run holds its own handle to the connection, but it must not outlive its session.
+/// Six runs on real sessions: closing one session stops only that run, at once; locking the vault
+/// stops all of them.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn snippet_runs_stop_when_their_session_closes_or_the_vault_locks() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let snippet = v
+        .save_snippet(SnippetInput {
+            id: None,
+            name: "slow".into(),
+            folder: String::new(),
+            text: "sleep 3; echo done-$((6*7))".into(),
+        })
+        .await
+        .unwrap();
+    let start_all = async |sessions: &[String], tag: &str| {
+        sessions
+            .iter()
+            .enumerate()
+            .map(|(i, session)| {
+                let (core, session, snippet, run) =
+                    (core.clone(), session.clone(), snippet.id.clone(), format!("{tag}-{i}"));
+                tokio::spawn(async move {
+                    let started = std::time::Instant::now();
+                    let result = core.sessions.exec_snippet(WINDOW, &session, &snippet, &run).await;
+                    (result, started.elapsed())
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut sessions = Vec::new();
+    for i in 0..6 {
+        sessions.push(connected_session(&core, &lab, if i % 2 == 0 { "a" } else { "b" }, &key.id).await);
+    }
+    let runs = start_all(&sessions, "close").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    core.sessions.close(WINDOW, &sessions[3]).unwrap();
+    for (i, run) in runs.into_iter().enumerate() {
+        let (result, took) = run.await.unwrap();
+        if i == 3 {
+            assert_eq!(result.unwrap_err().code, ErrorCode::Cancelled);
+            assert!(took < Duration::from_millis(2500), "stopped with its session, not after the command: {took:?}");
+        } else {
+            let out = result.unwrap();
+            assert_eq!(
+                (out.exit_status, out.stdout.as_str()),
+                (Some(0), "done-42\n"),
+                "the other hosts are unaffected"
+            );
+        }
+    }
+
+    sessions.remove(3);
+    let runs = start_all(&sessions, "lock").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    core.vault.lock().await;
+    for run in runs {
+        let (result, took) = run.await.unwrap();
+        assert_eq!(result.unwrap_err().code, ErrorCode::VaultLocked);
+        assert!(took < Duration::from_millis(2500), "stopped by the lock: {took:?}");
+    }
+}

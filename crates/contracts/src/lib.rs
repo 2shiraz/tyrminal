@@ -15,6 +15,7 @@ mod error;
 // agent B: tunnels and history
 mod tunnels;
 // agent D: inventory and snippets
+mod defaults;
 mod inventory;
 
 pub use dto::*;
@@ -26,4 +27,5 @@ pub use tunnels::*;
 mod layouts;
 pub use layouts::*;
 // agent D: inventory and snippets
+pub use defaults::*;
 pub use inventory::*;

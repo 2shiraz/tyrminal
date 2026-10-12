@@ -207,6 +207,10 @@ pub struct ImportHost {
     pub tags: Vec<String>,
     /// Notes for this entry, such as an identity file that was not imported.
     pub notes: Vec<String>,
+    /// The label of another host in the same import that this one is reached through (its jump
+    /// host, from an OpenSSH `ProxyJump`). Absent in older previews.
+    #[serde(default)]
+    pub jump_via: Option<String>,
 }
 
 /// Something in the source that was not imported, and why.

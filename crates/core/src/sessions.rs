@@ -42,7 +42,7 @@ use crate::folders;
 use crate::handoff::{HANDOFF_TTL, Relay};
 use crate::streams::Streams;
 use crate::validate;
-use crate::vault::{ConnectionPlan, PlanAuth, VaultService};
+use crate::vault::{ConnectionPlan, PlanAuth, StartupItem, VaultService};
 
 /// Where a session's output and events go. Implemented by the adapter over a per-session IPC
 /// channel; `false` means the receiver is gone and the session should end.
@@ -356,7 +356,23 @@ impl Sessions {
         shell: Option<String>,
         sink: Arc<dyn SessionSink>,
     ) -> Result<SessionOpened, IpcError> {
+        self.open_local_in(owner, cols, rows, shell, None, sink).await
+    }
+
+    /// As [`Self::open_local_with`], starting in `start_in` (a duplicated tab's folder) when it is
+    /// an absolute path to an existing folder; otherwise in the home folder. The renderer learns
+    /// the folder from the shell's own marks, so it is checked here like any other input.
+    pub async fn open_local_in(
+        self: &Arc<Self>,
+        owner: &str,
+        cols: u16,
+        rows: u16,
+        shell: Option<String>,
+        start_in: Option<String>,
+        sink: Arc<dyn SessionSink>,
+    ) -> Result<SessionOpened, IpcError> {
         let generation = self.vault.require_unlocked().await?;
+        let start_in = start_in.and_then(|dir| start_folder(&dir));
         let shell = shell
             .map(std::path::PathBuf::from)
             .filter(|chosen| tyrminal_pty::available_shells().iter().any(|p| p == chosen));
@@ -366,7 +382,7 @@ impl Sessions {
         let this = Arc::clone(self);
         let session_id = id.clone();
         tokio::spawn(async move {
-            let body = run_local(&sink, &relay, cols, rows, shell, input_rx);
+            let body = run_local(&sink, &relay, cols, rows, shell, start_in, input_rx);
             this.supervise(&session_id, &entry, &sink, body).await;
         });
         Ok(SessionOpened { session_id: id })
@@ -1396,7 +1412,7 @@ async fn run_ssh(
     let (host_id, generation) = (plan.host_id.clone(), plan.generation);
     let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
-        Ok((Linked { conn, hops }, reader, writer)) => {
+        Ok((Linked { conn, hops }, reader, writer, startup)) => {
             if let Some(n) = conn.negotiated() {
                 ctx.sink.event(SessionEvent::Negotiated {
                     kex: n.kex,
@@ -1428,6 +1444,7 @@ async fn run_ssh(
             tokio::spawn(async move {
                 sessions.start_auto_tunnels(&owner, &session_id, &tunnel_host, generation, &tunnel_conn).await;
             });
+            run_startup(&ctx.entry, startup);
             let transcoder = crate::transcode::Transcoder::new(ctx.terminal.encoding);
             let outcome = pump(Transport::Ssh { reader, writer }, &ctx.entry.relay, input, transcoder).await;
             ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -1467,7 +1484,7 @@ async fn connect_ssh(
     plan: ConnectionPlan,
     cols: u16,
     rows: u16,
-) -> Result<(Linked, ShellReader, ShellWriter), IpcError> {
+) -> Result<(Linked, ShellReader, ShellWriter, Vec<StartupItem>), IpcError> {
     ctx.state(SessionState::Connecting);
     // Bounds simultaneous connection attempts; released when this function returns.
     let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
@@ -1581,14 +1598,57 @@ async fn connect_ssh(
     let conn = chain.pop().ok_or_else(internal)?;
 
     ctx.state(SessionState::OpeningChannel);
+    // Startup snippets (SNP-08), read only now that the host is trusted and signed in, under the
+    // plan's generation: after a lock nothing is read or typed.
+    let startup = ctx.vault.session_startup(plan.generation, &plan.host_id).await?;
     let pty = PtyRequest { term: ctx.terminal.term.term().into(), cols: u32::from(cols), rows: u32::from(rows) };
     // Environment variables (SNP-11..13): requested before the shell; every refusal is reported.
     let (reader, writer, rejected) = conn.open_shell_with_env(&pty, &env).await.map_err(|e| from_ssh(&e))?;
     ctx.entry.log.note(&format!("shell opened ({}, {cols}x{rows})", pty.term));
     if !env.is_empty() {
-        ctx.sink.event(SessionEvent::Environment { sent: env.iter().map(|(n, _)| n.clone()).collect(), rejected });
+        let sent: Vec<String> = env.iter().map(|(n, _)| n.clone()).collect();
+        ctx.entry.log.note(&crate::connlog::environment_line(&sent, &rejected));
+        ctx.sink.event(SessionEvent::Environment { sent, rejected });
     }
-    Ok((Linked { conn, hops: chain }, reader, writer))
+    Ok((Linked { conn, hops: chain }, reader, writer, startup))
+}
+
+/// Types a host's startup snippets into its new shell, in order, each followed by Enter, through
+/// the session's own input queue (so they are encoded and ordered like typed input). Called only
+/// once the shell is open, which is after host trust and authentication. Every snippet is noted
+/// in the connection log by name; a deleted one is skipped and noted.
+fn run_startup(entry: &Arc<Entry>, startup: Vec<StartupItem>) {
+    if startup.is_empty() {
+        return;
+    }
+    let entry = Arc::clone(entry);
+    tokio::spawn(async move {
+        for item in startup {
+            let Some(text) = item.text else {
+                entry.log.note("startup snippet skipped: it was deleted");
+                continue;
+            };
+            let bytes = snippet_bytes(&text, SnippetSendMode::Run, false);
+            for chunk in bytes.chunks(MAX_TERMINAL_INPUT_CHUNK) {
+                if entry.input.send(Input::Data(chunk.to_vec())).await.is_err() {
+                    return;
+                }
+            }
+            entry.log.note(&format!("startup snippet \"{}\" typed", item.name));
+        }
+    });
+}
+
+/// Longest starting folder accepted for a local terminal.
+const MAX_START_FOLDER: usize = 4096;
+
+/// `dir` as a starting folder: absolute, bounded, free of control characters, an existing folder.
+pub(crate) fn start_folder(dir: &str) -> Option<std::path::PathBuf> {
+    if dir.is_empty() || dir.len() > MAX_START_FOLDER || dir.chars().any(char::is_control) {
+        return None;
+    }
+    let path = std::path::PathBuf::from(dir);
+    (path.is_absolute() && path.is_dir()).then_some(path)
 }
 
 async fn run_local(
@@ -1597,17 +1657,20 @@ async fn run_local(
     cols: u16,
     rows: u16,
     shell: Option<std::path::PathBuf>,
+    start_in: Option<std::path::PathBuf>,
     input: mpsc::Receiver<Input>,
 ) -> Outcome {
     let program = shell.unwrap_or_else(tyrminal_pty::default_shell);
     let mut spec = ShellSpec::new(&program);
     spec.cols = cols;
     spec.rows = rows;
-    // Start in the user's home directory when it is known and valid.
-    spec.cwd = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(Into::into)
-        .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir());
+    // Start in the requested folder, else the user's home directory, when it is known and valid.
+    spec.cwd = start_in.or_else(|| {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(Into::into)
+            .filter(|p: &std::path::PathBuf| p.is_absolute() && p.is_dir())
+    });
     // A login shell, as terminal applications conventionally start (where the shell has one).
     spec.args = tyrminal_pty::login_args(&program);
     match tyrminal_pty::spawn(&spec) {
@@ -1891,7 +1954,19 @@ impl Sessions {
             None => Vec::new(),
         };
         let cancel = self.snippet_runs.start(owner, run_id)?;
-        let result = crate::snippet_runs::run(&conn, &text, &env, cancel).await;
+        // The run holds its own handle to the connection, so it would outlive its session: it
+        // stops (and the channel is dropped) when the session closes or the vault locks.
+        let mut closed = entry.close.subscribe();
+        let mut vault = self.vault.subscribe();
+        let result = tokio::select! {
+            result = crate::snippet_runs::run(&conn, &text, &env, cancel) => result,
+            _ = closed.wait_for(|closed| *closed) => {
+                Err(err(ErrorCode::Cancelled, "The session was closed, so the run stopped."))
+            }
+            () = locked_since(&mut vault, entry.generation) => {
+                Err(err(ErrorCode::VaultLocked, "The vault was locked, so the run stopped."))
+            }
+        };
         self.snippet_runs.finish(run_id);
         result
     }
@@ -1928,6 +2003,31 @@ impl Sessions {
     ) -> Result<tyrminal_contracts::IntegrationStatus, IpcError> {
         let (_, conn) = self.connection(owner, session_id)?;
         crate::shell_integration::remote_remove(&conn).await
+    }
+}
+
+#[cfg(test)]
+mod start_folder_tests {
+    use super::*;
+
+    #[test]
+    fn a_start_folder_must_be_an_existing_absolute_folder_without_controls() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = dir.path().to_string_lossy().into_owned();
+        assert_eq!(start_folder(&ok).as_deref(), Some(dir.path()));
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"x").unwrap();
+        for bad in [
+            String::new(),
+            "relative/dir".to_owned(),
+            file.to_string_lossy().into_owned(),
+            dir.path().join("missing").to_string_lossy().into_owned(),
+            format!("{ok}\n"),
+            format!("{ok}\u{1b}]0;x"),
+            format!("/{}", "a".repeat(MAX_START_FOLDER)),
+        ] {
+            assert_eq!(start_folder(&bad), None, "{bad:?}");
+        }
     }
 }
 

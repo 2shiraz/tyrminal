@@ -56,7 +56,7 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `key_deploy_preview` / `key_deploy` | session id, key id | `KeyDeployPreview` | Owned, connected SSH session only; fixed remote commands, key line on stdin, append-only to `~/.ssh/authorized_keys` |
 | `known_host_list` / `known_host_remove` | — / id + reason | `KnownHostSummary[]` / — | Removal requires a reason |
 | `session_open_ssh` | host id, size, output channel, event channel | session id | Host-key trust and auth prompts arrive as events |
-| `session_open_local` | size, channels | session id | Local PTY |
+| `session_open_local` | size, optional `startIn` folder, channels | session id | Local PTY; `startIn` used only if absolute, existing and free of control characters, else home |
 | `session_write` | session id, bytes | — | Chunked; at most `MAX_TERMINAL_INPUT_CHUNK` per call |
 | `session_resize` / `session_ack` / `session_close` | session id, … | — | `ack` is output flow control |
 | `session_trust_answer` | prompt id, `TrustDecision` | — | `once`, `always`, `cancel` |

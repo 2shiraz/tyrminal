@@ -11,7 +11,7 @@ import { HostsView } from "../features/hosts/HostsView";
 import { DeployKeyDialog } from "../features/credentials/DeployKeyDialog";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { KnownHostsView, SettingsView } from "../features/settings/SettingsViews";
-import { SnippetRunDialog, type SnippetRunRequest } from "../features/snippets/SnippetRunDialog";
+import { SnippetRunDialog, type SnippetRunRequest, needsSnippetReview } from "../features/snippets/SnippetRunDialog";
 import { FilesPanel, panelMemory } from "../features/files/FilesPanel";
 import { SnippetsView } from "../features/snippets/SnippetsView";
 // agent B: tunnels and history
@@ -19,6 +19,7 @@ import { TunnelsView } from "../features/tunnels/TunnelsView";
 import { SnippetRunContext } from "../features/snippets/runContext";
 import { IntegrationDialog } from "../features/autocomplete/IntegrationDialog";
 import { SuggestDialog } from "../features/autocomplete/SuggestDialog";
+import { shellContexts } from "../features/autocomplete/shellContext";
 import { insertionBytes } from "../features/autocomplete/suggest";
 import type { TerminalTarget } from "../features/terminal/TerminalController";
 import type { PaneHandle, PaneStatus } from "../features/terminal/TerminalView";
@@ -227,8 +228,8 @@ function Shell() {
     setWs((current) => selectTab(current, null));
   }, []);
 
-  const open = useCallback((target: TerminalTarget, label: string, identity: string) => {
-    setWs((current) => openTab(current, { target, label, identity }));
+  const open = useCallback((target: TerminalTarget, label: string, identity: string, startIn?: string) => {
+    setWs((current) => openTab(current, { target, label, identity, ...(startIn ? { startIn } : {}) }));
   }, []);
 
   const connect = useCallback(
@@ -264,7 +265,11 @@ function Shell() {
   const duplicate = useCallback(
     (id: number) => {
       const current = wsRef.current;
-      const next = duplicateTab(current, id);
+      // Each copy starts in its source shell's current folder when the shell integration reports it.
+      const next = duplicateTab(current, id, (paneId) => {
+        const sessionId = handles.current.get(paneId)?.sessionId();
+        return sessionId ? (shellContexts.get(sessionId)?.cwd ?? undefined) : undefined;
+      });
       const t = current.tabs.find((x) => x.id === id);
       if (next === current && t) notify("danger", msgC.tabs.duplicateFull(panesOf(t.layout).length));
       else setWs(next);
@@ -392,9 +397,16 @@ function Shell() {
       const handle = p ? handles.current.get(p.id) : undefined;
       const sessionId = handle?.sessionId();
       if (!p || !handle || !sessionId || !handle.connected()) return;
-      const request: SnippetRunRequest = { snippet, mode, paneId: p.id, sessionId, targetLabel: p.label, targetIdentity: p.identity };
-      const lines = snippet.text.replace(/\n$/, "").split("\n").length;
-      if (lines > 1) {
+      const request: SnippetRunRequest = {
+        snippet,
+        mode,
+        paneId: p.id,
+        sessionId,
+        targetLabel: p.label,
+        targetIdentity: p.identity,
+        environment: handle.environment(),
+      };
+      if (needsSnippetReview(request)) {
         setRunRequest(request);
       } else {
         void sendSnippet(request);

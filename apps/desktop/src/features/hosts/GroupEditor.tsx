@@ -7,6 +7,7 @@ import { IconFolder } from "../../components/ui/icons";
 import { groups as groupsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
+import { GroupDefaultsSection, useGroupDefaults } from "./GroupDefaultsSection";
 import { groupPath } from "./HostEditor";
 
 /** Ids of `id` and every group nested under it (a group cannot move into these). */
@@ -47,25 +48,29 @@ export function GroupEditor({
   const [port, setPort] = useState(group?.port ? String(group.port) : "");
   const [keyId, setKeyId] = useState(group?.keyId ?? "");
   const { pending, error, run } = useAction();
+  const defaults = useGroupDefaults(group?.id ?? null);
 
   const excluded = group ? descendantsOf(groups, group.id) : new Set<string>();
   const portNumber = port === "" ? null : Number(port);
   const portValid = portNumber === null || (Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535);
-  const ready = name.trim() !== "" && !name.includes("/") && portValid;
+  const ready = name.trim() !== "" && !name.includes("/") && portValid && defaults.valid;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!ready || pending) return;
-    const saved = await run(() =>
-      groupsApi.save({
+    const saved = await run(async () => {
+      await defaults.saveBefore();
+      const result = await groupsApi.save({
         id: group?.id ?? null,
         name: name.trim(),
         parentId: parent,
         username: username.trim() === "" ? null : username.trim(),
         port: portNumber,
         keyId: keyId === "" ? null : keyId,
-      }),
-    );
+      });
+      await defaults.saveAfter(result.id);
+      return result;
+    });
     if (saved) onSaved(saved);
   }
 
@@ -121,6 +126,7 @@ export function GroupEditor({
             </select>
           </label>
         </fieldset>
+        <GroupDefaultsSection state={defaults} />
         <ErrorNotice error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose}>

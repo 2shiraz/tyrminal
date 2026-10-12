@@ -15,7 +15,7 @@ suggestions), see `docs/work-split.md`. Owner requests are logged in `docs/reque
 | 05 Workspace | Tabs, splits, broadcast on main; layouts, detach-to-window (handoff core done by A) in PR #7 (C) |
 | 06 Files | SFTP browser, transfers, folders, two panes, copy between servers, edit sessions on main; desktop drop, full-disk test on A's branch |
 | 07 Connections | Forwarding, jump hosts, proxies in PR #6 (B); Telnet, serial, protocol per host, encodings and terminal type on A's branch; Mosh deferred (ADR 0008) |
-| 08 Automation | Multi-host snippet runs, suggestions in PR #5 (D); logs and history next (B) |
+| 08 Automation | Multi-host snippet runs, suggestions, shell integration on main; the shell's folder opens the files panel and carries into duplicated tabs, mark events for history (PR #10); logs and history next (B) |
 | 09 Release candidate | Diagnostics consent, update controls, user guide, upgrade test from beta.1, installer smoke test on A's branch |
 | 10–15 | Not started (sync, teams, mobile) |
 
