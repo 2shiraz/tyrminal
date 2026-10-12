@@ -21,6 +21,8 @@ export interface MockOptions {
   // compromised-password check (SEC-11)
   /** Pretend the build can make range requests (the real build cannot yet). */
   passwordCheckAvailable?: boolean;
+  /** LAN discovery: the networks the mock offers (default: one, `en0`). */
+  discoveryNetworks?: { id: string; addresses: string[] }[];
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {

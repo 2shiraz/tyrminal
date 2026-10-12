@@ -68,6 +68,10 @@ already-redacted text. Codes include `VAULT_LOCKED`, `ACCESS_DENIED`, `NOT_FOUND
 | `snippet_send` | snippet id, session id, `SnippetSendMode`, bracketed | — | Text is read from the vault by the core, never from the UI |
 | `prefs_get` / `prefs_set` | — / `Preferences` | `Preferences` | Non-secret; sanitized and clamped; stored next to the vault |
 | `link_open` | URL | — | http/https only, re-validated natively, opened by the OS |
+| `discovery_networks` | — | interfaces (name, addresses) | Local interface table only; sends nothing (HST-14, ADR 0009) |
+| `discovery_start` | network id | discovery status | Vault unlocked; id must be a listed interface; browses `_ssh._tcp` there for 30 s |
+| `discovery_status` | — | running, seconds left, found (cleaned, ≤ 64), truncated | This window's browse |
+| `discovery_stop` | — | discovery status | Ends this window's browse; results stay readable |
 
 ## Events
 

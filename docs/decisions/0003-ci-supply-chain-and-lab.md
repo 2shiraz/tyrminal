@@ -82,4 +82,4 @@ The release-policy check separately asserts no HTTP client in the desktop featur
 | `socat` (CI and test machines only) | distribution package | GPL-2.0 (tool, not linked) | A pseudo-terminal pair plays a serial device in `a_serial_host_carries_bytes_both_ways`; never shipped |
 | `tokio` feature `net` in `tyrminal-core` | 1.x (unchanged) | MIT | Telnet hosts (CON-05) connect over TCP from the core |
 | `encoding_rs` | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause | Legacy terminal encodings per host (TRM-05), streaming decode across reads |
-| `sha1` in `tyrminal-core` (already in the tree through `ssh-key`; same `digest` 0.11 as `sha2`) | 0.11.0 | MIT OR Apache-2.0 | Compromised-password check (SEC-11): the k-anonymity range protocol is defined over SHA-1, so this is a protocol requirement, not a security choice (ADR 0009) |
+| `sha1` in `tyrminal-core` (already in the tree through `ssh-key`; same `digest` 0.11 as `sha2`) | 0.11.0 | MIT OR Apache-2.0 | Compromised-password check (SEC-11): the k-anonymity range protocol is defined over SHA-1, so this is a protocol requirement, not a security choice (ADR 0012) |

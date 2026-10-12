@@ -10,6 +10,7 @@
 
 pub mod limits;
 
+mod discovery;
 mod dto;
 mod error;
 // agent B: tunnels and history
@@ -24,6 +25,7 @@ mod identity_removal;
 // compromised-password check (SEC-11)
 mod password_check;
 
+pub use discovery::*;
 pub use dto::*;
 pub use error::{ErrorCode, IpcError};
 // agent B: tunnels and history

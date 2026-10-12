@@ -1,4 +1,4 @@
-# ADR 0009: Compromised-password check with a hash-prefix range query (SEC-11)
+# ADR 0012: Compromised-password check with a hash-prefix range query (SEC-11)
 
 Status: accepted for the local part; the network transport waits on an owner decision. 2026-10-12
 

@@ -19,7 +19,7 @@ earlier parallel identities implementation on this branch was reverted (commits 
 
 - SEC-11 transport: needs an HTTPS client in the release graph, which `check-release.mjs`
   forbids. Owner decision pending: (A) off-by-default cargo feature or (B) one allowed client
-  (ADR 0009).
+  (ADR 0012).
 
 ## Notes for other owners
 
