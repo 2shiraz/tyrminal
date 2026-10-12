@@ -1116,14 +1116,8 @@ function HostsViewImpl({
                         <div className="host-card-meta">
                           <div className="host-card-badges">
                           {isProduction(host) && <span className="badge badge-production">{msgProduction.label}</span>}
-                          {identityOf(host.id) ? (
-                            <span className="badge">
-                              <IconUser size={12} />
-                              {identityOf(host.id)}
-                            </span>
-                          ) : (
-                            <AuthBadge host={host} keys={keyList} />
-                          )}
+                          {/* An identity already shows in the "ssh, …" line above, as in list rows. */}
+                          {!identityOf(host.id) && <AuthBadge host={host} keys={keyList} />}
                           {isConnected ? (
                             <span className="badge badge-success">
                               <span className="status-dot" data-tone="ok" aria-hidden="true" />
