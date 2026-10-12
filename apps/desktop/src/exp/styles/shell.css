@@ -215,7 +215,7 @@
   }
 
   /* A terminal's tab takes its scheme's background, as main's (the label uses the scheme's text). */
-  & .tab:not(.tab-page)[aria-selected="true"] {
+  & .tab:not(.tab-page, [data-files-only])[aria-selected="true"] {
     --tab-fill: var(--scheme-bg);
   }
 
@@ -246,16 +246,16 @@
   }
 
   /* While a terminal is in front, the status bar and its tab take the scheme's colours (as main). */
-  & .main:has(.workspace:not([hidden])) .statusbar {
+  & .main:has(.workspace:not([hidden], [data-files-only])) .statusbar {
     border-color: var(--border);
     background: var(--scheme-bg);
   }
 
-  & .main:has(.workspace:not([hidden])) .content {
+  & .main:has(.workspace:not([hidden], [data-files-only])) .content {
     background: var(--scheme-bg);
   }
 
-  & .main:has(.workspace:not([hidden])) .status-button[aria-pressed="true"] {
+  & .main:has(.workspace:not([hidden], [data-files-only])) .status-button[aria-pressed="true"] {
     background: var(--bg-active);
     color: var(--text);
   }

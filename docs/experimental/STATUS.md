@@ -12,6 +12,7 @@ milestone, newest last.
   (onboarding, unlock, empty hosts, home, hosts list and cards, host editor, menu, snippets,
   keychain, known hosts, settings, terminal, terminal with snippets, palette, split, trust prompt).
   Checks: typecheck, exp build, `scripts/exp/check-contrast.mjs` (163 AA checks), main build clean of
-  Afterglow (`scripts/exp/check-isolation.mjs`), role-based specs against the exp build (see the
-  M0 entry in the commit for the count; the 5 failures that remain also fail on main). Next: M1
-  press and release springs, origin-aware menus, Phosphor icons.
+  Afterglow (`scripts/exp/check-isolation.mjs`), role-based specs against the exp build after merging main: 451 passed;
+  the 2 identity specs that fail also fail on main, and the toast-beside-panel spec that the card
+  inset broke is fixed (exp Toasts measures panels with the inset). Next: M1 press and release
+  springs, origin-aware menus, Phosphor icons.

@@ -20,6 +20,7 @@ export const EXPERIMENTAL_UI = env.TYRMINAL_UI === "experimental";
 /** @type {Record<string, string>} */
 const SWAPS = {
   "features/terminal/schemes.ts": "exp/terminal/schemes.ts",
+  "components/ui/Toasts.tsx": "exp/ui/Toasts.tsx",
 };
 
 /** Vite ids use forward slashes; a Windows drive keeps its letter (C:/...). */
