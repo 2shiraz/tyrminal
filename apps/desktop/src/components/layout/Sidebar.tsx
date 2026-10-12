@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Destination } from "../../app/AppShell";
 import { type Workspace, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
+import { versionLabel } from "../../lib/version";
 import { msgC } from "../../lib/messages-c";
 import { Shortcut } from "../ui/controls";
 import {
@@ -66,6 +67,7 @@ export function Sidebar({
   onSftp,
   onToggleCollapsed,
   onLock,
+  onOpenAbout,
   hostCount,
   snippetCount,
 }: {
@@ -80,6 +82,7 @@ export function Sidebar({
   onSftp?: () => void;
   onToggleCollapsed: () => void;
   onLock: () => void;
+  onOpenAbout: () => void;
   hostCount: number;
   snippetCount: number;
 }) {
@@ -174,6 +177,9 @@ export function Sidebar({
         >
           <IconSidebar size={17} />
           <span className="nav-label">{msg.nav.collapse}</span>
+        </button>
+        <button type="button" className="sidebar-version" onClick={onOpenAbout} aria-label={msg.about.open(versionLabel(__APP_VERSION__))}>
+          {versionLabel(__APP_VERSION__)}
         </button>
       </div>
     </nav>

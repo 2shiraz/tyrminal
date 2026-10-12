@@ -90,6 +90,7 @@ const COMMANDS: &[&str] = &[
     "serial_ports",
     "host_recent",
     "link_open",
+    "app_info",
     // backup and restore
     "backup_export",
     "backup_choose",
@@ -151,6 +152,14 @@ const COMMANDS: &[&str] = &[
     "env_get",
     "env_set",
     "env_effective",
+    // privilege prompts (KEY-18)
+    "session_identity",
+    "session_insert_identity_password",
+    // identity deletion (BUILD_SPEC §10.2)
+    "identity_usage",
+    // compromised-password check (SEC-11)
+    "password_check_status",
+    "password_check_run",
     "startup_get",
     "startup_set",
     "startup_effective",
@@ -175,7 +184,73 @@ const COMMANDS: &[&str] = &[
     "glance_host_set",
 ];
 
+/// Short hash of the commit being built: CI's `GITHUB_SHA`, else the local checkout, else `dev`.
+fn build_commit() -> String {
+    let valid = |s: &str| s.len() >= 7 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if let Ok(sha) = std::env::var("GITHUB_SHA")
+        && valid(&sha)
+    {
+        return sha[..7].to_ascii_lowercase();
+    }
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| valid(s))
+        .unwrap_or_else(|| "dev".to_owned())
+}
+
+/// UTC build date. `SOURCE_DATE_EPOCH` keeps reproducible builds reproducible.
+fn build_date() -> String {
+    let secs = std::env::var("SOURCE_DATE_EPOCH").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or_else(|| {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    });
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Rebuild the stamp when the checked-out commit moves.
+fn watch_git_head() {
+    let Some(git_dir) = std::process::Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+    else {
+        return;
+    };
+    let git_dir = std::path::PathBuf::from(git_dir.trim());
+    let head = git_dir.join("HEAD");
+    println!("cargo:rerun-if-changed={}", head.display());
+    if let Some(reference) =
+        std::fs::read_to_string(&head).ok().and_then(|h| h.strip_prefix("ref: ").map(|r| r.trim().to_owned()))
+    {
+        let path = git_dir.join(reference);
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+}
+
 fn main() {
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    watch_git_head();
+    println!("cargo:rustc-env=TYRMINAL_BUILD_COMMIT={}", build_commit());
+    println!("cargo:rustc-env=TYRMINAL_BUILD_DATE={}", build_date());
     let attributes = tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS));
     if let Err(error) = tauri_build::try_build(attributes) {
         panic!("tauri build configuration failed: {error:#}");

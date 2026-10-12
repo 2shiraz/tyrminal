@@ -98,6 +98,15 @@ pub const MAX_CHAIN_HOPS: usize = 8;
 pub const MAX_LAYOUT_PANES: usize = 16;
 /// A custom tab name in a layout template, in characters.
 pub const MAX_TAB_TITLE_LEN: usize = 80;
+// terminal input: highlight patterns
+/// Highlight rules that are regular expressions (of `MAX_HIGHLIGHT_KEYWORDS` rules in all).
+pub const MAX_HIGHLIGHT_PATTERNS: usize = 8;
+/// A highlight pattern's length, in characters.
+pub const MAX_HIGHLIGHT_PATTERN_LEN: usize = 128;
+/// Unbounded repetitions (`*`, `+`, `{n,}`) in one highlight pattern.
+pub const MAX_PATTERN_UNBOUNDED: usize = 3;
+/// The largest count in a bounded repetition (`{n,m}`) of a highlight pattern.
+pub const MAX_PATTERN_REPEAT: u32 = 256;
 // command history
 /// Commands kept per host (and for local terminals), and the length of one command in bytes.
 pub const MAX_HISTORY_ENTRIES: usize = 1_000;

@@ -158,6 +158,9 @@ export const msgC = {
       movePaneRight: "Move pane right",
       movePaneUp: "Move pane up",
       movePaneDown: "Move pane down",
+      // terminal input
+      previousCommand: "Jump to the previous command",
+      nextCommand: "Jump to the next command",
       nextPane: "Next pane",
       prevPane: "Previous pane",
       goToTab1: "Go to tab 1",
@@ -173,6 +176,7 @@ export const msgC = {
       focusTerminal: "Focus terminal",
       focusSidebar: "Focus sidebar",
       suggest: "Command suggestions",
+      insertPassword: "Type identity password",
     } as Record<string, string>,
   },
   highlight: {

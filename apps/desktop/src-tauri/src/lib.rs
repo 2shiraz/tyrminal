@@ -210,6 +210,7 @@ pub fn run() {
             commands::settings::serial_ports,
             commands::settings::host_recent,
             commands::settings::link_open,
+            commands::settings::app_info,
             commands::discovery::discovery_networks,
             commands::discovery::discovery_start,
             commands::discovery::discovery_status,
@@ -274,6 +275,14 @@ pub fn run() {
             commands::inventory::env_get,
             commands::inventory::env_set,
             commands::inventory::env_effective,
+            // privilege prompts (KEY-18)
+            commands::privilege::session_identity,
+            commands::privilege::session_insert_identity_password,
+            // identity deletion (BUILD_SPEC §10.2)
+            commands::inventory::identity_usage,
+            // compromised-password check (SEC-11)
+            commands::password_check::password_check_status,
+            commands::password_check::password_check_run,
             commands::inventory::startup_get,
             commands::inventory::startup_set,
             commands::inventory::startup_effective,

@@ -75,8 +75,10 @@ test("a group's identity shows on its hosts; a host's own wins; deleting reports
   await nav(page, "Keychain");
   await page.getByRole("button", { name: "Delete Ops" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Delete Ops?" });
-  await expect(confirm).toContainText("1 host or group uses it");
-  await confirm.getByRole("button", { name: "Delete" }).click();
+  // In use: a choice is needed (BUILD_SPEC §10.2); see identity-deletion.spec.ts.
+  await expect(confirm).toContainText("1 host and 1 group use this identity");
+  await confirm.getByRole("radio", { name: /Remove it from them/ }).check();
+  await confirm.getByRole("button", { name: "Delete identity" }).click();
   await expect(page.getByRole("list", { name: "Identities" })).not.toContainText("Ops");
   await nav(page, "Hosts");
   await expect(page.getByText("Identity: Ops")).toHaveCount(0);

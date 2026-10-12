@@ -519,6 +519,28 @@ pub struct Preferences {
     /// Keep a local, in-memory list of recent failures for a diagnostic report. Off by default;
     /// separate from session recording and command history.
     pub diagnostics: bool,
+    // compromised-password check (SEC-11)
+    /// Off by default; see `PasswordCheckPreferences`.
+    pub password_check: crate::PasswordCheckPreferences,
+}
+
+/// Static facts about this build and the computer it runs on, for Settings → About and bug
+/// reports. Nothing here identifies the user, their hosts or their vault.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppInfo {
+    /// Short commit hash the app was built from, or `dev` when it is unknown.
+    pub commit: String,
+    /// UTC build date, `YYYY-MM-DD`.
+    pub build_date: String,
+    /// Operating system family (`linux`, `macos`, `windows`).
+    pub os: String,
+    /// CPU architecture (`x86_64`, `aarch64`).
+    pub arch: String,
+    pub tauri_version: String,
+    /// The system WebView's version, when the platform reports it.
+    pub webview_version: Option<String>,
 }
 
 /// One failure for a diagnostic report: which command failed and how, never with what.
