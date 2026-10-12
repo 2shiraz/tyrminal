@@ -274,7 +274,7 @@ async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation
         |name: &str, text: &str| SnippetInput { id: None, name: name.into(), folder: String::new(), text: text.into() };
 
     // Succeeds on a, fails on b (a marker file decides), with stdout and stderr kept apart.
-    let marker = format!("/tmp/tyrminal-snp-{}", std::process::id());
+    let marker = format!("/tmp/tyrminal-snp-{}-{}", std::process::id(), key.id);
     let check = v
         .save_snippet(snippet(
             "check",
@@ -284,9 +284,12 @@ async fn snippets_run_on_several_sessions_with_per_host_results_and_cancellation
         .unwrap();
     let ok = core.sessions.exec_snippet(WINDOW, &a, &check.id, "run-a").await.unwrap();
     assert_eq!((ok.exit_status, ok.stdout.as_str(), ok.stderr.as_str()), (Some(0), "out-42\n", "err\n"));
-    std::fs::write(&marker, "").unwrap();
+    // The marker lives on the lab machine (in WSL on Windows), so it is made there, over SSH.
+    let touch = v.save_snippet(snippet("touch", &format!("touch {marker}"))).await.unwrap();
+    let remove = v.save_snippet(snippet("remove", &format!("rm -f {marker}"))).await.unwrap();
+    assert_eq!(core.sessions.exec_snippet(WINDOW, &b, &touch.id, "run-touch").await.unwrap().exit_status, Some(0));
     let failed = core.sessions.exec_snippet(WINDOW, &b, &check.id, "run-b").await.unwrap();
-    std::fs::remove_file(&marker).unwrap();
+    assert_eq!(core.sessions.exec_snippet(WINDOW, &b, &remove.id, "run-rm").await.unwrap().exit_status, Some(0));
     assert_eq!(failed.exit_status, Some(3));
     assert_eq!(failed.stdout, "out-42\n");
 
