@@ -919,6 +919,44 @@ export function installMockBackend(options) {
         .map((k) => ({ label: k.port === 22 ? k.host : `${k.host}:${k.port}`, address: k.host, port: k.port, username: "", group: "", tags: [], notes: [`Trusted ${k.algorithm} key ${k.fingerprint}`] }));
       return { hosts, skipped: [], duplicates: [] };
     },
+    identity_list: () =>
+      identityState.list.map((i) => ({
+        id: i.id,
+        label: i.label,
+        username: i.username,
+        hasPassword: i.password !== null,
+        keyId: i.keyId,
+        usedBy: [...identityState.uses.values()].filter((u) => u === i.id).length,
+      })),
+    identity_save: (a) => {
+      const input = a.identity;
+      if (!input.label.trim()) throw { code: "INVALID_INPUT", message: "Enter a name." };
+      const existing = identityState.list.find((i) => i.id === input.id);
+      const password = input.password.kind === "set" ? input.password.value : input.password.kind === "clear" ? null : (existing?.password ?? null);
+      const record = { id: existing?.id ?? id(1100 + identityState.list.length), label: input.label, username: input.username, password, keyId: input.keyId };
+      if (existing) Object.assign(existing, record);
+      else identityState.list.push(record);
+      return handlers.identity_list().find((i) => i.id === record.id);
+    },
+    identity_delete: (a) => {
+      identityState.list = identityState.list.filter((i) => i.id !== a.id);
+      let n = 0;
+      for (const [k, v] of identityState.uses) if (v === a.id) {
+        identityState.uses.delete(k);
+        n += 1;
+      }
+      return n;
+    },
+    identity_assignments: () => [
+      ...state.hosts.map((h) => identityAssignment({ kind: "host", hostId: h.id })),
+      ...state.groups.map((g) => identityAssignment({ kind: "group", groupId: g.id })),
+    ],
+    identity_assign: (a) => {
+      const key = a.target.kind === "host" ? `host:${a.target.hostId}` : `group:${a.target.groupId}`;
+      if (a.identityId) identityState.uses.set(key, a.identityId);
+      else identityState.uses.delete(key);
+      return identityAssignment(a.target);
+    },
     prompt_marks_status: (a) => integrationStatus(a.target),
     prompt_marks_install: (a) => {
       integration.set(integrationKey(a.target), 1);
@@ -945,6 +983,20 @@ export function installMockBackend(options) {
   };
   // agent D: inventory and snippets
   window.__mockAddFile = (path) => addNode(path, "file", 10);
+  /** Identities in the mock: the list (passwords kept here only) and which target uses which. */
+  const identityState = { list: [], uses: new Map() };
+  function identityAssignment(target) {
+    const own = identityState.uses.get(target.kind === "host" ? `host:${target.hostId}` : `group:${target.groupId}`) ?? null;
+    if (target.kind === "group") return { target, identityId: own, effectiveIdentityId: own, origin: own ? { kind: "host" } : null };
+    if (own) return { target, identityId: own, effectiveIdentityId: own, origin: { kind: "host" } };
+    let group = state.groups.find((g) => g.id === state.hosts.find((h) => h.id === target.hostId)?.groupId);
+    while (group) {
+      const fromGroup = identityState.uses.get(`group:${group.id}`);
+      if (fromGroup) return { target, identityId: null, effectiveIdentityId: fromGroup, origin: { kind: "group", groupId: group.id, name: group.name } };
+      group = state.groups.find((g) => g.id === group.parentId);
+    }
+    return { target, identityId: null, effectiveIdentityId: null, origin: null };
+  }
   /** Shell integration in the mock: per target, installed or not (the block text is fixed). */
   const integration = new Map();
   function integrationKey(target) {

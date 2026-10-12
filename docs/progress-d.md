@@ -16,7 +16,7 @@ Updated: 2026-10-12 (main 99d8d89 merged).
 | 4. Snippets: multi-host execution, saved targets, existing sessions, organization (SNP-05/06/07/10) | Done, tested (lab, real vault, UI mock) |
 | 6. Suggestions (AUT-02/03/04/12) and paste/snippet review (P-14), reassigned by agent A | Done, tested (UI mock); AUT-01 stays with agent B (command history) |
 | 7. Shell integration (AUT-06/07), assigned by agent A | Done, tested (core, lab, local Bash/Zsh, UI mock, native test) |
-| 5. Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18 | Next (B's PR #6 merged); IMP-02 and HST-05 moved to the tunnels owner |
+| 5. Identities (KEY-15..17), environment variables (SNP-11..14), startup scripts (SNP-08), KEY-18 | Identities done and tested (real vault, lab sign-in, UI mock); environment variables next; IMP-02 and HST-05 moved to the tunnels owner |
 
 ## Design notes
 
@@ -85,6 +85,11 @@ Updated: 2026-10-12 (main 99d8d89 merged).
   with a backup and refusal of hand-edited blocks. The terminal reads OSC 133/OSC 7 (bounded,
   validated) into a per-session context: Suggestions start relative paths from the shell's folder
   and show the last command and its status. Opened from Suggestions or the palette.
+
+- **Identities (KEY-15..17, ADR 0006):** record kind 203, referenced from a per-host/group
+  workflow record (kind 204) that environment variables and startup scripts will share. A host's
+  own identity wins; a group's applies to hosts inheriting their sign-in method. The lab test signs
+  in with a group's identity (key), then with its edited password, and refuses a wrong one.
 
 ## Evidence
 

@@ -13,7 +13,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tyrminal_core::contracts::{
-    ErrorCode, HostAuthInput, HostInput, KeyImportInput, SessionEvent, SessionState, SnippetInput, TrustDecision,
+    ErrorCode, GroupInput, HostAuthInput, HostInput, IdentityInput, KeyImportInput, SecretChange, SessionEvent,
+    SessionState, SettingsTarget, SnippetInput, TrustDecision,
 };
 use tyrminal_core::{Core, SessionSink};
 
@@ -468,4 +469,116 @@ async fn shell_integration_is_installed_on_request_and_a_real_bash_reports_its_c
     let restore = run("rm -f ~/.bashrc ~/.bashrc.tyrminal-backup; [ ! -e ~/.bashrc.tyrminal-test ] || mv ~/.bashrc.tyrminal-test ~/.bashrc").await;
     assert_eq!(restore.exit_status, Some(0));
     core.sessions.close(WINDOW, &session).unwrap();
+}
+
+/// How a connection attempt ended: connected, a sign-in prompt (credentials were not enough), or
+/// closed with an error code. Host keys are trusted once along the way.
+async fn attempt(core: &Core, host_id: &str) -> Result<(), String> {
+    let (tx, mut inbox) = mpsc::unbounded_channel();
+    let opened = core.sessions.open_ssh(WINDOW, host_id, 80, 24, Arc::new(Events(tx))).await.unwrap();
+    let outcome = loop {
+        let event = tokio::time::timeout(WAIT, inbox.recv()).await.expect("timed out").expect("closed");
+        match event {
+            SessionEvent::TrustPrompt { prompt_id, .. } => {
+                core.sessions.answer_trust(WINDOW, &opened.session_id, &prompt_id, TrustDecision::Once).unwrap();
+            }
+            SessionEvent::State { state: SessionState::Connected } => break Ok(()),
+            SessionEvent::AuthPrompt { .. } => break Err("asked for credentials".to_owned()),
+            SessionEvent::Closed { error, .. } => break Err(format!("closed: {error:?}")),
+            _ => {}
+        }
+    };
+    let _ = core.sessions.close(WINDOW, &opened.session_id);
+    outcome
+}
+
+/// KEY-15/16 against the real server: a host that inherits its sign-in method signs in with its
+/// group's identity (key), follows an edit of that identity (now a password) on the next
+/// connection, and a host's own identity overrides the group's.
+#[tokio::test]
+#[ignore = "needs the SSH lab (pnpm lab:up)"]
+async fn hosts_sign_in_with_their_groups_identity_and_follow_its_changes() {
+    let lab = Lab::load();
+    let dir = TempDir::new().unwrap();
+    let core = unlocked(&dir).await;
+    let v = &core.vault;
+    let key = v
+        .import_key(KeyImportInput {
+            label: "lab".into(),
+            private_key: std::fs::read_to_string(lab.str("/keys/ed25519")).unwrap(),
+            passphrase: None,
+            remember_passphrase: false,
+        })
+        .await
+        .unwrap();
+    let group = v
+        .save_group(GroupInput {
+            id: None,
+            name: "lab".into(),
+            parent_id: None,
+            username: None,
+            port: None,
+            key_id: None,
+        })
+        .await
+        .unwrap();
+    let identity = v
+        .save_identity(IdentityInput {
+            id: None,
+            label: "lab account".into(),
+            username: lab.str("/user"),
+            password: SecretChange::Keep,
+            key_id: Some(key.id.clone()),
+        })
+        .await
+        .unwrap();
+    // The host itself names a wrong user and inherits its sign-in method.
+    let member = v
+        .save_host(HostInput {
+            auth: HostAuthInput::Inherit,
+            group_id: Some(group.id.clone()),
+            ..host("member", lab.port("a"))
+        })
+        .await
+        .unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Err("asked for credentials".to_owned()), "no identity yet");
+
+    v.set_identity(SettingsTarget::Group { group_id: group.id.clone() }, Some(identity.id.clone())).await.unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()), "signed in with the group's identity (key)");
+
+    // KEY-16: change the identity once; the host uses the new credentials.
+    v.save_identity(IdentityInput {
+        id: Some(identity.id.clone()),
+        label: "lab account".into(),
+        username: lab.str("/user"),
+        password: SecretChange::Set { value: lab.str("/password") },
+        key_id: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()), "signed in with the identity's password");
+    v.save_identity(IdentityInput {
+        id: Some(identity.id.clone()),
+        label: "lab account".into(),
+        username: lab.str("/user"),
+        password: SecretChange::Set { value: "not the password".into() },
+        key_id: None,
+    })
+    .await
+    .unwrap();
+    assert!(attempt(&core, &member.id).await.is_err(), "a wrong identity password does not sign in");
+
+    // A host's own identity wins over the group's.
+    let own = v
+        .save_identity(IdentityInput {
+            id: None,
+            label: "key".into(),
+            username: lab.str("/user"),
+            password: SecretChange::Keep,
+            key_id: Some(key.id.clone()),
+        })
+        .await
+        .unwrap();
+    v.set_identity(SettingsTarget::Host { host_id: member.id.clone() }, Some(own.id.clone())).await.unwrap();
+    assert_eq!(attempt(&core, &member.id).await, Ok(()));
 }

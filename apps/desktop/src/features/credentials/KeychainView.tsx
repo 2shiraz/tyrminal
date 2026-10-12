@@ -9,6 +9,7 @@ import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useVaultData } from "../../app/vaultData";
 import { useAction } from "../../lib/useAsync";
+import { IdentitiesSection } from "./IdentitiesSection";
 
 export function KeychainView() {
   // The shared list, so host views see a new or deleted key immediately.
@@ -117,6 +118,8 @@ export function KeychainView() {
           </ul>
         )}
       </section>
+
+      <IdentitiesSection keys={keys.value ?? []} />
 
       {dialog === "generate" && <GenerateKeyDialog onClose={() => setDialog(null)} onDone={closeAndReload} />}
       {dialog === "import" && <ImportKeyDialog onClose={() => setDialog(null)} onDone={closeAndReload} />}

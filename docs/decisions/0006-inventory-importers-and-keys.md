@@ -12,6 +12,8 @@ parallel branches never assign the same number.
 | 200 | `HostAppearanceRecord` (host id, OS) | One per host; deleted with the host and copied with it in the same transaction. Kept apart from `HostRecord` so host fields wait for agent B's (work-split ordering). |
 | 202 | `ExecutionTargetRecord` (name, host ids) | Saved host selections for snippet runs; ids of deleted hosts are skipped and counted on read. |
 | 201 | `KeyCertificateRecord` (key id, certificate line, parsed fields) | One per key; deleted with the key in the same transaction. Public data, still encrypted like every record. |
+| 203 | `IdentityRecord` (label, user name, optional password, optional key id) | The password is write-only (never returned). A key an identity uses cannot be deleted. |
+| 204 | `WorkflowRecord` (host id or group id; identity id; later environment and startup snippet) | One per host or group; deleted with its host or group and copied with a duplicated host in the same transaction; dropped when it becomes empty. |
 
 ## Dependencies
 
@@ -151,3 +153,19 @@ sandbox. Nothing is stubbed in the UI.
 - **Command names** avoid the release policy's forbidden words: `prompt_marks_status`,
   `prompt_marks_install`, `prompt_marks_remove`. Test builds edit `TYRMINAL_E2E_HOME`, never the
   real home folder.
+
+## Identities (KEY-15..17)
+
+- An identity is a user name plus a password and/or a key; a key's attached certificate comes
+  with it. Hosts and groups refer to one through their workflow record, so editing the identity
+  changes every host that uses it on its next connection (KEY-16).
+- **Precedence:** a host's own identity always wins. A group's identity applies to the hosts in it
+  and its subgroups (nearest group first) whose sign-in method is "inherit from group", so a host
+  with its own password or key keeps it. The identity's user name replaces the host's when set;
+  an identity with a key signs in with the key, else with its password, else the user is asked.
+- **Connection path:** `hop_plan` asks `identity_for_host` before using the host's own
+  credentials (a few lines; noted under Requests in `docs/work-split.md`). Every hop of a jump
+  chain resolves its own identity the same way.
+- Deleting an identity removes its references in the same transaction and reports how many
+  hosts and groups used it; they fall back to their own settings. There is one personal vault,
+  so "accessible vaults" (KEY-17) is this vault.

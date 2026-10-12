@@ -368,3 +368,15 @@ export const promptMarks = {
   remove: (target: import("@tyrminal/contracts").IntegrationTarget) =>
     call<import("@tyrminal/contracts").IntegrationStatus>("prompt_marks_remove", { target }),
 };
+
+/** Reusable identities and which hosts and groups use them. Passwords are write-only. */
+export const identities = {
+  list: () => call<import("@tyrminal/contracts").IdentitySummary[]>("identity_list"),
+  save: (identity: import("@tyrminal/contracts").IdentityInput) =>
+    call<import("@tyrminal/contracts").IdentitySummary>("identity_save", { identity }),
+  /** Resolves to how many hosts and groups were using it. */
+  remove: (id: string) => call<number>("identity_delete", { id }),
+  assignments: () => call<import("@tyrminal/contracts").IdentityAssignment[]>("identity_assignments"),
+  assign: (target: import("@tyrminal/contracts").SettingsTarget, identityId: string | null) =>
+    call<import("@tyrminal/contracts").IdentityAssignment>("identity_assign", { target, identityId }),
+};

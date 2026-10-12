@@ -215,4 +215,40 @@ export const msgD = {
     removed: "Removed. Open a new terminal (or reconnect) to stop the marks.",
     needsTerminal: "Open or select a connected terminal to set up shell integration.",
   },
+  identities: {
+    title: "Identities",
+    body: "A user name with a password or key, saved once and used by many hosts. Change it here and every host that uses it signs in with the new details.",
+    add: "New identity",
+    edit: (label: string) => `Edit ${label}`,
+    newTitle: "New identity",
+    label: "Name",
+    username: "User name",
+    usernameHint: "Leave empty to keep each host's own user name.",
+    password: "Password",
+    passwordKeep: "A password is saved. Leave empty to keep it.",
+    passwordNone: "Optional. Stored encrypted in the vault and never shown again.",
+    clearPassword: "Remove the saved password",
+    key: "Key",
+    noKey: "No key",
+    save: "Save identity",
+    empty: "No identities yet.",
+    usedBy: (n: number) => (n === 0 ? "Not used" : `Used by ${n} ${n === 1 ? "host or group" : "hosts and groups"}`),
+    summary: (username: string, password: boolean, key: string | null) =>
+      [username || "host's user name", password ? "password" : null, key ? `key ${key}` : null].filter(Boolean).join(" · "),
+    deleteTitle: (label: string) => `Delete ${label}?`,
+    deleteBody: (n: number) =>
+      n === 0
+        ? "Nothing uses this identity."
+        : `${n} ${n === 1 ? "host or group uses" : "hosts and groups use"} it. They go back to their own sign-in settings.`,
+    assign: "Identity…",
+    assignTitle: (name: string) => `Identity for ${name}`,
+    assignBody:
+      "The identity's user name (if it has one) and credentials are used to sign in. A group's identity applies to the hosts in it whose sign-in method is “Inherit from group”; a host's own identity always wins.",
+    none: "None",
+    effective: (label: string) => `Signs in as ${label}`,
+    fromGroup: (label: string, group: string) => `Signs in as ${label}, from group ${group}`,
+    notUsed: "Uses its own sign-in settings.",
+    badge: (label: string) => `Identity: ${label}`,
+    assigned: "Identity updated",
+  },
 };

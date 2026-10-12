@@ -201,3 +201,83 @@ pub struct IntegrationStatus {
     /// takes effect where Bash starts interactively and reads `~/.bashrc`.
     pub login_shell: Option<String>,
 }
+
+/// A reusable identity (KEY-15): a user name with a password and/or a key from the keychain.
+/// The password never leaves the vault; only whether one is stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct IdentitySummary {
+    pub id: String,
+    pub label: String,
+    pub username: String,
+    pub has_password: bool,
+    pub key_id: Option<String>,
+    /// How many hosts and groups use it directly.
+    pub used_by: u32,
+}
+
+/// What to do with a stored secret when saving.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SecretChange {
+    Keep,
+    Clear,
+    Set { value: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct IdentityInput {
+    /// `None` creates a new identity.
+    pub id: Option<String>,
+    pub label: String,
+    pub username: String,
+    pub password: SecretChange,
+    pub key_id: Option<String>,
+}
+
+/// A host or a group, for settings that hosts inherit from their groups.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SettingsTarget {
+    Host {
+        #[serde(rename = "hostId")]
+        host_id: String,
+    },
+    Group {
+        #[serde(rename = "groupId")]
+        group_id: String,
+    },
+}
+
+/// Where an effective setting comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SettingOrigin {
+    /// Set on the host itself.
+    Host,
+    /// Inherited from this group (the nearest one that sets it).
+    Group {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        name: String,
+    },
+}
+
+/// The identity a target uses directly (`identity_id`) and, for a host, the one it ends up using
+/// with where it comes from. A host's own identity wins; a group's identity applies to hosts in
+/// it (and its subgroups) whose sign-in method is "inherit from group".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct IdentityAssignment {
+    pub target: SettingsTarget,
+    pub identity_id: Option<String>,
+    pub effective_identity_id: Option<String>,
+    pub origin: Option<SettingOrigin>,
+}
