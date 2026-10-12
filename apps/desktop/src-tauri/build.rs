@@ -115,6 +115,12 @@ const COMMANDS: &[&str] = &[
     "session_log_delete",
     "session_log_delete_all",
     "session_log_open",
+    // agent C: workspaces
+    "layout_list",
+    "layout_save",
+    "layout_delete",
+    "window_detach",
+    "window_detach_take",
     // agent D: inventory and snippets
     "host_appearance_list",
     "host_set_os",

@@ -15,7 +15,9 @@ mod files;
 mod folders;
 mod handoff;
 mod import;
+// agent C: workspaces
 mod inventory;
+mod layouts;
 mod preferences;
 mod records;
 mod remote_copy;
@@ -49,6 +51,8 @@ pub use tyrminal_platform::{
 };
 pub use tyrminal_pty::available_shells;
 pub use vault::VaultService;
+// agent C: workspaces
+pub use layouts::validate_detach;
 // agent D: inventory and snippets
 pub use importers::key_text_is_encrypted;
 

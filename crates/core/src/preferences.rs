@@ -58,6 +58,8 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
             return Err(invalid("An editor choice is not valid."));
         }
     }
+    // agent C: workspaces
+    prefs.workspace = prefs.workspace.map(crate::layouts::sanitize_workspace).transpose()?;
     Ok(prefs)
 }
 

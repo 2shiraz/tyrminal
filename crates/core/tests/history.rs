@@ -53,7 +53,7 @@ impl Terminal {
         let opened = core.sessions.open_local(WINDOW, 100, 30, Arc::new(ChannelSink(tx))).await.unwrap();
         let mut terminal = Self { core: core.clone(), session: opened.session_id, inbox, text: String::new() };
         loop {
-            if let SessionEvent::State { state: SessionState::Connected } = terminal.event().await {
+            if let SessionEvent::State { state: SessionState::Connected, .. } = terminal.event().await {
                 break;
             }
         }

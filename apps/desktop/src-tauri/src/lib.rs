@@ -238,6 +238,12 @@ pub fn run() {
             commands::history::session_log_delete,
             commands::history::session_log_delete_all,
             commands::history::session_log_open,
+            // agent C: workspaces
+            commands::layouts::layout_list,
+            commands::layouts::layout_save,
+            commands::layouts::layout_delete,
+            commands::layouts::window_detach,
+            commands::layouts::window_detach_take,
             // agent D: inventory and snippets
             commands::inventory::host_appearance_list,
             commands::inventory::host_set_os,

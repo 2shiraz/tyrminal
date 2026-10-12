@@ -370,7 +370,7 @@ impl Sessions {
         tokio::spawn(async move {
             let transcoder = crate::transcode::Transcoder::new(encoding);
             let body = async {
-                sink.event(SessionEvent::State { state: SessionState::Connecting });
+                sink.event(SessionEvent::State { state: SessionState::Connecting, hop: None });
                 entry.log.note(&format!(
                     "opening serial port {} at {} baud, {} data bits, parity {:?}, {} stop bits, flow control {:?}",
                     settings.path,
@@ -382,7 +382,7 @@ impl Sessions {
                 ));
                 match crate::serial::open(&settings) {
                     Ok(link) => {
-                        sink.event(SessionEvent::State { state: SessionState::Connected });
+                        sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
                         pump(Transport::Serial(link), &relay, &*relay, input_rx, transcoder).await
                     }
                     Err(error) => Outcome::failed(error),
@@ -521,6 +521,7 @@ impl Sessions {
         }
         sink.event(SessionEvent::State {
             state: if outcome.error.is_some() { SessionState::Failed } else { SessionState::Closed },
+            hop: None,
         });
         sink.event(closed_event(outcome.error, outcome.exit_status));
     }
@@ -1332,8 +1333,10 @@ impl TaskContext {
         }
     }
 
+    /// A state change; during a jump chain it names the hop being worked on.
     fn state(&self, state: SessionState) {
-        self.sink.event(SessionEvent::State { state });
+        let hop = self.hop.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        self.sink.event(SessionEvent::State { state, hop });
     }
 
     /// Asks the user for a secret and waits, bounded. `None` means cancelled or timed out.
@@ -1382,8 +1385,23 @@ struct PromptingVerifier {
 }
 
 impl HostKeyVerifier for PromptingVerifier {
+    fn connecting(&mut self) {
+        self.sink.event(SessionEvent::State { state: SessionState::Connecting, hop: self.hop.clone() });
+    }
+
     async fn verify(&mut self, request: &HostKeyRequest) -> TrustVerdict {
-        self.sink.event(SessionEvent::State { state: SessionState::VerifyingHost });
+        // The key exchange has finished: report what it settled on before the key is judged.
+        if let Some(n) = &request.negotiated {
+            self.sink.event(SessionEvent::Negotiated {
+                kex: n.kex.clone(),
+                host_key: n.host_key.clone(),
+                cipher: n.cipher.clone(),
+                mac: n.mac.clone(),
+                strict_kex: n.strict_kex,
+                hop: self.hop.clone(),
+            });
+        }
+        self.sink.event(SessionEvent::State { state: SessionState::VerifyingHost, hop: self.hop.clone() });
         let known: Vec<KnownHost> = self.known.iter().map(|(k, _)| k.clone()).collect();
         match evaluate(&known, &request.endpoint, &request.key) {
             TrustStatus::Trusted => TrustVerdict::Accept,
@@ -1560,15 +1578,9 @@ async fn run_ssh(
     let plan_host = plan.host_id.clone();
     match connect_ssh(ctx, plan, cols, rows).await {
         Ok((Linked { conn, hops }, reader, writer, startup)) => {
-            if let Some(n) = conn.negotiated() {
-                ctx.sink.event(SessionEvent::Negotiated {
-                    kex: n.kex,
-                    host_key: n.host_key,
-                    cipher: n.cipher,
-                    mac: n.mac,
-                    strict_kex: n.strict_kex,
-                });
-            }
+            // `Negotiated` was reported per hop during the handshake (before verification).
+            // `Connected` belongs to the session, not to a hop.
+            *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = None;
             // Shared before `Connected` is reported, so side operations (files, key install) work
             // as soon as the renderer sees the session connected. `conn` stays alive for the whole
             // pump; dropping it closes the transport. It is taken back when the shell ends.
@@ -1664,7 +1676,6 @@ async fn connect_ssh(
 
 /// Connects, verifies and signs in to every hop and the host. Opens no channel.
 async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked, IpcError> {
-    ctx.state(SessionState::Connecting);
     // Bounds simultaneous connection attempts; released when this function returns.
     let _slot = ctx.connect_slots.acquire().await.map_err(|_| internal())?;
 
@@ -1690,8 +1701,16 @@ async fn connect_chain(ctx: &TaskContext, plan: ConnectionPlan) -> Result<Linked
             label,
         });
         *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = hop.clone();
-        if !chain.is_empty() {
-            ctx.state(SessionState::Connecting);
+        // A name is resolved here only for the hop that leaves this computer directly (the
+        // verifier then reports `Connecting` once resolution is done); a proxy or the previous
+        // hop resolves the others.
+        match (chain.is_empty(), &proxy) {
+            (true, None) => ctx.state(SessionState::Resolving),
+            (true, Some(_)) => {
+                ctx.state(SessionState::Resolving);
+                ctx.state(SessionState::Connecting);
+            }
+            (false, _) => ctx.state(SessionState::Connecting),
         }
         let log = &ctx.entry.log;
         let step = hop.as_ref().map(|h| format!("hop {}/{} ({}): ", h.index, h.total, h.label)).unwrap_or_default();
@@ -1812,15 +1831,7 @@ async fn run_files(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
         Ok(linked) => linked,
         Err(error) => return Outcome::failed(error),
     };
-    if let Some(n) = conn.negotiated() {
-        ctx.sink.event(SessionEvent::Negotiated {
-            kex: n.kex,
-            host_key: n.host_key,
-            cipher: n.cipher,
-            mac: n.mac,
-            strict_kex: n.strict_kex,
-        });
-    }
+    // `Negotiated` was reported per hop during the handshake, as for a terminal session.
     ctx.state(SessionState::OpeningChannel);
     let outcome = match conn.open_sftp().await {
         Err(e) => Outcome::failed(sftp_open_error(&e)),
@@ -1829,6 +1840,8 @@ async fn run_files(ctx: &TaskContext, plan: ConnectionPlan) -> Outcome {
             let conn = Arc::new(conn);
             *ctx.entry.connection.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&conn));
             *ctx.entry.sftp.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(sftp));
+            // `Connected` belongs to the session, not to a hop.
+            *ctx.hop.lock().unwrap_or_else(|p| p.into_inner()) = None;
             ctx.state(SessionState::Connected);
             let vault = Arc::clone(&ctx.vault);
             tokio::spawn(async move {
@@ -1937,7 +1950,7 @@ async fn run_local(
     spec.args = tyrminal_pty::login_args(&program);
     match tyrminal_pty::spawn(&spec) {
         Ok((reader, handle)) => {
-            sink.event(SessionEvent::State { state: SessionState::Connected });
+            sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
             pump(Transport::Local { reader, handle, recheck_size: None }, relay, &**sink, input, None).await
         }
         Err(_) => Outcome::failed(err(ErrorCode::IoError, "The local shell could not be started.")),
@@ -1961,7 +1974,7 @@ async fn run_telnet(
     sink.event(SessionEvent::Notice {
         text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network.".into(),
     });
-    sink.event(SessionEvent::State { state: SessionState::Connecting });
+    sink.event(SessionEvent::State { state: SessionState::Connecting, hop: None });
     let host = endpoint.address.trim_start_matches('[').trim_end_matches(']').to_owned();
     let stream = match tokio::time::timeout(
         TELNET_CONNECT_TIMEOUT,
@@ -1975,7 +1988,7 @@ async fn run_telnet(
     };
     let _ = stream.set_nodelay(true);
     let (reader, writer) = stream.into_split();
-    sink.event(SessionEvent::State { state: SessionState::Connected });
+    sink.event(SessionEvent::State { state: SessionState::Connected, hop: None });
     let terminal = endpoint.terminal;
     let codec = crate::telnet::Codec::new(cols, rows, terminal.term.term());
     let link = TelnetLink { reader, writer, codec, replies: Vec::new() };

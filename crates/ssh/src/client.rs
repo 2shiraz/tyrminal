@@ -118,7 +118,9 @@ impl<V: HostKeyVerifier> Handler<V> {
             return same;
         }
 
-        let request = HostKeyRequest { endpoint: self.endpoint.clone(), resolved: self.resolved, key: presented };
+        let negotiated = self.with_record(|r| r.negotiated.clone());
+        let request =
+            HostKeyRequest { endpoint: self.endpoint.clone(), resolved: self.resolved, key: presented, negotiated };
         let _ = self.phase.send(Phase::Verifying);
         let verdict = self.verifier.verify(&request).await;
         let _ = self.phase.send(Phase::Verified);
@@ -335,7 +337,7 @@ impl client::Handler for ErasedHandler {
 /// host key. Returns only after the verifier accepted. No credential is involved at any point.
 pub async fn connect<V: HostKeyVerifier>(
     options: &ConnectOptions,
-    verifier: V,
+    mut verifier: V,
 ) -> Result<VerifiedConnection, SshError> {
     let (host, port) = (options.endpoint.host.trim().to_owned(), options.endpoint.port);
     let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(&host).to_owned();
@@ -352,6 +354,7 @@ pub async fn connect<V: HostKeyVerifier>(
     if addrs.is_empty() {
         return Err(SshError::Resolve);
     }
+    verifier.connecting();
 
     let mut last = SshError::Unreachable;
     for addr in addrs {
