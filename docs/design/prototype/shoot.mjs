@@ -10,7 +10,9 @@ const { chromium } = createRequire(join(here, "../../../tests/ui/package.json"))
 const out = join(here, "../after");
 mkdirSync(out, { recursive: true });
 
-const all = ["home", "hosts", "empty", "terminal", "palette", "trust", "settings", "toast", "unlock"];
+const all = ["home", "hosts", "empty", "terminal", "palette", "trust", "settings", "toast", "unlock",
+  "onboarding", "onboarding-recovery", "unlock-quick", "unlock-wrong", "first-run", "empty-keychain", "empty-snippets",
+  "connect", "connect-trust", "connect-hop", "connect-auth", "connect-changed", "connect-failed", "connect-reconnecting"];
 const screens = process.argv.length > 2 ? process.argv.slice(2) : all;
 const variants = [
   ["dark", null],

@@ -39,8 +39,8 @@ function sidebar(current, sessions = []) {
     <div class="brand"><span class="mark">&gt;${cursor}</span><span>Tyrminal</span><button class="btn ghost sm icon-only collapse" aria-label="Collapse sidebar">${i("sidebar", "sm")}</button></div>
     <div class="search">${i("search", "sm")}<span>Search</span><kbd>Ctrl+Shift+K</kbd></div>
     ${nav("home", "house", "Home")}
-    ${nav("hosts", "server", "Hosts", screen === "empty" ? 0 : 6)}
-    ${nav("snippets", "scroll-text", "Snippets", screen === "empty" ? 0 : 5)}
+    ${nav("hosts", "server", "Hosts", ["empty", "first-run", "empty-keychain", "empty-snippets"].includes(screen) ? 0 : 6)}
+    ${nav("snippets", "scroll-text", "Snippets", ["empty", "first-run", "empty-keychain", "empty-snippets"].includes(screen) ? 0 : 5)}
     ${nav("tunnels", "route", "Tunnels")}
     <div class="nav-gap"></div>
     ${nav("keychain", "key-round", "Keychain")}
@@ -62,7 +62,9 @@ function tabs(list) {
 
 function statusbar(session) {
   if (!session) return `<div class="statusbar"><span class="item">${i("lock", "sm")}Vault unlocked</span><span class="right"><span class="toggle">${i("moon", "sm")}</span></span></div>`;
-  if (session === "verifying") return `<div class="statusbar"><span class="item"><span class="dot warn m-connecting"></span>Checking server identity</span><span class="item mono">www@stg.example.net</span></div>`;
+  if (session === "failed") return `<div class="statusbar"><span class="item"><span class="dot bad"></span>Not connected</span></div>`;
+  if (session === "reconnecting") return `<div class="statusbar"><span class="item"><span class="dot warn m-connecting"></span>Reconnecting, attempt 3 in 4 s</span><span class="item mono">deploy@10.20.0.11</span></div>`;
+  if (session === "verifying") return `<div class="statusbar"><span class="item"><span class="dot warn m-connecting"></span>Connecting</span></div>`;
   return `<div class="statusbar">
     <span class="item"><span class="dot ok"></span>Connected</span>
     <span class="item mono">deploy@10.20.0.11</span>
@@ -83,6 +85,16 @@ const hostTable = (selected) => `<div class="table" role="grid" aria-label="Host
     <span class="name">${i("server", "sm")}${n}</span><span class="mono muted">${a}</span><span class="muted">${k}</span><span class="muted">${g || '<span class="faint">None</span>'}</span><span class="faint num">${t}</span>
     <span class="hover-actions"><button class="btn sm primary m-press">Connect</button><button class="btn ghost sm icon-only" aria-label="More">${i("ellipsis", "sm")}</button></span></div>`).join("")}
 </div>`;
+
+
+// A connection step list built from session states. kind: done | now | pending | fail | hop
+const steps = (rows) => `<ol class="steps">${rows.map(([k, label, detail = "", ms = ""]) =>
+  k === "hop" ? `<li class="hop"><span></span><span>${label}</span><span></span></li>` :
+  `<li class="${k}"><span class="marker">${k === "done" ? i("check") : k === "fail" ? i("x") : k === "now" ? cursor : ""}</span><span>${label}${detail ? `<span class="detail">${detail}</span>` : ""}</span><span class="ms">${ms}</span></li>`).join("")}</ol>`;
+const sheetHead = (title, sub, icon = "") => `<div class="sheet-head"><h2>${icon}${title}</h2><p class="muted">${sub}</p></div>`;
+const connectShell = (sheet, opts = {}) => shell("hosts", [["server", "Hosts"], ["", opts.tab ?? "api-gateway", true, opts.dot ?? "warn"]],
+  `<div class="term connecting">${sheet}</div>`, { session: opts.status ?? "verifying", sessions: [[opts.tab ?? "api-gateway", opts.dot ?? "warn", 1]] });
+const firstSteps = [["done", "Address found", '<span class="mono">10.20.0.11</span>', "12 ms"], ["done", "Connected", "port 22", "38 ms"], ["done", "Keys agreed", '<span class="mono">mlkem768x25519-sha256</span>', "21 ms"]];
 
 const screens = {
   hosts: () => shell("hosts", [["server", "Hosts", true]], `
@@ -240,6 +252,137 @@ const screens = {
       <div class="opt">${i("copy", "sm")}Duplicate</div>
       <div class="opt" style="color:var(--danger)">${i("trash2", "sm")}Delete<span class="keys">Del</span></div>
     </div>`,
+
+
+  connect: () => connectShell(`<div class="sheet">
+      ${sheetHead("Connecting to api-gateway", '<span class="mono">deploy@10.20.0.11:22</span>')}
+      ${steps([...firstSteps, ["now", "Checking server identity", "Ed25519, trusted"], ["pending", "Signing in"], ["pending", "Opening shell"]])}
+      <div class="foot"><button class="btn ghost sm m-press">${i("scroll-text", "sm")}Connection log</button><div class="end"><button class="btn m-press">Cancel</button></div></div>
+    </div>`),
+
+  "connect-hop": () => connectShell(`<div class="sheet">
+      ${sheetHead("Connecting to db-primary", '<span class="mono">postgres@db1.internal.example</span> through 1 jump host')}
+      ${steps([["hop", "bastion, jump host 1 of 1"], ["done", "Connected", '<span class="mono">ops@bastion.example.net</span>', "41 ms"], ["done", "Server identity", "trusted", "3 ms"], ["now", "Signing in", "password for ops"]])}
+      <div class="inline-prompt"><label for="pw">Password for ops on bastion</label>
+        <div class="field focus"><input id="pw" type="password" value="hunter22"></div>
+        <span class="hint">Sent only to bastion, whose identity was checked. Attempt 2 of 3: the previous password was not accepted.</span></div>
+      ${steps([["hop", "db-primary, destination"], ["pending", "Connect through bastion"], ["pending", "Check server identity"], ["pending", "Sign in"], ["pending", "Open shell"]])}
+      <div class="foot"><button class="btn ghost sm m-press">${i("scroll-text", "sm")}Connection log</button><div class="end"><button class="btn m-press">Cancel</button><button class="btn primary m-press">Sign in</button></div></div>
+    </div>`, { tab: "db-primary" }),
+
+  "connect-auth": () => connectShell(`<div class="sheet">
+      ${sheetHead("Connecting to build-runner-03", '<span class="mono">builder@ci3.lab.example:2222</span>')}
+      ${steps([["done", "Address found", '<span class="mono">ci3.lab.example</span>', "15 ms"], ["done", "Connected", "port 2222", "44 ms"], firstSteps[2], ["done", "Server identity", "trusted", "2 ms"], ["now", "Signing in", "server asks a question"]])}
+      <div class="inline-prompt"><span class="fp-label">From the server</span>
+        <div class="server-text">Verification code from your authenticator app:</div>
+        <div class="field focus" style="margin-top:4px"><input aria-label="Answer" value=""></div>
+        <span class="hint">The text above comes from the server, not from Tyrminal.</span></div>
+      <div class="foot"><button class="btn ghost sm m-press">${i("scroll-text", "sm")}Connection log</button><div class="end"><button class="btn m-press">Cancel</button><button class="btn primary m-press">Send</button></div></div>
+    </div>`, { tab: "build-runner-03" }),
+
+  "connect-trust": () => connectShell(`<div class="sheet">
+      ${sheetHead("Check this server before connecting", "Tyrminal has not seen stg.example.net before. Compare the fingerprint with one from its administrator or console. Nothing has been sent yet.")}
+      ${steps([["done", "Address found", '<span class="mono">198.51.100.7</span>', "9 ms"], ...firstSteps.slice(1), ["now", "Checking server identity", "new server"], ["pending", "Signing in"], ["pending", "Opening shell"]])}
+      <div><div class="fp-label">Ed25519 fingerprint, from 198.51.100.7</div><div class="fingerprint"><span class="faint">SHA256</span> k3J9 vT0y Q2uX 5rB8 nM1c P4sD 7fG0 hL3w Z6qE 9tY2 iA8</div></div>
+      <div class="foot"><div class="end"><button class="btn ghost m-press">Cancel</button><button class="btn m-press">Trust once</button><button class="btn primary m-press">Trust and save</button></div></div>
+    </div>`, { tab: "staging-web" }),
+
+  "connect-changed": () => connectShell(`<div class="sheet danger" role="alert">
+      ${sheetHead("Connection blocked: the server's identity changed", "The key stg.example.net presented is not the one you trusted. Someone may be intercepting the connection, or the server was reinstalled. No password or key was sent.", i("shield-alert", "bad"))}
+      ${steps([["done", "Address found", '<span class="mono">198.51.100.7</span>', "9 ms"], ...firstSteps.slice(1), ["fail", "Server identity", "does not match"]])}
+      <div><div class="fp-label">Presented now</div><div class="fingerprint"><span class="faint">SHA256</span> kyaN XVx1 Uds2 NONu EOTW sUwO sEBQ nhhS OOg1 h8P/ Eng</div></div>
+      <div><div class="fp-label">You trusted on 3 March 2026</div><div class="fingerprint"><span class="faint">SHA256</span> 71J6 v69v G05S 8WYY 7SBu 9DjP z+tw OC7F CitO Ma8X CzM</div></div>
+      <p class="muted">Ask the administrator whether the key changed. Only if they confirm it, remove the old key in Known hosts and connect again.</p>
+      <div class="foot"><button class="btn ghost sm m-press">Open Known hosts</button><div class="end"><button class="btn primary m-press">Close tab</button></div></div>
+    </div>`, { tab: "staging-web", dot: "bad", status: "failed" }),
+
+  "connect-failed": () => connectShell(`<div class="sheet">
+      ${sheetHead("The server did not accept the sign-in", '<span class="mono">ops@203.0.113.24</span> refused the saved password after 3 attempts.', i("circle-alert", "bad"))}
+      ${steps([["done", "Address found", '<span class="mono">203.0.113.24</span>', "4 ms"], ...firstSteps.slice(1), ["done", "Server identity", "trusted", "2 ms"], ["fail", "Signing in", "password refused"]])}
+      <p class="muted">Check the user name and password for edge-cache, then try again. Nothing in your vault was changed.</p>
+      <div class="foot"><button class="btn ghost sm m-press">${i("scroll-text", "sm")}Connection log</button><div class="end"><button class="btn m-press">Edit host</button><button class="btn primary m-press">Try again</button></div></div>
+    </div>`, { tab: "edge-cache", dot: "bad", status: "failed" }),
+
+  "connect-reconnecting": () => connectShell(`<div class="sheet">
+      ${sheetHead("Connection lost", "api-gateway stopped responding at 14:02. Tyrminal is trying again and will check the server's identity each time.")}
+      ${steps([["fail", "Attempt 1", "no route to host", "14:02:09"], ["fail", "Attempt 2", "timed out after 10 s", "14:02:21"], ["now", "Attempt 3 in 4 s", "waits about 1, 2, 4, 8, 16 and 30 s, then stops"]])}
+      <div class="foot"><button class="btn ghost sm m-press">${i("scroll-text", "sm")}Connection log</button><div class="end"><button class="btn m-press">Stop reconnecting</button><button class="btn primary m-press">Reconnect now</button></div></div>
+    </div>`, { dot: "warn", status: "reconnecting" }),
+
+  "onboarding": () => `<div class="lock"><div class="box wide">
+      <span class="mark">&gt;${cursor}</span>
+      <div class="progress"><span class="on">1 Passphrase</span><span>2 Recovery key</span></div>
+      <div><h1>Create your vault</h1><p class="lede" style="margin-top:4px">Hosts, keys and passwords are encrypted on this device with a passphrase only you know. There is no account and nothing is uploaded.</p></div>
+      <div class="fieldset"><label for="p1">Passphrase</label><div class="field lg"><input id="p1" type="password" value="correct horse battery"></div>
+        <div class="strength"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div><span class="hint">Strong. Four or more unrelated words work well.</span></div>
+      <div class="fieldset"><label for="p2">Repeat passphrase</label><div class="field lg focus"><input id="p2" type="password" value="correct horse battery"></div></div>
+      <button class="btn primary block m-press" style="height:36px">Continue</button>
+      <p class="hint">Moving from another device? <a href="#" style="color:var(--accent-text)">Restore a backup</a></p>
+    </div></div>`,
+
+  "onboarding-recovery": () => `<div class="lock"><div class="box wide">
+      <span class="mark">&gt;${cursor}</span>
+      <div class="progress"><span class="ok">${i("check", "sm")}Passphrase</span><span class="on">2 Recovery key</span></div>
+      <div><h1>Save your recovery key</h1><p class="lede" style="margin-top:4px">It opens the vault if you forget the passphrase. It is shown once. Keep it somewhere other than this computer.</p></div>
+      <div class="groups reveal">${"7K2MD Q9XW4 R3T8P H6VNC 2BJ5L M8S4D F1G7K P3Q9R W2E6T Y5U8I A4S7D".split(" ").map((g, n) => `<span style="--n:${n}">${g}</span>`).join("")}</div>
+      <div style="display:flex;gap:var(--space-2)"><button class="btn sm m-press">${i("copy", "sm")}Copy</button></div>
+      <div class="fieldset"><label for="g6">Type group 6 to confirm you saved it</label><div class="field lg focus"><input id="g6" class="mono" value="M8S4D"></div></div>
+      <div class="notice warn">${i("triangle-alert", "sm")}<span>Without the passphrase or this key the vault cannot be opened. There is no reset.</span></div>
+      <button class="btn primary block m-press" style="height:36px">Finish</button>
+    </div></div>`,
+
+  "unlock-quick": () => `<div class="lock"><div class="box">
+      <span class="mark">&gt;${cursor}</span>
+      <div><h1>Unlock Tyrminal</h1><p class="lede" style="margin-top:4px">Quick unlock is on for this computer.</p></div>
+      <button class="btn primary block m-press focus" style="height:36px">${i("lock-open", "sm")}Unlock with this computer</button>
+      <p class="hint"><a href="#" style="color:var(--accent-text)">Use passphrase</a> or <a href="#" style="color:var(--accent-text)">recovery key</a></p>
+    </div></div>`,
+
+  "unlock-wrong": () => `<div class="lock"><div class="box">
+      <span class="mark">&gt;${cursor}</span>
+      <div><h1>Unlock Tyrminal</h1><p class="lede" style="margin-top:4px">Your vault is encrypted on this device.</p></div>
+      <div class="fieldset"><label for="pp">Passphrase</label><div class="field lg focus" style="border-color:var(--danger)"><input id="pp" type="password" value="wrong horse"></div>
+        <span style="color:var(--danger);font-size:var(--text-sm)">That passphrase did not unlock the vault. Check Caps Lock and the keyboard layout.</span></div>
+      <button class="btn primary block m-press" style="height:36px">Unlock</button>
+      <p class="hint">Forgot it? <a href="#" style="color:var(--accent-text)">Use your recovery key</a></p>
+    </div></div>`,
+
+  "first-run": () => shell("home", [["house", "Home", true]], `
+    <div class="page"><div class="column">
+      <h1>Welcome to Tyrminal</h1>
+      <p class="lede" style="margin-top:4px">Your vault is ready. Connect to a server to begin.</p>
+      <div style="margin-top:var(--space-4);max-width:640px" class="field lg focus">${i("terminal")}<input placeholder="user@host:port"><span class="keys">Enter to connect</span></div>
+      <div class="home-grid" style="grid-template-columns:minmax(0,640px)">
+        <section><div class="section-title">Or start from</div>
+          <div class="links">
+            <div class="link">${i("plus")}Add a host<span class="faint" style="margin-left:auto">Save a server with its sign-in</span></div>
+            <div class="link">${i("download")}Import hosts<span class="faint" style="margin-left:auto">From an SSH config, PuTTY, MobaXterm or SecureCRT</span></div>
+            <div class="link">${i("key-round")}Generate a key<span class="faint" style="margin-left:auto">Ed25519, stored in the vault</span></div>
+            <div class="link">${i("square-terminal")}Open a local terminal<span class="keys">Ctrl+Shift+T</span></div>
+          </div></section>
+      </div>
+    </div></div>`),
+
+  "empty-keychain": () => shell("keychain", [["key-round", "Keychain", true]], `
+    <div class="page"><div class="column">
+      <div class="page-head"><h1>Keychain</h1></div>
+      <div class="empty">
+        <h2 style="margin:0">No keys yet</h2>
+        <p class="lede">A key signs you in without a password. Generate one here and copy its public half to the server, or import a private key you already use.</p>
+        <div class="actions"><button class="btn primary m-press">${i("plus", "sm")}Generate key</button><button class="btn m-press">${i("download", "sm")}Import key</button></div>
+      </div>
+    </div></div>`),
+
+  "empty-snippets": () => shell("snippets", [["scroll-text", "Snippets", true]], `
+    <div class="page"><div class="column">
+      <div class="page-head"><h1>Snippets</h1></div>
+      <div class="empty">
+        <h2 style="margin:0">No snippets yet</h2>
+        <p class="lede">Save a command you type often. Paste puts it at the prompt; Run also presses Enter, in one terminal or several.</p>
+        <div class="fingerprint" style="word-spacing:0">sudo systemctl restart app &amp;&amp; journalctl -u app -n 20</div>
+        <div class="actions"><button class="btn primary m-press">${i("plus", "sm")}New snippet</button></div>
+      </div>
+    </div></div>`),
 
   unlock: () => `<div class="lock"><div class="box">
       <span class="mark">&gt;${cursor}</span>

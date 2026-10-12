@@ -18,7 +18,7 @@ What is in this change:
 | `apps/desktop/src/styles/next/theme.css` | New tokens and the six themes. **Not imported by the app yet** |
 | `apps/desktop/src/styles/next/motion.css` | Motion tokens and utilities. **Not imported yet** |
 | `scripts/check-theme-contrast.mjs` | WCAG AA check for all six themes (678 pairs, passing) |
-| `tests/ui/design-capture.ts` + `design-capture.config.ts` | Re-takes the before screenshots from the real UI build. Not part of the suite (it matches `*.spec.ts` only) |
+| `tests/ui/design-capture.ts`, `design-capture-first.ts` + `design-capture.config.ts` | Re-take the before screenshots from the real UI build: the main screens, and the first-impression flows (onboarding, unlock, every connecting step, trust and auth prompts, failures, empty states). Not part of the suite (it matches `*.spec.ts` only) |
 
 No new dependencies. No bundled font (system UI face, so no ADR is needed). The terminal colour
 schemes are untouched.
@@ -87,6 +87,25 @@ almost all of them are the ones the skills list as generated-looking.
 | Hover on cards | Background and border transitions everywhere | Keep colour only, 100 ms |
 | Busy dots, spinner | Loop | Keep only for real waiting; stop under reduced motion (already true) |
 
+### 1.4 First impressions: onboarding, unlock and connecting
+
+Captured with `design-capture-first.ts`. The mock backend has no auth prompts and runs connection
+steps 15 ms apart, so the capture pauses the page clock to hold each step and delivers the real
+`SessionEvent` shapes from `packages/contracts` on the session's own channel.
+
+| # | Finding | Screens |
+|---|---|---|
+| F1 | **Connecting is a pill**: a spinner, "Connecting to deploy@10.20.0.11 · Signing in..." and four unlabelled dashes. It says nothing about what already happened, has no Cancel, and the spinner turns whatever the state | `before/dark-connect-connecting.png` ... `before/dark-connect-opening-channel.png` |
+| F2 | **Steps are not all real or all shown**: the dashes cover four of the five states; `resolving` exists in the contract but the SSH path never sends it; a jump host's steps fold into the destination's because state events do not say which hop they belong to | `TerminalView.tsx` `STEPS`, `crates/core/src/sessions.rs` |
+| F3 | **The connection log is invisible while connecting.** The core keeps a timed log of every step (`connlog.rs`) but the connecting view never offers it, so a slow or stuck connection gives no clue | |
+| F4 | **Auth prompts are window-wide modals** over a blurred app, for something that belongs to one tab. The copy is good (who asks, attempt 2 of 3, where the secret goes); the disabled "Continue" reads as enabled | `before/dark-auth-password.png`, `before/dark-auth-password-retry.png`, `before/dark-auth-key-passphrase.png`, `before/dark-auth-keyboard-interactive.png`, `before/dark-auth-jump-hop.png` |
+| F5 | **A dropped link is titled "Could not connect"**, the same title, icon and layout as a failure that never connected; the backoff is one sentence ("Reconnecting in 1 s (attempt 1 of 6)") with no record of earlier attempts | `before/dark-connect-reconnecting.png`, `before/dark-connect-failed.png` |
+| F6 | **The changed-host-key warning looks like any other dialog**: amber notice inside, the blue primary is "Open Known hosts" (the risky path), and in light mode both fingerprints are **clipped at the right edge** without wrapping, so the user cannot compare them in full | `before/light-host-key-changed.png` |
+| F7 | **The trust prompt** puts "Trust and remember" as the bright primary next to two equal secondary buttons; the jump-host hop is a grey box above the explanation rather than part of what is being trusted | `before/dark-trust-prompt-hop.png` |
+| F8 | **Onboarding** is a card on a dot grid with two glows, no indication that there are two steps, and the "I have saved it" button is disabled-blue until the group is typed. The recovery key itself is laid out well (11 numbered groups) | `before/dark-onboarding-filled.png`, `before/dark-recovery-key.png`, `before/dark-recovery-confirm-wrong.png` |
+| F9 | **Unlock with quick unlock on** still leads with the passphrase field and a disabled Unlock; "Unlock with this device" is a secondary button below it | `before/dark-unlock-quick.png`, `before/dark-unlock-wrong.png` |
+| F10 | **First run and empty states** all use the same centred icon-tile template; first-run Home is a "Welcome to Tyrminal" card with two buttons and nothing about importing existing hosts | `before/dark-first-run-home.png`, `before/dark-empty-keychain.png`, `before/dark-empty-snippets.png`, `before/dark-empty-known-hosts.png` |
+
 PR #7 adds 248 lines of CSS (tab status, layouts, detach) and PR #5 adds 122 (identities, keys,
 presentation); both follow the current card and pill patterns, so they inherit every finding above
 and need no separate treatment once the system lands (`before/pr5-*`, `before/pr7-*`).
@@ -102,6 +121,12 @@ block, the accent colour, that marks where you are. It sits after the label of t
 item and the current settings section, and in the wordmark. When the window loses focus it turns
 hollow, the way a terminal's cursor does. It never blinks (the real terminal cursor keeps the user's
 own blink setting). That is the whole of the brand in the UI.
+
+The cursor also carries the two first-impression moments. While a session connects, the cursor sits
+on the step in progress and jumps (never glides, like a real cursor) to the next one as each real
+state arrives. And once, when a new vault's recovery key is first shown, its eleven groups appear in
+reading order, 30 ms apart: the single orchestrated animation in the app, on a screen seen once per
+install, and it shows how the key is meant to be copied down.
 
 Everything else is quiet and disciplined:
 
@@ -255,6 +280,8 @@ are interruptible and need no JavaScript):
 | Toasts | 8 px rise plus opacity, 220 ms; leave by fading, 140 ms | `.m-toast`, `.m-leaving` |
 | Disclosure (a group expanding) | Opacity and 2 px drop, 140 ms | `.m-reveal` |
 | A session connecting | Its dot breathes (opacity), the only loop | `.m-connecting` |
+| Connection steps | No transition: the step cursor jumps to the next real state, a finished step's marker becomes a check. The sheet fades out (140 ms) when the shell opens | none |
+| Recovery key, first show only | Groups fade in with a 2 px rise in reading order, 30 ms apart (about 330 ms in all); no delay under reduced motion | `.groups.reveal` (prototype) |
 
 **What never animates**: terminal output, the terminal cursor, terminal resize and split dividers,
 tab switching, page changes, the sidebar collapse, the command palette and anything else opened from
@@ -388,14 +415,91 @@ Before: `before/dark-settings.png`, `before/dark-settings-terminal.png` · After
 - The terminal preview keeps its live xterm; scheme swatches become a compact list with the preview
   beside it.
 
-### Unlock and onboarding
+### First impressions: connecting
 
-Before: `before/dark-onboarding.png`, `before/dark-unlock.png` · After: `after/dark-unlock.png`,
-`after/light-unlock.png`
+Before: `before/dark-connect-*.png`, `before/dark-auth-*.png`, `before/*-host-key-changed.png`,
+`before/dark-trust-prompt-hop.png` · After: `after/dark-connect.png`, `after/light-connect-hop.png`,
+`after/dark-connect-auth.png`, `after/dark-connect-trust.png`, `after/dark-connect-changed.png`,
+`after/dark-connect-failed.png`, `after/light-connect-reconnecting.png`
 
-- No card, dot grid or glows: a 340 px column on the app background with the wordmark, a title, the
-  passphrase field and one button. The recovery key link under it.
-- Onboarding uses the same column; the irreversible-loss warning stays as an amber notice.
+The connecting view becomes a **connection sheet** inside the pane, on the terminal's own background:
+not a window-wide modal, so other tabs stay usable, and a background tab keeps its indicator.
+
+- **Real steps only.** One row per step the session actually reports, in order: Address found,
+  Connected, Keys agreed, Server identity, Signing in, Opening shell. A finished step shows a check,
+  what it found (address, port, algorithm, "trusted") and how long it took, measured from the state
+  events as they arrive. The step in progress shows the cursor. Steps not reached are faint. There
+  is no progress bar, no percentage and no spinner: if nothing arrives, nothing moves, and after 10 s
+  on one step the row says "still waiting, 12 s" from the real clock.
+- **Jump hosts** group their steps under the hop's own saved label ("bastion, jump host 1 of 1"),
+  then the destination's, so a prompt can never be mistaken for the other server's.
+- **Cancel** is always present, and Esc cancels. **Connection log** opens the core's timed log
+  (`connlog.rs`) in place, for when it is slow or stuck.
+- **Trust prompt** (new server): the step "Checking server identity" stays current and the sheet
+  shows the fingerprint in full, wrapped in groups of four, with key type and the address it came
+  from. Actions: Cancel, Trust once, Trust and save. Focus starts on the fingerprint text, not on a
+  button, so a stray Enter cannot trust a server.
+- **Changed host key**: the sheet turns into a blocked state with a red edge and shield icon,
+  "Connection blocked: the server's identity changed", the failed step marked, both fingerprints in
+  full (never clipped), when the old one was trusted, and what to do. The primary and default action
+  is the safe one (Close tab); Open Known hosts is a quiet secondary. Nothing animates.
+- **Auth prompts** appear inline under "Signing in": password (names the user and hop, says where it
+  is sent), key passphrase (names the key), keyboard-interactive (the server's text in a quoted
+  block labelled "From the server", rendered as plain text). Attempt 2 of 3 and why are stated in
+  the hint, not as a warning box.
+- **Failure** names the cause in the title ("The server did not accept the sign-in", "Could not reach
+  stg.example.net", "Connection timed out") with the failed step marked in the list and one next action
+  that fits (Try again, Edit host, Open Known hosts).
+- **Connection lost** (it had connected) is its own state, not "Could not connect": when it dropped,
+  each automatic attempt with its time and cause, the next attempt's countdown from the real timer,
+  and the schedule (about 1, 2, 4, 8, 16 and 30 s, then it stops: `terminalPolicy.ts`). Stop
+  reconnecting and Reconnect now are always there.
+- When the shell opens, the sheet fades out in 140 ms and the terminal is simply there.
+
+**Data the sheet needs** (small contract additions, for whoever owns `sessions.rs`; until they land
+the sheet shows only what does arrive and never invents a step):
+
+1. `state` events carry `hop: ChainPosition | null`, as prompts already do (the core already tracks
+   `ctx.hop`).
+2. The SSH path sends `resolving` before the address lookup (the state exists, it is not sent).
+3. `negotiated` is sent per hop right after key exchange, before host-key verification, instead of
+   only at the end. Today it arrives only once connected, so "Keys agreed" can only appear late.
+4. A `closed` error for a dropped link stays distinguishable from a failed first connection (the UI
+   already knows whether the session had connected, so this may need no change).
+
+### First impressions: onboarding, unlock, first run
+
+Before: `before/dark-onboarding.png`, `before/dark-onboarding-filled.png`, `before/dark-recovery-key.png`,
+`before/dark-recovery-confirm-wrong.png`, `before/dark-unlock.png`, `before/dark-unlock-wrong.png`,
+`before/dark-unlock-quick.png`, `before/dark-first-run-home.png` · After: `after/light-onboarding.png`,
+`after/dark-onboarding-recovery.png`, `after/dark-unlock.png`, `after/dark-unlock-wrong.png`,
+`after/dark-unlock-quick.png`, `after/dark-first-run.png`
+
+- **No card, dot grid or glow**: a 340 to 460 px column on the plain app background, the wordmark with
+  its cursor at the top.
+- **Two named steps** ("1 Passphrase, 2 Recovery key"), the first ticked when done. Real progress, not
+  a bar.
+- **Passphrase**: label above the field, a four-segment strength meter with a plain word ("Strong")
+  and one tip. The primary is "Continue", enabled once both fields match; a mismatch is said under the
+  second field. Restore a backup is a link under the button.
+- **Recovery key**: the eleven groups in a 4-column grid, numbered, mono, with the one-time reveal.
+  Copy only (no "save as file": the key must not be written to disk in plain text by us). Confirm by
+  typing one group, named by number. The warning is precise: "Without the passphrase or this key the
+  vault cannot be opened. There is no reset." Finish is enabled when the group matches.
+- **Unlock**: title, one line, the passphrase field focused, Unlock. A wrong passphrase is said under
+  the field ("That passphrase did not unlock the vault. Check Caps Lock and the keyboard layout."),
+  red edge on the field, nothing else changes. The recovery key is a link.
+- **Quick unlock on**: the primary action is "Unlock with this computer" and is focused; passphrase
+  and recovery key are links. If the OS keychain refuses, the passphrase field appears with the
+  reason; no plaintext fallback (AGENTS.md).
+- **Lock screen** is the unlock screen; locking never animates.
+- **First-run Home**: "Welcome to Tyrminal", one line, the quick-connect field focused, and a short
+  list of where to start (Add a host, Import hosts from an SSH config, PuTTY, MobaXterm or SecureCRT,
+  Generate a key, Open a local terminal), each with what it does.
+- **Empty states** (`after/dark-empty.png`, `after/dark-empty-keychain.png`,
+  `after/dark-empty-snippets.png`): left-aligned, a 15 px heading, one sentence that explains the
+  thing in the user's terms, and the real actions. Snippets shows one example command in mono, since
+  the idea is easier to see than to describe.
 
 ### Command palette
 
@@ -448,10 +552,13 @@ pinned container (`pnpm test:ui:update:container`), saying why in the PR.
 8. **Keychain and Known hosts**.
 9. **Tunnels and Recordings**.
 10. **Settings** (Appearance with the theme picker, then the other sections).
-11. **Unlock and onboarding**.
-12. **Command palette** and a final sweep of copy against the rules above.
+11. **Connection sheet**: steps, prompts inline, trust and changed-key states, failure and
+    connection-lost states, the log; then the contract additions above with whoever owns
+    `sessions.rs`. UI tests for every state with the mock, plus the existing native tests.
+12. **Onboarding, unlock, quick unlock, first-run Home and empty states**.
+13. **Command palette** and a final sweep of copy against the rules above.
 
-After step 1 the app already looks consistent (tokens drive most of it); steps 2 to 12 remove the
+After step 1 the app already looks consistent (tokens drive most of it); steps 2 to 13 remove the
 patterns. `docs/design-system.md` is updated in step 1 and again as primitives change.
 
 ---
@@ -464,3 +571,5 @@ patterns. `docs/design-system.md` is updated in step 1 and again as primitives c
    example a warm grey)?
 3. **Home**: agree to drop the hosts grid and the keyboard card from Home?
 4. **Hosts default view**: list (table) as the default, cards as an option?
+5. **Trust prompt focus**: start on the fingerprint (no button focused) so Enter cannot trust a new
+   server by accident. Agreed?

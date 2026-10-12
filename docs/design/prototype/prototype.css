@@ -1205,3 +1205,285 @@ hr {
   font-size: var(--text-sm);
   color: var(--text-faint);
 }
+
+/* ---------- connection sheet: real steps, in the pane, over the terminal's own background ---------- */
+.term.connecting {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  font: inherit;
+  white-space: normal;
+  color: var(--text);
+}
+
+.sheet {
+  width: 500px;
+  background: var(--bg-overlay);
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-4);
+  font: var(--weight-regular) var(--text-md) / var(--leading-md) var(--font-ui);
+}
+
+.sheet.danger {
+  box-shadow: var(--shadow-2), inset 3px 0 0 var(--danger);
+}
+
+.sheet-head {
+  display: grid;
+  gap: 2px;
+}
+
+.sheet-head h2 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sheet-head .icon.bad {
+  color: var(--danger);
+}
+
+.steps {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+}
+
+.steps li.hop {
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  min-height: 22px;
+  margin-top: var(--space-1);
+}
+
+.steps .marker {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.steps .marker .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.steps .done .marker {
+  color: var(--success);
+}
+
+.steps .fail .marker {
+  color: var(--danger);
+}
+
+.steps .pending {
+  color: var(--text-faint);
+}
+
+.steps .pending .marker::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  border: 1.5px solid var(--border-control);
+}
+
+.steps .now .marker .cursor {
+  margin: 0;
+  width: 7px;
+  height: 14px;
+  vertical-align: 0;
+}
+
+.steps .now {
+  font-weight: var(--weight-medium);
+}
+
+.steps .detail {
+  color: var(--text-faint);
+  font-weight: var(--weight-regular);
+  margin-left: var(--space-2);
+}
+
+.steps .ms {
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.inline-prompt {
+  display: grid;
+  gap: 6px;
+  margin: var(--space-1) 0 var(--space-1) 26px;
+  padding: var(--space-3);
+  border-radius: var(--radius-panel);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+}
+
+.inline-prompt label {
+  font-weight: var(--weight-medium);
+}
+
+.inline-prompt .hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.server-text {
+  border-left: 2px solid var(--border-strong);
+  padding: 2px 0 2px var(--space-2);
+  color: var(--text);
+}
+
+.sheet .foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sheet .foot .end {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.notice {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  box-shadow: inset 3px 0 0 var(--tone);
+  background: var(--tone-soft);
+  color: var(--text);
+}
+
+.notice.warn {
+  --tone: var(--warning);
+  --tone-soft: var(--warning-soft);
+}
+
+.notice.bad {
+  --tone: var(--danger);
+  --tone-soft: var(--danger-soft);
+}
+
+.notice .icon {
+  color: var(--tone);
+  margin-top: 1px;
+}
+
+.fp-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+/* ---------- onboarding ---------- */
+.lock .box.wide {
+  width: 460px;
+}
+
+.progress {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+.progress span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.progress .on {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.progress .ok .icon {
+  color: var(--success);
+}
+
+.strength {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.strength i {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-active);
+}
+
+.strength i.on {
+  background: var(--success);
+}
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-panel);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  counter-reset: g;
+}
+
+.groups span {
+  font: 15px/24px var(--font-mono);
+  letter-spacing: 0.06em;
+  display: flex;
+  gap: 8px;
+}
+
+.groups span::before {
+  counter-increment: g;
+  content: counter(g);
+  color: var(--text-faint);
+  font: 11px/24px var(--font-ui);
+  width: 14px;
+  text-align: right;
+  letter-spacing: 0;
+}
+
+/* The one orchestrated moment: on first show the groups appear in reading order, 30 ms apart. */
+.groups.reveal span {
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+  transition-delay: calc(var(--n) * 30ms);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .groups.reveal span {
+    transition-delay: 0ms;
+  }
+}
+
+:root[data-reduce-motion="true"] .groups.reveal span {
+  transition-delay: 0ms;
+}

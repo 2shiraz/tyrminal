@@ -4,4 +4,4 @@ import { defineConfig } from "@playwright/test";
 
 import base from "./playwright.config";
 
-export default defineConfig({ ...base, testMatch: /design-capture\.ts$/, reporter: "line", outputDir: "../../docs/reports/raw/design-capture" });
+export default defineConfig({ ...base, testMatch: /design-capture(-first)?\.ts$/, reporter: "line", outputDir: "../../docs/reports/raw/design-capture" });
