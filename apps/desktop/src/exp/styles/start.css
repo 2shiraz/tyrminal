@@ -156,8 +156,10 @@
 
 /* A new tab that is still its start page is not a terminal yet: its tab, the content card and the
    status bar keep the app's colours, not the terminal scheme's (main applies the scheme to every
-   tab that is not a page or a files-only tab). `inherit` takes back the app's values from .main. */
-:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) :is(.statusbar, .tab[aria-selected="true"]) {
+   tab that is not a page or a files-only tab). exp/layout/TabStrip.tsx sets data-ag-start-front
+   while such a tab is in front ([data-theme] is always set; it only lifts these rules to the
+   specificity of the terminal-colour rules they undo). `inherit` takes back the app's values. */
+:root[data-ui="afterglow"][data-ag-start-front][data-theme] .main :is(.statusbar, .tab[aria-selected="true"]) {
   --text: inherit;
   --text-muted: inherit;
   --text-faint: inherit;
@@ -176,8 +178,8 @@
   color: var(--text);
 }
 
-:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) .statusbar,
-:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) .content {
+:root[data-ui="afterglow"][data-ag-start-front][data-theme] .main .statusbar,
+:root[data-ui="afterglow"][data-ag-start-front][data-theme] .main .content {
   background: var(--bg-canvas);
 }
 

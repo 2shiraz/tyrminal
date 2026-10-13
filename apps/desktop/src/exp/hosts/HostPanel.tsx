@@ -72,7 +72,8 @@ function useThrowAway(host: RefObject<HTMLDivElement | null>, close: () => void)
       const recent = samples.filter((s) => event.timeStamp - s.t <= 80);
       const first = recent[0];
       const last = recent[recent.length - 1];
-      const velocity = first && last && recent.length > 1 && last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
+      // Movement within one timer tick still counts: the interval is never taken below 1 ms.
+      const velocity = first && last && recent.length > 1 ? (last.x - first.x) / Math.max(1, last.t - first.t) : 0;
       if (offset <= 0 && velocity <= 0) {
         void springX(panel, "sheet", offset, 0, velocity);
         return;

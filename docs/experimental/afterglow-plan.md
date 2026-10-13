@@ -580,3 +580,12 @@ Each entry says what changed from the plan above and why. Newest last.
     are a pointer shortcut hidden from assistive technology.
 23. **The side panel docks as on main (M5).** Main's panel already enters with a short slide and the
     terminal fits once; overlay-then-dock would change the terminal's geometry rules for little gain.
+24. **One `:has()` rule found by measurement (M7).** The performance smoke spec's CDP metrics showed
+    style recalculation in a 20-switch tab storm at twice main's. Removing stylesheets one at a time
+    pointed at a `.main:has(.workspace … .pane … .start-page)` rule; it is now a root attribute set
+    by the TabStrip wrapper from workspace state. Style work went from about 1.25 s to 0.9 s (main:
+    0.6 s) on this container. The rest is the larger stylesheet and the extra transitions; it needs a
+    real-device trace before anyone calls it smooth.
+25. **No feature-matrix row (M7).** `docs/feature-matrix.csv` is generated from BUILD_SPEC's
+    feature list and `pnpm docs:check` rejects IDs the spec does not have, so the experimental UI is
+    tracked in `docs/experimental/STATUS.md` instead of §10.5's matrix rows.

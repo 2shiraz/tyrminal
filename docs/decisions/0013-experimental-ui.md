@@ -34,9 +34,9 @@ the branch rebases on main with conflicts only in new files.
 | Component | Version | Licence | How it is used | Reason | Alternatives |
 |---|---|---|---|---|---|
 | Geist Sans (variable, latin + latin-ext) | 1.x via `@fontsource-variable/geist` 5.3.0 | OFL-1.1 | Two woff2 files vendored in `apps/desktop/src/exp/fonts/` (46 KB); Vite bundles them into `dist-exp` only; no package dependency, no runtime fetch | A UI face built for small sizes with tabular figures and round terminals that suit the rounded language | System UI faces (main's choice), Inter (the default tell the plan rejects) |
-| motion | 13.4.4 (pinned; published 2026-09-25, past the 7-day cool-down; 14.x avoided until it has aged) | MIT | `apps/desktop` dependency imported only from `src/exp/` (added in M2) | Interruptible springs, layout and exit animations, gesture velocity | CSS-only (no exit or layout animation), react-spring (no exit/layout story) |
+| motion | 13.4.4 (MIT) | MIT | **Considered, not added.** | The plan picked it for interruptible springs, layout and exit animations and gesture velocity | Main's WAAPI machinery (FLIP, glides, exit copies) plus `src/exp/motion/spring.ts`, a velocity-aware spring from the shared table played as a Web Animation, covered every moment without a second animation system or about 30 KB (plan §11.17) |
 | Phosphor icons | `@phosphor-icons/core` 2.1.1 (pinned; 2024-03-29) | MIT | `apps/desktop` devDependency, build-time only: `scripts/exp/gen-icons.mjs` inlines the regular and duotone paths into `src/exp/ui/icons.tsx` (M1), swapped in for main's Lucide set under the same export names | A softer, rounder icon family matching the shape language; main's Lucide set stays | Lucide (main's set) |
 
-Licences and versions are recorded in `NOTICE` when each lands; lockfiles stay committed.
+Geist and Phosphor are recorded in `NOTICE`; `pnpm-lock.yaml` is committed with the Phosphor devDependency.
 `scripts/check-release.mjs` on main is not changed; the branch's `scripts/exp/check-isolation.mjs`
 asserts that main's `dist/` holds no Afterglow code and no Geist font.

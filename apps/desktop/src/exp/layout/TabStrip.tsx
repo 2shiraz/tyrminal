@@ -13,6 +13,7 @@
 // - Keyboard switches and reduced motion are instant (no pill at all).
 import { type ComponentProps, type RefObject, memo, useEffect, useLayoutEffect, useRef } from "react";
 
+import { activePane } from "../../app/workspace";
 import { TabStrip as MainTabStrip } from "../../components/layout/TabStrip";
 import { motionMs, openedBy } from "../../lib/inputModality";
 
@@ -115,9 +116,31 @@ function usePill(host: RefObject<HTMLDivElement | null>, active: number | null) 
   }, [host]);
 }
 
+/**
+ * Marks the document while the tab in front is a new tab's start page (a pane that is not a
+ * terminal yet), so its tab and the status bar keep the app's colours (exp/styles/start.css). An
+ * attribute on the root costs nothing to match; a `:has()` over the panes made every style
+ * recalculation in the shell slower.
+ */
+function useStartFront(ws: ComponentProps<typeof MainTabStrip>["ws"]) {
+  const start = activePane(ws)?.target.kind === "start";
+  useEffect(() => {
+    const root = document.documentElement;
+    if (start) root.dataset.agStartFront = "";
+    else delete root.dataset.agStartFront;
+  }, [start]);
+  useEffect(
+    () => () => {
+      delete document.documentElement.dataset.agStartFront;
+    },
+    [],
+  );
+}
+
 function AfterglowTabStrip(props: ComponentProps<typeof MainTabStrip>) {
   const host = useRef<HTMLDivElement>(null);
   usePill(host, props.ws.active);
+  useStartFront(props.ws);
   return (
     <div ref={host} className="ag-tabstrip">
       <MainTabStrip {...props} />

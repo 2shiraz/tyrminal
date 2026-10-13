@@ -74,3 +74,14 @@ milestone, newest last.
   Checks: typecheck, exp build, role-based specs (472 passed; 2 fail on main's latest build too),
   `afterglow-motion.exp.ts` 9 passed (adds the unlock stagger). Next: M7 hardening and the review
   document.
+- **M7 hardening and review (2026-10-13).** Visible: no new screens; the owner review is
+  `docs/experimental/afterglow-review.md` with main's captures beside Afterglow's
+  (`docs/design/afterglow/main/`). Hardening: a performance smoke spec (frame intervals, long tasks,
+  CDP style/layout time) found one costly `:has()` rule, now replaced (style work in a tab storm
+  1.25 s to 0.9 s; main 0.6 s); the sheet's release velocity no longer reads 0 for a stroke inside one
+  timer tick. Checks: typecheck with module parity, exp build, springs and icons up to date, 163
+  contrast checks, main's build free of Afterglow, role-based specs plus all Afterglow specs (474
+  passed; failing: main's two motion specs that also fail on main's latest build, main's known tab
+  frame-sampling flake, and the sheet flick spec, fixed after the run and then 48/48 on repeat).
+  Not verified: performance on real WebView2 and WebKitGTK, and native app tests (no packaged
+  build or lab here). Next: the owner's review; nothing goes to main without written approval.
