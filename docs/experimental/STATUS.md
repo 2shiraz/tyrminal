@@ -36,3 +36,12 @@ milestone, newest last.
   after merging main (459 passed; the 3 that fail also fail on main's own latest build or are its
   known frame-sampling flake), `afterglow-motion.exp.ts` 8 passed (pill glide, keyboard instant,
   ping). Next: M3 Hosts sheet physics.
+- **M3 Hosts and the host sheet (2026-10-13).** Visible: the host details panel is a lifted sheet
+  (rounded free side, soft shadow, a grip in its header) that you can throw away: it follows the
+  pointer 1:1 from where you grabbed it, rubber-bands when pulled left, closes on a flick or past
+  half its width, and otherwise springs home, every spring starting at the release velocity. Its
+  setting rows no longer run label and hint together before Settings has been opened (a layout gap
+  in main's lazy-loaded CSS, worked around in exp). Screenshots: `*-07-host-editor.png`, plus the
+  refreshed set. Checks: typecheck, exp build, role-based specs (466 passed; the 2 failures also
+  fail on main's latest build), `afterglow-sheet.exp.ts` 6 passed (1:1 follow, flick, spring home,
+  rubber band, buttons are not a handle, reduced motion). Next: M4 ignition and the toast deck.

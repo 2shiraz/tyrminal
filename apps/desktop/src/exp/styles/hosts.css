@@ -1,0 +1,68 @@
+/* Afterglow Hosts, M3 (plan §7.2, §7.3). exp/hosts/HostPanel.tsx adds the throw-away gesture. */
+
+:root[data-ui="afterglow"] {
+  & .ag-sheet {
+    display: contents;
+  }
+
+  /* The details panel is a sheet: lifted off the list by a soft shadow, rounded on its free side,
+     its header a handle (grab cursor, a short grip). */
+  & .host-panel {
+    border-left: 1px solid var(--border);
+    border-radius: var(--r-lg) 0 0 var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: -16px 0 40px -24px rgb(6 4 14 / 0.6);
+  }
+
+  &[data-theme="light"] .host-panel {
+    box-shadow: -16px 0 40px -24px rgb(30 24 52 / 0.25);
+  }
+
+  & .hosts-layout[data-narrow="true"] .host-panel {
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  & .host-panel-head {
+    position: relative;
+    min-height: 60px;
+    cursor: grab;
+    touch-action: pan-y;
+  }
+
+  & .host-panel[data-dragging] .host-panel-head {
+    cursor: grabbing;
+  }
+
+  & .host-panel-head::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    width: 4px;
+    height: 24px;
+    margin-top: -12px;
+    border-radius: var(--r-full);
+    background: var(--border-strong);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  & .host-panel-heading h2 {
+    font-size: var(--text-row);
+    font-weight: var(--weight-medium);
+  }
+
+  /* While dragged the panel follows the pointer exactly: no transition may lag it. */
+  & .host-panel[data-dragging] {
+    transition: none !important;
+    user-select: none;
+  }
+
+  & .host-panel-foot {
+    border-top-color: var(--border-subtle);
+    border-bottom-left-radius: inherit;
+    background: var(--bg-surface-2);
+  }
+}
