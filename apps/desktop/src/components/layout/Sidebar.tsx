@@ -24,11 +24,24 @@ import { msgSftp } from "../../features/sftp/messages";
 
 /** The Tyrminal mark: a prompt chevron and cursor in a rounded tile. Original artwork. */
 export function BrandMark({ size = 26 }: { size?: number }) {
+  // The application icon (apps/desktop/design/icon-source.png) redrawn as a vector: a dark tile,
+  // the blue prompt chevron and the light cursor bar. It keeps its own colors in every theme.
   return (
     <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <rect x="1" y="1" width="30" height="30" rx="6" fill="var(--accent)" />
-      <path d="M9 11.5 14 16l-5 4.5" fill="none" stroke="var(--text-on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="16.5" y="19.2" width="7" height="2.6" rx="1.3" fill="var(--text-on-accent)" />
+      <defs>
+        <linearGradient id="tyr-mark-tile" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1c2636" />
+          <stop offset="1" stopColor="#0d131c" />
+        </linearGradient>
+        <linearGradient id="tyr-mark-prompt" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6fa8ff" />
+          <stop offset="1" stopColor="#4d8cf5" />
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="30" height="30" rx="7.5" fill="url(#tyr-mark-tile)" />
+      <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="none" stroke="rgb(255 255 255 / 0.12)" />
+      <path d="M9 10.5 15 15.5l-6 5" fill="none" stroke="url(#tyr-mark-prompt)" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="16.5" y="18.9" width="7.5" height="2.8" rx="1.4" fill="#e9edf4" />
     </svg>
   );
 }

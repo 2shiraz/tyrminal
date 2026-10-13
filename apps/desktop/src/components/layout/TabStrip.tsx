@@ -299,6 +299,11 @@ function TabStripImpl({
               }}
               onKeyDown={(event) => onTabKey(event, index, tab.id)}
               onDragStart={(event) => {
+                // A press on the close button that moves a pixel is still a click, not a drag.
+                if ((event.target as HTMLElement).closest(".tab-close")) {
+                  event.preventDefault();
+                  return;
+                }
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("text/plain", "");
                 setDrag({ from: index, over: null, side: "before" });
