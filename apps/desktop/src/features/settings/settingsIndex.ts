@@ -39,7 +39,7 @@ export interface IndexEntry {
 const s = msg.settings;
 const m = msgSettings;
 export const SETTINGS_INDEX: IndexEntry[] = [
-  { section: "appearance", group: m.theme, label: m.colourTheme, hint: m.colourThemeHint, id: "colour-theme" },
+  { section: "appearance", group: m.theme, label: m.colourTheme, id: "colour-theme" },
   { section: "appearance", group: m.theme, label: m.themeMode, hint: m.themeModeHint, id: "theme" },
   { section: "appearance", group: m.motion, label: s.reduceMotion, hint: s.reduceMotionHint, id: "reduce-motion" },
   { section: "terminal", group: m.colourScheme, label: s.scheme, id: "scheme" },

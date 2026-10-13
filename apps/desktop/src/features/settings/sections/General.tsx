@@ -25,7 +25,6 @@ export function AppearanceSection() {
         <div className="theme-picker" id="colour-theme">
           <div className="setting-label">
             <span>{msgSettings.colourTheme}</span>
-            <span className="hint">{msgSettings.colourThemeHint}</span>
           </div>
           <ThemeList value={appThemeById(prefs.palette).id} mode={resolvedTheme} onChange={(palette) => update((p) => ({ ...p, palette }))} />
         </div>
@@ -238,7 +237,7 @@ function ThemeList({ value, mode, onChange }: { value: string; mode: "light" | "
             type="button"
             role="radio"
             aria-checked={checked}
-            aria-label={`${theme.name}: ${theme.note}`}
+            aria-label={theme.name}
             tabIndex={checked ? 0 : -1}
             data-theme-id={theme.id}
             className="theme-card"
@@ -257,10 +256,7 @@ function ThemeList({ value, mode, onChange }: { value: string; mode: "light" | "
                 <span style={{ background: c.accent }} />
               </span>
             </span>
-            <span className="theme-card-text">
-              <span className="theme-card-name">{theme.name}</span>
-              <span className="theme-card-note">{theme.note}</span>
-            </span>
+            <span className="theme-card-name">{theme.name}</span>
           </button>
         );
       })}

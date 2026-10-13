@@ -27,7 +27,6 @@ export const msgSettings = {
   // Groups inside sections
   theme: "Theme",
   colourTheme: "Color theme",
-  colourThemeHint: "Colors of the interface. Terminals keep their own color scheme (Settings → Terminal).",
   themeMode: "Mode",
   themeModeHint: "System follows your computer's light or dark setting.",
   interfaceSize: "Interface size",

@@ -90,7 +90,7 @@
   --bg-box: var(--bg-surface);
   --bg-field: var(--bg-inset); /* text fields; Porcelain overrides it to white */
   /* State is an edge, never a glow or a coloured fill. */
-  --edge-select: inset 2px 0 0 var(--accent);
+  --edge-select: none; /* a selection is its fill; no one-sided accent edge (owner, 2026-10-14) */
   --edge-live: inset 0 2px 0 var(--accent);
   --edge-danger: inset 2px 0 0 var(--danger);
   /* A disabled filled button loses its colour, not its legibility: a translucent accent fill read
@@ -181,13 +181,13 @@
 /* =================== Cobalt (light): cool paper, deep azure =================== */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-app: #f4f6fb;
-  --bg-sidebar: #ebeff7;
+  --bg-app: #fafafd;
+  --bg-sidebar: #f5f7fb;
   --bg-surface: #ffffff;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #e8edf7;
+  --bg-raised-hover: #f4f6fb;
   --bg-overlay: #ffffff;
-  --bg-inset: #eef2f9;
+  --bg-inset: #f6f8fc;
   --bg-field: #ffffff;
   --bg-hover: rgb(20 40 80 / 0.045);
   --bg-active: rgb(20 40 80 / 0.08);
@@ -259,13 +259,13 @@
 
 :root[data-palette="verdigris"][data-theme="light"] {
   color-scheme: light;
-  --bg-app: #f5f7f6;
-  --bg-sidebar: #edf1f0;
+  --bg-app: #fafbfa;
+  --bg-sidebar: #f6f8f8;
   --bg-surface: #ffffff;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #e9efed;
+  --bg-raised-hover: #f4f7f6;
   --bg-overlay: #ffffff;
-  --bg-inset: #f0f4f2;
+  --bg-inset: #f8faf8;
   --bg-field: #ffffff;
   --bg-hover: rgb(18 45 52 / 0.045);
   --bg-active: rgb(18 45 52 / 0.075);
@@ -337,13 +337,13 @@
 
 :root[data-palette="graphite"][data-theme="light"] {
   color-scheme: light;
-  --bg-app: #f6f6f7;
-  --bg-sidebar: #eeeef0;
+  --bg-app: #fafafb;
+  --bg-sidebar: #f6f6f8;
   --bg-surface: #ffffff;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #ececef;
+  --bg-raised-hover: #f6f6f7;
   --bg-overlay: #ffffff;
-  --bg-inset: #f1f1f3;
+  --bg-inset: #f8f8f9;
   --bg-field: #ffffff;
   --bg-hover: rgb(24 24 32 / 0.045);
   --bg-active: rgb(24 24 32 / 0.08);
@@ -420,13 +420,13 @@
 
 :root[data-palette="fjord"][data-theme="light"] {
   color-scheme: light;
-  --bg-app: #f7f9fb;
-  --bg-sidebar: #edf0f4;
-  --bg-surface: #f2f4f7;
+  --bg-app: #fbfcfd;
+  --bg-sidebar: #f6f8fa;
+  --bg-surface: #f8fafb;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #f0f3f7;
+  --bg-raised-hover: #f8f9fb;
   --bg-overlay: #ffffff;
-  --bg-inset: #f3f5f8;
+  --bg-inset: #f9fafc;
   --bg-hover: rgb(30 44 66 / 0.05);
   --bg-active: rgb(30 44 66 / 0.085);
   --bg-selected: rgb(46 104 148 / 0.1);
