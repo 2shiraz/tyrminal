@@ -10,7 +10,7 @@ import { useGlide } from "../../lib/useGlide";
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
 import { IconButton, RangeField, Segmented, SettingRow, Shortcut, relativeTime } from "../../components/ui/controls";
-import { IconPanelRightClose, IconZoomIn, IconZoomOut } from "../../components/ui/icons";
+import { IconPanelRightClose } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
 import { msgI } from "../../lib/messages-input";
 import { ResizeHandle } from "../../components/ui/ResizeHandle";
@@ -28,7 +28,6 @@ export function ConnectionPanel({
   hostId,
   onSend,
   onConnect,
-  onZoom,
   onClose,
 }: {
   section: PanelSection;
@@ -38,7 +37,6 @@ export function ConnectionPanel({
   hostId: string | null;
   onSend: (snippet: SnippetSummary, mode: "paste" | "run") => void;
   onConnect: (host: HostSummary) => void;
-  onZoom: (step: "in" | "out" | "reset") => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -117,7 +115,7 @@ export function ConnectionPanel({
           </>
         )}
         {section === "history" && <History hostId={hostId} onConnect={onConnect} />}
-        {section === "appearance" && <Appearance onZoom={onZoom} />}
+        {section === "appearance" && <Appearance />}
       </div>
       <ResizeHandle panel="sidePanel" />
     </aside>
@@ -166,7 +164,7 @@ function History({ hostId, onConnect }: { hostId: string | null; onConnect: (hos
   );
 }
 
-function Appearance({ onZoom }: { onZoom: (step: "in" | "out" | "reset") => void }) {
+function Appearance() {
   const { prefs, update } = usePreferences();
   const t = prefs.terminal;
   const setTerminal = (patch: Partial<TerminalPreferences>) => update((p) => ({ ...p, terminal: { ...p.terminal, ...patch } }));
@@ -201,19 +199,6 @@ function Appearance({ onZoom }: { onZoom: (step: "in" | "out" | "reset") => void
             { value: "underline", label: msg.settings.cursorUnderline },
           ]}
         />
-      </SettingRow>
-      <SettingRow label={msgI.panel.zoom}>
-        <div className="row-flex">
-          <IconButton label={msgI.panel.zoomOut} onClick={() => onZoom("out")}>
-            <IconZoomOut size={14} />
-          </IconButton>
-          <button type="button" className="btn btn-sm" onClick={() => onZoom("reset")}>
-            {msgI.panel.zoomReset}
-          </button>
-          <IconButton label={msgI.panel.zoomIn} onClick={() => onZoom("in")}>
-            <IconZoomIn size={14} />
-          </IconButton>
-        </div>
       </SettingRow>
     </div>
   );

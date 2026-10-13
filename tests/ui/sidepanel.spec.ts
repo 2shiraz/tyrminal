@@ -92,14 +92,14 @@ test("side panel appearance: scheme, font and cursor apply live and persist; zoo
   expect(before[0]).toBe(before[1]);
   // The focused pane is the second one; zoom changes it alone and is not saved.
   const savedSize = (await prefs()).fontSize;
-  await side.getByRole("button", { name: "Zoom in" }).click();
-  await side.getByRole("button", { name: "Zoom in" }).click();
+  await page.locator(".statusbar").getByRole("button", { name: "Zoom in" }).click();
+  await page.locator(".statusbar").getByRole("button", { name: "Zoom in" }).click();
   await expect.poll(fontSizes).not.toEqual(before);
   const after = await fontSizes();
   expect(after[0]).toBe(before[0]);
   expect(parseFloat(after[1] as string)).toBeGreaterThan(parseFloat(before[1] as string));
   expect((await prefs()).fontSize).toBe(savedSize);
-  await side.getByRole("button", { name: "Reset zoom" }).click();
+  await page.locator(".statusbar").getByRole("button", { name: "Reset zoom" }).click();
   await expect.poll(fontSizes).toEqual(before);
 });
 

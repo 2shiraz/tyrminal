@@ -4,9 +4,10 @@ import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msgSftp } from "../../features/sftp/messages";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun } from "../ui/icons";
+import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun, IconZoomIn, IconZoomOut } from "../ui/icons";
 // server at a glance
 import { msgG } from "../../lib/messages-glance";
+import { msgI } from "../../lib/messages-input";
 
 /** Bottom status surface: where the focused session goes, its state, and terminal facts. */
 function StatusBarImpl({
@@ -24,6 +25,7 @@ function StatusBarImpl({
   onToggleServer,
   notesOpen,
   onToggleNotes,
+  onZoom,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -42,6 +44,8 @@ function StatusBarImpl({
   /** P-30: the focused host's notes. */
   notesOpen?: boolean | undefined;
   onToggleNotes?: (() => void) | undefined;
+  /** Zoom of the focused terminal pane (this pane only, not saved); absent when none is in front. */
+  onZoom?: ((step: "in" | "out" | "reset") => void) | undefined;
   /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
   shortcuts?: unknown;
 }) {
@@ -113,6 +117,21 @@ function StatusBarImpl({
         </span>
       )}
       <span className="spacer" />
+      {onZoom && (
+        // Zoom lives in the status strip, where applications usually keep it: out, reset, in.
+        <span className="status-zoom" role="group" aria-label={msgI.panel.zoom}>
+          <button type="button" className="status-button" aria-label={msgI.panel.zoomOut} data-tooltip={msgI.panel.zoomOut} data-tooltip-side="top" onClick={() => onZoom("out")}>
+            <IconZoomOut size={13} />
+          </button>
+          <button type="button" className="status-button" aria-label={msgI.panel.zoomReset} data-tooltip={msgI.panel.zoomReset} data-tooltip-side="top" onClick={() => onZoom("reset")}>
+            {msgI.panel.zoomShort}
+          </button>
+          <button type="button" className="status-button" aria-label={msgI.panel.zoomIn} data-tooltip={msgI.panel.zoomIn} data-tooltip-side="top" onClick={() => onZoom("in")}>
+            <IconZoomIn size={13} />
+          </button>
+          <span className="status-sep" aria-hidden="true" />
+        </span>
+      )}
       {onToggleNotes && (
         <button
           type="button"

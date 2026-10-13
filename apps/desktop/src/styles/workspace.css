@@ -67,6 +67,9 @@
 .statusbar .status-dimensions { font-family: var(--font-mono); font-size: 11px; }
 .statusbar .status-button { height: 22px; border-radius: 4px; gap: 5px; }
 .statusbar .status-button[aria-pressed="true"] { background: var(--bg-active); color: var(--text); }
+.statusbar .status-zoom { display: inline-flex; align-items: center; gap: 1px; }
+.statusbar .status-zoom .status-button { padding-inline: 5px; }
+.statusbar .status-zoom .status-sep { margin-inline: 6px 0; }
 
 /* ---------- panes ---------- */
 /* A pane's title bar is terminal material (scheme colours), like its tab, one fixed line high.

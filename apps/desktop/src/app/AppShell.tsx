@@ -1040,7 +1040,6 @@ function Shell() {
         onSection={setPanelSection}
         hostId={pane?.target.kind === "ssh" ? pane.target.hostId : null}
         onConnect={connect}
-        onZoom={zoomFocused}
         target={pane && paneStatus?.state === "connected" ? { label: pane.label, identity: pane.identity } : null}
         onSend={requestSnippet}
         onClose={closeSidePanel}
@@ -1164,6 +1163,7 @@ function Shell() {
           onToggleNotes={terminalVisible && !pageVisible ? toggleNotes : undefined}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
+          onZoom={terminalVisible && !pageVisible && paneStatus ? zoomFocused : undefined}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
           onStopBroadcast={stopActiveBroadcast}
           shortcuts={bindings}

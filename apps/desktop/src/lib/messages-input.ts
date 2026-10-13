@@ -78,6 +78,7 @@ export const msgI = {
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
     zoomReset: "Reset zoom",
+    zoomShort: "Zoom",
     showHistory: "Show connection history",
     showAppearance: "Show terminal appearance",
   },
