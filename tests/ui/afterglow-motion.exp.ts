@@ -195,4 +195,25 @@ test.describe("Afterglow motion", () => {
     );
     expect(await local.evaluate((el) => el.getAnimations({ subtree: true }).map((a) => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty))).not.toContain("ag-afterglow");
   });
+
+  test("unlock rise: the sidebar's destinations come in one after another, 30 ms apart", async ({ page }) => {
+    await openApp(page, { scenario: "locked" });
+    await allowMotion(page);
+    await page.getByLabel("Passphrase").fill("correct horse");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    const delays = await page.locator("nav.sidebar > .nav-item").evaluateAll((els) =>
+      els.slice(0, 6).map((el) => {
+        const cs = getComputedStyle(el);
+        const names = cs.transitionProperty.split(", ");
+        return cs.transitionDelay.split(", ")[names.indexOf("opacity")];
+      }),
+    );
+    expect(delays).toEqual(["0s", "0.03s", "0.06s", "0.09s", "0.12s", "0.15s"]);
+    // Nothing on the terminal moves, and each entrance stays inside the budget.
+    for (const a of await live(page)) {
+      expect(a.inTerminal).toBe(false);
+      expect(a.duration).toBeLessThanOrEqual(220);
+    }
+  });
 });

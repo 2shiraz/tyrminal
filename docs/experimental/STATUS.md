@@ -65,3 +65,12 @@ milestone, newest last.
   build, role-based specs (470 passed; 2 fail on main's latest build too; 1 exp spec was timing-
   sensitive and now waits for the glow to finish), `afterglow-themes.exp.ts` 2 passed. Next: M6
   unlock rise, remaining screens, light pass.
+- **M6 remaining screens, unlock rise, light pass (2026-10-13).** Visible: unlocking brings the
+  sidebar's destinations in one after another (30 ms apart, a 4 px rise and fade, the canvas never
+  moves; lock stays instant with content cleared first, as main); list rows on Keychain, Known
+  hosts and Recordings carry 40 px icon tiles; empty states sit on a soft amber well; every screen
+  reviewed in dark and light (keychain, known hosts, snippets, settings, SFTP, tunnels, recordings,
+  onboarding, unlock). Screenshots: the full set `docs/design/afterglow/{dark,light}-01…27-*.png`.
+  Checks: typecheck, exp build, role-based specs (472 passed; 2 fail on main's latest build too),
+  `afterglow-motion.exp.ts` 9 passed (adds the unlock stagger). Next: M7 hardening and the review
+  document.

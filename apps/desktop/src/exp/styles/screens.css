@@ -272,3 +272,39 @@
     border-radius: var(--r-sm);
   }
 }
+
+/* ------------------------------------------------------------ list tiles and empty states (M6) */
+
+:root[data-ui="afterglow"] {
+  /* A list row's icon sits in a 40 px tile (plan §7.8), as the host and group rows do. */
+  & .list .tile-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--bg-control);
+    color: var(--text-muted);
+  }
+
+  & .list .tile-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  & .list > li:has(.tile-icon) {
+    min-height: 56px;
+  }
+
+  /* An empty state's icon in a soft amber well: the invitation to act, not decoration. */
+  & .empty-art {
+    width: 56px;
+    height: 56px;
+    margin-bottom: var(--space-2);
+    border-radius: var(--r-lg);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+}

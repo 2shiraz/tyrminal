@@ -1,0 +1,60 @@
+/* Afterglow moments, M6 (plan §6 moment 6, "unlock rise"). Main already fades the window in after
+   unlock (styles/motion.css .shell) and shakes the card on a wrong passphrase (220 ms, its spec
+   pins it), and the lock is instant with content cleared before anything fades, exactly as main.
+   Afterglow adds the rise: the sidebar's destinations come in one after another, 30 ms apart, each
+   rising 4 px as it fades in (opacity and transform, 160 ms, the first six only). The terminal
+   canvas is never moved: only the sidebar's items do. Reduced motion: no delay, no movement. */
+
+:root[data-ui="afterglow"] {
+  --stagger-step: 30ms;
+
+  & .sidebar .nav-item {
+    transition:
+      background-color var(--hover-out) var(--ease-colour),
+      border-color var(--hover-out) var(--ease-colour),
+      color var(--hover-out) var(--ease-colour),
+      box-shadow var(--hover-out) var(--ease-colour),
+      transform var(--spring-release-duration) var(--spring-release),
+      opacity var(--duration-fast) var(--ease-out);
+
+    @starting-style {
+      opacity: 0;
+      transform: translateY(var(--distance-sm));
+    }
+  }
+
+  & .sidebar > :nth-child(2 of .nav-item) {
+    transition-delay: 0s, 0s, 0s, 0s, calc(var(--stagger-step) * 1), calc(var(--stagger-step) * 1);
+  }
+
+  & .sidebar > :nth-child(3 of .nav-item) {
+    transition-delay: 0s, 0s, 0s, 0s, calc(var(--stagger-step) * 2), calc(var(--stagger-step) * 2);
+  }
+
+  & .sidebar > :nth-child(4 of .nav-item) {
+    transition-delay: 0s, 0s, 0s, 0s, calc(var(--stagger-step) * 3), calc(var(--stagger-step) * 3);
+  }
+
+  & .sidebar > :nth-child(5 of .nav-item) {
+    transition-delay: 0s, 0s, 0s, 0s, calc(var(--stagger-step) * 4), calc(var(--stagger-step) * 4);
+  }
+
+  & .sidebar > :nth-child(6 of .nav-item) {
+    transition-delay: 0s, 0s, 0s, 0s, calc(var(--stagger-step) * 5), calc(var(--stagger-step) * 5);
+  }
+
+  /* Pressed or settled, no delay: the stagger is for the entrance only. */
+  & .sidebar .nav-item:is([data-pressed], :hover) {
+    transition-delay: 0s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-ui="afterglow"] {
+    --stagger-step: 0ms;
+  }
+}
+
+:root[data-ui="afterglow"][data-reduce-motion="true"] {
+  --stagger-step: 0ms;
+}

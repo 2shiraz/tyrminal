@@ -12,3 +12,4 @@ import "./styles/connect.css";
 import "./styles/toasts.css";
 import "./styles/start.css";
 import "./styles/themes.css";
+import "./styles/moments.css";

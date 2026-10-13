@@ -30,7 +30,8 @@ for (const theme of ["dark", "light"] as const) {
         // Views, panels and dialogs load on first use: let their chunks arrive.
         await page.waitForLoadState("networkidle");
         await page.mouse.move(1, 719);
-        await page.waitForTimeout(250);
+        // Lists fill in from the (mock) vault after the view has loaded.
+        await page.waitForTimeout(700);
         await page.screenshot({ path: `${OUT}/${theme}-${name}.png` });
       } catch (e) {
         console.log(`skip ${name}: ${String(e).slice(0, 1200)}`);
