@@ -36,6 +36,9 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     if !id_ok(&t.scheme) {
         return Err(invalid("That color scheme is not known."));
     }
+    if !id_ok(&prefs.palette) {
+        return Err(invalid("That color theme is not known."));
+    }
     if !matches!(t.font_family.as_str(), "jetbrains-mono" | "system") {
         return Err(invalid("That font is not available."));
     }
@@ -264,6 +267,24 @@ mod tests {
         for scale in [0, 50, 99, 120, 151, 1000] {
             assert!(with(scale).is_err(), "{scale}");
         }
+    }
+
+    #[test]
+    fn the_color_theme_is_an_id_and_older_files_get_the_default() {
+        assert_eq!(Preferences::default().palette, tyrminal_contracts::DEFAULT_PALETTE);
+        let with = |id: &str| sanitize(Preferences { palette: id.into(), ..Preferences::default() });
+        for id in ["cobalt", "verdigris", "fjord", "graphite", "contrast", "a-theme-from-a-newer-version"] {
+            assert_eq!(with(id).unwrap().palette, id);
+        }
+        let too_long = "a".repeat(41);
+        for id in ["", "Cobalt", "co balt", "../cobalt", "cobalt;", "<script>", too_long.as_str()] {
+            assert!(with(id).is_err(), "{id:?}");
+        }
+        // A file written before the setting existed has no such field.
+        let mut older = serde_json::to_value(Preferences::default()).unwrap();
+        older.as_object_mut().unwrap().remove("palette");
+        let read: Preferences = serde_json::from_value(older).unwrap();
+        assert_eq!(read.palette, tyrminal_contracts::DEFAULT_PALETTE);
     }
 
     #[test]

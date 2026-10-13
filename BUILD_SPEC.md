@@ -1476,8 +1476,10 @@ References: [S33], [S34], [S35], [S42].
 | P-31 | tmux and screen session awareness | 05 |
 | P-32 | Server at a glance: uptime, load, memory and disk | 05 |
 | P-33 | Container shells on the connected host | 05 |
+| P-34 | Application color themes | 09 |
 
 P-23 to P-33 were added at the owner's request on 2026-10-12 ([docs/decisions/0011-owner-feature-additions.md](docs/decisions/0010-owner-feature-additions.md)).
+P-34 was added at the owner's request on 2026-10-14 (logged in [docs/requests.md](docs/requests.md)): selectable themes for the whole interface, each with a dark and a light mode, blue by default; terminal color schemes stay separate.
 
 ## 13. Additional hardening details and decision rules
 

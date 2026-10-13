@@ -539,6 +539,10 @@ impl Default for TerminalPreferences {
 #[ts(export)]
 pub struct Preferences {
     pub theme: ThemePreference,
+    /// The application color theme, by id (for example "cobalt"); each has a dark and a light
+    /// mode chosen by `theme`. Files written before it existed get the default. An id this
+    /// version does not know is shown as the default theme.
+    pub palette: String,
     /// Reduce interface motion even if the OS does not ask for it.
     pub reduce_motion: bool,
     pub terminal: TerminalPreferences,
@@ -663,10 +667,14 @@ pub enum HostsFilter {
 /// The default production tag (P-26).
 pub const DEFAULT_PRODUCTION_TAG: &str = "prod";
 
+/// The application color theme used until the user chooses another.
+pub const DEFAULT_PALETTE: &str = "cobalt";
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: ThemePreference::default(),
+            palette: DEFAULT_PALETTE.to_owned(),
             reduce_motion: false,
             terminal: TerminalPreferences::default(),
             local_shell: None,

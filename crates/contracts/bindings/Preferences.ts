@@ -10,6 +10,12 @@ import type { WorkspacePreferences } from "./WorkspacePreferences";
 
 export type Preferences = { theme: ThemePreference, 
 /**
+ * The application color theme, by id (for example "cobalt"); each has a dark and a light
+ * mode chosen by `theme`. Files written before it existed get the default. An id this
+ * version does not know is shown as the default theme.
+ */
+palette: string, 
+/**
  * Reduce interface motion even if the OS does not ask for it.
  */
 reduceMotion: boolean, terminal: TerminalPreferences, 
