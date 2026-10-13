@@ -533,6 +533,28 @@ function HostsViewImpl({
     listWindow.scrollToIndex(shownIds.indexOf(id));
     requestAnimationFrame(() => hostButton(id)?.focus());
   };
+  // The arrow keys work on Hosts without first clicking into the list: with nothing focused, Down
+  // or Up goes to the selected host (or the first), and the list's own keys take over from there.
+  const arrowStart = useRef<(event: globalThis.KeyboardEvent) => void>(() => undefined);
+  arrowStart.current = (event) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const layoutElement = layoutRef.current;
+    if (!layoutElement || layoutElement.offsetParent === null || shownIds.length === 0) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== layoutElement) return;
+    if (document.querySelector("dialog[open], [role='menu']")) return;
+    const start = shownIds.find((id) => selected.has(id)) ?? (panelHostId && shownIds.includes(panelHostId) ? panelHostId : shownIds[0]);
+    if (!start) return;
+    event.preventDefault();
+    if (!selected.has(start)) setSelected(new Set([start]));
+    focusHost(start);
+  };
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => arrowStart.current(event);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   /** Hosts per row in the card grid (1 in the list), from where the cards are laid out. */
   const perRow = () => {
     const items = [...(listRef.current?.children ?? [])] as HTMLElement[];
@@ -1178,6 +1200,8 @@ function HostsViewImpl({
                     onClick={(event) => {
                       if ((event.target as HTMLElement).closest("button, input, a, select, label")) return;
                       rowClick(host, event);
+                      // Focus follows the click, so the arrow keys carry on from this row.
+                      hostButton(host.id)?.focus({ preventScroll: true });
                     }}
                     onDoubleClick={(event) => {
                       if ((event.target as HTMLElement).closest("input, .btn, .icon-button")) return;
