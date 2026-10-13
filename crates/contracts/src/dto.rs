@@ -582,6 +582,16 @@ pub struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub panel_widths: Option<PanelWidths>,
+    /// Show the hosts and ask before opening several sessions at once. On by default. A selection
+    /// with a production host (P-26) is governed by `confirm_production_open` as well.
+    pub confirm_multi_open: bool,
+    /// Ask before several sessions are opened when one of the hosts is a production host. On by
+    /// default; turned off only by the user's explicit choice (ADR 0011, amended 2026-10-14).
+    /// Broadcast and snippet runs on production hosts ask whatever this says.
+    pub confirm_production_open: bool,
+    /// Show the lines and the target before a snippet of several lines is sent. On by default.
+    /// Sessions on production hosts are asked whatever this says.
+    pub confirm_snippet_run: bool,
 }
 
 /// One width per resizable panel; `None` is the panel's default width. Only these panels are
@@ -688,6 +698,9 @@ impl Default for Preferences {
             panel_widths: None,
             no_port_suggestions: false,
             interface_scale: None,
+            confirm_multi_open: true,
+            confirm_production_open: true,
+            confirm_snippet_run: true,
         }
     }
 }

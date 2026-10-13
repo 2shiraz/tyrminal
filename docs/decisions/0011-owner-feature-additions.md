@@ -75,6 +75,11 @@ This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC 
   production pane, a multi-host snippet run, and connecting to a group that includes production
   hosts. Cancel has focus by default.
 - The guardrails only add confirmations. They never relax any other check.
+- Amended 2026-10-14 (owner request): opening several sessions that include a production host is
+  still confirmed by default, but the user can turn that one confirmation off, either in Settings
+  or with the review dialog's "Open and don't ask again, production hosts too". It is its own
+  preference (`confirmProductionOpen`), so turning off the general "ask before opening several
+  sessions" never turns it off. Broadcast and snippet runs on production hosts ask regardless.
 - Implementation (2026-10-12):
   - The vault stores the flag on host and group records. A host summary reports `production` as
     `host` or `group` (the nearest flag up the chain), or `null`.

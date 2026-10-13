@@ -288,6 +288,29 @@ mod tests {
     }
 
     #[test]
+    fn asking_first_is_on_by_default_and_for_files_written_before_the_settings_existed() {
+        let defaults = Preferences::default();
+        assert!(defaults.confirm_multi_open && defaults.confirm_snippet_run && defaults.confirm_production_open);
+        let mut older = serde_json::to_value(&defaults).unwrap();
+        older.as_object_mut().unwrap().remove("confirmMultiOpen");
+        older.as_object_mut().unwrap().remove("confirmProductionOpen");
+        older.as_object_mut().unwrap().remove("confirmSnippetRun");
+        let read: Preferences = serde_json::from_value(older).unwrap();
+        assert!(read.confirm_multi_open && read.confirm_snippet_run, "a missing setting means ask");
+        assert!(read.confirm_production_open, "production hosts are asked about unless the user said otherwise");
+        // Turning off the general question leaves the production one on: it is its own choice.
+        let general_off = sanitize(Preferences { confirm_multi_open: false, ..Preferences::default() }).unwrap();
+        assert!(general_off.confirm_production_open);
+        let production_off =
+            sanitize(Preferences { confirm_production_open: false, ..Preferences::default() }).unwrap();
+        assert!(!production_off.confirm_production_open, "the user's choice is kept");
+        let off =
+            sanitize(Preferences { confirm_multi_open: false, confirm_snippet_run: false, ..Preferences::default() })
+                .unwrap();
+        assert!(!off.confirm_multi_open && !off.confirm_snippet_run, "the user's choice is kept");
+    }
+
+    #[test]
     fn the_production_tag_follows_host_tag_rules_and_can_be_off() {
         assert_eq!(Preferences::default().production_tag, "prod");
         let with = |tag: &str| sanitize(Preferences { production_tag: tag.into(), ..Preferences::default() });

@@ -64,4 +64,20 @@ interfaceScale: number | null,
  * Widths the user dragged side panels to, in CSS pixels; kept across restarts. Absent in
  * files written before it existed. Clamped natively per panel in core `preferences::sanitize`.
  */
-panelWidths?: PanelWidths, };
+panelWidths?: PanelWidths, 
+/**
+ * Show the hosts and ask before opening several sessions at once. On by default. A selection
+ * with a production host (P-26) is governed by `confirm_production_open` as well.
+ */
+confirmMultiOpen: boolean, 
+/**
+ * Ask before several sessions are opened when one of the hosts is a production host. On by
+ * default; turned off only by the user's explicit choice (ADR 0011, amended 2026-10-14).
+ * Broadcast and snippet runs on production hosts ask whatever this says.
+ */
+confirmProductionOpen: boolean, 
+/**
+ * Show the lines and the target before a snippet of several lines is sent. On by default.
+ * Sessions on production hosts are asked whatever this says.
+ */
+confirmSnippetRun: boolean, };
