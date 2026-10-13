@@ -163,10 +163,13 @@ export class Session {
    * button; Enter and double-click connect.
    */
   async openHost(container, label) {
+    // Enter only once focus has stayed on the button between two polls: focus from a click that
+    // led here (a nav item, say) can still land after an immediate focus() call.
     const focus = `const b = [...document.querySelectorAll(arguments[0] + " button")].find((x) => (x.getAttribute("aria-label") ?? x.textContent.trim()) === arguments[1]);
       if (!b) return false;
+      if (document.activeElement === b) return true;
       b.focus();
-      return document.activeElement === b;`;
+      return false;`;
     await this.until(() => this.execute(focus, [container, label]), { describe: `${label} in ${container}` });
     await this.chord(["\uE007"]);
   }

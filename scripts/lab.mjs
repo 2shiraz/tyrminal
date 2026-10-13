@@ -194,7 +194,7 @@ function forHost(value) {
 
 function writeLab(lab) {
   // Only files the client side opens are translated; server-side program paths stay as they are.
-  const out = { ...lab, keys: forHost(lab.keys), servers: forHost(lab.servers) };
+  const out = { ...lab, keys: forHost(lab.keys), certificates: forHost(lab.certificates), servers: forHost(lab.servers) };
   writeFileSync(join(runDir, "lab.json"), `${JSON.stringify(out, null, 2)}\n`, { mode: 0o600 });
   for (const [name, s] of Object.entries(lab.servers)) {
     console.log(`lab server ${name}: 127.0.0.1:${s.port} ${s.hostKeyEd25519Fingerprint}`);

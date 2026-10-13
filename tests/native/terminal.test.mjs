@@ -345,6 +345,23 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
   });
 });
 
+/** Brings a terminal tab to the front by clicking its name (its lead holds the close button on hover). */
+async function selectTab(s, name) {
+  const rect = await s.until(
+    () =>
+      s.execute(
+        `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+         if (!e) return null; const r = (e.querySelector(".tab-label") ?? e).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`,
+      ),
+    { describe: `tab ${name}` },
+  );
+  await s.clickAt(rect.x, rect.y);
+  await s.until(
+    () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}))?.getAttribute("aria-selected") === "true" || null`),
+    { describe: `tab ${name} in front` },
+  );
+}
+
 /** The command palette shortcut: Cmd+K on macOS, Ctrl+Shift+K elsewhere (lib/shortcuts.ts). */
 const PALETTE = process.platform === "darwin" ? [KEYS.meta, "K"] : [KEYS.ctrl, KEYS.shift, "K"];
 
@@ -374,13 +391,13 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
        return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
     );
-  /** Clicks a terminal tab with a real pointer. */
+  /** Clicks a terminal tab's name with a real pointer (its lead holds the close button on hover). */
   const clickTab = async (name) => {
     const rect = await s.until(
       () =>
         s.execute(
           `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
-           if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2 };`,
+           if (!e) return null; const r = (e.querySelector(".tab-label") ?? e).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`,
         ),
       { describe: `tab ${name}` },
     );
@@ -786,7 +803,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
 });
 
 describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
-  test("a host connected once is offered on Hosts and in the new-tab menu, and both reconnect", async () => {
+  test("a host connected once is offered on Hosts and on the new-tab page, and both reconnect", async () => {
     const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     try {
       const s = app.session;
@@ -813,20 +830,20 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
       await trustOnce();
       await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Hosts" });
 
-      // The new-tab menu offers it too.
+      // The new-tab page ("+") offers it too, under recent connections.
       await s.click(await s.waitFor(".tabstrip button.tab-new"));
       const item = await s.until(
         async () => {
-          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
-            if ((await s.text(candidate)).trim() === "Lab") return candidate;
+          for (const candidate of await s.findAll(".start-recent .start-row")) {
+            if ((await s.text(candidate)).includes("Lab")) return candidate;
           }
           return null;
         },
-        { describe: "Lab in the new-tab menu" },
+        { describe: "Lab under recent connections on the new-tab page" },
       );
       await s.click(item);
       await trustOnce();
-      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the menu" });
+      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the new-tab page" });
       await t.type("echo REOPENED-$((2+2))\n");
       await t.waitForText("REOPENED-4");
     } finally {
@@ -901,6 +918,14 @@ describe("command-finished notifications from real shell marks (P-23)", { concur
       await t.importKey(lab.keys.ed25519);
       await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
       await t.connect("Lab");
+      // The other tab is opened first: starting a local shell is heavy work for the page, and
+      // done while the command runs it would delay when the start mark is seen.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(
+        () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].some((e) => e.textContent.includes("Local terminal") && e.dataset.status === "ok") || null`),
+        { describe: "local shell" },
+      );
+      await selectTab(s, "Lab");
       await t.type("export PS1='tyr$ '; clear\n");
       await t.waitForText("tyr$");
       // The marks an integrated shell prints, around a command that takes 4 seconds; the
@@ -909,7 +934,7 @@ describe("command-finished notifications from real shell marks (P-23)", { concur
         "printf '\\033]133;A\\007$ \\033]133;B\\007echo TOKEN=s3cret\\n\\033]133;C\\007'; sleep 4; printf '\\033]133;D;3\\007'\n",
       );
       // Another tab in front while it runs.
-      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await selectTab(s, "Local terminal");
       const announced = await s.until(() => s.execute(`return document.querySelector('[data-testid="command-finished"]')?.textContent || null`), {
         describe: "finished announcement",
         timeout: 20_000,
