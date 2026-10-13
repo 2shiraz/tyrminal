@@ -134,6 +134,14 @@ export async function sortHosts(page: Page, name: "Name" | "Recently used" | "Ad
 }
 
 /** Hosts selected in the library (rows in List, cards in Cards). */
+/**
+ * Opens a host's details the way a user does: the Edit button of its row or card. A click on the
+ * host only selects it; once details are open they follow the selection.
+ */
+export async function editHost(page: Page, label: string) {
+  await page.getByTestId("host-list").getByRole("button", { name: `Edit ${label}`, exact: true }).click();
+}
+
 export const selectedHosts = (page: Page) => page.locator('[data-testid="host-list"] [data-selected="true"]');
 
 /**

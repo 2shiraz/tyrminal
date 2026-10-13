@@ -5,7 +5,7 @@
 
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { editHost, openApp } from "./fixtures";
 
 type Call = { cmd: string; args: unknown };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as unknown as { __mockCalls: Call[] }).__mockCalls.filter((x) => x.cmd === c).length, cmd);
@@ -46,7 +46,7 @@ async function openSidePanel(page: Page) {
 
 async function openHostPanel(page: Page) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByTestId("host-list").getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await expect(page.getByTestId("host-panel")).toBeVisible();
 }
 

@@ -173,6 +173,27 @@ export function TerminalSection() {
           checked={t.confirmMultilinePaste}
           onChange={(confirmMultilinePaste) => setTerminal({ confirmMultilinePaste })}
         />
+        <Switch
+          id="confirm-open"
+          label={msg.settings.confirmOpen}
+          hint={msg.settings.confirmOpenHint}
+          checked={prefs.confirmMultiOpen !== false}
+          onChange={(confirmMultiOpen) => update((p) => ({ ...p, confirmMultiOpen }))}
+        />
+        <Switch
+          id="confirm-production-open"
+          label={msg.settings.confirmProductionOpen}
+          hint={msg.settings.confirmProductionOpenHint}
+          checked={prefs.confirmProductionOpen !== false}
+          onChange={(confirmProductionOpen) => update((p) => ({ ...p, confirmProductionOpen }))}
+        />
+        <Switch
+          id="confirm-run"
+          label={msg.settings.confirmRun}
+          hint={msg.settings.confirmRunHint}
+          checked={prefs.confirmSnippetRun !== false}
+          onChange={(confirmSnippetRun) => update((p) => ({ ...p, confirmSnippetRun }))}
+        />
         <Switch id="copy-on-select" label={msg.settings.copyOnSelect} checked={t.copyOnSelect} onChange={(copyOnSelect) => setTerminal({ copyOnSelect })} />
         {/* terminal notifications (P-23) */}
         <CommandNoticeSettings

@@ -1,3 +1,4 @@
+import { SplitAction } from "../../components/ui/SplitAction";
 import type { HostOs, HostSummary } from "@tyrminal/contracts";
 import { type FormEvent, useState } from "react";
 
@@ -24,6 +25,7 @@ export function ConnectAllDialog({
   initialLayout = "tabs",
   onClose,
   onConfirm,
+  askProduction = true,
 }: {
   hosts: HostSummary[];
   /** The group being opened, or null for a selection. */
@@ -33,8 +35,14 @@ export function ConnectAllDialog({
   /** Preselected: Cmd/Ctrl+Enter on a selection asks for one split tab. */
   initialLayout?: OpenLayout;
   onClose: () => void;
-  /** `layout`: one tab per host (default) or one tab split in a grid. */
-  onConfirm: (hosts: HostSummary[], layout: OpenLayout) => void;
+  /**
+   * `layout`: one tab per host (default) or one tab split in a grid. `dontAskAgain`: the user
+   * chose to open several sessions without this review from now on (Settings turns it back on);
+   * offered with a production host among them, that choice names production hosts and covers them.
+   */
+  onConfirm: (hosts: HostSummary[], layout: OpenLayout, dontAskAgain?: boolean) => void;
+  /** Whether production hosts get their own confirmation here (Settings; on unless the user turned it off). */
+  askProduction?: boolean;
 }) {
   const [layout, setLayout] = useState<OpenLayout>(initialLayout);
   const tooMany = hosts.length > free;
@@ -42,6 +50,14 @@ export function ConnectAllDialog({
   const isProduction = useIsProduction();
   const production = hosts.filter(isProduction);
   const [confirming, setConfirming] = useState(false);
+  const [dontAsk, setDontAsk] = useState(false);
+  const proceed = (never: boolean) => {
+    setDontAsk(never);
+    // Production hosts get their own confirmation (P-26) unless the user has said, in Settings or
+    // by the choice that names them here, not to be asked.
+    if (production.length > 0 && askProduction && !never) setConfirming(true);
+    else onConfirm(hosts, layout, never);
+  };
   return (
     <Dialog title={msgD.inventory.connectAllTitle(hosts.length)} icon={<IconPlay size={18} />} onDismiss={onClose}>
       <div className="stack">
@@ -89,13 +105,16 @@ export function ConnectAllDialog({
           <button type="button" className="btn" onClick={onClose} autoFocus={!ready} data-autofocus={!ready || undefined}>
             {msg.common.cancel}
           </button>
-          <button type="button" className="btn btn-primary" disabled={!ready}
-            onClick={() => (production.length > 0 ? setConfirming(true) : onConfirm(hosts, layout))}
-            data-autofocus={ready || undefined}
+          <SplitAction
+            disabled={!ready}
+            autoFocus={ready}
+            onClick={() => proceed(false)}
+            moreLabel={msgSelect.moreWays}
+            items={[{ label: production.length > 0 ? msgSelect.dontAskAgainProduction : msgSelect.dontAskAgain, onSelect: () => proceed(true) }]}
           >
             <IconPlay size={14} />
             {msgD.inventory.connectAllConfirm(hosts.length)}
-          </button>
+          </SplitAction>
         </div>
       </div>
       {confirming && (
@@ -107,7 +126,7 @@ export function ConnectAllDialog({
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             setConfirming(false);
-            onConfirm(hosts, layout);
+            onConfirm(hosts, layout, dontAsk);
           }}
         />
       )}

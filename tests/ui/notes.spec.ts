@@ -4,7 +4,7 @@
 // Runs against the UI test mock; storage and encryption are tested in the core (tests/notes.rs).
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp, terminalText, waitForTerminalText } from "./fixtures";
+import { editHost, openApp, terminalText, waitForTerminalText } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -25,7 +25,7 @@ const HOSTILE = [
 
 async function openHost(page: Page, label: string) {
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
-  await page.getByTestId("host-list").getByRole("button", { name: label, exact: true }).click();
+  await editHost(page, label);
   return page.getByTestId("host-panel");
 }
 

@@ -144,9 +144,6 @@ function rangeBetween(order: string[], from: string, to: string): string[] {
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
 
-/** How long after a click a second one still makes a double-click (the common system default). */
-const DOUBLE_CLICK_MS = 300;
-
 /** Connections from Hosts by double-click or Enter before the "Double-click to connect" hint stops. */
 const HINT_UNTIL = 3;
 
@@ -234,6 +231,21 @@ function HostsViewImpl({
   const [osInherited, setOsInherited] = useState<Set<string>>(new Set());
   const [settingOs, setSettingOs] = useState<{ ids: string[]; initial: HostOs | null } | null>(null);
   const [connectAll, setConnectAll] = useState<{ hosts: HostSummary[]; groupName: string | null; layout?: OpenLayout } | null>(null);
+  // Opening several sessions is reviewed first unless the user turned that off (Settings →
+  // Terminal). Even then the review shows when it has something to decide: a production host
+  // (P-26), or more hosts than there is room for.
+  const openMany = (list: HostSummary[], layout: OpenLayout) => {
+    notify("success", msgD.inventory.connectAllDone(list.length));
+    if (onConnectMany) onConnectMany(list, layout);
+    else for (const host of list) onConnect(host);
+  };
+  const reviewConnect = (request: NonNullable<typeof connectAll>) => {
+    // Asked about by default; a selection with a production host has its own setting as well.
+    const guarded = prefs.confirmProductionOpen !== false && request.hosts.some(isProduction);
+    const direct = prefs.confirmMultiOpen === false && request.hosts.length > 0 && request.hosts.length <= free && !guarded;
+    if (direct) openMany(request.hosts, request.layout ?? "tabs");
+    else setConnectAll(request);
+  };
   // Identities (KEY-17): which one every host and group uses.
   const identityList = useIdentities();
   const [assignments, setAssignments] = useState<Map<string, IdentityAssignment>>(new Map());
@@ -479,18 +491,15 @@ function HostsViewImpl({
       setSelected(new Set([id]));
     }
   };
-  // Opening the details panel narrows the list and can move the rows; when it is not open yet it
-  // opens once a double-click is no longer possible, so the second click lands on the same host.
-  const pendingPanel = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(pendingPanel.current), []);
+  // A click selects. Host details open from Edit (the row's pencil, or the host menu) and nowhere
+  // else; once they are open they follow the selection, so the panel stays while the user moves
+  // from host to host (owner request, 2026-10-14).
   const rowClick = (host: HostSummary, event: MouseEvent) => {
     // The second click of a double-click: the double-click handler decides.
     if (event.detail > 1) return;
     selectWith(host.id, event);
     if (event.shiftKey || toggleKey(event)) return;
-    window.clearTimeout(pendingPanel.current);
     if (panel) openPanel({ kind: "edit", host });
-    else pendingPanel.current = window.setTimeout(() => openPanel({ kind: "edit", host }), DOUBLE_CLICK_MS);
   };
   const selectedHosts = filtered.filter((h) => selected.has(h.id));
   // Open in SFTP for a selection: each SSH host becomes a location of the SFTP tab (at most
@@ -503,7 +512,6 @@ function HostsViewImpl({
    * when the host is part of one, else that host. Several hosts are reviewed first.
    */
   const connectFrom = (host: HostSummary, how: "connect" | "split" | "sftp" = "connect", fromDoubleClick = false) => {
-    window.clearTimeout(pendingPanel.current);
     const before = fromDoubleClick && replaced.current?.id === host.id ? replaced.current.ids : null;
     const ids = before ?? selected;
     const chosen = filtered.filter((h) => ids.has(h.id));
@@ -518,7 +526,7 @@ function HostsViewImpl({
       return;
     }
     hint.used();
-    if (many) setConnectAll({ hosts: chosen, groupName: null, layout: how === "split" ? "split" : "tabs" });
+    if (many) reviewConnect({ hosts: chosen, groupName: null, layout: how === "split" ? "split" : "tabs" });
     else if (how === "split" && onConnectSplit) onConnectSplit(host);
     else onConnect(host);
   };
@@ -581,8 +589,6 @@ function HostsViewImpl({
     const target = event.target as HTMLElement;
     if (target.closest("input:not([type=checkbox]), textarea, select")) return;
     const current = target.closest<HTMLElement>("[data-host-id]")?.dataset.hostId ?? null;
-    // Working in the list from the keyboard: a click's details panel that has not opened yet stays closed.
-    window.clearTimeout(pendingPanel.current);
     if (toggleKey(event) && event.key.toLowerCase() === "a") {
       event.preventDefault();
       setSelected(new Set(shownIds));
@@ -622,9 +628,9 @@ function HostsViewImpl({
       } else {
         anchor.current = nextId;
         setSelected(new Set([nextId]));
-        // Host details follow the selection (edits there are saved as they are made).
+        // Open host details follow the selection (edits there are saved as they are made).
         const host = filtered.find((h) => h.id === nextId);
-        if (host) openPanel({ kind: "edit", host }, { takeFocus: false });
+        if (host && panel) openPanel({ kind: "edit", host }, { takeFocus: false });
       }
       focusHost(nextId);
       return;
@@ -1144,6 +1150,9 @@ function HostsViewImpl({
                           </div>
                         </div>
                         <div className="host-card-actions">
+                          <IconButton size="sm" className="row-edit" label={msgHv.edit(host.label)} data-tooltip-side="bottom-end" onClick={() => openPanel({ kind: "edit", host })}>
+                            <IconPencil size={15} />
+                          </IconButton>
                           <IconButton size="sm" label={msg.hosts.more(host.label)} data-tooltip-side="bottom-end" aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
                             <IconEllipsis size={16} />
                           </IconButton>
@@ -1331,8 +1340,8 @@ function HostsViewImpl({
           items={[
             { label: msgBulk.title(selectedHosts.length), disabled: true, onSelect: () => undefined },
             "separator",
-            { label: msgBulk.connectTabs(selectedHosts.length), icon: <IconPlay size={15} />, onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null }) },
-            { label: msgBulk.connectSplit, icon: <IconColumns2 size={15} />, onSelect: () => setConnectAll({ hosts: selectedHosts, groupName: null, layout: "split" }) },
+            { label: msgBulk.connectTabs(selectedHosts.length), icon: <IconPlay size={15} />, onSelect: () => reviewConnect({ hosts: selectedHosts, groupName: null }) },
+            { label: msgBulk.connectSplit, icon: <IconColumns2 size={15} />, onSelect: () => reviewConnect({ hosts: selectedHosts, groupName: null, layout: "split" }) },
             ...(openSelectionInSftp ? [{ label: msgBulk.sftp(sftpSelection.length), icon: <IconArrowLeftRight size={15} />, onSelect: openSelectionInSftp }] : []),
             { label: msgBulk.run, icon: <IconScrollText size={15} />, onSelect: () => setRunOn(selectedHosts.map((h) => h.id)) },
             "separator",
@@ -1412,7 +1421,7 @@ function HostsViewImpl({
             {
               label: msgD.inventory.connectGroup,
               icon: <IconPlay size={15} />,
-              onSelect: () => setConnectAll({ hosts: hostsInGroup(groupMenu.group.id), groupName: groupPath(groupList, groupMenu.group.id) }),
+              onSelect: () => reviewConnect({ hosts: hostsInGroup(groupMenu.group.id), groupName: groupPath(groupList, groupMenu.group.id) }),
             },
             { label: msg.common.edit, icon: <IconPencil size={15} />, onSelect: () => setEditingGroup({ group: groupMenu.group }) },
             {
@@ -1521,11 +1530,12 @@ function HostsViewImpl({
           free={free}
           initialLayout={connectAll.layout ?? "tabs"}
           onClose={() => setConnectAll(null)}
-          onConfirm={(list, layout) => {
+          askProduction={prefs.confirmProductionOpen !== false}
+          onConfirm={(list, layout, dontAskAgain) => {
             setConnectAll(null);
-            notify("success", msgD.inventory.connectAllDone(list.length));
-            if (onConnectMany) onConnectMany(list, layout);
-            else for (const host of list) onConnect(host);
+            // "Don't ask again" offered beside a production host named them, and covers them.
+            if (dontAskAgain) update((p) => ({ ...p, confirmMultiOpen: false, ...(list.some(isProduction) ? { confirmProductionOpen: false } : {}) }));
+            openMany(list, layout);
           }}
         />
       )}

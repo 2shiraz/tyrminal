@@ -19,6 +19,9 @@ const DEFAULTS: Preferences = {
   productionTag: "prod",
   noPortSuggestions: false,
   interfaceScale: null,
+  confirmMultiOpen: true,
+  confirmProductionOpen: true,
+  confirmSnippetRun: true,
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

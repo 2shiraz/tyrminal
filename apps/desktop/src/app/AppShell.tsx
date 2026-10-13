@@ -321,6 +321,11 @@ function Shell() {
     }
     return out as ReadonlyMap<number, string>;
   }, [ws, data.hosts.value, isProduction]);
+  // Latest values for callbacks that are created once (requestSnippet).
+  const askForLines = useRef(true);
+  askForLines.current = prefs.confirmSnippetRun !== false;
+  const productionNow = useRef(productionPanes);
+  productionNow.current = productionPanes;
   // A broadcast that includes production panes waits for its own confirmation (P-26).
   const [confirmBroadcast, setConfirmBroadcast] = useState<{
     tabId: number;
@@ -641,7 +646,9 @@ function Shell() {
         targetIdentity: p.identity,
         environment: handle.environment(),
       };
-      if (needsSnippetReview(request)) {
+      // Several lines are reviewed first unless the user turned that off; a production host is
+      // always asked (P-26). A refused variable is always reviewed.
+      if (needsSnippetReview(request, askForLines.current || productionNow.current.has(p.id))) {
         setRunRequest(request);
       } else {
         void sendSnippet(request);
@@ -1559,13 +1566,15 @@ function Shell() {
       {runRequest && (
         <SnippetRunDialog
           request={runRequest}
+          canSkipLater={!productionPanes.has(runRequest.paneId) && !needsSnippetReview(runRequest, false)}
           onCancel={() => {
             setRunRequest(null);
             focusedHandle()?.focus();
           }}
-          onConfirm={() => {
+          onConfirm={(dontAskAgain) => {
             const request = runRequest;
             setRunRequest(null);
+            if (dontAskAgain) update((p) => ({ ...p, confirmSnippetRun: false }));
             void sendSnippet(request);
           }}
         />

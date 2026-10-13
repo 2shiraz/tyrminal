@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { connectHost, openApp } from "./fixtures";
+import { connectHost, editHost, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -121,7 +121,7 @@ test("a key can be installed from the Keychain on a chosen server", async ({ pag
 
 test("the host panel offers to install the chosen key on that host", async ({ page }) => {
   await openHosts(page);
-  await page.getByTestId("host-list").getByRole("button", { name: "Home lab", exact: true }).click();
+  await editHost(page, "Home lab");
   const panel = page.getByRole("complementary", { name: "Host details" });
   await panel.getByRole("button", { name: "Install key on server" }).click();
   const install = page.getByRole("dialog", { name: "Install “Deploy key” on a server" });

@@ -7,7 +7,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { connectHost, openApp, openSettings } from "./fixtures";
+import { connectHost, editHost, openApp, openSettings } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -42,7 +42,7 @@ test("hosts are production through their flag, a group above them or the product
 
   // The host's own switch, in the Host details panel.
   const details = page.getByRole("complementary", { name: "Host details" });
-  await page.getByTestId("host-list").getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   // Saved as you go, like every field of the panel.
   await details.getByRole("switch", { name: /Production host/ }).check();
   await expect.poll(async () => (await calls(page, "host_save")).at(-1)?.args.host).toMatchObject({ production: true });

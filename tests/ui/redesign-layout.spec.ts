@@ -1,6 +1,6 @@
 // Layout regressions uncovered by the redesign baseline, with real rendered bounds.
 import { type Page, expect, test } from "@playwright/test";
-import { connectHost, openApp, openSettings } from "./fixtures";
+import { connectHost, editHost, openApp, openSettings } from "./fixtures";
 
 const hosts = (page: Page) => page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
 const noOverflow = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -91,7 +91,7 @@ for (const layout of ["list", "grid"] as const) {
     expect(shown.left).toBe(0);
     // The host details panel open beside the list.
     await page.setViewportSize({ width: 1360, height: 860 });
-    await page.getByTestId("host-list").getByRole("button", { name: "api-gateway", exact: true }).click();
+    await editHost(page, "api-gateway");
     await expect(page.getByTestId("host-panel")).toBeVisible();
     const beside = await pageOverflow();
     expect(beside.scroll).toBeLessThanOrEqual(beside.client);

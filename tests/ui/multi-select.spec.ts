@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { uiModifier, chooseLayout, openApp, openSelectionMenu, selectedHosts, selectionAction } from "./fixtures";
+import { uiModifier, chooseLayout, editHost, openApp, openSelectionMenu, selectedHosts, selectionAction } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -20,10 +20,11 @@ async function openHosts(page: Page, options = {}) {
   await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
 }
 
-test("a click selects one host and shows it; Ctrl/Cmd-click toggles; Shift-click selects a range", async ({ page }) => {
+test("a click selects one host and opens nothing; Ctrl/Cmd-click toggles; Shift-click selects a range", async ({ page }) => {
   await openHosts(page);
   await nameButton(page, "build-runner-03").click();
-  await expect(page.getByRole("complementary", { name: "Host details" })).toBeVisible();
+  // Host details open from Edit only; a click is a selection.
+  await expect(page.getByRole("complementary", { name: "Host details" })).toHaveCount(0);
   expect(await selectedLabels(page)).toEqual(["build-runner-03"]);
   // One host picked by a click is not a selection of several yet.
   await expect(page.getByTestId("selection-count")).toHaveCount(0);
@@ -259,11 +260,19 @@ test("palette: Enter connects a host, Cmd/Ctrl+Enter beside the session in front
   await expect(page.getByRole("tab", { name: /\(2\)/ })).toHaveCount(1);
 });
 
-test("arrow keys move the selection and Host details follow it; Home and End jump to the ends", async ({ page }) => {
+test("arrow keys move the selection; open Host details follow it; Home and End jump to the ends", async ({ page }) => {
   await openHosts(page);
   await chooseLayout(page, "List");
-  await nameButton(page, "build-runner-03").focus();
   const details = page.getByRole("complementary", { name: "Host details" });
+  // With details closed the arrows only move the selection.
+  await nameButton(page, "api-gateway").focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(nameButton(page, "build-runner-03")).toBeFocused();
+  await expect(details).toHaveCount(0);
+  // Once opened from Edit they follow it.
+  await editHost(page, "build-runner-03");
+  await expect(details.getByLabel("Name", { exact: true })).toHaveValue("build-runner-03");
+  await nameButton(page, "build-runner-03").focus();
   await page.keyboard.press("ArrowDown");
   await expect(nameButton(page, "db-primary")).toBeFocused();
   await expect(details.getByLabel("Name", { exact: true })).toHaveValue("db-primary");

@@ -1,3 +1,4 @@
+import { SplitAction } from "../../components/ui/SplitAction";
 import type { SnippetSummary } from "@tyrminal/contracts";
 
 import { Dialog } from "../../components/ui/Dialog";
@@ -30,10 +31,14 @@ export function variableStates(text: string, environment: SessionEnvironment | n
   ]);
 }
 
-/** A snippet is reviewed first when it has several lines or uses a variable the server refused. */
-export function needsSnippetReview(request: SnippetRunRequest): boolean {
+/**
+ * A snippet is reviewed first when it uses a variable the server refused, or when it has several
+ * lines and `askForLines` holds (the user's setting; always true for a production host).
+ */
+export function needsSnippetReview(request: SnippetRunRequest, askForLines = true): boolean {
   const lines = request.snippet.text.replace(/\n$/, "").split("\n").length;
-  return lines > 1 || variableStates(request.snippet.text, request.environment).some(([, state]) => state === "refused");
+  if (variableStates(request.snippet.text, request.environment).some(([, state]) => state === "refused")) return true;
+  return lines > 1 && askForLines;
 }
 
 function VariableList({ request }: { request: SnippetRunRequest }) {
@@ -56,7 +61,18 @@ function VariableList({ request }: { request: SnippetRunRequest }) {
 }
 
 /** Preview of a multi-line snippet: the exact text and the exact target, before anything is sent. */
-export function SnippetRunDialog({ request, onCancel, onConfirm }: { request: SnippetRunRequest; onCancel: () => void; onConfirm: () => void }) {
+export function SnippetRunDialog({
+  request,
+  canSkipLater = false,
+  onCancel,
+  onConfirm,
+}: {
+  request: SnippetRunRequest;
+  /** Offer "don't ask again": only when the review is for the line count alone, off production. */
+  canSkipLater?: boolean;
+  onCancel: () => void;
+  onConfirm: (dontAskAgain?: boolean) => void;
+}) {
   const lines = request.snippet.text.replace(/\n$/, "").split("\n").length;
   const run = request.mode === "run";
   return (
@@ -83,10 +99,17 @@ export function SnippetRunDialog({ request, onCancel, onConfirm }: { request: Sn
         <button type="button" className="btn" onClick={onCancel} autoFocus data-autofocus>
           {msg.common.cancel}
         </button>
-        <button type="button" className="btn btn-primary" onClick={onConfirm}>
-          {run ? <IconPlay size={15} /> : <IconClipboardPaste size={15} />}
-          {run ? msg.snippets.previewRun(lines) : msg.snippets.previewPaste}
-        </button>
+        {canSkipLater ? (
+          <SplitAction onClick={() => onConfirm(false)} moreLabel={msg.snippets.moreWays} items={[{ label: run ? msg.snippets.runDontAsk : msg.snippets.pasteDontAsk, onSelect: () => onConfirm(true) }]}>
+            {run ? <IconPlay size={15} /> : <IconClipboardPaste size={15} />}
+            {run ? msg.snippets.previewRun(lines) : msg.snippets.previewPaste}
+          </SplitAction>
+        ) : (
+          <button type="button" className="btn btn-primary" onClick={() => onConfirm(false)}>
+            {run ? <IconPlay size={15} /> : <IconClipboardPaste size={15} />}
+            {run ? msg.snippets.previewRun(lines) : msg.snippets.previewPaste}
+          </button>
+        )}
       </div>
     </Dialog>
   );

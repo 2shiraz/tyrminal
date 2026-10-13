@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { editHost, openApp, selectedHosts } from "./fixtures";
 
 type Call = { cmd: string; args: unknown };
 const allCalls = (page: Page) => page.evaluate(() => (window as unknown as { __mockCalls: Call[] }).__mockCalls);
@@ -34,7 +34,7 @@ const undoKey = "Control+z";
 
 test("autosave never sends a secret: a password is written only by Set password (or Enter), once", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByRole("radio", { name: /Store a password in the vault/ }).check();
   const password = details(page).getByLabel("Password", { exact: true });
   await expect(password).toHaveAttribute("type", "password");
@@ -78,7 +78,7 @@ test("autosave never sends a secret: a password is written only by Set password 
 
 test("an invalid field is shown inline and never stored; the valid fields around it still save", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByLabel("Port").fill("70000");
   await details(page).getByLabel("Address").fill("user@stg.example.net");
   await details(page).getByLabel("User name").fill("-oProxyCommand=x");
@@ -107,7 +107,7 @@ test("undo restores the previous record exactly, from the keyboard or the status
   await openHosts(page);
   const before = await storedHost(page, "api-gateway");
   const id = (before as { id: string }).id;
-  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click();
+  await editHost(page, "api-gateway");
   // Leaving each field saves it: three writes, each its own undo step.
   await details(page).getByLabel("Name", { exact: true }).fill("api-gateway-renamed");
   await details(page).getByLabel("Tags").fill("prod, web, edge");
@@ -148,7 +148,7 @@ test("undo restores the previous record exactly, from the keyboard or the status
 test("undo is offered for 10 s only", async ({ page }) => {
   await openHosts(page);
   await page.clock.install({ time: new Date("2026-10-11T12:00:00Z") });
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByLabel("Tags").fill("web");
   await page.clock.runFor(500);
   await expect.poll(count(page, "host_save")).toBe(1);
@@ -165,7 +165,7 @@ test("undo is offered for 10 s only", async ({ page }) => {
 test("a key sign-in without a chosen key is never saved, and autosave never picks a key", async ({ page }) => {
   await openHosts(page);
   const usesKey = async () => (await calls(page, "host_save")).filter((c) => (c.args as { host: { auth: { kind: string } } }).host.auth.kind === "key");
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByRole("radio", { name: /Use a key from the keychain/ }).check();
   const select = details(page).getByRole("combobox", { name: "Choose a key" });
   await expect(select).toHaveValue("");
@@ -198,7 +198,7 @@ test("a key sign-in without a chosen key is never saved, and autosave never pick
 
 test("the jump host and proxy are one unit: saved once valid, never half, before the host's basics", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByText("Show more").click();
   // A proxy without its host is not a valid route: the name still saves, the route waits.
   await details(page).getByRole("combobox", { name: "Proxy" }).selectOption("socks5");
@@ -228,12 +228,12 @@ test("the jump host and proxy are one unit: saved once valid, never half, before
 
 test("a refused route leaves the host unchanged and offers Retry", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  await editHost(page, "db-primary");
   await details(page).getByText("Show more").click();
   await details(page).getByRole("combobox", { name: "Jump host" }).selectOption({ label: "api-gateway" });
   await expect.poll(count(page, "host_connection_set")).toBe(1);
   await settled(page);
-  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click();
+  await editHost(page, "api-gateway");
   await details(page).getByText("Show more").click();
   await details(page).getByRole("combobox", { name: "Jump host" }).selectOption({ label: "db-primary" });
   await details(page).getByLabel("Tags").fill("loop");
@@ -252,7 +252,7 @@ test("a failed write says so and Retry writes it", async ({ page }) => {
   await page.evaluate(() => {
     (window as unknown as { __mockFailNext: Record<string, number> }).__mockFailNext = { host_save: 1 };
   });
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByLabel("Tags").fill("web");
   await expect(status(page)).toHaveText("Couldn't save –");
   await expect(panel(page)).toHaveAttribute("data-autosave", "error");
@@ -319,7 +319,7 @@ test("a new host's route is written right after the host is created", async ({ p
 
 test("debounce: typing saves once, 400 ms after the last change; leaving the field saves at once", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   const name = details(page).getByLabel("Name", { exact: true });
   await name.fill("");
   await name.pressSequentially("stage-two", { delay: 60 });
@@ -340,7 +340,7 @@ test("debounce: typing saves once, 400 ms after the last change; leaving the fie
 
 test("a stored password is not dropped by an autosave: switching away waits for Remove", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   await details(page).getByRole("radio", { name: /Ask for the password each time/ }).check();
   await details(page).getByLabel("Tags").fill("cache");
   await expect.poll(count(page, "host_save")).toBe(1);
@@ -356,7 +356,7 @@ test("a stored password is not dropped by an autosave: switching away waits for 
 
 test("leaving with a typed but unset password asks first; Keep editing is the default", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  await editHost(page, "db-primary");
   await details(page).getByRole("radio", { name: /Store a password in the vault/ }).check();
   await details(page).getByLabel("Password", { exact: true }).fill("canary-typed-not-set");
 
@@ -367,7 +367,7 @@ test("leaving with a typed but unset password asks first; Keep editing is the de
   await expect(details(page).getByLabel("Password", { exact: true })).toHaveValue("canary-typed-not-set");
 
   // Switching host asks too; discarding switches, and nothing carried the password.
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   await confirm.getByRole("button", { name: "Discard password" }).click();
   await expect(details(page).getByLabel("Address")).toHaveValue("203.0.113.24");
   expect(JSON.stringify(await allCalls(page))).not.toContain("canary-typed-not-set");
@@ -382,9 +382,15 @@ test("leaving with a typed but unset password asks first; Keep editing is the de
 
 // ---- The panel itself. ----
 
-test("clicking a host opens its details beside the list; Escape closes and focus returns", async ({ page }) => {
+test("a click only selects; Edit opens the details beside the list, they follow the selection, Escape closes and focus returns", async ({ page }) => {
   await openHosts(page);
+  // A click selects the host and opens nothing.
   await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await expect(selectedHosts(page)).toHaveCount(1);
+  await page.waitForTimeout(500);
+  await expect(panel(page)).toHaveCount(0);
+
+  await editHost(page, "edge-cache");
   await expect(details(page)).toBeVisible();
   await expect(details(page).getByLabel("Address")).toBeFocused();
   await expect(details(page).getByLabel("Address")).toHaveValue("203.0.113.24");
@@ -393,25 +399,24 @@ test("clicking a host opens its details beside the list; Escape closes and focus
   // The section boxes, top to bottom, each headed by its strip.
   await expect(panel(page).locator(".box-strip h3")).toHaveText(["Address", "General", "Connection", "Credentials", "Notes"]);
   await expect(panel(page).getByText("Show more")).toBeVisible();
-  await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toHaveAttribute("aria-current", "true");
   // The primary button is always Connect.
   await expect(panel(page).getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
   await expect(panel(page).getByRole("button", { name: /Save|Cancel/ })).toHaveCount(0);
 
-  // The list stays usable: another host opens in the same panel.
+  // Once open, the panel stays and shows whichever host is clicked.
   await list(page).getByRole("article", { name: "api-gateway" }).locator(".host-card-dest").click();
   await expect(details(page).getByLabel("Address")).toHaveValue("10.20.0.11");
   await expect(panel(page).getByTestId("host-panel-location")).toHaveText("Local vault · Production");
 
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
-  await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toBeFocused();
+  await expect(list(page).getByRole("button", { name: "Edit edge-cache", exact: true })).toBeFocused();
   expect(await calls(page, "host_save")).toHaveLength(0);
 });
 
 test("closing right after an edit still saves it", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByLabel("Tags").fill("web");
   await details(page).getByRole("button", { name: "Close host details" }).click();
   await expect(panel(page)).toHaveCount(0);
@@ -421,7 +426,7 @@ test("closing right after an edit still saves it", async ({ page }) => {
 test("the menu copies the address, duplicates, and deletes after confirmation", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openHosts(page);
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   const menu = details(page).getByRole("button", { name: "Host details actions" });
 
   await menu.click();
@@ -462,7 +467,7 @@ test("a new host connects from the bottom button once it exists", async ({ page 
 test("at a narrow width the panel takes the whole view and the list behind it is inert", async ({ page }) => {
   await openHosts(page);
   await page.setViewportSize({ width: 820, height: 760 });
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   const layout = page.locator(".hosts-layout");
   await expect(layout).toHaveAttribute("data-narrow", "true");
   const [box, outer] = await Promise.all([panel(page).boundingBox(), layout.boundingBox()]);
@@ -475,11 +480,11 @@ test("at a narrow width the panel takes the whole view and the list behind it is
   }
   await details(page).getByRole("button", { name: "Close host details" }).click();
   await expect(page.locator(".hosts-main")).not.toHaveAttribute("inert", "");
-  await expect(list(page).getByRole("button", { name: "edge-cache", exact: true })).toBeFocused();
+  await expect(list(page).getByRole("button", { name: "Edit edge-cache", exact: true })).toBeFocused();
 
   // Wide again: side by side.
   await page.setViewportSize({ width: 1360, height: 860 });
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   await expect(layout).toHaveAttribute("data-narrow", "false");
   const wide = await panel(page).boundingBox();
   expect(wide?.width).toBe(400);
@@ -487,7 +492,7 @@ test("at a narrow width the panel takes the whole view and the list behind it is
 
 test("Show more holds the terminal settings and, for a key sign-in, agent forwarding (off by default)", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click();
+  await editHost(page, "api-gateway");
   await details(page).getByText("Show more").click();
   const forward = details(page).getByRole("switch", { name: /agent forwarding/ });
   await expect(forward).not.toBeChecked();
@@ -504,7 +509,7 @@ test("Show more holds the terminal settings and, for a key sign-in, agent forwar
 
 test("leaving with note changes asks about the note, not a password; with both it names both", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByRole("button", { name: "Add note" }).click();
   await details(page).getByRole("textbox", { name: "Note" }).fill("Reboot window: Sundays");
 
@@ -519,7 +524,7 @@ test("leaving with note changes asks about the note, not a password; with both i
   // A typed password as well: the prompt names both.
   await details(page).getByRole("radio", { name: /Store a password in the vault/ }).check();
   await details(page).getByLabel("Password", { exact: true }).fill("canary-unset-both");
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click();
+  await editHost(page, "edge-cache");
   const both = page.getByRole("alertdialog", { name: "Discard the password and note changes?" });
   await both.getByRole("button", { name: "Discard both" }).click();
   await expect(details(page).getByLabel("Address")).toHaveValue("203.0.113.24");
@@ -530,7 +535,7 @@ test("leaving with note changes asks about the note, not a password; with both i
 test("the port suggestions switch autosaves, even while the route is incomplete, and undo restores it", async ({ page }) => {
   await openHosts(page);
   const off = () => page.evaluate(() => [...(window as unknown as { __mockPortSuggestionsOff: Set<string> }).__mockPortSuggestionsOff]);
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await details(page).getByText("Show more").click();
   const suggestions = details(page).getByRole("switch", { name: "Forwarding suggestions for this host" });
   await expect(suggestions).toBeChecked();
@@ -554,11 +559,11 @@ test("the port suggestions switch autosaves, even while the route is incomplete,
 test("Credentials offers an identity when other hosts sign in with the same user and key", async ({ page }) => {
   await openHosts(page);
   // A password sign-in has nothing an identity could share from here: no hint.
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click();
+  await editHost(page, "staging-web");
   await expect(details(page).getByTestId("host-reuse")).toHaveCount(0);
 
   // build-runner-03 uses the deploy key as "builder", which no other host does.
-  await list(page).getByRole("button", { name: "build-runner-03", exact: true }).click();
+  await editHost(page, "build-runner-03");
   await expect(details(page).getByLabel("Address")).toHaveValue("ci3.lab.example");
   await expect(details(page).getByTestId("host-reuse")).toHaveCount(0);
   // As "deploy" it shares api-gateway's user and key.
@@ -581,7 +586,7 @@ test("Credentials offers an identity when other hosts sign in with the same user
 
 test("Host details boxes never scroll sideways at the panel's minimum width", async ({ page }) => {
   await openHosts(page);
-  await list(page).getByRole("button", { name: "build-runner-03", exact: true }).click();
+  await editHost(page, "build-runner-03");
   // The narrowest the resize handle allows (ResizeHandle.tsx, hostPanel.min).
   const handle = page.getByRole("separator", { name: "Resize host details" });
   await handle.focus();
@@ -603,7 +608,7 @@ test("Host details boxes never scroll sideways at the panel's minimum width", as
 test("Host details never scroll sideways, even at their narrowest, with long values", async ({ page }) => {
   await openHosts(page);
   await page.setViewportSize({ width: 1024, height: 760 });
-  await list(page).getByRole("button", { name: "db-primary", exact: true }).click();
+  await editHost(page, "db-primary");
   const panel = page.getByTestId("host-panel");
   await panel.getByLabel("Name", { exact: true }).fill("a-very-long-host-name-that-keeps-going-".repeat(4));
   await panel.getByText("Show more").click();
