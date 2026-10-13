@@ -45,3 +45,12 @@ milestone, newest last.
   refreshed set. Checks: typecheck, exp build, role-based specs (466 passed; the 2 failures also
   fail on main's latest build), `afterglow-sheet.exp.ts` 6 passed (1:1 follow, flick, spring home,
   rubber band, buttons are not a handle, reduced motion). Next: M4 ignition and the toast deck.
+- **M4 ignition and the toast deck (2026-10-13).** Visible: the connection track (main's, driven by
+  the real connect events) carries a phosphor glow on its travelled rail and reached stops, and the
+  shell's end glows amber once when the session opens; toasts form a deck (newest in front, two
+  edges peeking above, smaller and fainter) that fans out into a list while hovered, with every
+  move a Web Animation on transform and opacity; timers pause on hover and while the window is
+  hidden. Screenshots: `*-19-toast-deck.png`, `*-20-toast-deck-fanned.png`, `*-17-trust-prompt.png`
+  (the track mid-connect). Checks: typecheck, exp build, role-based specs (469 passed; the 2
+  failures also fail on main's latest build), `afterglow-deck.exp.ts` 3 passed. Next: M5 new-tab
+  page, quick connect, theme cards.

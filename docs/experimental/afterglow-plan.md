@@ -561,3 +561,13 @@ Each entry says what changed from the plan above and why. Newest last.
     it when narrow); its specs and the panel width clamp depend on that. Afterglow styles it as a
     lifted sheet (rounded free side, soft shadow, a grip in the header) and adds the throw-away
     gesture to its header, instead of turning it into an overlay over a dimmed list.
+19. **Ignition lives on the connection track (M4).** A pointer connect opens the new tab at once and
+    shows main's connection track in its pane, which already advances only on the real connect
+    events. A stroke around the Hosts tile would be hidden by that tab switch, and a tile-to-tab
+    morph would delay a tab main opens instantly. So the track is the ignition: a phosphor glow on
+    the travelled rail, and a one-shot amber afterglow on the shell's end when it opens. Failure
+    keeps main's danger segment and shake.
+20. **The toast deck stays click-through, so no swipe (M4).** Main made toasts click-through on
+    purpose (a toast never covers a control) and finds hover by hit-testing. A swipe needs pointer
+    events on the toast, so the deck leaves on its timers instead; hovering (the deck's box and the
+    toasts themselves) fans it out and pauses it, and a hidden window pauses it too.

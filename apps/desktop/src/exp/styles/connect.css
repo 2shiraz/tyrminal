@@ -1,0 +1,52 @@
+/* Afterglow ignition, M4 (plan §6 moment 1). Main's connection track already advances on the real
+   connect events (address, connect, server identity, sign in, shell) and never on a timer; this
+   gives it the phosphor: the travelled rail and reached stops carry a soft amber glow, and the
+   moment the shell answers, its end tile glows once and fades like a phosphor trace. Failure keeps
+   main's danger segment and one shake. Opacity only; reduced motion drops the fade (main's rule
+   for the track already stops every animation there). */
+
+:root[data-ui="afterglow"] {
+  & .track-end {
+    border-color: var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-control);
+  }
+
+  & .track-line {
+    height: 2px;
+    background: var(--border);
+  }
+
+  /* A static glow (painted once per stage, never animated). */
+  & .track-fill {
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+
+  & .track-stop[data-state="done"] .track-dot {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  & .track-to {
+    overflow: visible;
+  }
+
+  & .track-to[data-state="done"] {
+    box-shadow: 0 0 0 3px var(--accent-soft), 0 0 12px var(--accent-glow);
+  }
+
+  /* The shell answered: one amber ring that fades over 900 ms. */
+  & .track-to[data-state="done"]::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border: 2px solid var(--accent);
+    border-radius: calc(var(--r-sm) + 7px);
+    opacity: 0;
+    pointer-events: none;
+    animation: ag-afterglow 900ms var(--ease-out);
+  }
+
+  & .connection-sheet {
+    border-radius: var(--r-lg);
+  }
+}

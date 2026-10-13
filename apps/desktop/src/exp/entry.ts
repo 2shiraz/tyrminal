@@ -8,3 +8,5 @@ import "./styles/springs.css";
 import "./styles/motion.css";
 import "./styles/tabs.css";
 import "./styles/hosts.css";
+import "./styles/connect.css";
+import "./styles/toasts.css";

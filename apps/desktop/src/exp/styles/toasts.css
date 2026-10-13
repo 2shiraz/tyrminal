@@ -1,0 +1,44 @@
+/* Afterglow toast deck, M4 (plan §6 moment 5). exp/ui/Toasts.tsx places the toasts; this file
+   only gives them their shape. Click-through as on main. */
+
+:root[data-ui="afterglow"] {
+  & .toasts {
+    display: block;
+    transition: none;
+  }
+
+  & .toasts > .toast {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    overflow: hidden;
+    transform-origin: 50% 100%;
+    /* Positions are Web Animations (exp/ui/Toasts.tsx): no CSS entrance or transition here. */
+    transition: none;
+    will-change: transform;
+  }
+
+  /* Behind the front toast its text would read through: only the edge peeks out. */
+  & .toasts:not([data-expanded]) > .toast:not(:last-child) > * {
+    opacity: 0;
+  }
+
+  & .toast {
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    background: color-mix(in oklab, var(--bg-overlay) 92%, transparent);
+    backdrop-filter: blur(12px) saturate(140%);
+  }
+
+  & .toast > svg {
+    margin-top: 0;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-ui="afterglow"] .toast {
+    background: var(--bg-overlay);
+    backdrop-filter: none;
+  }
+}
