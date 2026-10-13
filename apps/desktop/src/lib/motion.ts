@@ -11,6 +11,8 @@ const MAX_FLIP_ITEMS = 300;
 /** How many rows may come or go before a change just snaps. */
 const MAX_CHANGED = 2;
 const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
+/** Rows of an arriving list that come in one after another; later rows arrive with the last of them. */
+const MAX_STAGGERED = 6;
 
 export function motionAllowed(): boolean {
   if (document.documentElement.dataset.reduceMotion === "true") return false;
@@ -53,15 +55,17 @@ export function flashSaved(element: HTMLElement | null | undefined): void {
  * - a child that moved slides from where it was on screen to its new place (--duration-glide);
  *   a move that interrupts a slide starts from where the row is now, so nothing jumps;
  * - a child that is new rises in (--duration-fast);
- * - the first arrival is immediate, with no library cascade.
+ * - arriving at a list by pointer, its first rows come in one after another (--stagger apart,
+ *   --duration-base each, opacity and --distance-sm only); rows past the sixth arrive with it, so
+ *   a long list is never a long wait, and a row can be used while it arrives;
  * Nothing moves after keyboard input (typing in a search field re-orders rows at once), under
  * reduced motion, or for very long lists. Removals are instant (exits are lib/exitGhost.ts).
  */
-export function useFlip(container: RefObject<HTMLElement | null>, { enter = true, evenFromKeyboard = false }: { stagger?: boolean; enter?: boolean; evenFromKeyboard?: boolean } = {}): void {
+export function useFlip(container: RefObject<HTMLElement | null>, { stagger = true, enter = true, evenFromKeyboard = false }: { stagger?: boolean; enter?: boolean; evenFromKeyboard?: boolean } = {}): void {
   const previous = useRef<Map<string, { left: number; top: number }> | null>(null);
   const previousRoot = useRef<HTMLElement | null>(null);
   const running = useRef(new WeakMap<HTMLElement, Animation>());
-  // A newly mounted list appears immediately.
+  // Whether this list element has had its arrival.
   const staggered = useRef(false);
   useLayoutEffect(() => {
     const root = container.current;
@@ -101,7 +105,19 @@ export function useFlip(container: RefObject<HTMLElement | null>, { enter = true
     if (!motionAllowed() || (!evenFromKeyboard && openedBy() === "keyboard")) return;
 
     if (first) {
-      // Navigation and first library arrival are immediate; no repeated row cascade.
+      if (!stagger) return;
+      const step = motionMs("--stagger");
+      const duration = motionMs("--duration-base");
+      const rise = getComputedStyle(document.documentElement).getPropertyValue("--distance-sm").trim() || "0px";
+      if (duration === 0) return;
+      items.forEach((el, index) => {
+        el.animate([{ opacity: 0, transform: `translateY(${rise})` }, { opacity: 1, transform: "none" }], {
+          duration,
+          delay: Math.min(index, MAX_STAGGERED - 1) * step,
+          easing: EASE_OUT,
+          fill: "backwards",
+        });
+      });
       return;
     }
 

@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { connectHost, openApp } from "./fixtures";
+import { connectHost, editHost, openApp } from "./fixtures";
 
 // The motion rules (docs/design/motion.md): motion answers the pointer and never the keyboard;
 // transform and opacity only, 100 to 220 ms; nothing at all under reduced motion; the terminal
@@ -346,18 +346,46 @@ test.describe("glides and lists", () => {
     expect(await primary(page).locator(".nav-glide").count()).toBe(0);
   });
 
-  test("arriving by click, library rows are immediately readable; typing never moves rows", async ({ page }) => {
+  test("arriving by click, the first rows come in one after another and stay usable; typing never moves rows", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
     const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
     await expect(rows.first()).toBeVisible();
-    expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
-    expect(await rows.evaluateAll((els) => els.every((el) => getComputedStyle(el).opacity === "1"))).toBe(true);
-    // Once the arrival has settled, filtering from the keyboard re-orders at once.
+    const arrival = await rows.evaluateAll((els) =>
+      els.map((el) => {
+        const [animation] = el.getAnimations();
+        const effect = animation?.effect as KeyframeEffect | undefined;
+        return effect ? { delay: effect.getTiming().delay, duration: effect.getTiming().duration, props: Object.keys(effect.getKeyframes()[0] ?? {}).filter((k) => ["opacity", "transform"].includes(k)).sort() } : null;
+      }),
+    );
+    expect(arrival.length).toBeGreaterThan(1);
+    // 30 ms apart, the sixth row's delay is the longest, 180 ms each: opacity and transform only.
+    arrival.forEach((row, index) => expect(row).toEqual({ delay: Math.min(index, 5) * 30, duration: 180, props: ["opacity", "transform"] }));
+    // A row is not blocked while it arrives.
+    expect(await rows.first().evaluate((el) => getComputedStyle(el).pointerEvents)).not.toBe("none");
+    // Once the arrival has settled every row is fully there, and filtering from the keyboard re-orders at once.
     await expect.poll(() => rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+    expect(await rows.evaluateAll((els) => els.every((el) => getComputedStyle(el).opacity === "1"))).toBe(true);
     await page.getByRole("searchbox").first().click();
     await page.keyboard.type("di");
+    expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+  });
+
+  test("arriving from the keyboard or with reduced motion, rows are there at once", async ({ page }) => {
+    await openApp(page);
+    await allowMotion(page);
+    const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
+    await primary(page).getByRole("button", { name: /^Snippets/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect(rows.first()).toBeVisible();
+    expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+    await primary(page).getByRole("button", { name: /^Hosts/ }).click();
+    await page.evaluate(() => {
+      document.documentElement.dataset.reduceMotion = "true";
+    });
+    await primary(page).getByRole("button", { name: /^Snippets/ }).click();
+    await expect(rows.first()).toBeVisible();
     expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
   });
 });
@@ -376,12 +404,12 @@ test.describe("host details", () => {
     await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
   }
 
-  test("a click slides content in; switching hosts crossfades; closing removes credential forms immediately", async ({ page }) => {
+  test("Edit slides content in; switching hosts crossfades; closing removes credential forms immediately", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await toHosts(page);
     const list = page.getByTestId("host-list");
-    await list.getByRole("button", { name: "staging-web", exact: true }).click();
+    await editHost(page, "staging-web");
     await expect(page.getByTestId("host-panel")).toBeVisible();
     expect(new Set(await panelContent(page))).toEqual(new Set(["opacity+transform"]));
     await expect.poll(() => panelContent(page)).toEqual([]);
