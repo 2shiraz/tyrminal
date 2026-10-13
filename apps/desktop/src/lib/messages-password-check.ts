@@ -17,6 +17,8 @@ export const msgPC = {
     "Only when you run a check: for each stored password, Tyrminal computes its SHA-1 hash on this computer and sends only the first 5 characters (for example 5BAA6) to the address below. The service answers with every known hash that starts with them, padded with decoys, and the comparison happens here. Passwords, full hashes and names never leave this computer. The service does see your IP address and when you check.",
   enable: "Allow compromised-password checks",
   enableHint: "Off by default. Nothing is sent until you turn this on and run a check.",
+  serviceGroup: "Service",
+  storedGroup: "Stored passwords",
   endpoint: "Service address",
   endpointHint: "An https:// address; the 5 characters are added to its end.",
   endpointInvalid: "Use an https:// address without a user name, query or fragment.",

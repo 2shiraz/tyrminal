@@ -88,6 +88,7 @@ export const msgC = {
     title: "Keyboard shortcuts",
     body: "Change application shortcuts. The terminal keeps its own keys: a shortcut needs Ctrl, Alt or Cmd, and Ctrl with a single key (such as Ctrl+C) always goes to the terminal. Remove a shortcut to let its keys reach the terminal.",
     listLabel: "Application shortcuts",
+    inputGroup: "Keys and mouse in the terminal",
     search: "Search shortcuts",
     noMatch: "No shortcut matches.",
     groups: {
@@ -188,6 +189,8 @@ export const msgC = {
     ipAddresses: "IP addresses",
     ipHint: "IPv4 and IPv6 addresses.",
     words: "Words",
+    wordsGroup: "Your own words",
+    outputGroup: "Terminal output",
     wordLabel: "Word to highlight",
     add: "Add",
     remove: (word: string) => `Remove ${word}`,

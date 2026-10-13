@@ -502,7 +502,7 @@
     align-items: stretch;
   }
 
-  .settings-section-body > :is(.settings-scheme, .notice, [data-span="all"]) {
+  .settings-section-body > :is(.settings-scheme, .notice, .span-all, [data-span="all"]) {
     grid-column: 1 / -1;
   }
 

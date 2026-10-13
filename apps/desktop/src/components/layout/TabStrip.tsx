@@ -239,8 +239,8 @@ function TabStripImpl({
 
   return (
     <div className="tabstrip">
-      {/* "+" scrolls with the tabs, right after the last one; it stays pinned at the end only when
-          the tabs overflow. */}
+      {/* "+" comes right after the scrolling tabs and is not inside them: with few tabs it follows
+          the last one, with many the tabs shrink and scroll beside it. No tab passes under it. */}
       <div className="tabstrip-scroll" ref={scrollRef}>
       {/* Only tabs are inside the tablist (WAI-ARIA); the new-tab and layout buttons sit beside it. */}
       <div className="tabstrip-tabs" role="tablist" aria-label={msg.nav.sessions} ref={tabsRef}>
@@ -394,6 +394,7 @@ function TabStripImpl({
         })}
       </div>
 
+      </div>
       <IconButton
         className="tab-new"
         size="sm"
@@ -416,7 +417,6 @@ function TabStripImpl({
       >
         <IconPlus size={16} />
       </IconButton>
-      </div>
       <span className="tab-spacer" />
       {layout && (
         <button

@@ -125,7 +125,7 @@
   --duration-glide: 140ms; /* something moving to a new place: FLIP, nav and tab glides */
   --duration-progress: 200ms; /* progress bars retargeting between ticks (linear) */
   --duration-flash: 400ms; /* one-shot "this changed" tint */
-  --stagger: 20ms; /* per item, capped at 6 items, opacity only */
+  --stagger: 30ms; /* between the first six rows of a list arriving by pointer (lib/motion.ts) */
   --distance-xs: 2px; /* disclosure, tooltips */
   --distance-sm: 4px; /* menus, rows entering */
   --distance-md: 8px; /* panels, toasts, dialogs */
@@ -137,7 +137,7 @@
   --shadow-1: none; /* flat surfaces: buttons, cards, settings groups */
   --shadow-2: var(--elevation-1); /* small floating things: tooltips, popovers */
   --shadow-3: var(--elevation-2); /* dialogs, menus, palette, toasts */
-  --glow-accent: 0 0 0 1px var(--focus); /* focused fields: a ring, never a halo */
+  --glow-accent: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); /* focused fields: the accent border plus a faint ring */
   --app-backdrop: none;
 
   /* =================== Cobalt (dark, the default): blue-black ink, azure accent =================== */
@@ -463,6 +463,7 @@
 
 /* =================== High contrast: for low vision and bright rooms =================== */
 :root[data-palette="contrast"] {
+  --glow-accent: 0 0 0 1px var(--focus); /* high contrast keeps a solid ring */
   color-scheme: dark;
   --bg-app: #000000;
   --bg-sidebar: #000000;

@@ -7,22 +7,41 @@
 .content { background: var(--bg-app); }
 
 /* ---------- sidebar ---------- */
-.sidebar { padding-block: 14px 8px; background: var(--bg-sidebar); }
+/* One rhythm for the whole column: 30px rows on a 32px pitch, in the list and in the footer alike,
+   so two fills never touch. A group's label sits 4px above its own rows and 16px below the group
+   before it: nearness says which rows it names. Labels, icons and the version share one left line
+   (18px); counts end on the matching line on the right. */
+.sidebar { padding-block: 14px 10px; background: var(--bg-sidebar); }
 .brand { gap: 10px; height: 32px; padding-inline: 16px; margin-bottom: 14px; }
 .brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
-.sidebar-search { height: 32px; margin-bottom: 4px; border-radius: 6px; background: var(--bg-field); }
-.nav-group-label { height: 28px; margin-top: 14px; padding-inline: 18px; color: var(--text-faint); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
-.sidebar .nav-item { width: calc(100% - 16px); min-height: 30px; height: auto; margin-inline: 8px; padding: 6px 10px; border-radius: 6px; gap: 10px; line-height: 18px; transform: none; }
+.sidebar-search { height: 32px; margin-bottom: 0; border-radius: 6px; background: var(--bg-field); }
+.nav-group-label { height: 24px; margin: 16px 0 4px; padding-inline: 18px; color: var(--text-faint); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+.sidebar .nav-item { width: calc(100% - 16px); min-height: 30px; height: 30px; margin: 1px 8px; padding: 0 10px; border-radius: 6px; gap: 10px; line-height: 18px; transform: none; }
 .sidebar .nav-item svg { color: var(--text-faint); transition: color var(--duration-press) var(--ease-out); }
 .sidebar .nav-item:hover svg, .sidebar .nav-item[aria-current="page"] svg { color: currentColor; }
 /* The current page is its fill and its icon in the accent; no edge on one side. */
 .sidebar .nav-item[aria-current="page"] { color: var(--text); background: var(--bg-active); box-shadow: none; }
 .sidebar .nav-item[aria-current="page"] svg { color: var(--accent-text); }
+/* The current place also has an accent marker on the window's edge, outside the row's fill (owner
+   request, 2026-10-14). It belongs to the sidebar only; lists and tabs have no side edges. */
+.sidebar .nav-item[aria-current="page"]::before, .sidebar .nav-glide::before { content: ""; position: absolute; left: -8px; top: 5px; bottom: 5px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.sidebar [data-gliding] .nav-item[aria-current="page"]::before, .sidebar[data-gliding] .nav-item[aria-current="page"]::before { opacity: 0; }
 .sidebar .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-footer { gap: 2px; padding-top: 8px; margin-top: auto; border-top: 1px solid var(--border-subtle); }
-.sidebar-version { margin-top: 4px; margin-left: 10px; }
+.sidebar-footer { gap: 0; padding-top: 7px; margin-top: auto; border-top: 1px solid var(--border-subtle); }
+.sidebar-version { height: 24px; margin: 5px 0 0 12px; padding: 0 6px; }
+.sidebar .nav-count { font-variant-numeric: tabular-nums; }
+.sidebar-create { display: grid; }
+/* A short window keeps every row and gives up group separation first. */
+@media (max-height: 680px) { .nav-group-label { margin-top: 8px; } }
 .shell[data-sidebar="collapsed"] .sidebar-create { padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px; }
-.shell[data-sidebar="collapsed"] .sidebar .nav-item { padding: 6px 0; }
+.shell[data-sidebar="collapsed"] .sidebar .nav-item { padding: 0; }
+/* The rail: search is one more icon row, not a boxed field, and a hairline stands where each
+   group's label was, so the groups stay readable without their names. */
+.shell[data-sidebar="collapsed"] .sidebar-search { width: calc(100% - 16px); height: 30px; margin: 1px 8px; border-color: transparent; background: transparent; color: var(--text-faint); }
+.shell[data-sidebar="collapsed"] .sidebar-search:hover { border-color: transparent; background: var(--bg-hover); color: var(--text); }
+.shell[data-sidebar="collapsed"] .sidebar-search svg { width: 17px; height: 17px; }
+.shell[data-sidebar="collapsed"] .nav-group-label { display: block; height: 1px; margin: 8px 14px; padding: 0; overflow: hidden; background: var(--border-subtle); color: transparent; font-size: 0; }
+.shell[data-sidebar="collapsed"] .brand { margin-bottom: 10px; }
 
 /* ---------- tab strip ---------- */
 /* Tabs are plain cells the full height of the strip. Every tab has the same width whether or not
@@ -39,16 +58,13 @@
 /* The browser-style feet are gone with the rounded tab; separators stay between unselected tabs. */
 .tabstrip .tab[aria-selected="true"]::before, .tabstrip .tab[aria-selected="true"]::after { display: none; }
 .tabstrip .tab:not([aria-selected="true"])::after { top: 12px; bottom: 12px; background: var(--border-subtle); }
-/* The pinned "+" sits on an opaque strip-coloured cell the full height of the strip, so tabs that
-   scroll under it never show beside or above the button, and the fade before it ends exactly at
-   that cell in every theme. */
-.tabstrip { --tab-new-cell: 38px; }
-.tabstrip .tab-new { align-self: center; margin: 0 6px; height: 26px; width: 26px; background-color: var(--bg-sidebar); isolation: isolate; }
-.tabstrip .tab-new::before { content: ""; position: absolute; z-index: -1; inset: calc((26px - var(--tab-h)) / 2) -6px; background: var(--bg-sidebar); box-shadow: inset 0 -1px 0 var(--border-subtle); }
-.tabstrip .tab-new:hover::before { background: var(--bg-sidebar); }
-.tabstrip-scroll { scroll-padding-inline-end: calc(var(--tab-new-cell) + 4px); }
-.tabstrip-scroll[data-overflow="end"] { mask-image: linear-gradient(to right, #000 calc(100% - var(--tab-new-cell) - 28px), transparent calc(100% - var(--tab-new-cell)), #000 calc(100% - var(--tab-new-cell))); }
-.tabstrip-scroll[data-overflow="both"] { mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - var(--tab-new-cell) - 28px), transparent calc(100% - var(--tab-new-cell)), #000 calc(100% - var(--tab-new-cell))); }
+/* "+" sits beside the scrolling tabs, never over them, so there is no cell to match to the strip
+   and nothing to show through in any theme. The tabs fade out at the side that has more. */
+.tabstrip .tab-new { position: relative; right: auto; flex: none; align-self: center; width: 26px; height: 26px; margin: 0 6px; background-color: transparent; }
+.tabstrip-scroll { scroll-padding-inline: 8px; }
+.tabstrip-scroll[data-overflow="start"] { mask-image: linear-gradient(to right, transparent 0, #000 24px); }
+.tabstrip-scroll[data-overflow="end"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%); }
+.tabstrip-scroll[data-overflow="both"] { mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%); }
 /* The close button is above the status dot or OS mark in its slot and always takes the click. */
 .tab-lead { width: 22px; height: 22px; }
 .tab-lead .tab-os, .tab-lead .status-dot { pointer-events: none; }

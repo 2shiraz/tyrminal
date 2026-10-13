@@ -1,6 +1,7 @@
 import type { KeyBindingPreference, WorkspacePreferences } from "@tyrminal/contracts";
 import { useEffect, useRef, useState } from "react";
 
+import { SettingsGroup } from "../settings/SettingsGroup";
 import { requestSection } from "../settings/settingsIndex";
 import { usePreferences } from "../../app/preferences";
 import { BuiltinKinds } from "../highlight/BuiltinKinds";
@@ -59,18 +60,20 @@ export function ShortcutsSettings() {
   return (
     <>
       <ShortcutList overrides={ws.bindings} onChange={(list) => setWs((w) => ({ ...w, bindings: list }))} />
-      {isMac ? (
-        <Switch
-          id="option-as-meta"
-          label={msgC.keys.optionAsMeta}
-          hint={msgC.keys.optionAsMetaHint}
-          checked={ws.optionAsMeta}
-          onChange={(optionAsMeta) => setWs((w) => ({ ...w, optionAsMeta }))}
-        />
-      ) : (
-        <p className="faint settings-note">{msgC.keys.altAsMeta}</p>
-      )}
-      <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
+      <SettingsGroup title={msgC.keys.inputGroup} className="span-all">
+        {isMac ? (
+          <Switch
+            id="option-as-meta"
+            label={msgC.keys.optionAsMeta}
+            hint={msgC.keys.optionAsMetaHint}
+            checked={ws.optionAsMeta}
+            onChange={(optionAsMeta) => setWs((w) => ({ ...w, optionAsMeta }))}
+          />
+        ) : (
+          <p className="faint settings-note">{msgC.keys.altAsMeta}</p>
+        )}
+        <MouseSettings ws={ws} onChange={(change) => setWs((w) => ({ ...w, ...change }))} />
+      </SettingsGroup>
     </>
   );
 }
@@ -83,18 +86,24 @@ export function HighlightSettings() {
     update((p) => ({ ...p, workspace: change(workspacePrefs(p.workspace)) }));
   return (
     <>
-      <Switch
-        id="highlight"
-        label={msgC.highlight.enabled}
-        checked={ws.highlight.enabled}
-        onChange={(enabled) => setWs((w) => ({ ...w, highlight: { ...w.highlight, enabled } }))}
-      />
+      <SettingsGroup title={msgC.highlight.outputGroup}>
+        <Switch
+          id="highlight"
+          label={msgC.highlight.enabled}
+          checked={ws.highlight.enabled}
+          onChange={(enabled) => setWs((w) => ({ ...w, highlight: { ...w.highlight, enabled } }))}
+        />
+        {ws.highlight.enabled && (
+          <div className="settings-block">
+            <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
+          </div>
+        )}
+      </SettingsGroup>
       {ws.highlight.enabled && (
-        <>
-          <BuiltinKinds highlight={ws.highlight} onChange={(change) => setWs((w) => ({ ...w, highlight: { ...w.highlight, ...change } }))} />
+        <SettingsGroup title={msgC.highlight.wordsGroup}>
           <HighlightRules words={ws.highlight.keywords} onChange={(keywords) => setWs((w) => ({ ...w, highlight: { ...w.highlight, keywords } }))} />
           <p className="faint settings-note">{msgC.highlight.stored}</p>
-        </>
+        </SettingsGroup>
       )}
     </>
   );
@@ -235,7 +244,7 @@ function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference
 
 
   return (
-    <div className="stack-xs" data-setting="shortcuts">
+    <div className="shortcut-settings span-all" data-setting="shortcuts">
       <input
         ref={search}
         className="input"
@@ -246,78 +255,87 @@ function ShortcutList({ overrides, onChange }: { overrides: KeyBindingPreference
         spellCheck={false}
         onChange={(e) => setQuery(e.target.value)}
       />
-      <div aria-label={msgC.keys.listLabel} role="group">
+      <div aria-label={msgC.keys.listLabel} role="group" className="shortcut-cols">
         {groups.length === 0 && !tabNumbersVisible && <p className="faint">{msgC.keys.noMatch}</p>}
-        {groups.map(([group, list]) => (
-          <section key={group} className="shortcut-group" aria-labelledby={`shortcut-group-${group}`}>
-            <h3 id={`shortcut-group-${group}`}>{msgC.keys.groups[group] ?? group}</h3>
-            <ul className="shortcut-list" aria-labelledby={`shortcut-group-${group}`}>
-              {list.map((action) => {
-                const custom = overrides.some((o) => o.action === action);
-                return (
-                  <li key={action} data-action={action}>
-                    <span className="shortcut-name">{label(action)}</span>
-                    <span className="shortcut-keys" aria-live={recording === action ? "polite" : undefined}>
-                      {recording === action ? (
-                        <span className="faint">{msgC.keys.recording}</span>
-                      ) : (
-                        <>
-                          <Keys caps={keyCaps(bindings[action])} />
-                          <span className="visually-hidden">{isUnbound(bindings[action]) ? msgC.keys.none : keyCaps(bindings[action]).join("+")}</span>
-                        </>
-                      )}
-                    </span>
-                    <span className="shortcut-actions">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        aria-label={msgC.keys.change(label(action))}
-                        onClick={() => {
-                          setProblem(null);
-                          setRecording(action);
-                        }}
-                      >
-                        <IconPencil size={14} />
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" aria-label={msgC.keys.remove(label(action))} onClick={() => set(action, { key: "" })}>
-                        <IconX size={14} />
-                      </button>
-                      {custom && (
-                        <button type="button" className="btn btn-ghost btn-sm" aria-label={msgC.keys.reset(label(action))} onClick={() => set(action, "default")}>
-                          <IconRefreshCw size={14} />
-                        </button>
-                      )}
-                    </span>
-                    {problem?.action === action && (
-                      <span className="shortcut-problem" role="alert">
-                        {problem.text}
-                        {problem.swap && (
-                          <span className="row-flex" style={{ gap: "var(--space-2)", marginTop: "var(--space-1)" }}>
-                            <button type="button" className="btn btn-sm" onClick={() => problem.swap && swap(action, problem.swap.other, problem.swap.candidate)}>
-                              {msgC.keys.swap(label(problem.swap.other))}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setProblem(null)}>
-                              {msgC.keys.cancel}
-                            </button>
+        {/* Two stacks, so in a wide pane the long first group stands beside the short ones and
+            every box sits directly under the one above it. */}
+        {[groups.slice(0, 1), groups.slice(1)].map(
+          (column, index) =>
+            column.length > 0 && (
+              <div key={index === 0 ? "first" : "rest"} className="shortcut-col">
+                {column.map(([group, list]) => (
+                  <section key={group} className="shortcut-group" aria-labelledby={`shortcut-group-${group}`}>
+                    <h3 id={`shortcut-group-${group}`}>{msgC.keys.groups[group] ?? group}</h3>
+                    <ul className="shortcut-list" aria-labelledby={`shortcut-group-${group}`}>
+                      {list.map((action) => {
+                        const custom = overrides.some((o) => o.action === action);
+                        return (
+                          <li key={action} data-action={action}>
+                            <span className="shortcut-name">{label(action)}</span>
+                            <span className="shortcut-keys" aria-live={recording === action ? "polite" : undefined}>
+                              {recording === action ? (
+                                <span className="faint">{msgC.keys.recording}</span>
+                              ) : (
+                                <>
+                                  <Keys caps={keyCaps(bindings[action])} />
+                                  <span className="visually-hidden">{isUnbound(bindings[action]) ? msgC.keys.none : keyCaps(bindings[action]).join("+")}</span>
+                                </>
+                              )}
+                            </span>
+                            <span className="shortcut-actions">
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                aria-label={msgC.keys.change(label(action))}
+                                onClick={() => {
+                                  setProblem(null);
+                                  setRecording(action);
+                                }}
+                              >
+                                <IconPencil size={14} />
+                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm" aria-label={msgC.keys.remove(label(action))} onClick={() => set(action, { key: "" })}>
+                                <IconX size={14} />
+                              </button>
+                              {custom && (
+                                <button type="button" className="btn btn-ghost btn-sm" aria-label={msgC.keys.reset(label(action))} onClick={() => set(action, "default")}>
+                                  <IconRefreshCw size={14} />
+                                </button>
+                              )}
+                            </span>
+                            {problem?.action === action && (
+                              <span className="shortcut-problem" role="alert">
+                                {problem.text}
+                                {problem.swap && (
+                                  <span className="row-flex" style={{ gap: "var(--space-2)", marginTop: "var(--space-1)" }}>
+                                    <button type="button" className="btn btn-sm" onClick={() => problem.swap && swap(action, problem.swap.other, problem.swap.candidate)}>
+                                      {msgC.keys.swap(label(problem.swap.other))}
+                                    </button>
+                                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setProblem(null)}>
+                                      {msgC.keys.cancel}
+                                    </button>
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                      {group === "tabs" && tabNumbersVisible && (
+                        <li data-action="tabNumber">
+                          <span className="shortcut-name">{msgC.keys.tabNumbers}</span>
+                          <span className="shortcut-keys">
+                            <Keys caps={[isMac ? keyLabels.mod : keyLabels.alt, "1–9"]} />
                           </span>
-                        )}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-              {group === "tabs" && tabNumbersVisible && (
-                <li data-action="tabNumber">
-                  <span className="shortcut-name">{msgC.keys.tabNumbers}</span>
-                  <span className="shortcut-keys">
-                    <Keys caps={[isMac ? keyLabels.mod : keyLabels.alt, "1–9"]} />
-                  </span>
-                  <span className="shortcut-actions faint">{msgC.keys.fixed}</span>
-                </li>
-              )}
-            </ul>
-          </section>
-        ))}
+                          <span className="shortcut-actions faint">{msgC.keys.fixed}</span>
+                        </li>
+                      )}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            ),
+        )}
       </div>
       {overrides.length > 0 && (
         <div>

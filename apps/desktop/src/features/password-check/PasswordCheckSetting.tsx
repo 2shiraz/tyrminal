@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { usePreferences } from "../../app/preferences";
 import { ErrorNotice, Notice, Switch, TextField } from "../../components/ui/controls";
+import { SettingsGroup } from "../settings/SettingsGroup";
 import { passwordCheck, preferences as preferencesApi } from "../../lib/ipc";
 import { msgPC } from "../../lib/messages-password-check";
 import { useAction } from "../../lib/useAsync";
@@ -48,17 +49,17 @@ export function PasswordCheckSetting() {
   const found = report?.items.filter((i) => i.breachCount > 0).length ?? 0;
 
   return (
-    <div className="stack-sm" data-testid="password-check">
+    <div className="settings-stack" data-testid="password-check">
       <Notice tone="info">{msgPC.whatIsSent}</Notice>
-      <Switch
-        id="password-check"
-        label={msgPC.enable}
-        hint={msgPC.enableHint}
-        checked={settings.enabled}
-        onChange={(enabled) => void persist({ ...settings, enabled })}
-      />
-      <div className="row-flex" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 320px" }}>
+      <SettingsGroup title={msgPC.serviceGroup}>
+        <Switch
+          id="password-check"
+          label={msgPC.enable}
+          hint={msgPC.enableHint}
+          checked={settings.enabled}
+          onChange={(enabled) => void persist({ ...settings, enabled })}
+        />
+        <div className="settings-block endpoint-row">
           <TextField
             label={msgPC.endpoint}
             value={draft}
@@ -67,35 +68,39 @@ export function PasswordCheckSetting() {
             hint={msgPC.endpointHint}
             error={draft !== "" && !draftValid ? msgPC.endpointInvalid : undefined}
           />
+          <button
+            type="button"
+            className="btn"
+            disabled={!draftValid || draft === settings.endpoint}
+            onClick={() => void persist({ ...settings, endpoint: draft })}
+          >
+            {msgPC.useEndpoint}
+          </button>
         </div>
-        <button
-          type="button"
-          className="btn"
-          disabled={!draftValid || draft === settings.endpoint}
-          onClick={() => void persist({ ...settings, endpoint: draft })}
-        >
-          {msgPC.useEndpoint}
-        </button>
-      </div>
+      </SettingsGroup>
       {status && !available && (
         <Notice tone="warning">
           <strong>{msgPC.unavailable}.</strong> {status.unavailableReason}
         </Notice>
       )}
-      {status && <p className="muted" style={{ fontSize: "var(--text-sm)" }}>{msgPC.stored(status.storedPasswords)}</p>}
-      <div>
-        <button
-          type="button"
-          className="btn"
-          disabled={!status?.enabled || !available || check.pending || save.pending}
-          onClick={async () => {
-            const result = await check.run(() => passwordCheck.run());
-            if (result) setReport(result);
-          }}
-        >
-          {check.pending ? msgPC.checking : msgPC.run}
-        </button>
-      </div>
+      <SettingsGroup title={msgPC.storedGroup}>
+        <div className="setting-row" data-variant="action">
+          <p className="setting-label muted">{status ? msgPC.stored(status.storedPasswords) : ""}</p>
+          <div className="setting-control">
+            <button
+              type="button"
+              className="btn"
+              disabled={!status?.enabled || !available || check.pending || save.pending}
+              onClick={async () => {
+                const result = await check.run(() => passwordCheck.run());
+                if (result) setReport(result);
+              }}
+            >
+              {check.pending ? msgPC.checking : msgPC.run}
+            </button>
+          </div>
+        </div>
+      </SettingsGroup>
       <ErrorNotice error={save.error ?? load.error ?? check.error} />
       {report && (
         <div role="status" className="stack-sm">

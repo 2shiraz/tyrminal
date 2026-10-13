@@ -47,11 +47,11 @@ button[data-tooltip]:hover::after, button[data-tooltip]:focus-visible::after {
 /* A button at the end of a row shows its tooltip to its left, level with it: under the button it
    was cut off by the box that holds the row (and by the window's right edge). */
 button[data-tooltip][data-tooltip-side="left"]::after,
-:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions) > button.btn-icon[data-tooltip]::after {
+:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions, .xfer-end) > button.btn-icon[data-tooltip]::after {
   top: 50%; right: calc(100% + 6px); bottom: auto; left: auto; max-width: 280px; overflow: hidden; text-overflow: ellipsis; transform: translate(0, -50%);
 }
 button[data-tooltip][data-tooltip-side="left"]:is(:hover, :focus-visible)::after,
-:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions) > button.btn-icon[data-tooltip]:is(:hover, :focus-visible)::after {
+:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions, .xfer-end) > button.btn-icon[data-tooltip]:is(:hover, :focus-visible)::after {
   transform: translate(0, -50%);
 }
 
@@ -59,6 +59,8 @@ button[data-tooltip][data-tooltip-side="left"]:is(:hover, :focus-visible)::after
    lifted out of it, so the choice reads as a position rather than a filled box. */
 .segmented { width: fit-content; max-width: 100%; justify-self: start; padding: 3px; gap: 2px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-inset); }
 .setting-control > .segmented { width: 100%; }
+.segmented label { white-space: nowrap; }
+.setting-control > .segmented label { flex: 1 0 auto; padding-inline: 10px; }
 .segmented label { height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); }
 .segmented label svg { color: var(--text-faint); transition: color var(--duration-press) var(--ease-out); }
 .segmented label:hover:not(:has(input:checked)) { background: var(--bg-hover); }
@@ -76,13 +78,12 @@ button[data-tooltip][data-tooltip-side="left"]:is(:hover, :focus-visible)::after
    is going, so the control answers the finger before the state changes. Transitions, not
    keyframes, so a quick double toggle retargets from where the thumb is. */
 .switch { transition: background var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out); }
-.switch::after { transform: translateX(0) scaleX(1); transition: transform var(--duration-base) var(--ease-out), background var(--duration-base) var(--ease-out); }
-.switch:checked::after { transform: translateX(16px) scaleX(1); }
-.switch:active:not(:disabled)::after { transform: translateX(2px) scaleX(1.28); transition-duration: var(--duration-press); }
-.switch:checked:active:not(:disabled)::after { transform: translateX(14px) scaleX(1.28); }
-.hosts-main .hosts-show-all .switch:checked::after { transform: translateX(12px) scaleX(1); }
-.hosts-main .hosts-show-all .switch:active:not(:disabled)::after { transform: translateX(1.5px) scaleX(1.28); }
-.hosts-main .hosts-show-all .switch:checked:active:not(:disabled)::after { transform: translateX(10.5px) scaleX(1.28); }
+/* One movement, started by the change itself: the thumb slides and the track recolours together.
+   No press stage: a click's press lasts under a tenth of a second, and a thumb that stretched for
+   it and then slid read as a hitch (owner report, 2026-10-14). */
+.switch::after { transform: translateX(0); transition: transform var(--duration-base) var(--ease-out), background var(--duration-base) var(--ease-out); }
+.switch:checked::after { transform: translateX(16px); }
+.hosts-main .hosts-show-all .switch:checked::after { transform: translateX(12px); }
 
 /* A choice between a few options (sign-in method, route): quiet rows that tint when chosen, with
    a ring-and-dot radio. Not four heavy cards. */
@@ -113,6 +114,14 @@ button[data-tooltip][data-tooltip-side="left"]:is(:hover, :focus-visible)::after
 .page-inner { padding: 20px 24px 40px; gap: 16px; }
 .page-title h1, .page-header h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.02em; }
 .page-title p, .page-inner > p, .section-hint { max-width: 80ch; }
+
+/* ---------- split action ---------- */
+/* A primary action and, joined to it, a small arrow for its other forms. */
+.split-action { position: relative; display: inline-flex; }
+.split-action > .btn:first-child { border-start-end-radius: 0; border-end-end-radius: 0; }
+.split-action > .split-action-more { padding-inline: 8px; border-start-start-radius: 0; border-end-start-radius: 0; border-inline-start: 1px solid color-mix(in srgb, var(--text-on-accent) 24%, transparent); }
+.split-action > .split-action-more:disabled { border-inline-start-color: var(--border); }
+.split-action > .split-action-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 2; min-width: max-content; }
 
 /* ---------- drop-downs ---------- */
 /* Every drop-down is the same field with the same chevron, whatever class its markup carries
@@ -306,18 +315,51 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 
 /* ---------- settings, files ---------- */
 .settings-page .settings-nav { background: var(--bg-app); padding: 12px 8px; border-right-color: var(--border-subtle); }
-.settings-page .settings-nav-label { height: 28px; margin-top: 10px; padding-inline: 10px; background: transparent; border: 0; color: var(--text-faint); font-size: 11px; letter-spacing: 0.02em; }
+.settings-page .settings-nav-label { height: 24px; margin: 16px 0 4px; padding-inline: 10px; background: transparent; border: 0; color: var(--text-faint); font-size: 11px; letter-spacing: 0.02em; }
 .settings-page .settings-nav-item { position: relative; border-radius: 6px; margin-block: 1px; min-height: 30px; height: 30px; padding-inline: 10px; color: var(--text-muted); }
 .settings-page .settings-nav-item:hover { color: var(--text); }
 .settings-page .settings-nav-item[aria-current="page"] { color: var(--text); box-shadow: none; }
-.settings-page .settings-search { border: 1px solid var(--border-control); border-radius: 6px; margin-bottom: 8px; background: var(--bg-field); }
+.settings-page .settings-nav-group:first-of-type .settings-nav-label { margin-top: 12px; }
+.settings-page .settings-search { border: 1px solid var(--border-control); border-radius: 6px; margin-bottom: 0; background: var(--bg-field); }
+.settings-page .settings-search:focus-within { border-color: var(--accent); box-shadow: var(--glow-accent); }
 .settings-page .settings-section > .settings-section-strip { background: var(--bg-app); padding: 20px 24px 16px; box-shadow: none; border-bottom: 0; }
 .settings-page .settings-section > .settings-section-strip h2 { font-size: var(--text-xl); letter-spacing: -0.02em; }
 .settings-page .settings-section > .settings-section-strip p { font-size: var(--text-sm); }
 .settings-page .settings-section-body { padding: 20px 24px 32px; gap: 20px; }
 .settings-page .settings-group { border-radius: var(--radius-box); border-color: var(--border-subtle); }
 .settings-page .settings-group .box-strip { background: var(--bg-surface); }
-.settings-page .settings-group .setting-row { padding: 12px 16px; }
+/* One inset for everything in a Settings box: its strip, every kind of row, hints, notes and
+   free blocks all start on the same 16px line. */
+.settings-page .settings-group > .box-strip { padding-inline: 16px 8px; }
+.settings-page .settings-group :is(.setting-row, .setting-row[data-variant="switch"]) { min-height: 52px; padding: 12px 16px; }
+.settings-page .settings-group-hint { padding: 12px 16px 0; }
+.settings-page .settings-group .settings-note { margin: 0; padding: 12px 16px; }
+.settings-page .settings-block { padding: 16px; }
+.settings-page .settings-stack { display: grid; gap: 20px; }
+/* A field with its action beside it: the action lines up with the field, not with its hint. */
+.settings-page .endpoint-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+.settings-page .endpoint-row > .btn { margin-top: calc(var(--text-xs) * var(--leading-normal, 1.5) + 6px); }
+
+/* Keyboard shortcuts: the search, then one box per group, like every other Settings group. */
+.shortcut-settings { display: grid; gap: 16px; min-width: 0; }
+.shortcut-settings > .shortcut-cols, .shortcut-settings .shortcut-col { display: grid; gap: 16px; align-items: start; align-content: start; min-width: 0; }
+.shortcut-settings .shortcut-group + .shortcut-group { margin-top: 0; }
+.shortcut-settings .shortcut-group { overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-box); background: var(--bg-surface); }
+.shortcut-settings .shortcut-group h3 { display: flex; align-items: center; min-height: var(--strip-height); margin: 0; padding: 0 16px; border-bottom: var(--box-rule); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-medium); letter-spacing: 0; text-transform: none; }
+.shortcut-settings .shortcut-list li { min-height: 38px; padding: 2px 8px 2px 16px; gap: 12px; }
+.shortcut-settings .shortcut-list li:last-child { border-bottom: 0; }
+.shortcut-settings .shortcut-problem { padding-bottom: 8px; }
+/* In a wide pane the first (long) group stands beside the rest, both stacks starting on one line. */
+@container settings-section (min-width: 1040px) {
+  .shortcut-settings > .shortcut-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+  .shortcut-settings .shortcut-col:only-child { grid-column: 1 / -1; }
+}
+
+/* Highlighting: the kinds, their note and the preview share one rhythm inside the box. */
+.settings-page .settings-block > .stack-sm { gap: 12px; }
+.settings-page .highlight-kinds legend { margin-bottom: 8px; padding: 0; }
+.settings-page .highlight-kind { min-height: 36px; padding: 6px 10px; border-radius: 6px; background: var(--bg-field); }
+.settings-page .highlight-preview { border: 1px solid var(--border-subtle); }
 /* Snippets page: folders as boxes with room in them. A snippet is a 56 px row: its name, then
    the first line of the command, then its actions set apart at the right. */
 .snippet-list:not([data-compact]) .folder + .folder { margin-top: 12px; }
@@ -337,7 +379,6 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .ft-table :is(.ft-col-size, .ft-col-modified) { font-variant-numeric: tabular-nums; }
 .pathbar { background: var(--bg-field); }
 .pathbar .pathbar-edit { min-width: 24px; min-height: 24px; }
-.xfer { background: var(--bg-surface); }
 
 @media (max-width: 1000px) {
   .hosts-main .host-rows > li { grid-template-columns: 28px minmax(0, 1fr) auto; }

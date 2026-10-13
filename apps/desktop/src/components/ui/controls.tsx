@@ -37,7 +37,6 @@ export function TextField({ label, value, onChange, hint, error, trailing, ...re
         <input
           id={id}
           name={rest.name ?? label}
-          className="input"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={error ? true : undefined}
@@ -49,6 +48,8 @@ export function TextField({ label, value, onChange, hint, error, trailing, ...re
           style={trailing ? { paddingRight: 40 } : undefined}
           data-autofocus={rest.autoFocus ? true : undefined}
           {...rest}
+          // After the spread: a caller's class (say "mono") adds to the field's own, never replaces it.
+          className={rest.className ? `input ${rest.className}` : "input"}
         />
         {trailing}
       </div>
