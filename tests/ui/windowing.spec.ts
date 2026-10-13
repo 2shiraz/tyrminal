@@ -1,4 +1,4 @@
-// Large lists (docs/design/interaction-polish.md, section 1): lists are windowed above 200 rows.
+// Large lists: lists are windowed above 200 rows.
 // Only rows near the visible part are in the DOM, the list still reports its full size to
 // assistive technology, and keyboard navigation reaches the end. Mock backend.
 import { expect, test } from "@playwright/test";

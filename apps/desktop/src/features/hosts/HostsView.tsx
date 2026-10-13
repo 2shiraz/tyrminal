@@ -346,7 +346,7 @@ function HostsViewImpl({
     };
   }, [query, hosts.value]);
 
-  // Sections (docs/design/revamp.md): at the top, the top-level groups and the hosts in no group
+  // Sections: at the top, the top-level groups and the hosts in no group
   // (or every host with "Show all hosts"); inside a group, its subgroups and its own hosts. A
   // search is flat: every matching host, with where it lives.
   const searching = query.trim() !== "";
@@ -764,7 +764,7 @@ function HostsViewImpl({
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
-  // Host details motion (docs/design/motion.md; owner request). One mechanism: the list takes its
+  // Host details motion. One mechanism: the list takes its
   // new width at once and the cards that move glide there (useFlip on the list), while the panel's
   // content slides in 16 px and fades. Animating the panel's width instead would reflow the grid on
   // every frame, so cards would jump between column counts. Switching hosts with the panel open

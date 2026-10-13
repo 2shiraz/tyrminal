@@ -1,11 +1,11 @@
-//! Port forwarding rules and the forwards running on sessions (BUILD_SPEC Phase 07).
+//! Port forwarding rules and the forwards running on sessions (spec Phase 07).
 //!
 //! A saved rule belongs to a host. It runs on a connected SSH session to that host, over that
 //! session's verified connection, so the host key was checked and the user authenticated exactly
 //! as for the terminal. A forward never outlives its session: when the session ends for any
 //! reason (closed, lost, vault locked, window closed) its forwards stop and their listeners close.
 //!
-//! Exposure (BUILD_SPEC Phase 07, §9.3 "Tunnels"): a listener other machines could reach needs `allow_external` on the rule,
+//! Exposure (spec Phase 07, §9.3 "Tunnels"): a listener other machines could reach needs `allow_external` on the rule,
 //! which the UI sets only after a separate confirmation. The SSH adapter enforces the same rule
 //! again when it binds, so a rule that bypassed this validation still could not bind externally.
 

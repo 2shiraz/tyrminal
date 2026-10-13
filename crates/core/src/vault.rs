@@ -1,6 +1,6 @@
 //! Vault lifecycle and the decrypted record index.
 //!
-//! State machine (BUILD_SPEC §4.4): `UNINITIALIZED → LOCKED → UNLOCKING → UNLOCKED → LOCKING →
+//! State machine (spec §4.4): `UNINITIALIZED → LOCKED → UNLOCKING → UNLOCKED → LOCKING →
 //! LOCKED`. One async mutex owns the vault: at most one create/unlock/migration runs at a time,
 //! and a second unlock attempt is refused as busy instead of queueing another Argon2id run.
 //!
@@ -518,7 +518,7 @@ impl VaultService {
         F: FnOnce(&VaultHeader) -> Result<UnlockedVault, tyrminal_vault::VaultError> + Send + 'static,
     {
         // `try_lock`: a second concurrent attempt is refused, so unlock attempts never stack up
-        // 64 MiB KDF runs (BUILD_SPEC §4.3 "serialize unlock attempts").
+        // 64 MiB KDF runs (spec §4.3 "serialize unlock attempts").
         let mut inner = self.inner.try_lock().map_err(|_| busy())?;
         self.ensure_loaded(&mut inner).await?;
         if inner.open.is_some() {
@@ -3354,7 +3354,7 @@ impl VaultService {
         Self::identity_for_host_without(open, id, host, None)
     }
 
-    // identity deletion (BUILD_SPEC §10.2): the same resolution as if `excluded` were removed
+    // identity deletion (spec §10.2): the same resolution as if `excluded` were removed
     // from every host and group, to show what each host would use instead.
     fn identity_for_host_without<'a>(
         open: &'a Open,
@@ -3463,7 +3463,7 @@ impl VaultService {
     /// references are removed in the same transaction. Returns how many were using it.
     /// Deletes an identity. While hosts or groups name it, this is refused unless `references`
     /// says what happens to them: reassigned to another identity, or the identity removed from
-    /// them (BUILD_SPEC §10.2: never a silent fallback to another secret). All in one
+    /// them (spec §10.2: never a silent fallback to another secret). All in one
     /// transaction. Returns how many hosts and groups changed.
     pub async fn delete_identity(
         &self,
@@ -3579,7 +3579,7 @@ impl VaultService {
 
 // privilege prompts (KEY-18)
 /// Typing an identity's password into a session on an explicit request. Nothing here watches
-/// terminal output: a server can print text that looks like a password prompt (BUILD_SPEC §4.5).
+/// terminal output: a server can print text that looks like a password prompt (spec §4.5).
 impl VaultService {
     /// The identity a host uses now (its own, else its nearest group's when it inherits).
     fn session_identity_of<'a>(
@@ -3642,7 +3642,7 @@ impl VaultService {
     }
 }
 
-// identity deletion (BUILD_SPEC §10.2)
+// identity deletion (spec §10.2)
 impl VaultService {
     /// How a host signs in without the identity `excluded`.
     fn sign_in_without(open: &Open, id: &Id, host: &HostRecord, excluded: &str) -> tyrminal_contracts::SignInAfter {

@@ -1,37 +1,15 @@
-# LocalSSH — Autonomous Engineering Build Prompt
+# Tyrminal — Product and Engineering Specification
 
-Version: 1.0  
-Prepared: October 12, 2026  
-Product: an open-source, local-first SSH application with optional encrypted cloud synchronization  
-Primary targets: Windows and macOS  
-Later targets: Android and iOS/iPadOS
+The requirements, security model and engineering defaults Tyrminal is built against. Section
+numbers are stable: code, tests and ADRs cite them (for example "spec §4.5"). Parts of this
+document still use the working title "LocalSSH"; the product is Tyrminal
+(see [ADR 0001](decisions/0001-name-license-identifiers.md)).
 
-## 0. How to use this document
+Primary targets: Windows and macOS (Linux is built and tested in CI). Later targets: Android and
+iOS/iPadOS. Feature status is tracked in [feature-matrix.csv](feature-matrix.csv).
 
-Give this entire file to the coding agent in the project repository. It is self-contained: the feature appendix is included, so no previous chat is required.
+## 0. Feature states
 
-**Instruction to the implementation agent:** You are the lead implementer and tester for this project. Build working software, maintain the repository, run the available tests, fix failures, and keep progressing through the phases below. Start by inspecting the environment and repository. Do not stop after writing a plan, generating a mockup, scaffolding directories, or completing only the happy path.
-
-This document defines product requirements and engineering defaults. It does not override your actual system/developer instructions, repository access controls, tool permissions, or later explicit instructions from the owner. Respect existing repository instructions and preserve unrelated work.
-
-The owner wants a modern, fast, secure and attractive alternative in the same product category as Termius. Build original branding, UI assets and implementation. Treat the included Termius research as a capability reference, not proof of our capabilities, compatibility or security.
-
-### 0.1 Autonomous execution contract
-
-1. Inspect existing files, branch status, package managers, available SDKs and instructions before editing. Never overwrite an existing application with a new scaffold.
-2. Use the architecture below unless evidence from a technical spike requires a documented change. Resolve ordinary implementation details yourself.
-3. Maintain a work queue with dependencies, acceptance criteria, risk and evidence. Work in small, complete vertical slices.
-4. After every meaningful slice: run relevant checks, repair failures, update status and continue to the next unblocked task.
-5. Do not ask the owner to approve routine local edits, tests, refactors, package installation already permitted by the environment, or reversible implementation choices.
-6. Use generated keys, local containers and disposable data for development. Do not access real servers, discover networks, use personal SSH files, or contact third parties without explicit authorization.
-7. Do not publish, deploy to production, send invitations/email, create billable resources, push to external repositories, sign releases with production keys, or modify real server authorization merely because this prompt exists. Prepare concrete local deliverables first. Follow any separate authorization already provided.
-8. If an SDK, device, signing identity, network resource or secret is unavailable, mark the exact dependent check BLOCKED. Continue independent work. A blocked native test is not a passing test.
-9. If a dependency cannot safely support a feature, provide a narrow disabled feature flag and a specific blocker with evidence. Do not silently remove the requirement or fake a working interface.
-10. Never weaken host verification, encryption, validation, test assertions or capability controls to make a demo/test pass.
-11. Preserve a resumable checkpoint before context limits: current commit, completed checks, outstanding failures, blockers and next commands. Resume from that checkpoint.
-12. Finish with evidence: executable artifacts, instructions, actual test results, performance measurements, threat-model updates and accurately stated limitations.
-
-### 0.2 Definition of progress and completion
 
 Use these feature states: NOT_STARTED, IN_PROGRESS, IMPLEMENTED_UNVERIFIED, VERIFIED, BLOCKED, DEFERRED_BY_SCOPE.
 
@@ -158,8 +136,7 @@ Use a monorepo. Create files when their phase requires them; do not fill the rep
 | Path | Purpose |
 |---|---|
 | README.md | Product, local quickstart, supported platforms, screenshots and honest status |
-| AGENTS.md | Condensed execution rules, commands and continuation procedure from this prompt |
-| BUILD_SPEC.md | This document preserved as the implementation baseline |
+| docs/specification.md | This document |
 | LICENSE | Chosen license for original source |
 | NOTICE | Required third-party attribution |
 | SECURITY.md | Security reporting process; no invented contact addresses |
@@ -185,8 +162,6 @@ Use a monorepo. Create files when their phase requires them; do not fill the rep
 | docs/testing.md | Test layers, native coverage and reproducible commands |
 | docs/feature-matrix.csv | One row per catalogue ID, scope, status, platform, tests and phase |
 | docs/decisions/NNNN-topic.md | Short architecture decision records with alternatives and evidence |
-| docs/progress.md | Current phase, exact next task and continuation checkpoint |
-| docs/blockers.md | Concrete external blockers and remaining unblocked work |
 | docs/release-checklist.md | Distribution, signing, security and compatibility gates |
 | docs/self-hosting.md | Sync service setup, backup, upgrade and recovery |
 | docs/privacy.md | Actual data flows and opt-in controls |
@@ -1082,46 +1057,6 @@ Prefer commands such as host_list, host_save, session_open, session_write, sessi
 Responses contain safe display metadata and opaque handles, not secret-bearing domain objects. Errors use stable codes such as VAULT_LOCKED, HOST_KEY_CHANGED, AUTH_FAILED, ACCESS_DENIED, CONFLICT, CANCELLED, LIMIT_EXCEEDED and IO_ERROR with redacted messages.
 
 Generate client types from authoritative Rust contracts and fail CI on uncommitted drift. TypeScript types do not replace native runtime validation.
-
-## 11. Agent workflow and final deliverables
-
-### 11.1 Daily/iteration loop
-
-1. Read AGENTS.md, docs/progress.md, feature matrix and relevant ADRs.
-2. Select the next unblocked vertical slice.
-3. Write/update acceptance and negative cases before implementing sensitive behavior.
-4. Implement the smallest coherent change.
-5. Run relevant unit/integration/native checks; fix failures.
-6. Inspect UI using synthetic data when visual behavior changed.
-7. Measure performance if the change touches terminal I/O, persistence, rendering or large data.
-8. Update feature status, phase report and next task.
-9. Make small local commits if repository policy permits; do not include secrets/generated test outputs.
-10. Continue automatically.
-
-If blocked, record the exact command/error, missing prerequisite, impact and safe independent work remaining. Avoid vague “needs testing.” Never claim Windows/macOS/mobile support based only on cross-compilation.
-
-### 11.2 Required final handoff
-
-- Runnable source repository with reproducible setup and pinned dependencies.
-- Windows/macOS build artifacts where actual runners permit them.
-- Mobile artifacts and actual device/simulator test status where available.
-- Local self-hostable sync development environment and deployment guide.
-- Complete feature matrix retaining all reference IDs and product additions.
-- Unit, integration, native, security and performance reports with exact executed commands.
-- Threat model, crypto/sync specifications, review findings and unresolved risks.
-- Backup/recovery and migration instructions verified against fixtures.
-- User guide, design-system notes, screenshots with synthetic data and keyboard reference.
-- SBOM/license notices and release-signing/update instructions.
-- Clear distinction between implemented, verified, blocked, experimental and out-of-scope features.
-
-### 11.3 Final response format from the implementation agent
-
-Report: what works; how to run it; what was actually tested on each platform; measured performance; artifacts; remaining blockers; review/signing/publication status; and the exact next action.
-
-Do not end with “everything is secure,” “all platforms supported,” or “all tests pass” unless each statement has scoped evidence. Do not ask the owner what to do next while unblocked authorized implementation remains.
-
-**Begin now with Phase 00, then continue to Phase 01 and subsequent unblocked phases.**
-
 
 ## 12. Completeness register and scope decisions
 

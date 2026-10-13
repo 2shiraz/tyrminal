@@ -141,7 +141,7 @@
   min-width: 0;
 }
 
-/* On success the sheet fades (an exit: --duration-fast, docs/design/motion.md) while the shell, already live underneath, takes input. */
+/* On success the sheet fades (an exit: --duration-fast) while the shell, already live underneath, takes input. */
 .connect-layer[data-leaving="true"] {
   opacity: 0;
   pointer-events: none;

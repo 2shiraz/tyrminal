@@ -769,7 +769,7 @@ async fn identities_are_referenced_inherited_by_group_and_cleaned_up_with_their_
         .unwrap();
     assert!(kept.has_password);
 
-    // Deleting an identity that is in use needs an explicit choice (BUILD_SPEC §10.2). Removing
+    // Deleting an identity that is in use needs an explicit choice (spec §10.2). Removing
     // it from its users clears the references in the same transaction; hosts fall back.
     assert_eq!(v.delete_identity(&deploy.id, None).await.unwrap_err().code, ErrorCode::InUse);
     assert_eq!(v.delete_identity(&deploy.id, Some(IdentityReferences::Remove)).await.unwrap(), 1);

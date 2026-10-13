@@ -1,7 +1,7 @@
 // Native notes suite (P-30): a note is written in the real Host details panel, stored in the real
 // vault, shown by the platform's own WebView without turning markup into elements, kept across a
 // lock, and its code block reaches a real SSH session only through the paste review, without
-// running. Typed text is ASCII only (macOS WebDriver; see docs/progress.md finding 15).
+// running. Typed text is ASCII only (macOS WebDriver).
 //
 //   pnpm lab:up && pnpm build:e2e && node --test tests/native/notes.test.mjs
 

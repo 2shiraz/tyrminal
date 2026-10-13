@@ -1,4 +1,4 @@
-//! Deleting an identity that hosts or groups still use (BUILD_SPEC §10.2): refused unless the
+//! Deleting an identity that hosts or groups still use (spec §10.2): refused unless the
 //! user explicitly chooses to reassign its users to another identity or to remove it from them,
 //! after seeing what each affected host will sign in with.
 

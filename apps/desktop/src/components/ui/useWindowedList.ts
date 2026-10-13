@@ -1,4 +1,4 @@
-// A tiny list windowing hook (docs/design/interaction-polish.md, section 1, "Large lists"): above
+// A tiny list windowing hook: above
 // WINDOW_THRESHOLD items only the rows near the visible part of the scroll container are in the
 // DOM, with the list's padding (or, for a table body, two spacer rows) holding the height of the
 // rest. Works for one-column lists, table bodies and CSS grids of cards (it measures the columns and

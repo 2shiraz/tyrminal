@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 
 /**
- * A wait shorter than this shows nothing: fast loads never flash a skeleton or progress bar
- * (docs/design/interaction-polish.md, section 1).
+ * A wait shorter than this shows nothing: fast loads never flash a skeleton or progress bar.
  */
 export const LOADING_DELAY_MS = 150;
 

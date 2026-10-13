@@ -1186,7 +1186,7 @@ impl Sessions {
         self.vault.session_identity(entry.generation, host_id).await
     }
 
-    /// Types the stored password of `identity_id` into a session, without Enter (BUILD_SPEC
+    /// Types the stored password of `identity_id` into a session, without Enter (spec
     /// §4.5, AUT-05). Only ever reached from an explicit user action: nothing in the core
     /// watches terminal output for password prompts, because a server can print anything. The
     /// password is read from the vault here, never passes through the renderer, and is refused

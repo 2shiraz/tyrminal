@@ -1,6 +1,6 @@
 //! Declares every application command explicitly. With an app manifest, a command that is not
 //! listed here does not exist for the renderer, and a listed command still needs an `allow-*`
-//! permission in a capability file before any window can invoke it (BUILD_SPEC §3.3, §4.6).
+//! permission in a capability file before any window can invoke it (spec §3.3, §4.6).
 
 const COMMANDS: &[&str] = &[
     // vault
@@ -167,7 +167,7 @@ const COMMANDS: &[&str] = &[
     // privilege prompts (KEY-18)
     "session_identity",
     "session_insert_identity_password",
-    // identity deletion (BUILD_SPEC §10.2)
+    // identity deletion (spec §10.2)
     "identity_usage",
     // compromised-password check (SEC-11)
     "password_check_status",

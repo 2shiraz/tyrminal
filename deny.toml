@@ -1,4 +1,4 @@
-# Dependency policy (BUILD_SPEC §3.1, §9.7). `cargo deny check` runs in the Security workflow.
+# Dependency policy (spec §3.1, §9.7). `cargo deny check` runs in the Security workflow.
 [graph]
 all-features = false
 no-default-features = false

@@ -1,6 +1,6 @@
 # Security invariants and their tests
 
-Each invariant from BUILD_SPEC §4.2 with the tests that currently exercise it. "Covered" means
+Each invariant from the specification (§4.2) with the tests that currently exercise it. "Covered" means
 real-backend tests exist and pass on macOS; it does not mean the invariant is proven, and nothing
 here has been independently reviewed. Windows has no coverage at all (blocker B-01).
 

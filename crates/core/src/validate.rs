@@ -1,5 +1,5 @@
 //! Native validation of renderer-supplied values. TypeScript types are not a security boundary;
-//! everything is checked again here before it is stored or used (BUILD_SPEC §4.6).
+//! everything is checked again here before it is stored or used (spec §4.6).
 
 use tyrminal_contracts::IpcError;
 use tyrminal_contracts::limits::{

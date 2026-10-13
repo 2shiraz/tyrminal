@@ -1,4 +1,4 @@
-//! Adversarial tests for the vault header and key slots (BUILD_SPEC §9.3 "Vault", INV-11, INV-18).
+//! Adversarial tests for the vault header and key slots (spec §9.3 "Vault", INV-11, INV-18).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

@@ -1,4 +1,4 @@
-// Which input the user is on, for motion (docs/design/motion.md, principle 1): motion answers the
+// Which input the user is on, for motion: motion answers the
 // pointer and never the keyboard. Also warms tooltips: once one has shown, the next open at once.
 
 const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta"]);

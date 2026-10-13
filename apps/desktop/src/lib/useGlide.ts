@@ -1,4 +1,4 @@
-// Nav glides (docs/design/motion.md, PR 3): when the current item of a list changes after a click,
+// Nav glides: when the current item of a list changes after a click,
 // a transient indicator carrying the current item's fill and accent edge slides from the old item
 // to the new one, and the new item's own marker is hidden only while it slides. The resting pixels
 // are the item's own, so nothing changes at rest. Keyboard changes (arrows, shortcuts) are instant,

@@ -1,5 +1,5 @@
 /* Design tokens. Components use these variables only; no raw colours elsewhere.
-   The values follow DESIGN.md (Quiet Precision). Older token names keep their meaning with the new
+   The values follow docs/design-system.md (Quiet Precision). Older token names keep their meaning with the new
    values (for example --text-md is the 13 px body size, --shadow-1 is "flat, no shadow") until the
    component layer moves to the final names screen by screen.
 
@@ -46,7 +46,7 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* ---------- radius, by hierarchy (docs/design/revamp.md §3): boxes, not cards ---------- */
+  /* ---------- radius, by hierarchy: boxes, not cards ---------- */
   --radius-inner: 2px; /* tags, badges, chips, checkboxes, key hints, inner icon buttons */
   --radius-xs: 2px;
   --radius-sm: 4px; /* small buttons, segmented thumbs */
@@ -110,7 +110,7 @@
   --z-toast: 50;
   --z-tooltip: 60;
 
-  /* ---------- motion (docs/design/overhaul.md, "Motion") ---------- */
+  /* ---------- motion ---------- */
   --duration-press: 100ms;
   --duration-fast: 140ms;
   --duration-base: 180ms;
@@ -120,7 +120,7 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-colour: ease;
   --ease-linear: linear; /* progress only */
-  /* Second pass (docs/design/motion.md §2). No overshoot anywhere, and nothing over 220 ms. */
+  /* Second pass. No overshoot anywhere, and nothing over 220 ms. */
   --duration-exit: 100ms; /* every exit: fade only, faster than any entrance */
   --duration-glide: 140ms; /* something moving to a new place: FLIP, nav and tab glides */
   --duration-progress: 200ms; /* progress bars retargeting between ticks (linear) */

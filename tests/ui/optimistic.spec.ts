@@ -1,4 +1,4 @@
-// Optimistic vault edits (docs/design/interaction-polish.md, section 1): moving hosts to a group
+// Optimistic vault edits: moving hosts to a group
 // and adding or removing a tag show at once and roll back with an inline error when the vault
 // refuses. Deleting is never optimistic. Mock backend; UI evidence only.
 import { type Page, expect, test } from "@playwright/test";

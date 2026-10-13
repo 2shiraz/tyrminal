@@ -1791,7 +1791,7 @@ export function installMockBackend(options) {
       return handlers.identity_list().find((i) => i.id === record.id);
     },
     identity_delete: (a) => {
-      // identity deletion (BUILD_SPEC §10.2): refused while in use unless the caller chooses.
+      // identity deletion (spec §10.2): refused while in use unless the caller chooses.
       const users = [...identityState.uses].filter(([, v]) => v === a.id).map(([k]) => k);
       if (users.length > 0 && !a.references)
         throw { code: "IN_USE", message: "Hosts or groups use this identity. Choose another identity for them or remove it from them." };
@@ -1803,7 +1803,7 @@ export function installMockBackend(options) {
       }
       return users.length;
     },
-    // identity deletion (BUILD_SPEC §10.2)
+    // identity deletion (spec §10.2)
     identity_usage: (a) => {
       const uses = [];
       for (const g of state.groups)

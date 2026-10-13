@@ -47,7 +47,7 @@ export const SCHEMES: readonly TerminalScheme[] = [
     name: "Tyrminal Night",
     kind: "dark",
     credit: "Tyrminal",
-    // Background, cursor and selection follow the default app theme (Cobalt, DESIGN.md); the
+    // Background, cursor and selection follow the default app theme (Cobalt); the
     // ANSI colors are unchanged.
     background: "#0a0e17",
     foreground: "#e6e9f0",

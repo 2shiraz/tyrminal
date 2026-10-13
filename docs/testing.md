@@ -81,7 +81,7 @@ limits of this setup.
 ## Flake policy
 
 No retries and no blind sleeps. Every intermittent failure so far was investigated to a root
-cause, and each is recorded in `docs/progress.md`. Suites were then run repeatedly: the lab suite
+cause and fixed. Suites were then run repeatedly: the lab suite
 12 times, the PTY suite 30 times, the core session suite 6 times and the native suite 25 times,
 all passing.
 

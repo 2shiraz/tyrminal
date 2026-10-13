@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Seeds and checks docs/feature-matrix.csv against the ID tables in BUILD_SPEC.md §12.
+// Seeds and checks docs/feature-matrix.csv against the ID tables in docs/specification.md §12.
 //
 //   node scripts/feature-matrix.mjs           merge: add missing IDs, keep existing tracking columns
 //   node scripts/feature-matrix.mjs --check   fail if an ID is missing, unknown, or has an invalid status
@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const specPath = join(root, "BUILD_SPEC.md");
+const specPath = join(root, "docs/specification.md");
 const csvPath = join(root, "docs", "feature-matrix.csv");
 
 const COLUMNS = [
@@ -69,7 +69,7 @@ function parseSpec() {
     }
   }
   for (const [k, want] of Object.entries(EXPECTED)) {
-    if (counts[k] !== want) throw new Error(`BUILD_SPEC.md: expected ${want} ${k} IDs, parsed ${counts[k]}`);
+    if (counts[k] !== want) throw new Error(`docs/specification.md: expected ${want} ${k} IDs, parsed ${counts[k]}`);
   }
   return rows;
 }
@@ -135,7 +135,7 @@ if (check) {
       problems.push(`${r.id}: VERIFIED requires test_ids, platforms and verified_commit`);
     }
     if (e.status === "BLOCKED" && !e.blocker) problems.push(`${r.id}: BLOCKED requires a blocker`);
-    if (e.title !== r.title) problems.push(`${r.id}: title drifted from BUILD_SPEC.md`);
+    if (e.title !== r.title) problems.push(`${r.id}: title drifted from docs/specification.md`);
   }
   for (const id of existing.keys()) if (!specIds.has(id)) problems.push(`unknown row ${id}`);
   if (problems.length) {

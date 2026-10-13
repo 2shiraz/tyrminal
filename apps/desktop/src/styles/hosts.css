@@ -1,5 +1,5 @@
 /*
- * The Hosts page (docs/design/revamp.md): a search bar that also connects, one toolbar, then a
+ * The Hosts page: a search bar that also connects, one toolbar, then a
  * Groups box and a Hosts box. Rows are about 52 px, on 16/24 px gutters, with aligned columns.
  * Scoped under .hosts-main so the general list rules in global.css stay as they are elsewhere.
  */

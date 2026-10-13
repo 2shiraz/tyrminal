@@ -4,7 +4,7 @@ Status: accepted (provisional until first publication) · Date: 2026-10-12
 
 ## Decision
 
-- **Product name:** Tyrminal, chosen by the owner. BUILD_SPEC.md keeps its original "LocalSSH" wording
+- **Product name:** Tyrminal, chosen by the owner. docs/specification.md keeps its original "LocalSSH" wording
   because it is preserved verbatim as the baseline.
 - **License:** Apache-2.0 for original code. This is the spec's provisional default and an
   *assumption*: the owner has not separately confirmed it. It must be confirmed before anything is

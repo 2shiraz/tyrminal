@@ -1,4 +1,4 @@
-//! Port forwarding over a verified, authenticated connection (BUILD_SPEC Phase 07).
+//! Port forwarding over a verified, authenticated connection (spec Phase 07).
 //!
 //! Three kinds, each with the same lifecycle (a [`ForwardHandle`] that reports statistics and
 //! stops the forward when told to or when dropped):
@@ -10,7 +10,7 @@
 //! - **dynamic** (`-D`): a SOCKS5 listener on this machine; each `CONNECT` request becomes a
 //!   `direct-tcpip` channel to the requested destination.
 //!
-//! Exposure policy (BUILD_SPEC Phase 07 and §9.3 "Tunnels"): a listener binds to a loopback
+//! Exposure policy (spec Phase 07 and §9.3 "Tunnels"): a listener binds to a loopback
 //! address unless the caller passes an explicit external-bind approval. The check runs here, in
 //! the adapter, before any socket or server request is made, so no caller can skip it. A local
 //! listener's address must be an IP literal or `localhost` (mapped to `127.0.0.1` without a DNS

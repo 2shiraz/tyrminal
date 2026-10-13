@@ -5025,7 +5025,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   gap: var(--space-2);
 }
 
-/* ---------- press and hover feedback (docs/design/interaction-polish.md, section 1) ----------
+/* ---------- press and hover feedback ----------
    Hover appears at once and fades out over 120 ms. Pressed (data-pressed, set on pointer down by
    lib/press.ts before any handler runs) shows with no transition. Reduced motion: no fade and no
    scale. Only colour changes here; the press scale on buttons is the existing transform. */
@@ -5129,7 +5129,7 @@ button[data-tooltip][data-tooltip-side="top"]:focus-visible::after {
   transform: none;
 }
 
-/* Pressed things give a little under the finger (docs/design/motion.md §3): 2 % for controls, 1 %
+/* Pressed things give a little under the finger: 2 % for controls, 1 %
    for cards and tiles. Pointer devices only; under reduced motion the scale tokens are 1. */
 @media (hover: hover) and (pointer: fine) {
   :is(.nav-item, .chip, .status-button)[data-pressed]:not(:disabled, [aria-disabled="true"]) {

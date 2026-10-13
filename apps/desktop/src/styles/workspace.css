@@ -1,4 +1,4 @@
-/* Quiet Precision working chrome (DESIGN.md). The sidebar, tab strip and status strip are one quiet
+/* Quiet Precision working chrome (docs/design-system.md). The sidebar, tab strip and status strip are one quiet
    frame in the sidebar tone; what they frame (a page, or a terminal in its own scheme) sits a step
    deeper. The selected tab and, with a terminal in front, the status strip are cut from the same
    material as what they belong to, so a terminal, its tab and its status read as one object.

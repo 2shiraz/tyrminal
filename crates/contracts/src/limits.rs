@@ -1,4 +1,4 @@
-//! Central application limits (BUILD_SPEC §6.2 and §13). These are initial defaults to benchmark,
+//! Central application limits (spec §6.2 and §13). These are initial defaults to benchmark,
 //! not protocol maxima. Changing one needs a measured workload and an abuse test.
 
 /// Display labels (host names, key names), in bytes.

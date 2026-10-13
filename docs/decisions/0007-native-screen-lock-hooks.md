@@ -4,9 +4,9 @@ Status: accepted (agent A), 2026-10-12
 
 ## Context
 
-BUILD_SPEC Phase 02 requires the vault to lock when the operating system locks the screen
-(matrix row P-10). Every crate forbids `unsafe` (AGENTS.md: "No first-party `unsafe` … unless an ADR
-isolates platform FFI"). Linux exposes screen locks as D-Bus signals, reachable from safe Rust
+Spec Phase 02 requires the vault to lock when the operating system locks the screen
+(matrix row P-10). Every crate forbids `unsafe` (CONTRIBUTING.md: unless an ADR
+isolates platform FFI). Linux exposes screen locks as D-Bus signals, reachable from safe Rust
 through `zbus` (already in the tree via the Secret Service store). macOS and Windows only expose
 them through native APIs, which need `unsafe` calls.
 

@@ -1,4 +1,4 @@
-// User-visible strings for deleting an identity that is in use (BUILD_SPEC §10.2), kept apart
+// User-visible strings for deleting an identity that is in use (spec §10.2), kept apart
 // from the other message modules so parallel branches never edit the same object.
 
 import type { SignInAfter } from "@tyrminal/contracts";

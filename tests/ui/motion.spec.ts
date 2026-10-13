@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 import { connectHost, editHost, openApp } from "./fixtures";
 
-// The motion rules (docs/design/motion.md): motion answers the pointer and never the keyboard;
+// The motion rules: motion answers the pointer and never the keyboard;
 // transform and opacity only, 100 to 220 ms; nothing at all under reduced motion; the terminal
 // canvas never animates.
 

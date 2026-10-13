@@ -1,5 +1,5 @@
 /*
- * Boxes (docs/design/revamp.md §4): the one container pattern, lifted from the SFTP and Files panes.
+ * Boxes: the one container pattern, lifted from the SFTP and Files panes.
  * A box groups rows under a strip label. It has a 1 px border, a small radius (none when attached to
  * a window edge), no shadow and no inner padding: rows touch its edges. State is an edge.
  */

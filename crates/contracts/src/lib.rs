@@ -21,7 +21,7 @@ mod defaults;
 mod inventory;
 // privilege prompts (KEY-18)
 mod privilege;
-// identity deletion (KEY-15/16, BUILD_SPEC §10.2)
+// identity deletion (KEY-15/16, spec §10.2)
 mod identity_removal;
 // compromised-password check (SEC-11)
 mod password_check;
@@ -51,7 +51,7 @@ pub use defaults::*;
 pub use inventory::*;
 // privilege prompts (KEY-18)
 pub use privilege::*;
-// identity deletion (KEY-15/16, BUILD_SPEC §10.2)
+// identity deletion (KEY-15/16, spec §10.2)
 pub use identity_removal::*;
 // compromised-password check (SEC-11)
 pub use password_check::*;

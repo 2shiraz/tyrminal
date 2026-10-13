@@ -1,4 +1,4 @@
-// Exits (docs/design/motion.md, PR 2: "everything that appears also leaves"). When a surface
+// Exits. When a surface
 // unmounts, a static copy of it fades out in its place for --duration-exit, then goes. The real
 // element is gone at once: focus, input and tests move on immediately, and the copy is inert,
 // hidden from assistive technology and stripped of ids, test ids and roles. Nothing is kept

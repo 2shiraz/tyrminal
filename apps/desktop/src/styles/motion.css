@@ -1,4 +1,4 @@
-/* Motion utilities (docs/design/motion.md). The tokens live in tokens.css. Rules they encode:
+/* Motion utilities. The tokens live in tokens.css. Rules they encode:
    - Motion answers something the user did with the pointer, or shows a state change. Nothing loops
      except a connecting indicator, and nothing moves on its own to decorate.
    - Only transform and opacity animate (plus background-color for a one-shot tint). Entrances use
@@ -167,7 +167,7 @@ dialog.m-dialog[open]::backdrop {
   animation: none !important;
 }
 
-/* ---------- moments (docs/design/motion.md, PR 4): rare, so they may be felt ---------- */
+/* ---------- moments: rare, so they may be felt ---------- */
 
 /* The window after unlock: the shell fades in once per unlock. */
 .shell {

@@ -1,5 +1,5 @@
 //! Telling the application when the operating system locks the screen, so the vault can lock with
-//! it (BUILD_SPEC Phase 02, P-10). Signals can only cause a lock, never prevent or delay one, so a
+//! it (spec Phase 02, P-10). Signals can only cause a lock, never prevent or delay one, so a
 //! spurious signal costs the user an unlock and nothing else.
 //!
 //! Linux: the screensaver's `ActiveChanged(true)` on the session bus (freedesktop and GNOME
