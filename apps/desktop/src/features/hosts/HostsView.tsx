@@ -774,17 +774,34 @@ function HostsViewImpl({
   useLayoutEffect(() => {
     const was = shownPanel.current;
     shownPanel.current = panel;
-    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
-    if (!el || !panel) return;
+    const layout = layoutRef.current;
+    if (!layout || !panel) return;
     const ms = motionMs("--duration-base");
     if (ms <= 0 || openedBy() !== "pointer") return;
-    const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
-    if (!was) {
-      const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
-      for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
-    } else if (was.version !== panel.version) {
-      for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    const play = (el: HTMLElement) => {
+      const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
+      if (!was) {
+        const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
+        for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
+      } else if (was.version !== panel.version) {
+        for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+      }
+    };
+    const el = layout.querySelector<HTMLElement>(":scope > .host-panel");
+    if (el) {
+      play(el);
+      return;
     }
+    // The panel's code loads on first use, so it can mount after this effect: animate it then.
+    // Mutation callbacks run before the next paint, so it never shows unanimated first.
+    const observer = new MutationObserver(() => {
+      const mounted = layout.querySelector<HTMLElement>(":scope > .host-panel");
+      if (!mounted) return;
+      observer.disconnect();
+      play(mounted);
+    });
+    observer.observe(layout, { childList: true });
+    return () => observer.disconnect();
   }, [panel]);
   const panelHostId = panel?.target.kind === "edit" ? panel.target.host.id : null;
   const currentGroupId = filter.kind === "group" ? filter.id : null;

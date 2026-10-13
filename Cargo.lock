@@ -6154,7 +6154,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "tyrminal-contracts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6163,7 +6163,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",
@@ -6192,7 +6192,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.4.3",
  "open",
@@ -6209,7 +6209,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-os-hooks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "block2",
  "objc2-foundation",
@@ -6218,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "apple-native-keyring-store",
  "getrandom 0.4.3",
@@ -6233,7 +6233,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-pty"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "portable-pty",
  "thiserror 2.0.21",
@@ -6242,7 +6242,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-session-log"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aead-stream",
  "chacha20poly1305",
@@ -6256,7 +6256,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-ssh"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "rand 0.10.3",
@@ -6270,7 +6270,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -6280,7 +6280,7 @@ dependencies = [
 
 [[package]]
 name = "tyrminal-vault"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "chacha20poly1305",

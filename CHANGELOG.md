@@ -5,6 +5,31 @@ pre-releases are not stable and have not been independently security reviewed.
 
 ## Unreleased
 
+## 0.2.0-beta.1 — pre-release
+
+Release notes: [docs/releases/v0.2.0-beta.1.md](docs/releases/v0.2.0-beta.1.md).
+
+### Added
+- Redesigned Hosts page (search that also connects, groups as sections, favourites, list and
+  card views, OS icons, details side panel, keyboard navigation), browser-style tabs, a
+  new-tab page with recent connections, quick connect in its own tab, resizable panels and
+  interface scaling.
+- Command-finished notifications, unread tab marks, search across sessions, saving a marked
+  command's output, notes on hosts and groups, session recordings (off by default), command
+  history, workspaces and layout templates.
+- Inventory, SFTP, tunnels, jump hosts, proxies, Telnet and serial, agent forwarding and the
+  other features listed in the release notes.
+
+### Changed
+- Home is removed; its search and recent connections moved to Hosts and the new-tab page.
+- Faster start: fewer calls before the first screen and a smaller initial bundle.
+
+### Fixed
+- RSA signatures with a leading zero byte are padded to the key size.
+- Multi-step sign-in (SSH partial success) is supported.
+
+## 0.1.0-beta.1 — pre-release
+
 ### Added
 - Local encrypted vault (Argon2id + XChaCha20-Poly1305) with recovery key, passphrase change,
   recovery-key rotation, idle auto-lock; format specified in `docs/crypto-format.md` with

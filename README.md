@@ -23,6 +23,11 @@ No account, no cloud, no telemetry.
 
 </div>
 
+<p align="center">
+  <img src="docs/screenshots/hosts.png" alt="The Hosts page: groups, hosts and a search bar that also connects" width="49%">
+  <img src="docs/screenshots/terminal.png" alt="A terminal session with the snippets panel open" width="49%">
+</p>
+
 > [!WARNING]
 > Tyrminal is **pre-release software**. It has not been independently security reviewed and the
 > installers are not yet code-signed. Use it with test servers and credentials you can rotate.

@@ -46,16 +46,8 @@ describe("notes in the real application", { concurrency: false }, () => {
 
   async function openHostPanel() {
     await t.nav("Hosts");
-    const open = await s.until(
-      async () => {
-        for (const button of await s.findAll('[data-testid="host-list"] button.host-open')) {
-          if ((await s.text(button)).trim() === "Lab") return button;
-        }
-        return null;
-      },
-      { describe: "the Lab host" },
-    );
-    await s.click(open);
+    // A click on a host selects it; its Edit button opens the details panel.
+    await s.click(await s.waitFor('[data-testid="host-list"] button[aria-label="Edit Lab"]'));
     await s.waitFor(HOST_PANEL);
   }
 
