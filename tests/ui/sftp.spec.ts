@@ -446,8 +446,9 @@ test("the Files panel and an SFTP pane are the same pane: toolbar, columns, row 
   expect(panelTools).toContain("Filter");
   await panel.getByRole("grid").getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });
   const panelMenu = await page.getByRole("menu").getByRole("menuitem").allTextContents();
-  // The panel adds its own Edit; the SFTP tab adds Copy to the other pane (only when it shows something).
-  expect(panelMenu.filter((i) => i !== "Edit…")).toEqual(sftpMenu.filter((i) => !i.startsWith("Copy to ")));
+  // Both offer Open in editor for a file; the SFTP tab adds Copy to the other pane (only when it shows something).
+  expect(panelMenu).toContain("Open in editor");
+  expect(panelMenu).toEqual(sftpMenu.filter((i) => !i.startsWith("Copy to ")));
   await page.keyboard.press("Escape");
   await expect(panel.getByRole("grid").getByRole("columnheader")).toHaveText(["Name", "Size", "Date Modified"]);
 });
@@ -465,4 +466,33 @@ test("sftp: files dropped from the desktop on a server pane upload into its fold
   });
   await expect(view(page).getByRole("region", { name: "Transfers" }).getByTestId("transfer-state")).toHaveText("Done");
   await expect(table(right(page)).getByRole("button", { name: "Select dropped.txt" })).toBeVisible();
+});
+
+test("sftp: a file opens in an editor from its menu; a save says it is under way and a second press does not upload again", async ({ page }) => {
+  await openApp(page);
+  await openSftp(page);
+  await connectRight(page, "api-gateway");
+  const pane = right(page);
+  await expect(table(pane)).toBeVisible();
+  await table(pane).getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });
+  await page.getByRole("menu").getByRole("menuitem", { name: "Open in editor" }).click();
+  const editing = pane.getByRole("region", { name: "Open in editors" });
+  await expect(editing.getByTestId("edit-state")).toHaveText("No changes yet");
+  const save = editing.getByRole("button", { name: "Save deploy.sh to the server" });
+  await expect(save).toBeDisabled();
+
+  await page.evaluate(() => (window as unknown as { __mockEditLocalChange: (n: string) => void }).__mockEditLocalChange("deploy.sh"));
+  await expect(editing.getByTestId("edit-state")).toHaveText("Changed locally", { timeout: 5000 });
+  // Two presses in a row: one upload.
+  await save.dblclick();
+  await expect(editing.getByTestId("edit-state")).toHaveText("Saved to the server");
+  expect((await calls(page)).filter((c) => c.cmd === "files_edit_save")).toHaveLength(1);
+  await expect(save).toBeDisabled();
+
+  // A folder has nothing to open in an editor.
+  await table(pane).getByRole("button", { name: "Open app" }).click({ button: "right" });
+  await expect(page.getByRole("menu").getByRole("menuitem", { name: "Open in editor" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await editing.getByRole("button", { name: "Stop editing deploy.sh" }).click();
+  await expect(editing).toHaveCount(0);
 });

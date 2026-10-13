@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Dialog } from "../../components/ui/Dialog";
 import type { MenuEntry } from "../../components/ui/Menu";
 import { ErrorNotice, IconButton, Notice, TextField } from "../../components/ui/controls";
-import { IconArrowLeftRight, IconCopy, IconFolderOpen, IconHardDrive, IconPanelRightClose, IconPencil, IconSquareTerminal, IconTriangleAlert, IconUpload, IconX } from "../../components/ui/icons";
+import { IconArrowLeftRight, IconCopy, IconExternalLink, IconFolderOpen, IconHardDrive, IconPanelRightClose, IconSquareTerminal } from "../../components/ui/icons";
 import { files as filesApi, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
 import { useAction } from "../../lib/useAsync";
@@ -12,12 +12,12 @@ import { ResizeHandle } from "../../components/ui/ResizeHandle";
 import { shellContexts } from "../autocomplete/shellContext";
 import { msgSftp } from "../sftp/messages";
 import type { Loc } from "../sftp/model";
-import { visibleName } from "../sftp/model";
 import { droppedFileJob, droppedFiles } from "./dropUpload";
 import { FILE_DRAG, type FileDrag, FilePane, type PaneView, emptyView, localBackend, remoteBackend } from "./FilePane";
 import { copyJob, downloadJob, uploadJob } from "./jobs";
 import { KeyedMemory, useMemory } from "./memory";
 import { msgFiles } from "./messages";
+import { type Edit, EditConflictDialog, EditsSection } from "./RemoteEdits";
 import { TransferDrawer } from "./TransferDrawer";
 import { type QueuedTransfer, useTransferQueue } from "./useTransferQueue";
 import { useExit } from "../../lib/exitGhost";
@@ -27,7 +27,6 @@ export interface FilesTarget {
   label: string;
 }
 
-type Edit = EditStatus & { saved?: boolean | undefined };
 type LocalRoot = Loc & { kind: "local" };
 
 /** What the panel shows for one session; it stays while the session lives (see `panelMemory`). */
@@ -168,7 +167,7 @@ export function FilesPanel({
     if (loc.kind !== "remote") return [];
     const one = entries.length === 1 ? entries[0] : undefined;
     return [
-      ...(one?.kind === "file" ? [{ label: msgFiles.edit, icon: <IconPencil size={15} />, onSelect: () => void editEntry(one, loc.path) }] : []),
+      ...(one?.kind === "file" ? [{ label: msgFiles.edit, icon: <IconExternalLink size={15} />, onSelect: () => void editEntry(one, loc.path) }] : []),
       ...(one && (one.kind === "file" || one.kind === "dir") && others.length > 0
         ? [{ label: msgFiles.copyTo, icon: <IconCopy size={15} />, onSelect: () => setPrompt({ kind: "copy", entry: one, dir: loc.path, others }) }]
         : []),
@@ -320,64 +319,14 @@ export function FilesPanel({
             />
           </div>
 
-          {edits.length > 0 && (
-            <section className="xfer fp-edits" aria-label={msg.files.editing} data-open>
-              <div className="xfer-head">
-                <span className="xfer-toggle">
-                  <span className="xfer-title">{msg.files.editing}</span>
-                </span>
-              </div>
-              <ul className="xfer-list">
-                {edits.map((e) => (
-                  <li key={e.editId} className="xfer-row" data-state={e.changed ? "changed" : "clean"}>
-                    <span className="xfer-icon" aria-hidden="true">
-                      <IconPencil size={14} />
-                    </span>
-                    <span className="xfer-name">{visibleName(e.name)}</span>
-                    <span className="xfer-end">
-                      <button type="button" className="btn btn-sm btn-primary" disabled={!e.changed} onClick={() => void saveEdit(e, false)} aria-label={msg.files.editSave(e.name)}>
-                        <IconUpload size={13} />
-                      </button>
-                      <IconButton size="sm" label={msg.files.editClose(e.name)} onClick={() => void closeEdit(e)}>
-                        <IconX size={13} />
-                      </IconButton>
-                    </span>
-                    <span className="xfer-detail" data-testid="edit-state">
-                      {e.changed ? msg.files.editChanged : e.saved ? msg.files.editSaved : msg.files.editUnchanged}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <EditsSection edits={edits} onSave={(e) => saveEdit(e, false)} onClose={(e) => void closeEdit(e)} />
 
           <TransferDrawer transfers={transfers} onCancel={queue.cancel} onRetry={queue.retry} onClear={queue.clear} />
           {queue.dialog}
         </>
       )}
 
-      {prompt?.kind === "editConflict" && (
-        <Dialog title={msg.files.editConflictTitle(prompt.edit.name)} role="alertdialog" tone="danger" icon={<IconTriangleAlert size={18} />} onDismiss={() => setPrompt(null)}>
-          <div className="stack">
-            <p>{msg.files.editConflictBody}</p>
-            <div className="dialog-actions">
-              <button type="button" className="btn" onClick={() => setPrompt(null)} data-autofocus>
-                {msg.common.cancel}
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger-solid"
-                onClick={() => {
-                  prompt.overwrite();
-                  setPrompt(null);
-                }}
-              >
-                {msg.files.editOverwrite}
-              </button>
-            </div>
-          </div>
-        </Dialog>
-      )}
+      {prompt?.kind === "editConflict" && <EditConflictDialog edit={prompt.edit} onOverwrite={prompt.overwrite} onDismiss={() => setPrompt(null)} />}
       {prompt?.kind === "copy" && sessionId && (
         <CopyDialog
           prompt={{

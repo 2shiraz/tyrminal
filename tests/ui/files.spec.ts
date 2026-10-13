@@ -347,7 +347,7 @@ test("files: a file opened in an editor is saved only on request, and server cha
   await openApp(page);
   await connect(page, "api-gateway");
   await page.keyboard.press("Control+Shift+O");
-  await rowAction(page, "README.md", "Edit…");
+  await rowAction(page, "README.md", "Open in editor");
   const editing = panel(page).getByRole("region", { name: "Open in editors" });
   await expect(editing.getByTestId("edit-state")).toHaveText("No changes yet");
   await expect(editing.getByRole("button", { name: "Save README.md to the server" })).toBeDisabled();

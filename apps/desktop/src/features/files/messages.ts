@@ -40,7 +40,7 @@ export const msgFiles = {
   // Row and folder menus
   open: "Open",
   download: "Download…",
-  edit: "Edit…",
+  edit: "Open in editor",
   rename: "Rename",
   permissions: "Permissions…",
   delete: "Delete…",

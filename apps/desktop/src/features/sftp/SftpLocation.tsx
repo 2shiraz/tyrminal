@@ -13,6 +13,7 @@ import {
   IconShieldCheck,
   IconTriangleAlert,
   IconUnplug,
+  IconExternalLink,
 } from "../../components/ui/icons";
 import { files as filesApi, sessions, toAppError } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -21,6 +22,7 @@ import { FILE_DRAG, type FileDrag, FilePane, type PaneBackend, type PaneView, em
 import { AuthDialog, Fingerprint } from "../terminal/AuthDialog";
 import { HopNotice } from "../tunnels/HopNotice";
 import { msgFiles } from "../files/messages";
+import { useRemoteEdits } from "../files/RemoteEdits";
 import { OsIcon } from "../hosts/OsIcon";
 import { useHostOs } from "./hostOs";
 import { msgSftp } from "./messages";
@@ -223,6 +225,9 @@ export function SftpLocation({
   // ---------- what the pane browses, and what the tab sees ----------
 
   const connected = source.kind === "host" && conn?.sessionId && conn.state === "connected" ? conn.sessionId : null;
+  // Open in editor (the same flow as the Files panel): a saved edit lists the folder again.
+  const [editRefresh, setEditRefresh] = useState(0);
+  const edits = useRemoteEdits(connected, () => setEditRefresh((n) => n + 1));
   const backend: PaneBackend | null = useMemo(() => {
     if (source.kind === "host") return connected ? remoteBackend(connected, source.label) : null;
     if (source.kind === "local") return root ? localBackend(root) : null;
@@ -308,13 +313,17 @@ export function SftpLocation({
         start={source.kind === "local" ? root : startPath ? { kind: "remote", path: startPath } : null}
         goRequest={goRequest ? { loc: { kind: "remote", path: goRequest.path }, seq: goRequest.seq } : null}
         inactive={!active}
-        refreshKey={refreshKey}
+        refreshKey={refreshKey + editRefresh}
         placeholder={placeholder}
         menuExtras={menuExtras}
         onDownload={remote ? (entries) => transfers.download(entries) : undefined}
         onUpload={remote ? () => transfers.upload() : undefined}
         onUploadFolder={remote ? () => transfers.uploadFolder() : undefined}
         onDuplicate={remote ? (entries) => transfers.duplicate(entries) : undefined}
+        rowExtras={(entries, loc) => {
+          const one = entries.length === 1 ? entries[0] : undefined;
+          return connected && loc.kind === "remote" && one?.kind === "file" ? [{ label: msgFiles.edit, icon: <IconExternalLink size={15} />, onSelect: () => edits.open(one, loc.path) }] : [];
+        }}
         copyOther={transfers.copyLabel ? { label: transfers.copyLabel, run: (entries) => transfers.copy(entries) } : null}
         drop={{
           accepts: (types) => types.includes(FILE_DRAG) || (remote && types.includes("Files")),
@@ -329,6 +338,8 @@ export function SftpLocation({
         }}
         emptyHint={transfers.copyLabel ? msgSftp.emptyDrop : undefined}
       />
+      {edits.section}
+      {edits.dialog}
 
 
       {visible && conn?.trust && (
