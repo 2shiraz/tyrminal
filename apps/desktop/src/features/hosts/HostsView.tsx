@@ -51,7 +51,6 @@ import {
   IconTrash2,
   IconUpload,
   IconUser,
-  IconX,
 } from "../../components/ui/icons";
 import { msgSftp } from "../sftp/messages";
 import { playExit } from "../../lib/exitGhost";
@@ -929,37 +928,12 @@ function HostsViewImpl({
             </EmptyState>
           )}
 
+          {/* A selection has no bar of its own: the selected rows are tinted, and every action for
+              them is in the right-click menu (Shift+F10 or the Menu key from the keyboard). */}
           {bulkCount > 0 && (
-            <div className="bulk-bar box-strip" role="toolbar" aria-label={msg.hosts.selected(selectedIds.length)} data-testid="bulk-bar">
-              <strong>{msg.hosts.selected(selectedIds.length)}</strong>
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                onClick={() => setConnectAll({ hosts: (hosts.value ?? []).filter((h) => selected.has(h.id)), groupName: null })}
-              >
-                <IconPlay size={13} />
-                {msgSelect.connectN(selectedIds.length)}
-              </button>
-              {groupList.length > 0 && (
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setBulk("move")}>
-                  <IconFolder size={13} />
-                  {msg.hosts.moveTo}
-                </button>
-              )}
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setBulk("delete")}>
-                <IconTrash2 size={13} />
-                {msg.common.delete}
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost" aria-haspopup="menu" onClick={(event) => setBulkMenu({ anchor: event.currentTarget })}>
-                <IconEllipsis size={13} />
-                {msgBulk.more}
-              </button>
-              <span className="spacer" />
-              <button type="button" className="btn btn-sm btn-ghost" aria-label={msg.hosts.clearSelection} onClick={() => setSelected(new Set())}>
-                <IconX size={13} />
-                {msgSelect.clear}
-              </button>
-            </div>
+            <p className="visually-hidden" role="status" data-testid="selection-count">
+              {msg.hosts.selected(selectedIds.length)}
+            </p>
           )}
 
           {favourites.length > 0 && !searching && filter.kind !== "group" && (

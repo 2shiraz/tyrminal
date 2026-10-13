@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { uiModifier, chooseLayout, openApp } from "./fixtures";
+import { uiModifier, chooseLayout, openApp, openSelectionMenu, selectedHosts, selectionAction } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -13,7 +13,6 @@ const list = (page: Page) => page.getByTestId("host-list");
 const card = (page: Page, label: string) => list(page).getByRole("article", { name: label, exact: true });
 const nameButton = (page: Page, label: string) => list(page).getByRole("button", { name: label, exact: true });
 const selectedLabels = (page: Page) => list(page).locator('[data-selected="true"]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? e.querySelector(".host-open")?.textContent));
-const bulkBar = (page: Page) => page.getByTestId("bulk-bar");
 
 async function openHosts(page: Page, options = {}) {
   await openApp(page, options);
@@ -26,12 +25,12 @@ test("a click selects one host and shows it; Ctrl/Cmd-click toggles; Shift-click
   await nameButton(page, "build-runner-03").click();
   await expect(page.getByRole("complementary", { name: "Host details" })).toBeVisible();
   expect(await selectedLabels(page)).toEqual(["build-runner-03"]);
-  // One host picked by a click is not a bulk selection yet.
-  await expect(bulkBar(page)).toHaveCount(0);
+  // One host picked by a click is not a selection of several yet.
+  await expect(page.getByTestId("selection-count")).toHaveCount(0);
 
   await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   expect(await selectedLabels(page)).toEqual(["build-runner-03", "edge-cache"]);
-  await expect(bulkBar(page)).toContainText("2 selected");
+  await expect(page.getByTestId("selection-count")).toHaveText("2 selected");
   await expect(card(page, "edge-cache")).toHaveAttribute("data-selected", "true");
   // Toggling again removes it.
   await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
@@ -65,7 +64,7 @@ test("Ctrl/Cmd+A selects every shown host, Escape clears, and arrows move or ext
   await expect(nameButton(page, "api-gateway")).toBeFocused();
   await nameButton(page, "build-runner-03").focus();
   await page.keyboard.press(`${uiModifier}+a`);
-  await expect(bulkBar(page)).toContainText("6 selected");
+  await expect(page.getByTestId("selection-count")).toHaveText("6 selected");
   await page.keyboard.press("Escape");
   await expect(list(page).locator('[data-selected="true"]')).toHaveCount(0);
 
@@ -77,7 +76,7 @@ test("Ctrl/Cmd+A selects every shown host, Escape clears, and arrows move or ext
   await page.keyboard.press("Shift+ArrowDown");
   await expect(nameButton(page, "Home lab")).toBeFocused();
   expect(await selectedLabels(page)).toEqual(["db-primary", "edge-cache", "Home lab"]);
-  await expect(bulkBar(page)).toContainText("3 selected");
+  await expect(page.getByTestId("selection-count")).toHaveText("3 selected");
 });
 
 test("double-click on a selection reviews and opens one tab per host; trust stays per session", async ({ page }) => {
@@ -111,11 +110,11 @@ test("Enter on a selection opens it in one tab, split", async ({ page }) => {
   await expect(page.locator(".workspace:not([hidden]) .pane, .pane:not([hidden])")).toHaveCount(3);
 });
 
-test("the selection bar and the host menu connect the selection; production hosts are confirmed first", async ({ page }) => {
+test("the selection's menu connects the selection; production hosts are confirmed first", async ({ page }) => {
   await openHosts(page);
   await nameButton(page, "api-gateway").click();
   await nameButton(page, "build-runner-03").click({ modifiers: [uiModifier] });
-  await expect(bulkBar(page).getByRole("button", { name: "Connect 2 hosts" })).toBeVisible();
+  await expect(selectedHosts(page)).toHaveCount(2);
   await card(page, "build-runner-03").click({ button: "right", position: { x: 10, y: 10 } });
   await page.getByRole("menuitem", { name: "Connect 2 hosts" }).click();
   const review = page.getByRole("dialog", { name: "Open 2 sessions?" });
@@ -139,14 +138,14 @@ test("opening more hosts than there are free panes is refused, also as one split
     await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
     await list(page).locator(".host-open").first().focus();
     await page.keyboard.press(`${uiModifier}+a`);
-    await bulkBar(page).getByRole("button", { name: "Connect 6 hosts" }).click();
+    await selectionAction(page, "Connect 6 hosts");
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(12);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await list(page).locator(".host-open").first().focus();
   await page.keyboard.press(`${uiModifier}+a`);
-  await bulkBar(page).getByRole("button", { name: "Connect 6 hosts" }).click();
+  await selectionAction(page, "Connect 6 hosts");
   const review = page.getByRole("dialog", { name: "Open 6 sessions?" });
   await review.getByText("In one tab, split").click();
   await expect(review.getByRole("alert")).toContainText("Only 4 more sessions can be open at once");
@@ -216,29 +215,34 @@ test("Space toggles, Cmd/Ctrl+Enter opens in a split, Shift+Enter in SFTP, and t
   await expect(list(page).locator(".host-open")).toHaveText(["staging-web"]);
 });
 
-test("no checkboxes; from two selected hosts a slim strip offers Connect, Move, Delete, More… and Clear", async ({ page }) => {
+test("no checkboxes and no selection bar; the selected hosts' menu offers Connect, Move, Delete and the rest", async ({ page }) => {
   await openHosts(page);
   await chooseLayout(page, "List");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await nameButton(page, "api-gateway").click();
-  await expect(bulkBar(page)).toHaveCount(0);
   await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   await expect(page.getByRole("checkbox")).toHaveCount(0);
-  const bar = bulkBar(page);
-  // A slim strip: the common actions, the rest under More….
-  for (const name of ["Connect 2 hosts", "Move to group", "Delete", "More…"]) {
-    await expect(bar.getByRole("button", { name })).toBeVisible();
-  }
-  // One line.
-  const height = await bar.evaluate((el) => el.getBoundingClientRect().height);
-  expect(height).toBeLessThan(48);
-  // Selected rows: the tint and the accent edge on the left.
-  await expect(list(page).locator('li[data-selected="true"]').first()).toHaveCSS("box-shadow", /inset/);
-  await expect(bar).toContainText("Clear");
+  // Nothing is added to the page for a selection: no toolbar of actions.
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(page.getByRole("toolbar", { name: "2 selected" })).toHaveCount(0);
+  // Selected rows carry the tint and nothing on one side; assistive technology hears the count.
+  const row = list(page).locator('li[data-selected="true"]').first();
+  await expect(row).toHaveCSS("box-shadow", "none");
+  expect(await row.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe("none");
+  await expect(page.getByTestId("selection-count")).toHaveText("2 selected");
 
-  await bar.getByRole("button", { name: "Delete" }).click();
+  const menu = await openSelectionMenu(page);
+  for (const name of ["Connect 2 hosts", "Connect all in one split tab", "Move to group…", "Add tag…", "Delete 2 hosts…"]) {
+    await expect(menu.getByRole("menuitem", { name })).toBeVisible();
+  }
+  await menu.getByRole("menuitem", { name: "Delete 2 hosts…" }).click();
   await expect(page.getByRole("alertdialog")).toContainText("2");
   expect(await calls(page, "host_bulk")).toHaveLength(0);
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+  // Escape clears the selection.
+  await nameButton(page, "api-gateway").focus();
+  await page.keyboard.press("Escape");
+  await expect(selectedHosts(page)).toHaveCount(0);
 });
 
 test("palette: Enter connects a host, Cmd/Ctrl+Enter beside the session in front", async ({ page }) => {

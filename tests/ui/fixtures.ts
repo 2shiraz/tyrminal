@@ -132,3 +132,23 @@ export async function sortHosts(page: Page, name: "Name" | "Recently used" | "Ad
   await page.getByRole("button", { name: "Sort", exact: true }).click();
   await page.getByRole("menuitemcheckbox", { name }).click();
 }
+
+/** Hosts selected in the library (rows in List, cards in Cards). */
+export const selectedHosts = (page: Page) => page.locator('[data-testid="host-list"] [data-selected="true"]');
+
+/**
+ * The menu for the selected hosts: a right-click on one of them (Shift+F10 opens the same from the
+ * keyboard). It carries every action for a selection; there is no separate selection bar.
+ */
+export async function openSelectionMenu(page: Page) {
+  await selectedHosts(page).first().click({ button: "right", position: { x: 12, y: 12 } });
+  const menu = page.getByRole("menu");
+  await menu.waitFor();
+  return menu;
+}
+
+/** Chooses one action of the selection's menu. */
+export async function selectionAction(page: Page, name: string | RegExp) {
+  const menu = await openSelectionMenu(page);
+  await menu.getByRole("menuitem", { name }).click();
+}

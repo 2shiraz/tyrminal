@@ -3,7 +3,7 @@
 // refuses. Deleting is never optimistic. Mock backend; UI evidence only.
 import { type Page, expect, test } from "@playwright/test";
 
-import { uiModifier, openApp } from "./fixtures";
+import { uiModifier, openApp, openSelectionMenu, selectionAction } from "./fixtures";
 
 type MockWindow = { __mockDelay: Record<string, number>; __mockFailNext: Record<string, unknown> };
 
@@ -22,7 +22,7 @@ async function selectTwo(page: Page) {
 }
 
 async function addTag(page: Page, tag: string) {
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await openSelectionMenu(page);
   await page.getByRole("menuitem", { name: "Add tag…" }).click();
   const dialog = page.getByRole("dialog", { name: "Add tag" });
   await dialog.getByLabel("Tag").fill(tag);
@@ -54,7 +54,7 @@ test("optimistic: a refused move rolls back exactly and says so inline", async (
     w.__mockFailNext = { host_bulk: { code: "IO_ERROR", message: "The vault could not be written." } };
   });
   await selectTwo(page);
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Move to group" }).click();
+  await selectionAction(page, "Move to group…");
   const dialog = page.getByRole("dialog", { name: "Move to group" });
   await dialog.getByRole("combobox").selectOption({ label: "Lab" });
   await dialog.getByRole("button", { name: "Save" }).click();
@@ -85,7 +85,7 @@ test("optimistic: a refused tag removal puts the tag back", async ({ page }) => 
   // The strip shows from two hosts on: api-gateway (tagged web) and staging-web (no tags).
   await list(page).getByRole("button", { name: "api-gateway", exact: true }).click({ modifiers: [uiModifier] });
   await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: [uiModifier] });
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await openSelectionMenu(page);
   await page.getByRole("menuitem", { name: "Remove tag…" }).click();
   const dialog = page.getByRole("dialog", { name: "Remove tag" });
   await dialog.getByLabel("Tag").fill("web");
@@ -100,7 +100,7 @@ test("optimistic: never for deletes — hosts stay until the vault confirms", as
     (window as unknown as MockWindow).__mockDelay = { host_bulk: 800 };
   });
   await selectTwo(page);
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Delete" }).click();
+  await selectionAction(page, "Delete 2 hosts…");
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
   // Still listed while the call runs.
   await expect(card(page, "edge-cache")).toBeVisible();

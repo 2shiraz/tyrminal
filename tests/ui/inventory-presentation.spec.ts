@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { uiModifier, chooseLayout, openApp, sortHosts } from "./fixtures";
+import { uiModifier, chooseLayout, openApp, sortHosts, selectedHosts, openSelectionMenu, selectionAction } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -88,22 +88,22 @@ test("select all shown hosts and shift-click a range", async ({ page }) => {
   await expect(page.getByRole("checkbox", { name: "Select all shown hosts" })).toHaveCount(0);
   await name(page, "api-gateway").focus();
   await page.keyboard.press(`${uiModifier}+a`);
-  await expect(page.getByTestId("bulk-bar")).toContainText("6 selected");
+  await expect(selectedHosts(page)).toHaveCount(6);
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(selectedHosts(page)).toHaveCount(0);
 
   await name(page, "build-runner-03").click();
   await name(page, "Home lab").click({ modifiers: ["Shift"] });
-  await expect(page.getByTestId("bulk-bar")).toContainText("4 selected");
+  await expect(selectedHosts(page)).toHaveCount(4);
 
   // Search narrows what "all shown" means.
-  await page.getByRole("button", { name: "Clear selection" }).click();
-  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(selectedHosts(page)).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Search hosts" }).fill("tag:prod");
   await expect(hostCards(page)).toHaveCount(2);
   await name(page, "api-gateway").focus();
   await page.keyboard.press(`${uiModifier}+a`);
-  await expect(page.getByTestId("bulk-bar")).toContainText("2 selected");
+  await expect(selectedHosts(page)).toHaveCount(2);
 });
 
 test("set the OS of selected hosts: the tile shows its icon", async ({ page }) => {
@@ -111,7 +111,7 @@ test("set the OS of selected hosts: the tile shows its icon", async ({ page }) =
   await openHosts(page);
   await name(page, "edge-cache").click({ modifiers: [uiModifier] });
   await name(page, "staging-web").click({ modifiers: [uiModifier] });
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
+  await openSelectionMenu(page);
   await page.getByRole("menuitem", { name: "Set OS icon…" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Operating system").selectOption({ label: "Debian" });
@@ -122,7 +122,9 @@ test("set the OS of selected hosts: the tile shows its icon", async ({ page }) =
   await expect(hostCards(page).filter({ has: page.getByRole("img", { name: "Operating system: Debian" }) })).toHaveCount(2);
 
   // One host from its menu (outside a selection, so it acts on that host); "Not set" clears it.
-  await page.getByRole("button", { name: "Clear selection" }).click();
+  await selectedHosts(page).first().locator(".host-open").focus();
+  await page.keyboard.press("Escape");
+  await expect(selectedHosts(page)).toHaveCount(0);
   await page.getByRole("button", { name: "More actions for edge-cache" }).click();
   await page.getByRole("menuitem", { name: "Set OS" }).click();
   await expect(page.getByRole("dialog").getByLabel("Operating system")).toHaveValue("debian");
@@ -164,7 +166,7 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
     await openHosts(page);
     await name(page, "api-gateway").focus();
     await page.keyboard.press(`${uiModifier}+a`);
-    await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
+    await selectionAction(page, "Connect 6 hosts");
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
   // As above: the first terminals take a few seconds to start on the test runner's emulated GPU.
@@ -172,7 +174,7 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
   await openHosts(page);
   await name(page, "api-gateway").focus();
   await page.keyboard.press(`${uiModifier}+a`);
-  await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
+  await selectionAction(page, "Connect 6 hosts");
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("alert")).toContainText("Only 4 more sessions can be open at once");
   await expect(dialog.getByRole("button", { name: "Open 6 sessions" })).toBeDisabled();
