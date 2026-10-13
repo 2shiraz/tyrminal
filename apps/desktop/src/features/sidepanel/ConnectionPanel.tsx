@@ -5,6 +5,8 @@
 import type { HostSummary, SnippetSummary, TerminalPreferences } from "@tyrminal/contracts";
 import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 
+import { useGlide } from "../../lib/useGlide";
+
 import { usePreferences } from "../../app/preferences";
 import { useVaultData } from "../../app/vaultData";
 import { IconButton, RangeField, Segmented, SettingRow, Shortcut, relativeTime } from "../../components/ui/controls";
@@ -40,6 +42,9 @@ export function ConnectionPanel({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
+  // The section tabs are a segmented choice: its thumb slides to a clicked tab (lib/useGlide).
+  const sectionTabs = useRef<HTMLDivElement>(null);
+  useGlide(sectionTabs, "segmented-glide", '[aria-selected="true"]');
   // Closing, the panel fades and drifts back toward its edge (lib/exitGhost).
   const exitRef = useExit<HTMLElement>({ transform: "translateX(4px)" }, ref);
   const tabsId = useId();
@@ -84,7 +89,7 @@ export function ConnectionPanel({
           <IconPanelRightClose size={16} />
         </IconButton>
       </div>
-      <div className="panel-sections" role="tablist" aria-label={msgI.panel.sections}>
+      <div className="panel-sections" role="tablist" aria-label={msgI.panel.sections} ref={sectionTabs}>
         {SECTIONS.map((s) => (
           <button
             key={s}

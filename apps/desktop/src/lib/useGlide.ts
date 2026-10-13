@@ -21,7 +21,11 @@ function boxIn(container: HTMLElement, rect: DOMRect): Box {
   return { top: rect.top - c.top + container.scrollTop, left: rect.left - c.left + container.scrollLeft, width: rect.width, height: rect.height };
 }
 
-export function useGlide(container: RefObject<HTMLElement | null>, className = "nav-glide"): void {
+/**
+ * `active` selects the current item inside the container (the current nav row by default; the
+ * checked option of a segmented choice, the selected tab of a panel).
+ */
+export function useGlide(container: RefObject<HTMLElement | null>, className = "nav-glide", active: string = ACTIVE): void {
   const previous = useRef<{ item: HTMLElement; box: Box } | null>(null);
   const glide = useRef<{ element: HTMLElement; animation: Animation } | null>(null);
 
@@ -62,7 +66,7 @@ export function useGlide(container: RefObject<HTMLElement | null>, className = "
       clear();
       return;
     }
-    const item = root.querySelector<HTMLElement>(ACTIVE);
+    const item = root.querySelector<HTMLElement>(active);
     const was = previous.current;
     previous.current = item ? { item, box: boxIn(root, item.getBoundingClientRect()) } : null;
     const ms = motionMs("--duration-glide");

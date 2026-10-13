@@ -316,7 +316,7 @@ test.describe("moments", () => {
 test.describe("glides and lists", () => {
   const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 
-  test("the current page caret glides to a clicked nav item, and rests as the item's own", async ({ page }) => {
+  test("the current page marker glides to a clicked nav item, and rests as the item's own", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
@@ -324,8 +324,6 @@ test.describe("glides and lists", () => {
     await expect(glide).toHaveCount(1);
     expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([140]);
     await expect(primary(page)).toHaveAttribute("data-gliding", "");
-    // Only the caret travels: the glide has no fill of its own, and the item is filled at once.
-    expect(await glide.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     // Settled: no copy left, and the item carries its own marker again.
     await expect(glide).toHaveCount(0);
     await expect(primary(page)).not.toHaveAttribute("data-gliding", /.*/);

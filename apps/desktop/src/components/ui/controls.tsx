@@ -5,11 +5,13 @@ import {
   type ReactNode,
   forwardRef,
   useId,
+  useRef,
   useState,
 } from "react";
 
 import type { AppError } from "../../lib/ipc";
 import { useDelayed } from "../../lib/useDelayed";
+import { useGlide } from "../../lib/useGlide";
 import { msg } from "../../lib/messages";
 import { isMac } from "../../lib/platform";
 import { type ActionId, bindings, keyCaps, shortcutText } from "../../lib/shortcuts";
@@ -264,8 +266,11 @@ export function Segmented<T extends string>({
   iconOnly?: boolean;
 }) {
   const name = useId();
+  // The thumb slides to a clicked option (lib/useGlide); arrow keys and reduced motion are instant.
+  const group = useRef<HTMLDivElement>(null);
+  useGlide(group, "segmented-glide", "label:has(input:checked)");
   return (
-    <div className={`segmented ${iconOnly ? "segmented-icons" : ""}`} role="radiogroup" aria-label={label}>
+    <div ref={group} className={`segmented ${iconOnly ? "segmented-icons" : ""}`} role="radiogroup" aria-label={label}>
       {options.map((option) => (
         <label key={option.value} data-tooltip={iconOnly ? option.label : undefined}>
           <input type="radio" name={name} checked={value === option.value} onChange={() => onChange(option.value)} />

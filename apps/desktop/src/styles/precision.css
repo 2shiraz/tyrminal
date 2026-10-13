@@ -44,10 +44,21 @@ button[data-tooltip]:not(:hover, :focus-visible)::after { content: none; }
 button[data-tooltip]:hover::after, button[data-tooltip]:focus-visible::after {
   @starting-style { opacity: 0; }
 }
+/* A button at the end of a row shows its tooltip to its left, level with it: under the button it
+   was cut off by the box that holds the row (and by the window's right edge). */
+button[data-tooltip][data-tooltip-side="left"]::after,
+:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions) > button.btn-icon[data-tooltip]::after {
+  top: 50%; right: calc(100% + 6px); bottom: auto; left: auto; max-width: 280px; overflow: hidden; text-overflow: ellipsis; transform: translate(0, -50%);
+}
+button[data-tooltip][data-tooltip-side="left"]:is(:hover, :focus-visible)::after,
+:is(.snippet-actions, .row-actions, .folder-row, .group-row, .box-actions, .host-card-actions) > button.btn-icon[data-tooltip]:is(:hover, :focus-visible)::after {
+  transform: translate(0, -50%);
+}
 
 /* Segmented choice (theme mode, list or cards, pane tabs): a recessed track with the chosen option
    lifted out of it, so the choice reads as a position rather than a filled box. */
-.segmented { padding: 3px; gap: 2px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-inset); }
+.segmented { width: fit-content; max-width: 100%; justify-self: start; padding: 3px; gap: 2px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-inset); }
+.setting-control > .segmented { width: 100%; }
 .segmented label { height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); }
 .segmented label svg { color: var(--text-faint); transition: color var(--duration-press) var(--ease-out); }
 .segmented label:hover:not(:has(input:checked)) { background: var(--bg-hover); }
@@ -60,6 +71,29 @@ button[data-tooltip]:hover::after, button[data-tooltip]:focus-visible::after {
 :root[data-theme="light"] .segmented label:has(input:checked) { box-shadow: 0 1px 2px rgb(16 28 52 / 0.12); }
 :root[data-palette="contrast"] .segmented label:has(input:checked) { border-color: var(--border-strong); box-shadow: none; }
 .hosts-main .segmented-icons label { padding-inline: 8px; }
+
+/* Switch: the thumb travels with a strong ease-out and, while pressed, stretches toward where it
+   is going, so the control answers the finger before the state changes. Transitions, not
+   keyframes, so a quick double toggle retargets from where the thumb is. */
+.switch { transition: background var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out); }
+.switch::after { transform: translateX(0) scaleX(1); transition: transform var(--duration-base) var(--ease-out), background var(--duration-base) var(--ease-out); }
+.switch:checked::after { transform: translateX(16px) scaleX(1); }
+.switch:active:not(:disabled)::after { transform: translateX(2px) scaleX(1.28); transition-duration: var(--duration-press); }
+.switch:checked:active:not(:disabled)::after { transform: translateX(14px) scaleX(1.28); }
+.hosts-main .hosts-show-all .switch:checked::after { transform: translateX(12px) scaleX(1); }
+.hosts-main .hosts-show-all .switch:active:not(:disabled)::after { transform: translateX(1.5px) scaleX(1.28); }
+.hosts-main .hosts-show-all .switch:checked:active:not(:disabled)::after { transform: translateX(10.5px) scaleX(1.28); }
+
+/* A choice between a few options (sign-in method, route): quiet rows that tint when chosen, with
+   a ring-and-dot radio. Not four heavy cards. */
+.choice { gap: 10px; padding: 10px 12px; border-color: var(--border-subtle); border-radius: var(--radius-box); background: transparent; }
+.choice:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.choice:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
+.choice input[type="radio"] { margin-top: 1px; border: 1.5px solid var(--border-control); background: transparent; transition: border-color var(--duration-press) var(--ease-out), background-size var(--duration-fast) var(--ease-out); background-image: radial-gradient(circle, var(--accent) 0 60%, transparent 62%); background-repeat: no-repeat; background-position: center; background-size: 0 0; }
+.choice input[type="radio"]:checked { border: 1.5px solid var(--accent); background: radial-gradient(circle, var(--accent) 0 60%, transparent 62%) center / 10px 10px no-repeat; }
+.choice-title { font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: 1.35; }
+.choice .hint { font-size: var(--text-xs); line-height: 1.45; color: var(--text-faint); }
+.choice:has(input:checked) .hint { color: var(--text-muted); }
 
 /* Shared Switch must work before lazy Settings CSS has loaded (host editor, privacy, files). */
 .setting-label { display: grid; gap: var(--space-1); min-width: 0; }
@@ -80,7 +114,25 @@ button[data-tooltip]:hover::after, button[data-tooltip]:focus-visible::after {
 .page-title h1, .page-header h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.02em; }
 .page-title p, .page-inner > p, .section-hint { max-width: 80ch; }
 
+/* ---------- drop-downs ---------- */
+/* Every drop-down is the same field with the same chevron, whatever class its markup carries
+   (some were plain selects drawn by the system, shorter and with their own arrows). */
+select:not([multiple]) {
+  appearance: none; -webkit-appearance: none; min-height: var(--control-height); padding: 0 34px 0 var(--space-3);
+  border: 1px solid var(--border-control); border-radius: var(--radius-control); background-color: var(--bg-field);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238693a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; color: var(--text); font-size: var(--text-sm); line-height: 1.2; cursor: pointer;
+  transition: border-color var(--duration-press) var(--ease-out), box-shadow var(--duration-press) var(--ease-out);
+}
+select:not([multiple]):hover { border-color: var(--text-faint); }
+select:not([multiple]):focus, select:not([multiple]):focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--glow-accent); }
+select:not([multiple]):disabled { opacity: 0.6; cursor: not-allowed; }
+select.input-sm:not([multiple]) { min-height: var(--control-height-sm); font-size: var(--text-xs); }
+
 /* ---------- overlays ---------- */
+/* A modal dialog is centred in the window wherever its markup sits: a dialog rendered inside a
+   page section used to take that section's child margin and open in the top-left corner. */
+dialog.dialog:modal { margin: auto; }
 .dialog { border-color: var(--border-strong); overscroll-behavior: contain; }
 .dialog-body { padding-inline: 24px; padding-bottom: 24px; gap: 20px; }
 .dialog-head { margin-inline: -24px; min-height: 60px; padding: 16px 24px; background: var(--bg-overlay); }
@@ -150,7 +202,10 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 
 /* Host rows: name and sign-in, the address as the machine wrote it, then what is true of it now. */
 .hosts-main .host-rows > li { min-height: 48px; padding: 6px 8px 6px 12px; grid-template-columns: 28px minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(0, 1fr) auto; }
-.hosts-main .host-rows > li[data-active="true"] { background: var(--bg-selected); box-shadow: var(--edge-select); }
+.hosts-main .host-rows > li[data-active="true"] { background: var(--bg-selected); }
+/* A selected row is its tint: its dividers keep their own colour (an accent divider read as a
+   stray line above the row). Cards keep their full accent border. */
+.list > li[data-selected="true"] { border-color: var(--border-subtle); box-shadow: none; }
 .hosts-main .host-rows .os-icon { width: 28px; height: 28px; background: transparent; border: 0; color: var(--text-faint); }
 .hosts-main .host-rows .row-sub { color: var(--text-faint); }
 .hosts-main .host-col-address { font-size: var(--text-xs); color: var(--text-muted); }
@@ -183,12 +238,12 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .host-panel-foot { padding: 12px 20px; background: var(--bg-surface); }
 
 /* ---------- connection sheet ---------- */
-/* Three parts: the heading (what is happening, and the risk when there is one), a body that
-   scrolls when the pane is short, and the actions. The heading and the choices are therefore
+/* Centred in its pane. Three parts: the heading (what is happening, and the risk when there is
+   one), a body that scrolls when the pane is short, and the actions. The heading and the choices are therefore
    always in view, whatever the window size; nothing overlaps a fingerprint. */
 .connect-layer {
-  display: grid; grid-template-columns: minmax(0, 560px); grid-template-rows: minmax(0, 1fr);
-  align-items: start; padding: 32px 24px 24px; overflow: hidden; overscroll-behavior: contain;
+  display: grid; grid-template-columns: minmax(0, 480px); grid-template-rows: minmax(0, 1fr);
+  align-items: center; justify-content: center; padding: 24px; overflow: hidden; overscroll-behavior: contain;
 }
 .connection-sheet {
   display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; width: 100%; max-height: 100%;
@@ -197,11 +252,34 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .connection-sheet[open] { inset: auto; margin: 0; }
 .connection-sheet[data-tone="danger"] { border-color: var(--danger); box-shadow: var(--shadow-3); transition: none !important; }
 .connection-sheet .connect-head { flex: none; padding: 20px 24px 14px; }
-.connect-head h2 { line-height: 1.45; text-wrap: balance; }
-.connection-sheet .connect-body { display: grid; align-content: start; gap: var(--space-4); min-height: 0; padding: 4px 24px 20px; overflow: auto; overscroll-behavior: contain; }
+.connection-sheet .connect-head .os-icon { display: none; }
+.connect-head h2 { font-size: var(--text-lg); line-height: 1.4; letter-spacing: -0.01em; text-wrap: balance; }
+.connection-sheet .connect-head p { font-size: var(--text-sm); line-height: 1.5; }
+.connection-sheet .connect-head .btn { --btn-fg: var(--text-muted); min-height: 28px; height: 28px; padding-inline: 8px; font-size: var(--text-xs); }
+.connection-sheet .connect-body { display: grid; align-content: start; gap: var(--space-4); min-height: 0; padding: 2px 24px 20px; overflow: auto; overscroll-behavior: contain; }
 .connection-sheet .connect-body:empty { display: none; }
+/* One line says what is happening: the step under way, or the one that failed. The steps already
+   passed stay in the list for assistive technology and in the connection log, but are not drawn. */
+.connection-sheet .connect-track + .connect-steps { margin-top: -6px; }
+.connection-sheet .connect-steps { position: relative; }
+.connection-sheet .connect-steps li { grid-template-columns: minmax(0, 1fr); min-height: 0; animation: none; color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.connection-sheet .connect-steps li:not([data-kind="now"], [data-kind="fail"]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.connection-sheet .connect-steps :is(.connect-marker, .connect-time) { display: none; }
+.connection-sheet .connect-steps li[data-kind="fail"] { color: var(--danger); }
+.connection-sheet .connect-steps .connect-detail { margin-left: 6px; }
+.connection-sheet .connect-prompt { margin-left: 0; padding: 16px; border-radius: var(--radius-box); background: var(--bg-surface); }
 .connection-sheet .connect-actions { flex: none; flex-wrap: wrap; margin: 0; padding: 12px 24px 16px; border-top: 1px solid var(--border-subtle); }
 .connection-sheet .connect-actions:empty { display: none; }
+/* Quick connect (an address that is not a saved host) is the same sheet: its form is the column,
+   so its heading, progress, choices and actions sit on the same 24 px inset as a connection. */
+.quick-connect-sheet > form { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.quick-connect-sheet > form > :not(.connect-head, .connect-actions) { margin-inline: 24px; }
+.quick-connect-sheet > form > .connect-head { padding-bottom: 0; }
+.quick-connect-sheet > form > .connect-track { margin-bottom: 0; }
+.quick-connect-sheet > form > .connect-actions { margin-top: var(--space-1); }
+.quick-connect-sheet fieldset { gap: var(--space-2); }
+.quick-connect-sheet legend { margin-bottom: var(--space-2); padding: 0; }
+.quick-connect-sheet .choice .field { margin-top: var(--space-2); }
 .fingerprint { overflow-wrap: anywhere; }
 
 /* ---------- command palette ---------- */
@@ -232,7 +310,6 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .settings-page .settings-nav-item { position: relative; border-radius: 6px; margin-block: 1px; min-height: 30px; height: 30px; padding-inline: 10px; color: var(--text-muted); }
 .settings-page .settings-nav-item:hover { color: var(--text); }
 .settings-page .settings-nav-item[aria-current="page"] { color: var(--text); box-shadow: none; }
-.settings-page .settings-nav-item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--accent); }
 .settings-page .settings-search { border: 1px solid var(--border-control); border-radius: 6px; margin-bottom: 8px; background: var(--bg-field); }
 .settings-page .settings-section > .settings-section-strip { background: var(--bg-app); padding: 20px 24px 16px; box-shadow: none; border-bottom: 0; }
 .settings-page .settings-section > .settings-section-strip h2 { font-size: var(--text-xl); letter-spacing: -0.02em; }
@@ -241,6 +318,18 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .settings-page .settings-group { border-radius: var(--radius-box); border-color: var(--border-subtle); }
 .settings-page .settings-group .box-strip { background: var(--bg-surface); }
 .settings-page .settings-group .setting-row { padding: 12px 16px; }
+/* Snippets page: folders as boxes with room in them. A snippet is a 56 px row: its name, then
+   the first line of the command, then its actions set apart at the right. */
+.snippet-list:not([data-compact]) .folder + .folder { margin-top: 12px; }
+.snippet-list:not([data-compact]) .folder { border-color: var(--border-subtle); }
+.snippet-list:not([data-compact]) .folder-row { padding-right: 8px; }
+.snippet-list:not([data-compact]) .folder-head { height: 40px; padding: 0 14px; gap: 8px; font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.snippet-list:not([data-compact]) .snippet { min-height: 56px; padding: 10px 10px 10px 16px; gap: 16px; border-color: var(--border-subtle); }
+.snippet-list:not([data-compact]) .snippet-main { gap: 3px; }
+.snippet-list:not([data-compact]) .snippet-name { gap: 8px; line-height: 1.35; }
+.snippet-list:not([data-compact]) .snippet-code { color: var(--text-faint); line-height: 1.45; }
+.snippet-list:not([data-compact]) .snippet-actions { gap: 6px; }
+.snippet-list:not([data-compact]) .snippet-actions .btn-sm:not(.btn-icon) { padding-inline: 10px; }
 .sftp .sftp-head, .files-panel .panel-head { background: var(--bg-surface); }
 .tabstrip .tab[data-files-only] { --tab-fill: var(--bg-surface); }
 .ft-table thead th { background: var(--bg-surface); }
