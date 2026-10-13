@@ -6,3 +6,4 @@ import "./styles/components.css";
 import "./styles/screens.css";
 import "./styles/springs.css";
 import "./styles/motion.css";
+import "./styles/tabs.css";

@@ -35,7 +35,9 @@ function live(page: Page) {
           on: target ? `${target.tagName.toLowerCase()}.${[...target.classList].join(".")}` : "",
         };
       })
-      .filter((a) => a.duration > 0 && !/spin|pulse|breathe|blink|progress/.test(a.name)),
+      // Loops that show a state, and one-shot state flashes (main's m-flash, Afterglow's ping), are
+      // state indications rather than interface movement.
+      .filter((a) => a.duration > 0 && !/spin|pulse|breathe|blink|progress|m-flash|ag-afterglow/.test(a.name)),
   );
 }
 
@@ -130,5 +132,64 @@ test.describe("Afterglow motion", () => {
     await openApp(page);
     const viewBoxes = await page.getByRole("navigation", { name: "Primary" }).locator("svg:not(.brand-mark)").evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("viewBox")))]);
     expect(viewBoxes).toEqual(["0 0 256 256"]);
+  });
+
+  test("liquid tabs: a pointer switch glides one pill to the clicked tab, which then rests filled", async ({ page }) => {
+    await openApp(page, { renderer: "compatibility" });
+    await allowMotion(page);
+    const tabs = page.locator(".tabstrip-tabs .tab:not(.tab-page)");
+    for (let i = 0; i < 2; i += 1) {
+      await page.keyboard.press("Control+Shift+T");
+      await expect(tabs).toHaveCount(i + 1);
+    }
+    await page.waitForTimeout(300);
+    const first = tabs.nth(0);
+    await first.click();
+    // Mid-glide: one pill, beside the tablist (which holds only tabs), the new tab's fill waiting.
+    const during = await page.evaluate(() => ({
+      pills: document.querySelectorAll(".tab-pill-indicator").length,
+      inTablist: !!document.querySelector('[role="tablist"] .tab-pill-indicator'),
+      gliding: document.querySelector(".ag-tabstrip")?.hasAttribute("data-pill-gliding"),
+    }));
+    expect(during).toEqual({ pills: 1, inTablist: false, gliding: true });
+    // At rest: no pill, and the clicked tab carries its own fill.
+    await expect(page.locator(".tab-pill-indicator")).toHaveCount(0);
+    await expect(first).toHaveAttribute("aria-selected", "true");
+    expect(await first.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+  });
+
+  test("liquid tabs: from the keyboard, the active tab simply changes", async ({ page }) => {
+    await openApp(page, { renderer: "compatibility" });
+    await allowMotion(page);
+    const tabs = page.locator(".tabstrip-tabs .tab:not(.tab-page)");
+    await page.keyboard.press("Control+Shift+T");
+    await page.keyboard.press("Control+Shift+T");
+    await expect(tabs).toHaveCount(2);
+    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Control+Shift+Tab");
+    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+    expect(await page.locator(".tab-pill-indicator").count()).toBe(0);
+  });
+
+  test("afterglow ping: output in a background tab glows once, then leaves an amber dot", async ({ page }) => {
+    await openApp(page, { renderer: "compatibility" });
+    await allowMotion(page);
+    await page.keyboard.press("Control+Shift+K");
+    await page.getByRole("combobox", { name: /Type a command/ }).fill("api-gateway");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.keyboard.press("Control+Shift+T");
+    const local = page.getByRole("tab", { name: /Local terminal/ });
+    await page.getByRole("tab", { name: /api-gateway/ }).click();
+    await page.evaluate(() => (window as unknown as { __mockOutput: (s: string) => void }).__mockOutput("background line\r\n"));
+    await expect(local).toHaveAttribute("data-unread", "true");
+    const glow = await local.evaluate((el) =>
+      el
+        .getAnimations({ subtree: true })
+        .map((a) => ({ name: (a as CSSAnimation).animationName, pseudo: (a.effect as KeyframeEffect).pseudoElement, duration: (a.effect as KeyframeEffect).getTiming().duration })),
+    );
+    expect(glow).toContainEqual({ name: "ag-afterglow", pseudo: "::before", duration: 900 });
+    await page.waitForTimeout(1000);
+    expect(await local.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
   });
 });

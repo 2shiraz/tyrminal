@@ -539,3 +539,25 @@ Each entry says what changed from the plan above and why. Newest last.
     main's 92 icon exports to a Phosphor regular glyph and generates `exp/ui/icons.tsx` with the same
     names (plus duotone variants for tiles), so no component changes. A new main icon without a
     mapping fails the generator.
+15. **Shell leaves are wrapped, not forked (M2).** Main already has the sidebar glide (lib/useGlide.ts,
+    pinned at 140 ms by its spec), the rail collapse and the tab width glide, so the Sidebar and
+    StatusBar are reskinned rather than swapped. `exp/layout/TabStrip.tsx` renders main's TabStrip
+    unchanged and adds the liquid pill around it. Main's specs pin "only the active tab is filled"
+    and "the tablist holds only tabs", so the pill exists only during a pointer glide (as main's nav
+    glide does), sits beside the tablist, follows the widening tab's live box each frame, and hands
+    the fill back to the tab when it lands. Active tabs keep main's widening (its spec samples it).
+16. **The afterglow ping is CSS (M2).** A background tab with unseen output (`data-unread`) or a
+    finished command glows once (900 ms opacity on a pseudo-element, named `ag-afterglow`) and then
+    holds a 6 px amber dot. Like main's one-shot `m-flash`, it is a state indication, so it is exempt
+    from the 220 ms interface budget (the exp motion spec lists it explicitly).
+17. **No Motion library (M2, M3).** Main's front end already does FLIP, glides and exits with WAAPI;
+    adding Motion would mean a second animation system on the same DOM, about 30 KB, and React
+    components it could only reach by forking. Gestures use `exp/motion/spring.ts` instead: the
+    shared spring table simulated from the release position and velocity and played as a WAAPI
+    keyframe animation on `transform` (compositor-driven, interruptible by cancelling and
+    restarting from the live transform), plus Apple's projection and rubber band. ADR 0013 keeps
+    motion 13.4.4 listed as considered, not added.
+18. **The host sheet stays docked (M3).** Main's host details panel sits beside the list (and covers
+    it when narrow); its specs and the panel width clamp depend on that. Afterglow styles it as a
+    lifted sheet (rounded free side, soft shadow, a grip in the header) and adds the throw-away
+    gesture to its header, instead of turning it into an overlay over a dimmed list.

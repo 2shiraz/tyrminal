@@ -1,0 +1,90 @@
+/* Afterglow tabs, M2 (plan §6 moments 2 and 3). exp/layout/TabStrip.tsx adds the pill. */
+
+:root[data-ui="afterglow"] {
+  /* ------------------------------------------------------------ the gliding pill */
+
+  & .ag-tabstrip {
+    display: contents;
+  }
+
+  & .tab-pill-indicator {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    z-index: 0;
+    height: var(--tab-h);
+    margin-top: calc(var(--tab-h) / -2);
+    border-radius: var(--r-sm);
+    background: var(--bg-control);
+    box-shadow: var(--shadow-card), 0 0 0 1px var(--border-subtle);
+    contain: strict;
+    pointer-events: none;
+  }
+
+  & .tab-pill-indicator[data-kind="terminal"] {
+    background: var(--scheme-bg);
+    box-shadow: var(--shadow-card), 0 0 0 1px color-mix(in srgb, var(--scheme-fg) 10%, transparent);
+  }
+
+  & .tabstrip-scroll {
+    position: relative;
+  }
+
+  & .tabstrip-tabs {
+    z-index: 1;
+  }
+
+  /* While the pill glides, the new tab's own fill waits; at rest the tab is filled as on main. */
+  & .ag-tabstrip[data-pill-gliding] .tab[aria-selected="true"] {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  & .ag-tabstrip[data-pill-gliding] .tab[data-production="true"][aria-selected="true"] {
+    box-shadow: inset 0 2px 0 var(--danger);
+  }
+
+  /* ------------------------------------------------------------ afterglow ping */
+
+  /* A background tab with unseen output or a finished command glows amber once, fading over
+     900 ms like a phosphor, then keeps a small amber dot until visited. One shot, opacity only, on
+     a pseudo-element. A state indication, as main's one-shot m-flash; never a loop. */
+  & .tab:not([aria-selected="true"]):is([data-unread], :has(.tab-finished))::before {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--accent-soft);
+    opacity: 0;
+    pointer-events: none;
+    animation: ag-afterglow 900ms var(--ease-out);
+  }
+
+  & .tab-lead .status-dot[data-unread] {
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    box-shadow: none;
+  }
+}
+
+@keyframes ag-afterglow {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-ui="afterglow"] .tab::before {
+    animation: none !important;
+  }
+}
+
+:root[data-ui="afterglow"][data-reduce-motion="true"] .tab::before {
+  animation: none !important;
+}

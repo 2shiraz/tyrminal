@@ -26,3 +26,13 @@ milestone, newest last.
   specs fail on main too), new `tests/ui/afterglow-motion.exp.ts` (5 passed: release spring, 220 ms
   budget, menu spring vs keyboard, reduced motion, Phosphor). Next: M2 liquid tabs with a gliding
   pill and the afterglow ping.
+- **M2 shell chrome (2026-10-13).** Visible: liquid tabs: a pointer switch glides one pill
+  carrying the active fill from the tab you leave to the one you click, in step with main's tab
+  width glide, then hands the fill back (keyboard switches stay instant); the afterglow ping: a
+  background tab with new output or a finished command glows amber once and keeps a small amber
+  dot until visited. Sidebar and status bar stay main's components, reskinned. Screenshots:
+  `docs/design/afterglow/*-18-tab-glide.png` (the strip at rest after a switch; a 140 ms glide is
+  over before a capture lands) plus the refreshed set. Checks: typecheck, exp build, role-based specs
+  after merging main (459 passed; the 3 that fail also fail on main's own latest build or are its
+  known frame-sampling flake), `afterglow-motion.exp.ts` 8 passed (pill glide, keyboard instant,
+  ping). Next: M3 Hosts sheet physics.

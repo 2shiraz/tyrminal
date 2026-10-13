@@ -1,9 +1,11 @@
 // Afterglow (experimental UI, branch only): every swapped module must keep the shape of the module
 // it replaces, so `pnpm typecheck` fails as soon as main changes a signature the swap relies on.
 // Never imported at run time.
+import type * as MainTabStrip from "../components/layout/TabStrip";
 import type * as MainIcons from "../components/ui/icons";
 import type * as MainToasts from "../components/ui/Toasts";
 import type * as MainSchemes from "../features/terminal/schemes";
+import type * as ExpTabStrip from "./layout/TabStrip";
 import type * as ExpIcons from "./ui/icons";
 import type * as ExpToasts from "./ui/Toasts";
 import type * as ExpSchemes from "./terminal/schemes";
@@ -15,4 +17,5 @@ export type Parity = [
   Same<typeof MainToasts, typeof ExpToasts>,
   Same<typeof MainSchemes, typeof ExpSchemes>,
   Same<typeof MainIcons, typeof ExpIcons>,
+  Same<typeof MainTabStrip, typeof ExpTabStrip>,
 ];

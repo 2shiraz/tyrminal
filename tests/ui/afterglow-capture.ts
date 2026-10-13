@@ -15,10 +15,12 @@ const nav = (page: Page, name: RegExp | string) =>
 for (const theme of ["dark", "light"] as const) {
   test(`afterglow ${theme}`, async ({ page }) => {
     test.setTimeout(240_000);
-    const shot = async (name: string, fn?: () => Promise<void>) => {
+    /** `fn` prepares the screen; with `own`, it also takes the screenshot itself (mid-motion shots). */
+    const shot = async (name: string, fn?: () => Promise<void>, own = false) => {
       if (ONLY && !ONLY.includes(name)) return;
       try {
         if (fn) await fn();
+        if (own) return;
         await page.mouse.move(1, 719);
         await page.waitForTimeout(250);
         await page.screenshot({ path: `${OUT}/${theme}-${name}.png` });
@@ -72,6 +74,19 @@ for (const theme of ["dark", "light"] as const) {
       await expect(page.locator(".pane")).toHaveCount(2);
       await page.waitForTimeout(300);
     });
+    await shot("18-tab-glide", async () => {
+      // Mid-glide: motion allowed, a pointer switch, caught after a few frames.
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await page.evaluate(() => {
+        document.documentElement.dataset.reduceMotion = "false";
+      });
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Control+Shift+T");
+      await page.waitForTimeout(400);
+      await page.getByRole("tab", { name: /api-gateway/ }).click();
+      await page.waitForTimeout(40);
+      await page.screenshot({ path: `${OUT}/${theme}-18-tab-glide.png` });
+    }, true);
     await openApp(page, { theme, trustPromptFor: "staging-web", renderer: "compatibility" });
     await shot("17-trust-prompt", async () => {
       await nav(page, /^Hosts/);
