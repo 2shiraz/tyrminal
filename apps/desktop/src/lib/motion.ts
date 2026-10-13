@@ -8,8 +8,7 @@ import { motionMs, openedBy } from "./inputModality";
 
 export const EXIT_MS = 100;
 const MAX_FLIP_ITEMS = 300;
-/** Rows in the arrival stagger, and how many rows may come or go before a change just snaps. */
-const STAGGER_ROWS = 6;
+/** How many rows may come or go before a change just snaps. */
 const MAX_CHANGED = 2;
 const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
 
@@ -54,16 +53,15 @@ export function flashSaved(element: HTMLElement | null | undefined): void {
  * - a child that moved slides from where it was on screen to its new place (--duration-glide);
  *   a move that interrupts a slide starts from where the row is now, so nothing jumps;
  * - a child that is new rises in (--duration-fast);
- * - the first time the list shows rows after a click (arriving on the page), the first eight rise
- *   in one after another, --stagger apart.
+ * - the first arrival is immediate, with no library cascade.
  * Nothing moves after keyboard input (typing in a search field re-orders rows at once), under
  * reduced motion, or for very long lists. Removals are instant (exits are lib/exitGhost.ts).
  */
-export function useFlip(container: RefObject<HTMLElement | null>, { stagger = true, enter = true, evenFromKeyboard = false }: { stagger?: boolean; enter?: boolean; evenFromKeyboard?: boolean } = {}): void {
+export function useFlip(container: RefObject<HTMLElement | null>, { enter = true, evenFromKeyboard = false }: { stagger?: boolean; enter?: boolean; evenFromKeyboard?: boolean } = {}): void {
   const previous = useRef<Map<string, { left: number; top: number }> | null>(null);
   const previousRoot = useRef<HTMLElement | null>(null);
   const running = useRef(new WeakMap<HTMLElement, Animation>());
-  // The arrival stagger plays once per list element.
+  // A newly mounted list appears immediately.
   const staggered = useRef(false);
   useLayoutEffect(() => {
     const root = container.current;
@@ -103,19 +101,7 @@ export function useFlip(container: RefObject<HTMLElement | null>, { stagger = tr
     if (!motionAllowed() || (!evenFromKeyboard && openedBy() === "keyboard")) return;
 
     if (first) {
-      // The list's first rows: a short stagger, only when a click brought the user here.
-      if (!stagger || openedBy() !== "pointer") return;
-      // Opacity only, a few rows, close together: the page is there at once and settles in.
-      const step = motionMs("--stagger");
-      const enter = motionMs("--duration-fast");
-      items.slice(0, STAGGER_ROWS).forEach((el, i) => {
-        el.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: enter,
-          delay: i * step,
-          easing: EASE_OUT,
-          fill: "backwards",
-        });
-      });
+      // Navigation and first library arrival are immediate; no repeated row cascade.
       return;
     }
 

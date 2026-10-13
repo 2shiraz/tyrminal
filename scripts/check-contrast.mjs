@@ -25,6 +25,10 @@ const base = block(":root");
 const themes = [
   ["dark", base],
   ["light", { ...base, ...block(':root[data-theme="light"]') }],
+  ["verdigris dark", { ...base, ...block(':root[data-palette="verdigris"]') }],
+  ["verdigris light", { ...base, ...block(':root[data-palette="verdigris"][data-theme="light"]') }],
+  ["graphite dark", { ...base, ...block(':root[data-palette="graphite"]') }],
+  ["graphite light", { ...base, ...block(':root[data-palette="graphite"][data-theme="light"]') }],
   ["fjord dark", { ...base, ...block(':root[data-palette="fjord"]') }],
   ["fjord light", { ...base, ...block(':root[data-palette="fjord"][data-theme="light"]') }],
   ["contrast dark", { ...base, ...block(':root[data-palette="contrast"]') }],
@@ -148,4 +152,24 @@ if (failures.length) {
   console.error(`\n${failures.length} of ${checked} contrast checks failed`);
   process.exit(1);
 }
+// The theme picker's preview colors (app/themes.ts) must be the tokens they stand for.
+const themeList = readFileSync(join(root, "apps/desktop/src/app/themes.ts"), "utf8");
+const previewOf = { canvas: "bg-app", frame: "bg-sidebar", surface: "bg-surface", text: "text", accent: "accent" };
+const previews = [...themeList.matchAll(/id: "([\w-]+)",[\s\S]*?dark: \{([^}]+)\},\s*light: \{([^}]+)\}/g)];
+if (previews.length === 0) throw new Error("no themes found in app/themes.ts");
+const mismatches = [];
+for (const [, id, dark, light] of previews) {
+  for (const [mode, body] of [["dark", dark], ["light", light]]) {
+    const selector = id === "cobalt" ? (mode === "dark" ? ":root" : ':root[data-theme="light"]') : `:root[data-palette="${id}"]${mode === "light" ? '[data-theme="light"]' : ""}`;
+    const tokens = block(selector);
+    for (const [, key, value] of body.matchAll(/(\w+): "(#[0-9a-f]{6})"/g)) {
+      if (tokens[previewOf[key]] !== value) mismatches.push(`${id} ${mode}: preview ${key} ${value} is not --${previewOf[key]} (${tokens[previewOf[key]]})`);
+    }
+  }
+}
+if (mismatches.length > 0) {
+  console.error(mismatches.join("\n"));
+  process.exit(1);
+}
+console.log(`theme previews ok: ${previews.length} themes match their tokens`);
 console.log(`contrast ok: ${checked} pairs across ${themes.length} themes and ${schemeBlocks.length} terminal schemes`);

@@ -6,6 +6,7 @@ import { defineConfig } from "@playwright/test";
 // TYR_UI_PORT lets parallel runs (several worktrees on one machine) each serve their own build:
 // with a shared port, `reuseExistingServer` would silently test another checkout's frontend.
 const port = Number(process.env.TYR_UI_PORT ?? 4319);
+const outputRoot = process.env.TYR_UI_OUTPUT ?? "../../docs/reports/raw";
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(`TYR_UI_PORT must be a port number from 1024 to 65535, got ${process.env.TYR_UI_PORT}`);
 
 export default defineConfig({
@@ -14,8 +15,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  reporter: [["list"], ["html", { open: "never", outputFolder: "../../docs/reports/raw/ui-report" }]],
-  outputDir: "../../docs/reports/raw/ui-results",
+  reporter: [["list"], ["html", { open: "never", outputFolder: `${outputRoot}/ui-report` }]],
+  outputDir: `${outputRoot}/ui-results`,
   snapshotPathTemplate: "{testDir}/__screenshots__/{arg}{ext}",
   expect: {
     toHaveScreenshot: { maxDiffPixelRatio: 0.004, threshold: 0.15, animations: "disabled", caret: "hide", scale: "css" },
@@ -28,6 +29,7 @@ export default defineConfig({
     timezoneId: "UTC",
     locale: "en-US",
     launchOptions: {
+      ...(process.env.TYR_BROWSER_EXECUTABLE ? { executablePath: process.env.TYR_BROWSER_EXECUTABLE } : {}),
       // Software GL so the WebGL renderer path is exercised the same way on every machine.
       args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--font-render-hinting=none"],
     },

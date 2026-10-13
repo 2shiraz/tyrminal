@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { uiModifier, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -63,8 +63,8 @@ test("search goes through the core and understands tag: and group:", async ({ pa
 test("bulk: select hosts, add a tag and move them, all in one call each", async ({ page }) => {
   await openHosts(page);
   const name = (label: string) => page.getByTestId("host-list").getByRole("button", { name: label, exact: true });
-  await name("edge-cache").click({ modifiers: ["ControlOrMeta"] });
-  await name("staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await name("edge-cache").click({ modifiers: [uiModifier] });
+  await name("staging-web").click({ modifiers: [uiModifier] });
   const bar = page.getByTestId("bulk-bar");
   await expect(bar).toContainText("2 selected");
 
@@ -80,7 +80,7 @@ test("bulk: select hosts, add a tag and move them, all in one call each", async 
 
   // The strip shows from two hosts on: move both tagged hosts to Lab, which holds Home lab.
   await name("edge-cache").click();
-  await name("staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await name("staging-web").click({ modifiers: [uiModifier] });
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Move to group" }).click();
   await page.getByRole("dialog").getByRole("combobox").selectOption({ label: "Lab" });
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();

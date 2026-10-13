@@ -34,12 +34,14 @@ export function TextField({ label, value, onChange, hint, error, trailing, ...re
       <div className="input-with-icon">
         <input
           id={id}
+          name={rest.name ?? label}
           className="input"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
           autoCapitalize="off"
+          autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
           style={trailing ? { paddingRight: 40 } : undefined}
@@ -114,6 +116,7 @@ export function TextArea({
       <label htmlFor={id}>{label}</label>
       <textarea
         id={id}
+        name={label}
         className="textarea"
         style={mono ? undefined : { fontFamily: "var(--font-ui)" }}
         rows={rows}
@@ -122,6 +125,7 @@ export function TextArea({
         autoFocus={autoFocus}
         data-autofocus={autoFocus ? true : undefined}
         spellCheck={false}
+        autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"
         aria-describedby={hint ? `${id}-hint` : undefined}

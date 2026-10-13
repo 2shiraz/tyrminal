@@ -19,6 +19,7 @@ export function installMockBackend(options) {
     vault: { state: scenario === "onboarding" ? "uninitialized" : scenario === "locked" ? "locked" : "unlocked", generation: 0 },
     prefs: {
       theme: options.theme ?? "dark",
+      palette: options.palette ?? "cobalt",
       reduceMotion: true,
       localShell: null,
       editorApps: [],

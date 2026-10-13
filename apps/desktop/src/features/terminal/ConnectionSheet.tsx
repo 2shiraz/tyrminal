@@ -522,18 +522,21 @@ export function ConnectionSheet(props: {
           </div>
           {ssh && !settling && log}
         </div>
-        {showTrack && <ConnectTrack states={states} lead={props.leadStops} />}
-        {retrying && !closed ? (
-          <>
-            {body}
-            <Steps rows={listed} />
-          </>
-        ) : (
-          <>
-            {showSteps && !retrying && <Steps rows={listed} />}
-            {body}
-          </>
-        )}
+        {/* The part that scrolls in a short pane: the heading above and the actions below stay put. */}
+        <div className="connect-body">
+          {showTrack && <ConnectTrack states={states} lead={props.leadStops} />}
+          {retrying && !closed ? (
+            <>
+              {body}
+              <Steps rows={listed} />
+            </>
+          ) : (
+            <>
+              {showSteps && !retrying && <Steps rows={listed} />}
+              {body}
+            </>
+          )}
+        </div>
         {/* Keyed by what the sheet shows, so its buttons mount afresh and the right one takes focus. */}
         <div className="connect-actions" key={mode}>
           {actions}

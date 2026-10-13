@@ -19,6 +19,11 @@ suggestions), see `docs/work-split.md`. Owner requests are logged in `docs/reque
 | 09 Release candidate | Diagnostics consent, update controls, user guide, upgrade test from beta.1, installer smoke test on A's branch |
 | 10–15 | Not started (sync, teams, mobile) |
 
+Interface redesign ("Quiet Precision", five app themes with Cobalt blue as the default) is on
+`redesign/quiet-precision`, not merged: state, results and what is still unverified are in
+[`docs/redesign/PROGRESS.md`](redesign/PROGRESS.md); the design is in [`DESIGN.md`](../DESIGN.md).
+Its 22 visual goldens must be re-recorded in the pinned container before it merges.
+
 Pre-release v0.1.0-beta.1 is published; v0.1.0-beta.2 follows once PR #6 and PR #5 merge.
 
 ## Findings worth keeping

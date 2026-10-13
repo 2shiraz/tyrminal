@@ -1,5 +1,5 @@
 // The tab strip: browser-style tabs, "+" right after the last tab, horizontal-only overflow, the
-// active tab wider than the others, and no animation under reduced motion. Mock backend; the
+// stable widths during switching, immediate removal, and no animation under reduced motion. Mock backend; the
 // geometry is measured in the page. Never native evidence.
 
 import { type Page, expect, test } from "@playwright/test";
@@ -119,23 +119,21 @@ test("tabs shrink evenly before the strip scrolls", async ({ page }) => {
     els.filter((e) => e.getAttribute("aria-selected") !== "true").map((e) => Math.round(e.getBoundingClientRect().width)),
   );
   expect(new Set(widths).size).toBe(1);
-  expect(widths[0]!).toBeLessThan(180);
+  // Narrower than a tab at rest (every tab has one resting width, selected or not).
+  const resting = await terminalTabs(page).first().evaluate((el) => Number.parseFloat(getComputedStyle(el).getPropertyValue("--tab-w")));
+  expect(resting).toBeGreaterThan(0);
+  expect(widths[0]!).toBeLessThan(resting);
 });
 
-test("the active tab is wider than the inactive ones", async ({ page }) => {
+test("selecting a session preserves every tab's width and keeps the selected identity visible", async ({ page }) => {
   await openApp(page);
   await openLocalTabs(page, 3);
+  const before = await terminalTabs(page).evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
   await terminalTabs(page).nth(1).click();
   await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-  await expect
-    .poll(async () => {
-      const widths = await terminalTabs(page).evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
-      return widths[1]! > widths[0]! && widths[1]! > widths[2]!;
-    })
-    .toBe(true);
-  // Inactive tabs keep room for the status dot, a few letters and the close button.
-  const inactive = (await terminalTabs(page).nth(0).boundingBox())!;
-  expect(inactive.width).toBeGreaterThanOrEqual(64);
+  const after = await terminalTabs(page).evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+  expect(after).toEqual(before);
+  for (const width of after) expect(width).toBeGreaterThanOrEqual(96);
 });
 
 test("reduced motion: switching tabs does not animate", async ({ page }) => {
@@ -182,90 +180,42 @@ async function sampleWidths(page: Page, a: number, b: number, act: () => Promise
   });
 }
 
-test("a pointer switch: the old tab narrows while the new one widens, in step, frame by frame", async ({ page }) => {
-  // The DOM renderer, as the other terminal specs: software WebGL in a headless container keeps
-  // the main thread too busy to sample.
+test("pointer traversal is immediate, with no width or terminal animation", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.evaluate(() => {
-    document.documentElement.dataset.reduceMotion = "false";
-  });
+  await page.evaluate(() => { document.documentElement.dataset.reduceMotion = "false"; });
   await openLocalTabs(page, 3);
-  await page.waitForTimeout(400);
-  // Tab 2 is active; click tab 0. Sample [tab 0, tab 2] every frame.
-  const frames = await sampleWidths(page, 0, 2, () => terminalTabs(page).nth(0).click());
-  const first = frames[0]!;
-  const last = frames.at(-1)!;
-  expect(last[0]).toBeGreaterThan(first[0] + 40);
-  expect(last[1]).toBeLessThan(first[1] - 40);
-  // Monotonic: the new tab only grows and the old one only shrinks.
-  for (let k = 1; k < frames.length; k += 1) {
-    expect(frames[k]![0]).toBeGreaterThanOrEqual(frames[k - 1]![0] - 0.5);
-    expect(frames[k]![1]).toBeLessThanOrEqual(frames[k - 1]![1] + 0.5);
-  }
-  // Simultaneous: both start on the same frame, and their sum never jumps (same duration and easing).
-  const startA = frames.findIndex((f) => Math.abs(f[0] - first[0]) > 0.5);
-  const startB = frames.findIndex((f) => Math.abs(f[1] - first[1]) > 0.5);
-  expect(startA).toBeGreaterThan(0);
-  expect(Math.abs(startA - startB)).toBeLessThanOrEqual(0);
-  const sum = first[0] + first[1];
-  for (const f of frames) expect(Math.abs(f[0] + f[1] - sum)).toBeLessThanOrEqual(2);
-  // It is a glide, not a jump: several intermediate frames.
-  const between = frames.filter((f) => f[0] > first[0] + 1 && f[0] < last[0] - 1).length;
-  expect(between).toBeGreaterThanOrEqual(3);
-  // The tabs never move by transform.
-  const transformed = await terminalTabs(page).evaluateAll((els) => els.some((e) => e.getAnimations().some((x) => !(x instanceof CSSTransition))));
-  expect(transformed).toBe(false);
+  const frames = await sampleWidths(page, 0, 2, () => terminalTabs(page).nth(0).click(), 200);
+  await expect(terminalTabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  expect(frames.length).toBeGreaterThan(1);
+  for (const frame of frames) expect(frame).toEqual(frames[0]);
+  const animations = await page.locator(".tabstrip, .terminal-host").evaluateAll((els) => els.flatMap((el) => el.getAnimations()).filter((a) => a.playState === "running").length);
+  expect(animations).toBe(0);
 });
 
-test("a keyboard switch changes the widths in one step", async ({ page }) => {
-  // The DOM renderer, as the other terminal specs: software WebGL in a headless container keeps
-  // the main thread too busy to sample.
+test("keyboard traversal keeps widths stable and activates the focused tab immediately", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.evaluate(() => {
-    document.documentElement.dataset.reduceMotion = "false";
-  });
+  await page.evaluate(() => { document.documentElement.dataset.reduceMotion = "false"; });
   await openLocalTabs(page, 3);
-  await page.waitForTimeout(400);
   await terminalTabs(page).nth(2).focus();
   await page.keyboard.press("ArrowLeft");
-  const frames = await sampleWidths(page, 1, 2, () => page.keyboard.press("Enter"), 300);
+  const frames = await sampleWidths(page, 1, 2, () => page.keyboard.press("Enter"), 200);
   await expect(terminalTabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-  const first = frames[0]!;
-  const last = frames.at(-1)!;
-  const between = frames.filter((f) => f[0] > first[0] + 1 && f[0] < last[0] - 1).length;
-  expect(last[0]).toBeGreaterThan(first[0] + 40);
-  expect(between).toBe(0);
+  for (const frame of frames) expect(frame).toEqual(frames[0]);
 });
 
-test("closing with the pointer narrows the tab to nothing, then removes it", async ({ page }) => {
+test("pointer close removes the session immediately without a layout-animation timer", async ({ page }) => {
   await openApp(page, { renderer: "compatibility" });
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.evaluate(() => {
-    document.documentElement.dataset.reduceMotion = "false";
-  });
+  await page.evaluate(() => { document.documentElement.dataset.reduceMotion = "false"; });
   await openLocalTabs(page, 3);
-  await page.waitForTimeout(400);
   const target = terminalTabs(page).nth(1);
   await target.hover();
-  // Sample the closing tab itself, by reference, until it leaves the page: sampling by position
-  // would read the next tab once this one is gone.
-  await target.evaluate((el) => {
-    const w = window as unknown as { __closing: number[]; __closingSampler: number };
-    w.__closing = [el.getBoundingClientRect().width];
-    w.__closingSampler = window.setInterval(() => {
-      if (el.isConnected) w.__closing.push(el.getBoundingClientRect().width);
-      else window.clearInterval(w.__closingSampler);
-    }, 8);
-  });
   await target.locator(".tab-close").click();
   await expect(terminalTabs(page)).toHaveCount(2);
-  const widths = await page.evaluate(() => (window as unknown as { __closing: number[] }).__closing);
-  expect(widths[0]).toBeGreaterThan(100);
-  expect(widths.filter((w) => w > 1 && w < widths[0]! - 1).length).toBeGreaterThanOrEqual(2);
-  for (let k = 1; k < widths.length; k += 1) expect(widths[k]!).toBeLessThanOrEqual(widths[k - 1]! + 0.5);
-  await expect(terminalTabs(page)).toHaveCount(2);
+  expect(await page.locator(".tab[data-closing]").count()).toBe(0);
+  await expect(terminalTabs(page).last()).toHaveAttribute("aria-selected", "true");
 });
 
 test("status dots in tabs are plain 8 px dots, with no halo or ring", async ({ page }) => {
@@ -307,4 +257,35 @@ test("a host's tab shows its OS logo; a local tab keeps the status dot", async (
   await expect(local.locator(".tab-os")).toHaveCount(0);
   // The tab's accessible name is unchanged by the logo (the slot is hidden from assistive tech).
   await expect(host).toHaveAccessibleName(/^api-gateway/);
+});
+
+test("a new-tab page reports its context without pretending to connect", async ({ page }) => {
+  await openApp(page);
+  await plus(page).click();
+  await expect(page.locator(".statusbar")).toContainText("Local · encrypted");
+  await expect(page.locator(".statusbar")).not.toContainText("Connecting");
+});
+
+test("working chrome retains app colors and both split terminal canvases stay fully legible", async ({ page }) => {
+  await openApp(page, { renderer: "compatibility" });
+  await openLocalTabs(page, 1);
+  const colors = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const status = getComputedStyle(document.querySelector(".statusbar")!);
+    return { ui: root.getPropertyValue("--bg-sidebar").trim(), actual: status.backgroundColor };
+  });
+  // Resolve the token through a browser element so hex/rgb representation doesn't affect the assertion.
+  const expected = await page.evaluate((value) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = value;
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  }, colors.ui);
+  expect(colors.actual).toBe(expected);
+  await page.keyboard.press("Alt+Shift+Equal");
+  const panes = page.locator(".pane:not([hidden]) .terminal-host");
+  await expect(panes).toHaveCount(2);
+  for (const pane of await panes.all()) await expect(pane).toHaveCSS("opacity", "1");
 });

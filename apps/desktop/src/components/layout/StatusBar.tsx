@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { Pane } from "../../app/workspace";
 import type { PaneStatus } from "../../features/terminal/TerminalView";
+import { msgSftp } from "../../features/sftp/messages";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
 import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun } from "../ui/icons";
@@ -45,7 +46,7 @@ function StatusBarImpl({
   shortcuts?: unknown;
 }) {
   const state = status?.state ?? "connecting";
-  const stateText = state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
+  const stateText = pane?.target.kind === "start" ? msg.nav.newTab : pane?.target.kind === "sftp" ? msgSftp.open : state === "failed" ? msg.terminal.state.failed : state === "closed" ? msg.terminal.state.closed : msg.terminal.state[state];
   return (
     <footer className="statusbar">
       {pane ? (
@@ -55,19 +56,19 @@ function StatusBarImpl({
             <span>{stateText}</span>
           </span>
           <span className="status-sep" aria-hidden="true" />
-          <span className="status-item selectable truncate" title={pane.identity}>
+          <span className="status-item status-identity selectable truncate" title={pane.identity}>
             {pane.identity}
           </span>
           {status && status.cols > 0 && (
             <>
-              <span className="status-sep" aria-hidden="true" />
-              <span className="status-item tabular">{msg.status.size(status.cols, status.rows)}</span>
+              <span className="status-sep status-dimensions" aria-hidden="true" />
+              <span className="status-item status-dimensions tabular">{msg.status.size(status.cols, status.rows)}</span>
             </>
           )}
           {status && (
             <>
-              <span className="status-sep" aria-hidden="true" />
-              <span className="status-item" data-renderer={status.renderer}>
+              <span className="status-sep status-renderer" aria-hidden="true" />
+              <span className="status-item status-renderer" data-renderer={status.renderer}>
                 <IconCpu size={13} />
                 {msg.status.renderer(status.renderer === "webgl" ? msg.status.webgl : msg.status.dom)}
               </span>

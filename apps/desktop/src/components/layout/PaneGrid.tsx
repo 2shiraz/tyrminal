@@ -170,16 +170,17 @@ function PaneGridImpl({
                     <IconGripVertical size={12} />
                   </span>
                   <span className="status-dot" data-tone={pane.indicator} aria-hidden="true" />
-                  <span className="truncate" style={{ flex: 1 }}>
+                  <span className="truncate pane-heading" style={{ flex: 1 }} title={`${pane.label} — ${pane.identity}`}>
                     {pane.label}
-                    <span className="pane-identity"> · {pane.identity}</span>
+                    {pane.identity !== pane.label && <span className="pane-identity"> · {pane.identity}</span>}
+                    <span className="visually-hidden"> {msgC.status.describe(pane)}</span>
                   </span>
                   {production?.has(id) && (
                     <span className="badge badge-production tab-production">
                       {msgProduction.label}
                     </span>
                   )}
-                  {broadcasting.has(tab.id) && broadcastPaneIds && !broadcastPaneIds.has(id) && <span className="faint">{msgI.broadcast.excluded}</span>}
+                  {broadcasting.has(tab.id) && broadcastPaneIds && !broadcastPaneIds.has(id) && <span className="faint pane-note" title={msgI.broadcast.excluded}>{msgI.broadcast.excluded}</span>}
                   {canOpen && (
                     <IconButton size="sm" label={msgC.panes.toNewTab} onClick={() => onToNewTab(id)}>
                       <IconArrowUpRight size={13} />

@@ -3,7 +3,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, expect, test } from "@playwright/test";
 
-import { type MockOptions, openApp } from "./fixtures";
+import { uiModifier, type MockOptions, openApp } from "./fixtures";
 
 async function audit(page: Page) {
   const results = await new AxeBuilder({ page })
@@ -86,7 +86,7 @@ for (const theme of ["dark", "light"] as const) {
       await audit(page);
       await page.keyboard.press("Escape");
       // The row menu, and the bar for several selected items.
-      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+      await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: [uiModifier] });
       await expect(view.getByRole("toolbar", { name: "2 selected items" })).toBeVisible();
       await audit(page);
       await view.getByRole("grid", { name: /on api-gateway/ }).getByRole("button", { name: "Select deploy.sh" }).click({ button: "right" });

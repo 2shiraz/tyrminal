@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { connectHost, openApp } from "./fixtures";
 
 // The motion rules (docs/design/motion.md): motion answers the pointer and never the keyboard;
 // transform and opacity only, 100 to 220 ms; nothing at all under reduced motion; the terminal
@@ -90,6 +90,13 @@ test.describe("motion allowed", () => {
   test("a transfer bar glides between progress ticks", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
+    // File-management CSS is lazy-loaded: open the Files panel of an SSH session (a local terminal
+    // has no files) before inspecting its bar.
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
+    await connectHost(page, "api-gateway");
+    await expect(page.locator(".statusbar").getByRole("status")).toHaveText(/Connected/);
+    await page.getByRole("button", { name: "Files", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "Files" }).getByRole("grid")).toBeVisible();
     const duration = await page.evaluate(() => {
       const bar = document.createElement("span");
       bar.className = "xfer-bar";
@@ -258,7 +265,7 @@ test.describe("exits", () => {
 
 // Moments (motion.md PR 4).
 test.describe("moments", () => {
-  test("a wrong passphrase shakes the card once and puts focus back in the field", async ({ page }) => {
+  test("a wrong passphrase keeps the error stable and puts focus back in the field", async ({ page }) => {
     await openApp(page, { scenario: "locked" });
     await allowMotion(page);
     const field = page.getByLabel("Passphrase");
@@ -267,8 +274,9 @@ test.describe("moments", () => {
     await expect(page.getByText("That did not unlock the vault.")).toBeVisible();
     await expect(field).toBeFocused();
     const card = page.locator("form.auth-card");
-    const shakes = await card.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)));
-    expect(shakes).toEqual([220]);
+    const transforms = await card.evaluate((el) => el.getAnimations().flatMap((a) => (a.effect as KeyframeEffect).getKeyframes()).filter((frame) => frame.transform && frame.transform !== "none"));
+    expect(transforms).toEqual([]);
+    expect(await card.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
     // The right one still opens the vault, and the window fades in.
     await field.fill("correct horse");
     await page.keyboard.press("Enter");
@@ -308,7 +316,7 @@ test.describe("moments", () => {
 test.describe("glides and lists", () => {
   const primary = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 
-  test("the current page marker glides to a clicked nav item, and rests as the item's own", async ({ page }) => {
+  test("the current page caret glides to a clicked nav item, and rests as the item's own", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
@@ -316,6 +324,8 @@ test.describe("glides and lists", () => {
     await expect(glide).toHaveCount(1);
     expect(await glide.evaluate((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().duration)))).toEqual([140]);
     await expect(primary(page)).toHaveAttribute("data-gliding", "");
+    // Only the caret travels: the glide has no fill of its own, and the item is filled at once.
+    expect(await glide.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     // Settled: no copy left, and the item carries its own marker again.
     await expect(glide).toHaveCount(0);
     await expect(primary(page)).not.toHaveAttribute("data-gliding", /.*/);
@@ -338,14 +348,14 @@ test.describe("glides and lists", () => {
     expect(await primary(page).locator(".nav-glide").count()).toBe(0);
   });
 
-  test("arriving by click, a list's first rows rise in one after another; typing never moves rows", async ({ page }) => {
+  test("arriving by click, library rows are immediately readable; typing never moves rows", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await primary(page).getByRole("button", { name: /^Snippets/ }).click();
     const rows = page.locator('[data-testid="snippet-list"] [data-flip-key]');
     await expect(rows.first()).toBeVisible();
-    const delays = await rows.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAnimations().map((a) => Number((a.effect as KeyframeEffect).getTiming().delay))[0] ?? null));
-    expect(delays).toEqual([0, 20, 40]);
+    expect(await rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
+    expect(await rows.evaluateAll((els) => els.every((el) => getComputedStyle(el).opacity === "1"))).toBe(true);
     // Once the arrival has settled, filtering from the keyboard re-orders at once.
     await expect.poll(() => rows.evaluateAll((els) => els.flatMap((el) => el.getAnimations()).length)).toBe(0);
     await page.getByRole("searchbox").first().click();
@@ -368,7 +378,7 @@ test.describe("host details", () => {
     await expect(page.getByRole("heading", { name: "Hosts", level: 1 })).toBeVisible();
   }
 
-  test("a click slides the content in; switching hosts only crossfades; closing by pointer fades a copy", async ({ page }) => {
+  test("a click slides content in; switching hosts crossfades; closing removes credential forms immediately", async ({ page }) => {
     await openApp(page);
     await allowMotion(page);
     await toHosts(page);
@@ -384,8 +394,9 @@ test.describe("host details", () => {
 
     await page.getByTestId("host-panel").getByRole("button", { name: "Close host details" }).click();
     await expect(page.getByTestId("host-panel")).toHaveCount(0);
-    await expect(page.locator("[data-exit-ghost]")).toHaveCount(1);
-    await expect(page.locator("[data-exit-ghost]")).toHaveCount(0);
+    // Host details contain editable credentials: no copy may extend their lifetime for motion.
+    expect(await page.locator("[data-exit-ghost]").count()).toBe(0);
+    await expect(list.getByRole("button", { name: "edge-cache", exact: true })).toBeFocused();
   });
 
   test("opened from the keyboard, or under reduced motion, the panel is simply there", async ({ page }) => {

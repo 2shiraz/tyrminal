@@ -26,16 +26,9 @@ import { msgSftp } from "../../features/sftp/messages";
 export function BrandMark({ size = 26 }: { size?: number }) {
   return (
     <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <defs>
-        <linearGradient id="tyr-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#7aa7ff" />
-          <stop offset="1" stopColor="#3b6fe0" />
-        </linearGradient>
-      </defs>
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#tyr-mark)" />
-      <rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="rgb(255 255 255 / 0.25)" />
-      <path d="M9 11.5 14 16l-5 4.5" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="16.5" y="19.2" width="7" height="2.6" rx="1.3" fill="#fff" />
+      <rect x="1" y="1" width="30" height="30" rx="6" fill="var(--accent)" />
+      <path d="M9 11.5 14 16l-5 4.5" fill="none" stroke="var(--text-on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="16.5" y="19.2" width="7" height="2.6" rx="1.3" fill="var(--text-on-accent)" />
     </svg>
   );
 }
@@ -82,7 +75,7 @@ function SidebarImpl({
   shortcuts?: unknown;
 }) {
   const counts: Partial<Record<Destination, number>> = { hosts: hostCount, snippets: snippetCount };
-  // The current page marker glides to the clicked item (lib/useGlide).
+  // The accent caret of the current page glides to a clicked item (lib/useGlide); the fill does not.
   const navRef = useRef<HTMLElement>(null);
   useGlide(navRef);
 
@@ -116,13 +109,14 @@ function SidebarImpl({
         <Shortcut action="palette" />
       </button>
 
+      <div className="nav-group-label">{msg.nav.library}</div>
       {PRIMARY.map(item)}
 
-      <div className="nav-group-label eyebrow">{msg.nav.library}</div>
+      <div className="nav-group-label">{msg.nav.security}</div>
       {VAULT.map(item)}
 
-
-      <div className="sidebar-footer">
+      <div className="nav-group-label">{msg.nav.newSession}</div>
+      <div className="sidebar-create">
         <button type="button" className="nav-item" data-nav="local" onClick={onLocalTerminal} data-tooltip={collapsed ? msg.nav.localTerminal : undefined} data-tooltip-side="right">
           <IconSquareTerminal size={17} />
           <span className="nav-label">{msg.nav.localTerminal}</span>
@@ -133,6 +127,9 @@ function SidebarImpl({
             <span className="nav-label">{msgSftp.open}</span>
           </button>
         )}
+      </div>
+
+      <div className="sidebar-footer">
         {item({ id: "settings", icon: <IconSettings size={17} /> })}
         <button type="button" className="nav-item" data-nav="lock" onClick={onLock} data-tooltip={collapsed ? msg.nav.lock : undefined} data-tooltip-side="right">
           <IconLock size={17} />

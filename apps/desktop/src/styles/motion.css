@@ -190,8 +190,7 @@ dialog.m-dialog[open]::backdrop {
   }
 }
 
-/* A wrong passphrase: the card shakes once per failed attempt (VaultScreens plays it with WAAPI,
-   reading --duration-slow, so reduced motion keeps it still). */
+/* Security errors remain spatially stable; focus and readable inline feedback acknowledge them. */
 
 /* Status dots change colour gently. */
 .status-dot {

@@ -2,7 +2,7 @@
 // cancellation against OpenSSH are tested in crates/core/tests/sessions_lab.rs.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { uiModifier, openApp } from "./fixtures";
 
 async function connect(page: Page, host: string) {
   await page.keyboard.press("Control+Shift+K");
@@ -117,7 +117,7 @@ test("files: the path can be typed, and Escape puts the breadcrumbs back", async
 
   // Ctrl+L from the list edits the path too; a folder that is not there says so and stays put.
   await names(page).first().click();
-  await page.keyboard.press("ControlOrMeta+l");
+  await page.keyboard.press(`${uiModifier}+l`);
   await expect(field).toBeFocused();
   await field.fill("/nowhere");
   await page.keyboard.press("Enter");
@@ -540,7 +540,7 @@ test("files: a click visibly selects, Shift/Ctrl extend it, keys move it, and op
 
   // Ctrl adds, Shift takes a range; the footer counts them.
   await list(page).getByRole("button", { name: "Select README.md" }).click();
-  await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click({ modifiers: [uiModifier] });
   await expect(footer).toHaveText(/^2 selected · 700 MB/);
   await list(page).getByRole("button", { name: "Open app" }).click();
   await list(page).getByRole("button", { name: "Select backup.tar.gz" }).click({ modifiers: ["Shift"] });
@@ -558,7 +558,7 @@ test("files: a click visibly selects, Shift/Ctrl extend it, keys move it, and op
   await expect(footer).toHaveText(/^1 selected/);
   await page.keyboard.press("Home");
   await expect(row(/Open app/)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await expect(footer).toHaveText(/^5 selected/);
 
   // A click on the free space below the rows clears the selection.
@@ -723,7 +723,7 @@ test("files: the date says how long ago, several items get a selection bar, and 
 
   // Two selected: a bar with what can be done to both at once.
   await list(page).getByRole("button", { name: "Select README.md" }).click();
-  await list(page).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: [uiModifier] });
   const bulk = panel(page).getByRole("toolbar", { name: "2 selected items" });
   await expect(bulk).toContainText("2 selected");
   await expect(bulk.getByRole("button", { name: "Download" })).toBeVisible();

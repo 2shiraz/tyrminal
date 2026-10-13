@@ -4,7 +4,6 @@ import type { Destination } from "../../app/AppShell";
 import { msgN } from "../../lib/messages-notify";
 import { type Direction, type Workspace, panesOf, tabStatus, tabTitle } from "../../app/workspace";
 import { msg } from "../../lib/messages";
-import { motionMs, openedBy } from "../../lib/inputModality";
 import { msgC } from "../../lib/messages-c";
 import { msgProduction } from "../../lib/messages-production";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -112,10 +111,7 @@ function TabStripImpl({
   });
   const PageIcon = PAGE_ICONS[destination];
 
-  // One mechanism moves the tabs: each tab's width (styles/global.css). When the active tab
-  // changes, the old one narrows while the new one widens in the same frames, and the tabs between
-  // them follow; opening grows a tab in and closing with the pointer shrinks it out. Pointer only:
-  // keyboard changes and reduced motion are instant. No transform (FLIP) runs on tabs.
+  // Session selection and geometry are immediate; terminal content never animates.
   const tabsRef = useRef<HTMLDivElement>(null);
 
   // The OS of each host open in a tab, for its icon (Termius-style). Read again when the hosts or
@@ -181,28 +177,11 @@ function TabStripImpl({
     }
     list.style.minWidth = `${Math.ceil(least)}px`;
   });
-  // The active tab is scrolled into view once its width has settled, never during the change.
-  useEffect(() => {
-    const reveal = () => tabRefs.current.get(ws.active ?? -1)?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    const ms = openedBy() === "pointer" ? motionMs("--duration-glide") : 0;
-    if (ms <= 0) {
-      reveal();
-      return;
-    }
-    const timer = window.setTimeout(reveal, ms + 20);
-    return () => window.clearTimeout(timer);
+  // Reveal the selected session before paint; no animation timer can delay keyboard traversal.
+  useLayoutEffect(() => {
+    tabRefs.current.get(ws.active ?? -1)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
   }, [ws.active, ws.tabs.length]);
-  /** A tab closed with the pointer narrows to nothing first; from the keyboard it closes at once. */
-  const closeWithPointer = (id: number) => {
-    const element = tabRefs.current.get(id);
-    const ms = motionMs("--duration-glide");
-    if (!element || ms <= 0) {
-      onClose(id);
-      return;
-    }
-    element.dataset.closing = "true";
-    window.setTimeout(() => onClose(id), ms);
-  };
+  const closeWithPointer = (id: number) => onClose(id);
 
   function focusTab(index: number) {
     const id = index < 0 ? null : ws.tabs[index]?.id;

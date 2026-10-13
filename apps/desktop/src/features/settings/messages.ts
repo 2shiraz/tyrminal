@@ -26,6 +26,10 @@ export const msgSettings = {
   },
   // Groups inside sections
   theme: "Theme",
+  colourTheme: "Color theme",
+  colourThemeHint: "Colors of the interface. Terminals keep their own color scheme (Settings → Terminal).",
+  themeMode: "Mode",
+  themeModeHint: "System follows your computer's light or dark setting.",
   interfaceSize: "Interface size",
   interfaceSizeHint: "Auto grows the interface with the window. Outside a terminal, Cmd or Ctrl with + and − changes it, and 0 returns to Auto.",
   interfaceSizeAuto: "Auto",

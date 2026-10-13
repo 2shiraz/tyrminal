@@ -766,9 +766,9 @@ function HostsViewImpl({
   return (
     <div className="hosts-layout" ref={layoutRef} data-narrow={narrow} data-panel={panel !== null}>
       <div className="page hosts-main" inert={narrow && panel !== null}>
-        <h1 id="hosts-title" className="visually-hidden">
-          {msg.hosts.title}
-        </h1>
+        <header className="hosts-library-head">
+          <h1 id="hosts-title">{msg.hosts.title}</h1>
+        </header>
         <form
           className="hosts-search"
           role="search"
@@ -781,6 +781,7 @@ function HostsViewImpl({
           <input
             className="input hosts-search-input"
             type="search"
+            name="host-search"
             placeholder={msgHv.searchPlaceholder}
             aria-label={msg.hosts.searchLabel}
             title={msg.hosts.searchHelp}
@@ -797,7 +798,7 @@ function HostsViewImpl({
               else if (filtered[0]) focusHost(filtered[0].id);
             }}
           />
-          <button type="submit" className="btn btn-primary" title={filtered.length === 0 && quickTarget ? msgQuick.option(formatTarget(quickTarget)) : msgHv.connectHint} disabled={!canSubmit}>
+          <button type="submit" className="btn" title={filtered.length === 0 && quickTarget ? msgQuick.option(formatTarget(quickTarget)) : msgHv.connectHint} disabled={!canSubmit}>
             <IconPlay size={14} />
             {msgHv.connect}
           </button>
@@ -893,6 +894,16 @@ function HostsViewImpl({
                 <IconPlus size={16} />
                 {msgHv.newHost}
               </button>
+              <button type="button" className="btn" onClick={() => setImporting(true)}>
+                <IconUpload size={15} />
+                {msgHv.importHostsFull}
+              </button>
+              {onLocal && (
+                <button type="button" className="btn" title={msgHv.terminalHint} onClick={onLocal}>
+                  <IconSquareTerminal size={15} />
+                  {msg.nav.localTerminal}
+                </button>
+              )}
             </EmptyState>
           )}
 
@@ -980,7 +991,7 @@ function HostsViewImpl({
                 <h2 id="hosts-groups-title">{msgHv.groups}</h2>
                 <span className="count">{shownGroups.length}</span>
                 <span className="spacer" />
-                <IconButton size="sm" label={msg.hosts.newGroup} onClick={() => setEditingGroup({ group: null, parentId: currentGroupId })}>
+                <IconButton size="sm" label={msg.hosts.newGroup} data-tooltip-side="bottom-end" onClick={() => setEditingGroup({ group: null, parentId: currentGroupId })}>
                   <IconFolderPlus size={14} />
                 </IconButton>
               </div>
@@ -1013,7 +1024,7 @@ function HostsViewImpl({
                     </div>
                     {g.production && <span className="badge badge-production">{msgProduction.label}</span>}
                     <div className="row-actions">
-                      <IconButton size="sm" label={msg.hosts.groupActions(g.name)} aria-haspopup="menu" onClick={(event) => setGroupMenu({ group: g, anchor: event.currentTarget })}>
+                      <IconButton size="sm" label={msg.hosts.groupActions(g.name)} data-tooltip-side="bottom-end" aria-haspopup="menu" onClick={(event) => setGroupMenu({ group: g, anchor: event.currentTarget })}>
                         <IconEllipsis size={16} />
                       </IconButton>
                     </div>
@@ -1137,7 +1148,7 @@ function HostsViewImpl({
                           </div>
                         </div>
                         <div className="host-card-actions">
-                          <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                          <IconButton size="sm" label={msg.hosts.more(host.label)} data-tooltip-side="bottom-end" aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
                             <IconEllipsis size={16} />
                           </IconButton>
                         </div>
@@ -1220,7 +1231,7 @@ function HostsViewImpl({
                       <IconButton size="sm" className="row-edit" label={msgHv.edit(host.label)} onClick={() => openPanel({ kind: "edit", host })}>
                         <IconPencil size={15} />
                       </IconButton>
-                      <IconButton size="sm" label={msg.hosts.more(host.label)} aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
+                      <IconButton size="sm" label={msg.hosts.more(host.label)} data-tooltip-side="bottom-end" aria-haspopup="menu" onClick={(event) => actions(host, event.currentTarget)}>
                         <IconEllipsis size={16} />
                       </IconButton>
                     </div>

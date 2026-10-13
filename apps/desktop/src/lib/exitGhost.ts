@@ -7,6 +7,12 @@ import { type Ref, type RefCallback, useCallback, useRef } from "react";
 
 import { motionMs, openedBy } from "./inputModality";
 
+// Any new interaction or mounting surface ends an older visual exit immediately.
+const activeExits = new Set<() => void>();
+function cancelExits(): void {
+  for (const cancel of [...activeExits]) cancel();
+}
+
 export interface ExitOptions {
   /** Where the copy ends up, besides transparent (motion.md: panels drift 4 px, popovers shrink). */
   transform?: string;
@@ -16,11 +22,19 @@ export interface ExitOptions {
 
 /** Plays the exit for `element`, which is about to be removed. Returns at once. */
 export function playExit(element: HTMLElement, options: ExitOptions = {}): void {
+  // Never extend the lifetime of input/security/terminal surfaces for decoration.
+  const sensitive = 'form, input, textarea, [contenteditable="true"], dialog, [role="dialog"], [role="alertdialog"], .terminal-host';
+  if (element.matches(sensitive) || element.querySelector(sensitive)) return;
   const ms = motionMs("--duration-exit");
   if (ms <= 0 || !element.isConnected || typeof element.animate !== "function") return;
   if (!options.evenFromKeyboard && openedBy() === "keyboard") return;
   const rect = element.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
+  const presentation = getComputedStyle(element);
+  const opacity = presentation.opacity;
+  const transform = presentation.transform;
+  const origin = presentation.transformOrigin;
+  const zIndex = presentation.zIndex;
   const ghost = element.cloneNode(true) as HTMLElement;
   for (const node of [ghost, ...ghost.querySelectorAll<HTMLElement>("*")]) {
     node.removeAttribute("id");
@@ -39,7 +53,8 @@ export function playExit(element: HTMLElement, options: ExitOptions = {}): void 
     height: `${rect.height}px`,
     margin: "0",
     pointerEvents: "none",
-    zIndex: getComputedStyle(element).zIndex === "auto" ? "50" : getComputedStyle(element).zIndex,
+    zIndex: zIndex === "auto" ? "50" : zIndex,
+    transformOrigin: origin,
     transition: "none",
     animation: "none",
   });
@@ -50,16 +65,56 @@ export function playExit(element: HTMLElement, options: ExitOptions = {}): void 
   queueMicrotask(() => {
     if (!document.querySelector(".shell")) ghost.remove();
   });
-  const animation = ghost.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: options.transform ?? "none" }], {
+  const animation = ghost.animate([{ opacity, transform }, { opacity: 0, transform: options.transform ?? "none" }], {
     duration: ms,
     easing: "cubic-bezier(0.23, 1, 0.32, 1)",
     fill: "forwards",
   });
-  const remove = () => ghost.remove();
+  let removed = false;
+  let timeout = 0;
+  const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const observer = new MutationObserver(() => {
+    if (document.documentElement.dataset.reduceMotion === "true" || !document.querySelector(".shell")) remove();
+  });
+  const reduced = () => {
+    if (media.matches) remove();
+  };
+  // Any later pointer or key action ends the visual at once. The listeners are attached after the
+  // current task, because the event that closed the surface is often still being dispatched (the
+  // close runs in window capture, before document capture); comparing timestamps cannot tell the
+  // two apart where the clock is coarse.
+  const onInput = () => remove();
+  let listening = false;
+  const listen = window.setTimeout(() => {
+    if (removed) return;
+    listening = true;
+    document.addEventListener("pointerdown", onInput, true);
+    document.addEventListener("keydown", onInput, true);
+  }, 0);
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    activeExits.delete(remove);
+    ghost.remove();
+    animation.cancel();
+    window.clearTimeout(timeout);
+    window.clearTimeout(listen);
+    if (listening) {
+      document.removeEventListener("pointerdown", onInput, true);
+      document.removeEventListener("keydown", onInput, true);
+    }
+    media.removeEventListener("change", reduced);
+    observer.disconnect();
+  };
+  activeExits.add(remove);
+  media.addEventListener("change", reduced);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-reduce-motion"] });
+  const appRoot = document.getElementById("root");
+  if (appRoot) observer.observe(appRoot, { childList: true });
   animation.onfinish = remove;
   animation.oncancel = remove;
   // Belt and braces: never leave a copy behind.
-  window.setTimeout(remove, ms + 200);
+  timeout = window.setTimeout(remove, ms + 200);
 }
 
 /**
@@ -74,6 +129,7 @@ export function useExit<T extends HTMLElement>(options: ExitOptions = {}, forwar
       if (typeof forward === "function") forward(node);
       else if (forward) (forward as { current: T | null }).current = node;
       if (!node) return;
+      cancelExits();
       return () => {
         playExit(node, latest.current);
         if (typeof forward === "function") forward(null);

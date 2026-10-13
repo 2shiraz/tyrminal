@@ -7,9 +7,13 @@ bundled, and the CSP forbids loading anything from the network.
 
 ## Themes
 
-- Dark (default), light, and system (follows `prefers-color-scheme`), chosen in Settings →
-  Appearance and applied as `data-theme` on the root element.
-- Contrast: `node scripts/check-contrast.mjs` checks every text/surface pair in both themes and
+- The current visual system is described in `DESIGN.md` at the repository root (Quiet Precision);
+  where this file differs from it, `DESIGN.md` is newer.
+- Five color themes (Cobalt, the default; Verdigris; Fjord; Graphite; High contrast), each with a
+  dark and a light mode. The theme is the `palette` preference, applied as `data-palette` on the
+  root element (absent for Cobalt); the mode is dark, light or system (follows
+  `prefers-color-scheme`), applied as `data-theme`. Both are chosen in Settings → Appearance.
+- Contrast: `node scripts/check-contrast.mjs` checks every text/surface pair in every theme and mode and
   every terminal scheme against WCAG 2.2 AA (4.5:1 text, 3:1 large text, icons and control
   boundaries). It runs in CI.
 - The terminal palette is independent of the app theme (`features/terminal/schemes.ts`,

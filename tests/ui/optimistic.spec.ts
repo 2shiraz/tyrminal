@@ -3,7 +3,7 @@
 // refuses. Deleting is never optimistic. Mock backend; UI evidence only.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { uiModifier, openApp } from "./fixtures";
 
 type MockWindow = { __mockDelay: Record<string, number>; __mockFailNext: Record<string, unknown> };
 
@@ -17,8 +17,8 @@ const list = (page: Page) => page.getByTestId("host-list");
 const card = (page: Page, name: string) => list(page).getByRole("article", { name });
 
 async function selectTwo(page: Page) {
-  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click({ modifiers: ["ControlOrMeta"] });
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "edge-cache", exact: true }).click({ modifiers: [uiModifier] });
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: [uiModifier] });
 }
 
 async function addTag(page: Page, tag: string) {
@@ -83,8 +83,8 @@ test("optimistic: a refused tag removal puts the tag back", async ({ page }) => 
     (window as unknown as MockWindow).__mockFailNext = { host_bulk: { code: "IO_ERROR", message: "The vault could not be written." } };
   });
   // The strip shows from two hosts on: api-gateway (tagged web) and staging-web (no tags).
-  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click({ modifiers: ["ControlOrMeta"] });
-  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: ["ControlOrMeta"] });
+  await list(page).getByRole("button", { name: "api-gateway", exact: true }).click({ modifiers: [uiModifier] });
+  await list(page).getByRole("button", { name: "staging-web", exact: true }).click({ modifiers: [uiModifier] });
   await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
   await page.getByRole("menuitem", { name: "Remove tag…" }).click();
   const dialog = page.getByRole("dialog", { name: "Remove tag" });

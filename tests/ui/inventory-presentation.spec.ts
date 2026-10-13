@@ -4,7 +4,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { chooseLayout, openApp, sortHosts } from "./fixtures";
+import { uiModifier, chooseLayout, openApp, sortHosts } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: unknown }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -87,7 +87,7 @@ test("select all shown hosts and shift-click a range", async ({ page }) => {
   await expect(page.getByTestId("host-list").getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "Select all shown hosts" })).toHaveCount(0);
   await name(page, "api-gateway").focus();
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await expect(page.getByTestId("bulk-bar")).toContainText("6 selected");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
@@ -102,15 +102,15 @@ test("select all shown hosts and shift-click a range", async ({ page }) => {
   await page.getByRole("searchbox", { name: "Search hosts" }).fill("tag:prod");
   await expect(hostCards(page)).toHaveCount(2);
   await name(page, "api-gateway").focus();
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await expect(page.getByTestId("bulk-bar")).toContainText("2 selected");
 });
 
 test("set the OS of selected hosts: the tile shows its icon", async ({ page }) => {
   await openApp(page);
   await openHosts(page);
-  await name(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
-  await name(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await name(page, "edge-cache").click({ modifiers: [uiModifier] });
+  await name(page, "staging-web").click({ modifiers: [uiModifier] });
   await page.getByTestId("bulk-bar").getByRole("button", { name: "More…" }).click();
   await page.getByRole("menuitem", { name: "Set OS icon…" }).click();
   const dialog = page.getByRole("dialog");
@@ -163,7 +163,7 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
   for (let round = 0; round < 2; round++) {
     await openHosts(page);
     await name(page, "api-gateway").focus();
-    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press(`${uiModifier}+a`);
     await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
@@ -171,7 +171,7 @@ test("a group-wide connection that does not fit is refused, not cut short", asyn
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length, { timeout: 15_000 }).toBe(12);
   await openHosts(page);
   await name(page, "api-gateway").focus();
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Connect" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("alert")).toContainText("Only 4 more sessions can be open at once");

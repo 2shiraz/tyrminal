@@ -57,7 +57,7 @@ test("interface size: Cmd/Ctrl + = and 0 change it outside a terminal, and a ter
   // Focus outside the terminal: the interface grows, and the terminal refits to fewer columns.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   expect(await page.evaluate(() => document.activeElement?.closest(".terminal-pane") == null)).toBe(true);
-  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "Meta" : "Control");
   await page.keyboard.press(`${mod}+Equal`);
   await expect.poll(async () => (await zooms(page)).at(-1)).toBe(1.1);
   await expect.poll(async () => (await resizes()).length).toBeGreaterThan(before.length);

@@ -2,11 +2,13 @@ import type { Preferences } from "@tyrminal/contracts";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { schemeById } from "../features/terminal/schemes";
+import { DEFAULT_APP_THEME, appThemeById } from "./themes";
 import { diagnostics, preferences as prefsApi } from "../lib/ipc";
 import { useInterfaceScale } from "./interfaceScale";
 
 const DEFAULTS: Preferences = {
   theme: "system",
+  palette: DEFAULT_APP_THEME,
   reduceMotion: false,
   localShell: null,
   editorApps: [],
@@ -85,7 +87,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement;
     root.dataset.theme = resolvedTheme;
     root.dataset.reduceMotion = String(prefs.reduceMotion);
-  }, [resolvedTheme, prefs.reduceMotion]);
+    // The default theme is the plain :root tokens; the others are selected by data-palette.
+    const palette = appThemeById(prefs.palette).id;
+    if (palette === DEFAULT_APP_THEME) delete root.dataset.palette;
+    else root.dataset.palette = palette;
+  }, [resolvedTheme, prefs.reduceMotion, prefs.palette]);
 
   // The chrome around a terminal (its tab, the status bar) takes the terminal scheme's colours.
   useEffect(() => {

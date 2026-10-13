@@ -10,6 +10,7 @@ export const msgHv = {
   moreNew: "More ways to add",
   newGroup: "New group",
   importHosts: "Import…",
+  importHostsFull: "Import hosts…",
   findOnNetwork: "Find on network…",
   terminal: "Terminal",
   terminalHint: "A terminal on this computer",

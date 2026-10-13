@@ -2,7 +2,12 @@ import type { Page } from "@playwright/test";
 
 import { installMockBackend } from "./mock-backend.js";
 
+/** Match the explicitly emulated app convention, rather than Playwright's host OS. */
+export const uiModifier: "Control" | "Meta" = process.env.TYR_UI_PLATFORM === "linux" ? "Control" : process.env.TYR_UI_PLATFORM === "macos" || process.platform === "darwin" ? "Meta" : "Control";
+
 export interface MockOptions {
+  /** The application color theme (Settings → Appearance); default "cobalt". */
+  palette?: string;
   /** The production tag preference (P-26); default "prod". */
   productionTag?: string;
   /** The saved Hosts layout. The app's default is list; specs written for cards ask for "grid",
@@ -54,6 +59,11 @@ export interface MockOptions {
 }
 
 export async function openApp(page: Page, options: MockOptions = {}) {
+  // Explicit browser-only convention emulation for the existing Linux-keyboard UI suite.
+  // Default remains the actual browser platform; this never changes native security behavior.
+  const platform = process.env.TYR_UI_PLATFORM;
+  if (platform && platform !== "linux" && platform !== "macos") throw new Error("TYR_UI_PLATFORM must be linux or macos");
+  if (platform) await page.addInitScript((value) => Object.defineProperty(navigator, "platform", { configurable: true, value }), platform === "macos" ? "MacIntel" : "Linux x86_64");
   await page.emulateMedia({ colorScheme: options.theme === "light" ? "light" : "dark", reducedMotion: "reduce" });
   if (options.noWebgl) {
     await page.addInitScript(() => {

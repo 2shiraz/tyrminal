@@ -12,18 +12,26 @@ import { SCHEMES, type TerminalScheme, lowContrastColors } from "../../terminal/
 import { msgSettings } from "../messages";
 import { SettingsGroup } from "../SettingsGroup";
 import { INTERFACE_SCALES } from "../../../app/interfaceScale";
+import { APP_THEMES, appThemeById } from "../../../app/themes";
 
 // The preview pulls in the terminal emulator; load it only when the Terminal section opens.
 const TerminalPreview = lazy(() => import("../../terminal/TerminalPreview").then((m) => ({ default: m.TerminalPreview })));
 
 export function AppearanceSection() {
-  const { prefs, update } = usePreferences();
+  const { prefs, update, resolvedTheme } = usePreferences();
   return (
     <>
       <SettingsGroup title={msgSettings.theme}>
-        <SettingRow label={msg.settings.theme} id="theme">
+        <div className="theme-picker" id="colour-theme">
+          <div className="setting-label">
+            <span>{msgSettings.colourTheme}</span>
+            <span className="hint">{msgSettings.colourThemeHint}</span>
+          </div>
+          <ThemeList value={appThemeById(prefs.palette).id} mode={resolvedTheme} onChange={(palette) => update((p) => ({ ...p, palette }))} />
+        </div>
+        <SettingRow label={msgSettings.themeMode} hint={msgSettings.themeModeHint} id="theme">
           <Segmented
-            label={msg.settings.theme}
+            label={msgSettings.themeMode}
             value={prefs.theme}
             onChange={(theme) => update((p) => ({ ...p, theme }))}
             options={[
@@ -199,6 +207,64 @@ export function TerminalSection() {
         </SettingRow>
       </SettingsGroup>
     </>
+  );
+}
+
+/**
+ * Application themes as a radio group of small previews, drawn in the mode now in use. Arrow keys
+ * move the choice, as in any radio group; the choice applies at once.
+ */
+function ThemeList({ value, mode, onChange }: { value: string; mode: "light" | "dark"; onChange: (id: string) => void }) {
+  const index = Math.max(0, APP_THEMES.findIndex((t) => t.id === value));
+  function onKey(event: React.KeyboardEvent<HTMLDivElement>) {
+    const delta = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+    if (!delta && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? APP_THEMES.length - 1 : (index + delta + APP_THEMES.length) % APP_THEMES.length;
+    const theme = APP_THEMES[next];
+    if (!theme) return;
+    onChange(theme.id);
+    const list = event.currentTarget;
+    window.requestAnimationFrame(() => list.querySelector<HTMLElement>(`[data-theme-id="${theme.id}"]`)?.focus());
+  }
+  return (
+    <div className="theme-list" role="radiogroup" aria-label={msgSettings.colourTheme} data-setting="palette" onKeyDown={onKey}>
+      {APP_THEMES.map((theme) => {
+        const checked = theme.id === value;
+        const c = theme[mode];
+        return (
+          <button
+            key={theme.id}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            aria-label={`${theme.name}: ${theme.note}`}
+            tabIndex={checked ? 0 : -1}
+            data-theme-id={theme.id}
+            className="theme-card"
+            onClick={() => onChange(theme.id)}
+          >
+            {/* A miniature of the window: frame, canvas, a box of rows and the accent. */}
+            <span className="theme-preview" aria-hidden="true" style={{ background: c.canvas }}>
+              <span className="theme-preview-frame" style={{ background: c.frame }}>
+                <span style={{ background: c.accent }} />
+                <span style={{ background: c.text }} />
+                <span style={{ background: c.text }} />
+              </span>
+              <span className="theme-preview-box" style={{ background: c.surface }}>
+                <span style={{ background: c.text }} />
+                <span style={{ background: c.text }} />
+                <span style={{ background: c.accent }} />
+              </span>
+            </span>
+            <span className="theme-card-text">
+              <span className="theme-card-name">{theme.name}</span>
+              <span className="theme-card-note">{theme.note}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

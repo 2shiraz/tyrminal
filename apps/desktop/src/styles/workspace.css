@@ -1,0 +1,130 @@
+/* Quiet Precision working chrome (DESIGN.md). The sidebar, tab strip and status strip are one quiet
+   frame in the sidebar tone; what they frame (a page, or a terminal in its own scheme) sits a step
+   deeper. The selected tab and, with a terminal in front, the status strip are cut from the same
+   material as what they belong to, so a terminal, its tab and its status read as one object.
+   Terminal scheme and buffer stay owned by the renderer; nothing here touches the canvas. */
+
+.content { background: var(--bg-app); }
+
+/* ---------- sidebar ---------- */
+.sidebar { padding-block: 14px 8px; background: var(--bg-sidebar); }
+.brand { gap: 10px; height: 32px; padding-inline: 16px; margin-bottom: 14px; }
+.brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+.sidebar-search { height: 32px; margin-bottom: 4px; border-radius: 6px; background: var(--bg-field); }
+.nav-group-label { height: 28px; margin-top: 14px; padding-inline: 18px; color: var(--text-faint); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+.sidebar .nav-item { width: calc(100% - 16px); min-height: 30px; height: auto; margin-inline: 8px; padding: 6px 10px; border-radius: 6px; gap: 10px; line-height: 18px; transform: none; }
+.sidebar .nav-item svg { color: var(--text-faint); transition: color var(--duration-press) var(--ease-out); }
+.sidebar .nav-item:hover svg, .sidebar .nav-item[aria-current="page"] svg { color: currentColor; }
+/* The current page is marked the way a selection is everywhere: the active fill and a caret-thin
+   accent edge. The edge is inset so it follows the row's rounded corner. */
+.sidebar .nav-item[aria-current="page"] { color: var(--text); background: var(--bg-active); box-shadow: none; }
+.sidebar .nav-item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--accent); }
+.sidebar .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-footer { gap: 2px; padding-top: 8px; margin-top: auto; border-top: 1px solid var(--border-subtle); }
+.sidebar-version { margin-top: 4px; margin-left: 10px; }
+.shell[data-sidebar="collapsed"] .sidebar-create { padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px; }
+.shell[data-sidebar="collapsed"] .sidebar .nav-item { padding: 6px 0; }
+.shell[data-sidebar="collapsed"] .sidebar .nav-item[aria-current="page"]::before { left: 0; }
+
+/* ---------- tab strip ---------- */
+/* Tabs are plain cells the full height of the strip. Every tab has the same width whether or not
+   it is selected, so selecting one moves nothing; the selected tab takes the fill of what is below
+   it and loses the strip's bottom rule, which is the whole indicator. Colour on a tab's top edge
+   is reserved for meaning (a production host). */
+.tabstrip { --tab-h: var(--tabstrip-height); background: var(--bg-sidebar); }
+.tabstrip-scroll, .tabstrip-tabs { align-items: stretch; }
+.tabstrip .tab { --tab-w: 196px; --tab-min: 132px; --tab-fill: var(--bg-app); height: var(--tab-h); padding: 0 10px 0 8px; border-radius: 0; gap: 6px; flex-shrink: 1; transition: background var(--duration-press) var(--ease-out), color var(--duration-press) var(--ease-out) !important; }
+.tabstrip .tab[aria-selected="true"] { --tab-w: 196px; --tab-min: 132px; background: var(--tab-fill); box-shadow: inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); }
+.tabstrip .tab[data-production="true"][aria-selected="true"] { box-shadow: inset 0 2px 0 var(--production-fg, var(--danger)), inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); }
+.tabstrip .tab-page { --tab-w: auto; --tab-min: 0px; flex: none; width: auto; padding-inline: 14px 16px; gap: 8px; }
+.tabstrip-tabs > .tab:first-child[aria-selected="true"] { box-shadow: inset -1px 0 0 var(--border-subtle); }
+/* The browser-style feet are gone with the rounded tab; separators stay between unselected tabs. */
+.tabstrip .tab[aria-selected="true"]::before, .tabstrip .tab[aria-selected="true"]::after { display: none; }
+.tabstrip .tab:not([aria-selected="true"])::after { top: 12px; bottom: 12px; background: var(--border-subtle); }
+.tabstrip .tab-new { align-self: center; margin: 0 6px; height: 26px; width: 26px; background-color: var(--bg-sidebar); }
+.tabstrip .tab-layout { max-width: 160px; }
+.tabstrip .tab-close { border-radius: 4px; }
+.tabstrip .tab-title { font-variant-numeric: tabular-nums; }
+.tabstrip .tab-production { padding: 1px 5px; font-size: 10px; letter-spacing: 0.01em; }
+.tab-os:not([data-tone="ok"])::after { box-shadow: 0 0 0 1.5px var(--bg-sidebar); }
+
+/* ---------- status strip ---------- */
+.shell .main .statusbar { gap: 10px; padding-inline: 12px 8px; }
+.statusbar .status-sep { align-self: center; height: 12px; flex: none; }
+.statusbar .status-item { flex-shrink: 0; }
+.statusbar .status-identity { max-width: 34vw; flex-shrink: 1; font-family: var(--font-mono); font-size: 11px; }
+.statusbar .status-dimensions { font-family: var(--font-mono); font-size: 11px; }
+.statusbar .status-button { height: 22px; border-radius: 4px; gap: 5px; }
+.statusbar .status-button[aria-pressed="true"] { background: var(--bg-active); color: var(--text); }
+
+/* ---------- panes ---------- */
+/* A pane's title bar is terminal material (scheme colours), like its tab, one fixed line high.
+   Unfocused panes keep full-contrast text; focus is the accent outline and the heavier title. */
+.pane-header { height: 30px; min-height: 0; padding: 0 4px 0 8px; gap: 6px; white-space: nowrap; border-bottom: 1px solid color-mix(in srgb, var(--pane-fg, var(--scheme-fg, var(--text))) 10%, transparent); }
+.pane-header .btn-sm { flex: none; width: 24px; height: 24px; min-height: 24px; }
+.pane-header .pane-heading { min-width: 3ch; }
+.pane-header .pane-note { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.panes[data-split="true"] .pane[data-focused="true"] .pane-header .pane-heading { font-weight: var(--weight-semibold); }
+.pane-header .pane-identity { font-family: var(--font-mono); font-size: 11px; font-weight: var(--weight-regular); color: color-mix(in srgb, currentColor 80%, transparent); }
+.panes[data-split="true"] .pane:not([data-focused="true"]) .terminal-host { opacity: 1; }
+.splitter { touch-action: none; }
+.splitter::after { background: color-mix(in srgb, var(--scheme-fg, var(--text)) 14%, transparent); }
+
+@media (max-width: 1100px) {
+  .statusbar .status-renderer { display: none; }
+  .statusbar { gap: 8px; }
+  .pane-header .pane-identity { display: none; }
+  .tabstrip .tab-layout { max-width: 112px; }
+}
+@media (max-width: 900px) {
+  .statusbar .status-dimensions { display: none; }
+  .statusbar .status-identity { max-width: 180px; }
+  .statusbar .status-button { gap: 4px; padding-inline: 4px; }
+  .tabstrip .tab { --tab-w: 148px; --tab-min: 96px; }
+  .tabstrip .tab[aria-selected="true"] { --tab-w: 148px; --tab-min: 96px; }
+}
+
+/* ---------- side panel (Snippets, History, Appearance, Notes, Server) ---------- */
+/* A panel beside the terminals is a surface, like the host details panel: a plain title, its
+   sections as the same segmented choice used everywhere else, and rows with room to breathe on a
+   12 px inset. Nothing here is a filled strip. */
+.side-panel { border-left: 1px solid var(--border-subtle); background: var(--bg-surface); }
+.side-panel .panel-head { height: 46px; padding: 0 8px 0 16px; border-bottom: 0; }
+.side-panel .panel-head h2 { font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: -0.005em; }
+.side-panel .panel-sections { gap: 2px; margin: 0 12px 12px; padding: 3px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-inset); }
+.side-panel .panel-section-tab {
+  flex: 1 1 0; min-width: 0; height: 26px; padding: 0 8px; overflow: hidden; border: 1px solid transparent; border-radius: 6px;
+  color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--duration-press) var(--ease-out), color var(--duration-press) var(--ease-out);
+}
+.side-panel .panel-section-tab:hover:not([aria-selected="true"]) { background: var(--bg-hover); color: var(--text); }
+.side-panel .panel-section-tab[aria-selected="true"] { border-color: var(--border); background: var(--bg-raised); box-shadow: 0 1px 2px rgb(0 0 0 / 0.22); color: var(--text); }
+:root[data-theme="light"] .side-panel .panel-section-tab[aria-selected="true"] { box-shadow: 0 1px 2px rgb(16 28 52 / 0.12); }
+.side-panel .panel-section-tab:focus-visible { outline-offset: 2px; }
+/* Where snippets go: one quiet line, not a band. */
+.side-panel .panel-target { height: auto; min-height: 0; padding: 0 16px 12px; border-bottom: 0; background: transparent; color: var(--text-muted); }
+.side-panel .panel-body { padding: 0 16px 16px; }
+.side-panel .snippets-panel-body { padding: 0 0 12px; }
+.side-panel .snippets-panel-body .row-flex { gap: 6px; padding: 0 12px; }
+.side-panel .snippets-panel-body .stack-sm { gap: 12px; }
+
+/* Snippets in the panel: folder names as small labels, each snippet a row that answers the pointer
+   with its Run button. */
+.snippet-list[data-compact] .folder + .folder { margin-top: 8px; }
+.snippet-list[data-compact] .folder-row { min-height: 0; padding: 0 12px; border: 0; background: transparent; }
+.snippet-list[data-compact] .folder-head { height: 26px; padding: 0 4px; color: var(--text-faint); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.02em; }
+.snippet-list[data-compact] .folder-head:hover { color: var(--text-muted); }
+.snippet-list[data-compact] .snippet { min-height: 44px; margin: 0 8px; padding: 5px 4px 5px 8px; border-bottom: 0; border-radius: 6px; }
+.snippet-list[data-compact] .snippet + .snippet { margin-top: 1px; }
+.snippet-list[data-compact] .snippet-name { gap: 6px; }
+.snippet-list[data-compact] .snippet-code { color: var(--text-faint); font-size: var(--text-2xs); }
+.snippet-list[data-compact] .snippet-run { min-height: 24px; height: 24px; padding: 0 8px; }
+.snippet-list[data-compact] .snippet-actions .btn-icon { width: 24px; height: 24px; min-height: 24px; }
+
+/* ---------- nav caret glide (lib/useGlide.ts) ---------- */
+/* Only the 2 px accent caret travels between items; the fill changes at once, so no block slides
+   across unrelated rows. Pointer only; keyboard and reduced motion are instant (the hook). */
+.nav-glide { background: transparent; box-shadow: none; }
+.nav-glide::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--accent); }
+[data-gliding] :is(.nav-item, .settings-nav-item)[aria-current="page"] { background: var(--bg-active); }
+[data-gliding] :is(.nav-item, .settings-nav-item)[aria-current="page"]::before { opacity: 0; }

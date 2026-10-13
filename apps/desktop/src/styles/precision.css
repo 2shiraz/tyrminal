@@ -1,0 +1,277 @@
+/* Quiet Precision (DESIGN.md): shared product surfaces. Loaded after global.css; public class names
+   are unchanged, so every existing workflow consumes this layer. Terminal rendering and transport
+   are untouched. Three planes: the page is the canvas (--bg-app), a box or panel is one step up
+   (--bg-surface), and things that float (menus, dialogs, the palette) are --bg-overlay. Text fields
+   are recessed (--bg-field). */
+
+:root {
+  /* Motion vocabulary (docs/redesign/MOTION.md), aliased onto the existing duration tokens so
+     there is one set of values. Springs are deliberately absent: drags track the pointer 1:1. */
+  --motion-instant: 0ms;
+  --motion-micro: var(--duration-press);
+  --motion-fast: var(--duration-fast);
+  --motion-standard: var(--duration-base);
+  --motion-spatial: var(--duration-slow);
+  --motion-expressive: var(--duration-slow);
+  --ease-enter: var(--ease-out);
+  --ease-exit: var(--ease-out);
+  --ease-move: var(--ease-in-out);
+}
+
+html { accent-color: var(--accent); }
+body { -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { text-wrap: balance; }
+input, textarea { caret-color: var(--accent); }
+button, a, input, select, textarea { touch-action: manipulation; }
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--text); }
+
+/* ---------- controls ---------- */
+.btn { min-height: var(--control-height); letter-spacing: -0.005em; }
+.btn-sm { min-height: var(--control-height-sm); }
+.btn-primary { font-weight: var(--weight-semibold); }
+.btn:disabled:not(.btn-primary) { opacity: 1; color: var(--text-faint); background: var(--bg-active); }
+.input, .textarea, .select { background-color: var(--bg-field); }
+.field > label, .label { letter-spacing: 0; font-weight: var(--weight-medium); color: var(--text-muted); }
+.hint { line-height: 1.5; }
+.badge { border-radius: var(--radius-sm); font-weight: var(--weight-medium); }
+.tag { border-radius: var(--radius-sm); }
+.mono { font-feature-settings: "zero" 1, "calt" 0; }
+
+/* A tooltip takes no room until it shows. An invisible one still counted as content, so a button
+   near the right edge of a page gave that page a horizontal scrollbar. It still fades in after
+   the usual delay; it leaves at once. */
+button[data-tooltip]:not(:hover, :focus-visible)::after { content: none; }
+button[data-tooltip]:hover::after, button[data-tooltip]:focus-visible::after {
+  @starting-style { opacity: 0; }
+}
+
+/* Segmented choice (theme mode, list or cards, pane tabs): a recessed track with the chosen option
+   lifted out of it, so the choice reads as a position rather than a filled box. */
+.segmented { padding: 3px; gap: 2px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-inset); }
+.segmented label { height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); }
+.segmented label svg { color: var(--text-faint); transition: color var(--duration-press) var(--ease-out); }
+.segmented label:hover:not(:has(input:checked)) { background: var(--bg-hover); }
+.segmented label:has(input:checked) {
+  border-color: var(--border); background: var(--bg-raised); color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.22);
+}
+.segmented label:has(input:checked) svg { color: var(--accent-text); }
+.segmented label:has(input:focus-visible) { outline-offset: 2px; }
+:root[data-theme="light"] .segmented label:has(input:checked) { box-shadow: 0 1px 2px rgb(16 28 52 / 0.12); }
+:root[data-palette="contrast"] .segmented label:has(input:checked) { border-color: var(--border-strong); box-shadow: none; }
+.hosts-main .segmented-icons label { padding-inline: 8px; }
+
+/* Shared Switch must work before lazy Settings CSS has loaded (host editor, privacy, files). */
+.setting-label { display: grid; gap: var(--space-1); min-width: 0; }
+.setting-label > span:first-child { color: var(--text); font-size: var(--text-sm); }
+.setting-control { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.switch-row { gap: var(--space-4); align-items: center; }
+.switch-row .setting-label { flex: 1; }
+
+/* ---------- boxes ---------- */
+/* A box strip is a label row, not a toolbar band: same fill as its box, quieter heading. */
+.box-strip h2, .box-strip h3, .section-head h2 { color: var(--text-muted); font-weight: var(--weight-medium); }
+.list > li, .list-row { border-color: var(--border-subtle); }
+
+/* ---------- pages ---------- */
+/* Every page uses the width of its pane (a capped column left the right of a wide window empty);
+   prose keeps a readable measure of its own. */
+.page-inner { padding: 20px 24px 40px; gap: 16px; }
+.page-title h1, .page-header h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.02em; }
+.page-title p, .page-inner > p, .section-hint { max-width: 80ch; }
+
+/* ---------- overlays ---------- */
+.dialog { border-color: var(--border-strong); overscroll-behavior: contain; }
+.dialog-body { padding-inline: 24px; padding-bottom: 24px; gap: 20px; }
+.dialog-head { margin-inline: -24px; min-height: 60px; padding: 16px 24px; background: var(--bg-overlay); }
+.dialog-head h2 { font-size: var(--text-lg); letter-spacing: var(--tracking-title); }
+.dialog .dialog-actions { margin-inline: -24px; margin-bottom: -24px; bottom: -24px; padding: 12px 24px; }
+/* A security decision never moves. */
+dialog[role="alertdialog"] { transition: none !important; transform: none !important; }
+.menu { border-radius: 10px; padding: 5px; border-color: var(--border-strong); }
+.menu-item { min-height: 30px; border-radius: 6px; }
+.menu-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.toast { border-radius: 10px; box-shadow: var(--shadow-3); }
+.notice { border-radius: var(--radius-control); box-shadow: none; }
+
+/* ---------- Hosts ---------- */
+/* One header row: the page name and, filling the rest, the field that both finds a host and
+   connects to an address. It stays in view while the library scrolls. */
+.hosts-main { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto; align-content: start; overflow-x: hidden; }
+/* min-width 0: a grid item is otherwise as wide as its widest content, which widened the page
+   past the window and gave it a horizontal scrollbar. */
+.hosts-main > * { min-width: 0; }
+.hosts-main > .page-inner { grid-column: 1 / -1; }
+.hosts-main .hosts-library-head {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center;
+  padding: 0 4px 0 24px; background: var(--bg-app);
+}
+.hosts-library-head h1 { margin: 0; font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.02em; }
+.hosts-main .hosts-search {
+  position: sticky; top: 0; z-index: 2; isolation: isolate; height: 64px; gap: 10px;
+  padding: 0 30px 0 32px; border: 0; background: var(--bg-app);
+}
+.hosts-main .hosts-search::before {
+  content: ""; position: absolute; z-index: -1; inset: 12px 24px 12px 16px;
+  border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-field);
+  transition: border-color var(--duration-press) var(--ease-out);
+}
+.hosts-main .hosts-search:hover::before { border-color: var(--text-faint); }
+.hosts-main .hosts-search:focus-within { outline: 0; box-shadow: none; }
+.hosts-main .hosts-search:focus-within::before { border-color: var(--accent); box-shadow: var(--glow-accent); }
+.hosts-main .hosts-search .hosts-search-input { font-size: var(--text-md); }
+.hosts-main .hosts-search .btn { min-height: 28px; height: 28px; padding-inline: 10px; border-radius: 5px; }
+.hosts-main .page-inner { padding: 4px 24px 40px; gap: 20px; }
+.hosts-main .hosts-toolbar { gap: 8px; }
+.hosts-main .split-button > .split-button-more { color: var(--text-on-accent); border-color: color-mix(in srgb, var(--text-on-accent) 24%, transparent); }
+
+/* Section labels sit on the page; the box below them holds only rows. */
+.hosts-main .hosts-section-head {
+  border: 0; background: transparent; min-height: 28px; padding: 0 0 6px;
+  border-radius: 0; gap: 8px;
+}
+.hosts-main .hosts-section-head h2 { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
+.hosts-main .hosts-section-head .count { color: var(--text-faint); }
+.hosts-main .hosts-section-head .hosts-show-all { margin-inline-end: 0; }
+.hosts-main .hosts-section-head ~ .list.host-rows { border-radius: var(--radius-box); border-color: var(--border-subtle); }
+
+/* Groups in List: compact folder cells in a row, so hosts start high on the page. */
+.hosts-main .hosts-section-head + .list:not(.host-rows) {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  border: 0; background: transparent; gap: 8px; overflow: visible;
+}
+.hosts-main .hosts-section-head + .list:not(.host-rows) > li {
+  min-height: 48px; padding: 6px 6px 6px 10px; gap: 10px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-box); background: var(--bg-surface);
+  transition: border-color var(--duration-press) var(--ease-out), background var(--duration-press) var(--ease-out);
+}
+.hosts-main .hosts-section-head + .list:not(.host-rows) > li:hover { border-color: var(--border-strong); background: var(--bg-raised); }
+.hosts-main .group-tile { width: 28px; height: 28px; border: 0; background: transparent; color: var(--text-faint); }
+
+/* Host rows: name and sign-in, the address as the machine wrote it, then what is true of it now. */
+.hosts-main .host-rows > li { min-height: 48px; padding: 6px 8px 6px 12px; grid-template-columns: 28px minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(0, 1fr) auto; }
+.hosts-main .host-rows > li[data-active="true"] { background: var(--bg-selected); box-shadow: var(--edge-select); }
+.hosts-main .host-rows .os-icon { width: 28px; height: 28px; background: transparent; border: 0; color: var(--text-faint); }
+.hosts-main .host-rows .row-sub { color: var(--text-faint); }
+.hosts-main .host-col-address { font-size: var(--text-xs); color: var(--text-muted); }
+.hosts-main .hosts-empty { border: 1px solid var(--border-subtle); border-radius: var(--radius-box); padding: 20px; background: var(--bg-surface); }
+.hosts-main .host-grid .host-card { background: var(--bg-surface); border-radius: var(--radius-box); border-color: var(--border-subtle); }
+.hosts-main .hosts-section:has(> .tile-grid) > .hosts-section-head { border: 0; border-radius: 0; margin-bottom: 0; }
+.hosts-main .fav-strip { padding: 0; border: 0; background: transparent; }
+.hosts-main .fav-tile { background: var(--bg-surface); }
+
+/* The empty library is the first-run screen: left-aligned with the page, three real ways to start. */
+.hosts-main .empty { justify-items: start; max-width: 520px; margin: 48px 0 0; padding: 0; text-align: start; gap: 10px; }
+.hosts-main .empty .empty-art { display: none; }
+.hosts-main .empty :is(h2, h3) { font-size: var(--text-xl); letter-spacing: -0.02em; }
+.hosts-main .empty p { max-width: 46ch; line-height: 1.55; text-wrap: pretty; }
+.hosts-main .empty .empty-actions { flex-wrap: wrap; margin-top: 10px; }
+
+/* Contextual host form: sections, not cards inside a panel. */
+.host-panel { background: var(--bg-surface); }
+.host-panel-head { background: var(--bg-surface); min-height: 64px; padding-inline: 20px; }
+.host-panel .host-panel-body { padding: 20px; gap: 24px; }
+.host-panel .host-section { border: 0; background: transparent; border-radius: 0; }
+.host-panel .host-section > .box-strip { padding: 0 0 12px; background: transparent; border: 0; min-height: 0; }
+.host-panel .host-section > .box-strip :is(h2, h3) { color: var(--text); font-weight: var(--weight-semibold); }
+.host-panel .host-section + .host-section { border-top: 1px solid var(--border-subtle); padding-top: 20px; }
+.host-panel .host-section-body { padding: 0; gap: 16px; }
+.host-panel .host-address-mark { display: none; }
+.host-panel .host-address .os-icon { display: none; }
+.host-panel .host-address > .host-section-body { grid-template-columns: minmax(0, 1fr); }
+.host-panel .switch-row { width: 100%; padding-block: 4px; }
+.host-panel-foot { padding: 12px 20px; background: var(--bg-surface); }
+
+/* ---------- connection sheet ---------- */
+/* Three parts: the heading (what is happening, and the risk when there is one), a body that
+   scrolls when the pane is short, and the actions. The heading and the choices are therefore
+   always in view, whatever the window size; nothing overlaps a fingerprint. */
+.connect-layer {
+  display: grid; grid-template-columns: minmax(0, 560px); grid-template-rows: minmax(0, 1fr);
+  align-items: start; padding: 32px 24px 24px; overflow: hidden; overscroll-behavior: contain;
+}
+.connection-sheet {
+  display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; width: 100%; max-height: 100%;
+  padding: 0; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-dialog);
+}
+.connection-sheet[open] { inset: auto; margin: 0; }
+.connection-sheet[data-tone="danger"] { border-color: var(--danger); box-shadow: var(--shadow-3); transition: none !important; }
+.connection-sheet .connect-head { flex: none; padding: 20px 24px 14px; }
+.connect-head h2 { line-height: 1.45; text-wrap: balance; }
+.connection-sheet .connect-body { display: grid; align-content: start; gap: var(--space-4); min-height: 0; padding: 4px 24px 20px; overflow: auto; overscroll-behavior: contain; }
+.connection-sheet .connect-body:empty { display: none; }
+.connection-sheet .connect-actions { flex: none; flex-wrap: wrap; margin: 0; padding: 12px 24px 16px; border-top: 1px solid var(--border-subtle); }
+.connection-sheet .connect-actions:empty { display: none; }
+.fingerprint { overflow-wrap: anywhere; }
+
+/* ---------- command palette ---------- */
+/* Immediate: the palette never animates in, whatever opened it. */
+.palette { border-color: var(--border-strong); border-radius: var(--radius-dialog); }
+.palette[open][data-opened-by="pointer"] { transition: none; }
+.palette-input { min-height: 52px; padding-inline: 18px; }
+.palette-input input { font-size: 15px; }
+.palette-list { padding: 6px; overscroll-behavior: contain; }
+.palette-item { min-height: 34px; border-radius: 6px; padding-inline: 12px; }
+.palette-group { padding: 10px 12px 4px; min-height: 0; background: transparent; border: 0; color: var(--text-faint); font-size: var(--text-2xs); font-weight: 500; letter-spacing: 0.02em; }
+.palette-foot { background: transparent; border-top: 1px solid var(--border-subtle); padding: 9px 18px; }
+
+/* ---------- first run and unlock ---------- */
+.auth-screen { padding: 48px 24px 64px; align-content: center; }
+.auth-card { width: min(420px, 100%); gap: 20px; }
+.auth-card-wide { width: min(520px, 100%); }
+.auth-head { gap: 12px; }
+.auth-head h1 { font-size: var(--text-2xl); line-height: 1.2; letter-spacing: -0.025em; }
+.auth-head .wordmark { margin-bottom: 20px; }
+.auth-steps { gap: 20px; }
+.auth-head p { line-height: 1.6; }
+.auth-card .btn-lg { height: 40px; }
+
+/* ---------- settings, files ---------- */
+.settings-page .settings-nav { background: var(--bg-app); padding: 12px 8px; border-right-color: var(--border-subtle); }
+.settings-page .settings-nav-label { height: 28px; margin-top: 10px; padding-inline: 10px; background: transparent; border: 0; color: var(--text-faint); font-size: 11px; letter-spacing: 0.02em; }
+.settings-page .settings-nav-item { position: relative; border-radius: 6px; margin-block: 1px; min-height: 30px; height: 30px; padding-inline: 10px; color: var(--text-muted); }
+.settings-page .settings-nav-item:hover { color: var(--text); }
+.settings-page .settings-nav-item[aria-current="page"] { color: var(--text); box-shadow: none; }
+.settings-page .settings-nav-item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--accent); }
+.settings-page .settings-search { border: 1px solid var(--border-control); border-radius: 6px; margin-bottom: 8px; background: var(--bg-field); }
+.settings-page .settings-section > .settings-section-strip { background: var(--bg-app); padding: 20px 24px 16px; box-shadow: none; border-bottom: 0; }
+.settings-page .settings-section > .settings-section-strip h2 { font-size: var(--text-xl); letter-spacing: -0.02em; }
+.settings-page .settings-section > .settings-section-strip p { font-size: var(--text-sm); }
+.settings-page .settings-section-body { padding: 20px 24px 32px; gap: 20px; }
+.settings-page .settings-group { border-radius: var(--radius-box); border-color: var(--border-subtle); }
+.settings-page .settings-group .box-strip { background: var(--bg-surface); }
+.settings-page .settings-group .setting-row { padding: 12px 16px; }
+.sftp .sftp-head, .files-panel .panel-head { background: var(--bg-surface); }
+.tabstrip .tab[data-files-only] { --tab-fill: var(--bg-surface); }
+.ft-table thead th { background: var(--bg-surface); }
+.ft-table tbody tr { height: 30px; }
+.ft-table :is(.ft-col-size, .ft-col-modified) { font-variant-numeric: tabular-nums; }
+.pathbar { background: var(--bg-field); }
+.pathbar .pathbar-edit { min-width: 24px; min-height: 24px; }
+.xfer { background: var(--bg-surface); }
+
+@media (max-width: 1000px) {
+  .hosts-main .host-rows > li { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .hosts-main .host-col-address, .hosts-main .host-col-badges { display: none; }
+  .hosts-main .hosts-library-head { padding-inline-start: 20px; }
+  .hosts-main .hosts-search { padding-inline-end: 26px; }
+  .hosts-main .hosts-search::before { right: 20px; }
+  .hosts-main .page-inner { padding-inline: 20px; }
+}
+@media (max-height: 700px) {
+  .connect-layer { padding: 16px; }
+  .connection-sheet .connect-head { padding: 16px 20px 12px; }
+  .connection-sheet .connect-body { padding-inline: 20px; }
+  .connection-sheet .connect-actions { padding-inline: 20px; }
+  .auth-screen { align-content: start; padding-top: 24px; }
+  .auth-version { position: static; margin-top: 24px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .hosts-main .row-edit, .snippet-list[data-compact] .snippet-run { opacity: 1; }
+  .btn, .menu-item { min-height: 40px; }
+}
+@media (forced-colors: active) {
+  .connection-sheet[data-tone="danger"] { border-color: CanvasText; }
+  .sidebar .nav-item[aria-current="page"]::before, .hosts-main .hosts-search::before { forced-color-adjust: none; background: Highlight; }
+  .hosts-main .hosts-search::before { background: Canvas; border-color: CanvasText; }
+}

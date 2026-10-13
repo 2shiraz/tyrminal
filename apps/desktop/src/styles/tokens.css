@@ -1,14 +1,15 @@
 /* Design tokens. Components use these variables only; no raw colours elsewhere.
-   The values follow docs/design/overhaul.md. Older token names keep their meaning with the new
+   The values follow DESIGN.md (Quiet Precision). Older token names keep their meaning with the new
    values (for example --text-md is the 13 px body size, --shadow-1 is "flat, no shadow") until the
    component layer moves to the final names screen by screen.
 
    Themes are two attributes on the root element:
      data-theme   = "dark" | "light"              (resolved from the System setting)
-     data-palette = absent | "fjord" | "contrast"  (absent is the standard Graphite / Paper pair)
+     data-palette = absent | "verdigris" | "fjord" | "graphite" | "contrast"
+                    (absent is Cobalt, the default; app/themes.ts lists them for Settings)
    Every palette defines both modes. Contrast is checked by scripts/check-contrast.mjs (WCAG 2.2 AA:
    4.5:1 for text, 3:1 for large text, icons and control boundaries) for every text/surface pair in
-   all six combinations. The terminal palette is separate (features/terminal/schemes.ts) and
+   all ten combinations. The terminal palette is separate (features/terminal/schemes.ts) and
    independent of the theme. */
 
 :root {
@@ -27,7 +28,7 @@
   --text-md: 13px; /* body */
   --text-lg: 15px; /* section and dialog titles */
   --text-xl: 20px; /* the page title */
-  --text-2xl: 20px;
+  --text-2xl: 26px;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -48,18 +49,18 @@
   /* ---------- radius, by hierarchy (docs/design/revamp.md §3): boxes, not cards ---------- */
   --radius-inner: 2px; /* tags, badges, chips, checkboxes, key hints, inner icon buttons */
   --radius-xs: 2px;
-  --radius-sm: 3px; /* small buttons, segmented thumbs */
-  --radius-control: 4px; /* buttons, inputs, selects, segmented, menu items, tabs */
-  --radius-panel: 4px; /* page boxes, popovers, notices */
-  --radius-dialog: 6px; /* dialogs, the palette, toasts, menus */
+  --radius-sm: 4px; /* small buttons, segmented thumbs */
+  --radius-control: 6px; /* buttons, inputs, selects, segmented, menu items, tabs */
+  --radius-panel: 8px; /* page boxes, popovers, notices */
+  --radius-dialog: 12px; /* dialogs, the palette, toasts, menus */
   --radius-pill: 999px; /* switch tracks and status dots only */
   --radius-round: 999px;
-  --radius-box: 4px; /* .box on a page */
+  --radius-box: 8px; /* .box on a page */
   --radius-edge: 0; /* panes attached to a window edge */
 
   /* ---------- sizes ---------- */
-  --control-height: 30px;
-  --control-height-sm: 24px;
+  --control-height: 32px;
+  --control-height-sm: 28px;
   --row-height: 36px;
   --row-height-2: 48px;
   --row-dense: 28px; /* panels, the palette, file tables */
@@ -71,13 +72,12 @@
   --icon-stroke: 1.5;
   --sidebar-width: 224px;
   /* Widest a page's content gets (lists, tables, settings); wider windows keep side margins. */
-  --page-max: 1400px;
   --sidebar-collapsed: 52px;
   --tabstrip-height: 38px;
-  --statusbar-height: 26px;
+  --statusbar-height: 28px;
   --panel-width: 320px;
-  --page-max: 1080px;
-  --page-gutter: 32px;
+  --page-max: none; /* pages use the full width of their pane, as Hosts does */
+  --page-gutter: 24px;
   /* Inner space around the terminal grid, painted in the scheme background (Settings can change it). */
   --terminal-padding: 12px;
 
@@ -85,8 +85,10 @@
   --box-border: 1px solid var(--border);
   --box-rule: 1px solid var(--border-subtle);
   --box-gap: 1px; /* shared-edge grids: the grid background shows through as the rule */
+  /* Quiet Precision planes: the page is the canvas, a box is one step up, fields are recessed. */
   --bg-strip: var(--bg-surface);
-  --bg-box: var(--bg-raised);
+  --bg-box: var(--bg-surface);
+  --bg-field: var(--bg-inset); /* text fields; Porcelain overrides it to white */
   /* State is an edge, never a glow or a coloured fill. */
   --edge-select: inset 2px 0 0 var(--accent);
   --edge-live: inset 0 2px 0 var(--accent);
@@ -138,93 +140,238 @@
   --glow-accent: 0 0 0 1px var(--focus); /* focused fields: a ring, never a halo */
   --app-backdrop: none;
 
-  /* =================== Graphite (dark, default) =================== */
+  /* =================== Cobalt (dark, the default): blue-black ink, azure accent =================== */
   color-scheme: dark;
-  --bg-app: #16181b; /* page canvas */
-  --bg-sidebar: #111315;
-  --bg-surface: #1a1c20; /* side panels, status bar, tab strip */
-  --bg-raised: #1f2226; /* grouped lists, cards, inputs */
-  --bg-raised-hover: #25282d;
-  --bg-overlay: #222529; /* menus, dialogs, palette, toasts */
-  --bg-inset: #121416; /* code blocks, fingerprints, path bars */
-  --bg-hover: rgb(255 255 255 / 0.045);
-  --bg-active: rgb(255 255 255 / 0.075);
-  --bg-selected: rgb(94 190 204 / 0.14);
-
-  --border-subtle: rgb(255 255 255 / 0.06);
-  --border: rgb(255 255 255 / 0.1);
-  --border-strong: rgb(255 255 255 / 0.16);
-  --border-control: #6f757e; /* 3:1 against every surface */
-
-  --text: #e7e9ec;
-  --text-muted: #a5aab2;
-  --text-faint: #8e949d;
-  --text-on-accent: #071416;
-
-  --accent: #52b4c3;
-  --accent-hover: #6cc2ce;
-  --accent-soft: rgb(94 190 204 / 0.13);
-  --accent-text: #7ccfda;
-  --focus: #7ccfda;
-  /* The cursor marker: the one memorable element. Solid while the window is focused, hollow when not. */
-  --cursor: #7ccfda;
-
-  --success: #5ccb8f;
-  --success-soft: rgb(92 203 143 / 0.12);
-  --warning: #e3b45a;
-  --warning-soft: rgb(227 180 90 / 0.12);
-  --danger: #f07b7b;
-  --danger-soft: rgb(240 123 123 / 0.12);
-  --info: #7ccfda;
-
-  --scrim: rgb(8 9 10 / 0.56);
-  /* Elevation is for things that float. Lists and cards are flat and use borders. */
-  --elevation-1: 0 4px 12px -2px rgb(4 5 6 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.07);
-  --elevation-2: 0 16px 40px -8px rgb(4 5 6 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
+  --bg-app: #0c111b;
+  --bg-sidebar: #0f1522;
+  --bg-surface: #131a29;
+  --bg-raised: #192235;
+  --bg-raised-hover: #212d45;
+  --bg-overlay: #192235;
+  --bg-inset: #090d15;
+  --bg-hover: rgb(222 232 250 / 0.05);
+  --bg-active: rgb(222 232 250 / 0.085);
+  --bg-selected: rgb(106 165 255 / 0.14);
+  --border-subtle: rgb(222 232 250 / 0.075);
+  --border: rgb(222 232 250 / 0.12);
+  --border-strong: rgb(222 232 250 / 0.2);
+  --border-control: #7887a3;
+  --text: #e8ecf5;
+  --text-muted: #a7b2c7;
+  --text-faint: #94a0b8;
+  --text-on-accent: #06162f;
+  --accent: #6aa5ff;
+  --accent-hover: #8ab9ff;
+  --accent-soft: rgb(106 165 255 / 0.13);
+  --accent-text: #8fbbff;
+  --focus: #8fbbff;
+  --cursor: #6aa5ff;
+  --success: #6fcf9f;
+  --success-soft: rgb(111 207 159 / 0.1);
+  --warning: #e6b968;
+  --warning-soft: rgb(230 185 104 / 0.1);
+  --danger: #f08a8f;
+  --danger-soft: rgb(240 138 143 / 0.1);
+  --info: #8fbbff;
+  --scrim: rgb(4 8 16 / 0.6);
+  --elevation-1: 0 6px 18px -4px rgb(2 6 14 / 0.45);
+  --elevation-2: 0 20px 56px -16px rgb(2 6 14 / 0.7);
 }
 
-/* =================== Paper (light) =================== */
+/* =================== Cobalt (light): cool paper, deep azure =================== */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-app: #fbfbfc;
-  --bg-sidebar: #f2f3f5;
-  --bg-surface: #f6f7f8;
+  --bg-app: #f4f6fb;
+  --bg-sidebar: #ebeff7;
+  --bg-surface: #ffffff;
   --bg-raised: #ffffff;
-  --bg-raised-hover: #f4f5f7;
+  --bg-raised-hover: #e8edf7;
   --bg-overlay: #ffffff;
-  --bg-inset: #f6f7f8;
-  --bg-hover: rgb(20 24 30 / 0.045);
-  --bg-active: rgb(20 24 30 / 0.08);
-  --bg-selected: rgb(8 112 132 / 0.1);
-
-  --border-subtle: rgb(20 24 30 / 0.07);
-  --border: rgb(20 24 30 / 0.12);
-  --border-strong: rgb(20 24 30 / 0.2);
-  --border-control: #80868f;
-
-  --text: #16191d;
-  --text-muted: #4d535b;
-  --text-faint: #5d636c;
+  --bg-inset: #eef2f9;
+  --bg-field: #ffffff;
+  --bg-hover: rgb(20 40 80 / 0.045);
+  --bg-active: rgb(20 40 80 / 0.08);
+  --bg-selected: rgb(31 95 209 / 0.1);
+  --border-subtle: rgb(20 40 80 / 0.09);
+  --border: rgb(20 40 80 / 0.14);
+  --border-strong: rgb(20 40 80 / 0.23);
+  --border-control: #74819a;
+  --text: #141d2f;
+  --text-muted: #4a5670;
+  --text-faint: #56627c;
   --text-on-accent: #ffffff;
+  --accent: #1f5fd1;
+  --accent-hover: #194fb2;
+  --accent-soft: rgb(31 95 209 / 0.08);
+  --accent-text: #1a54bd;
+  --focus: #1f5fd1;
+  --cursor: #1f5fd1;
+  --success: #17703f;
+  --success-soft: rgb(23 112 63 / 0.08);
+  --warning: #815409;
+  --warning-soft: rgb(168 112 15 / 0.09);
+  --danger: #b72d3c;
+  --danger-soft: rgb(183 45 60 / 0.08);
+  --info: #1a54bd;
+  --scrim: rgb(16 28 52 / 0.3);
+  --elevation-1: 0 6px 18px -6px rgb(16 28 52 / 0.16);
+  --elevation-2: 0 20px 56px -16px rgb(16 28 52 / 0.28);
+}
 
-  --accent: #0b7184;
-  --accent-hover: #095f6f;
-  --accent-soft: rgb(11 113 132 / 0.1);
-  --accent-text: #08687a;
-  --focus: #08687a;
-  --cursor: #0b7184;
+/* =================== Verdigris: obsidian ink and porcelain, verdigris accent =================== */
+:root[data-palette="verdigris"] {
+  color-scheme: dark;
+  --bg-app: #0e1317;
+  --bg-sidebar: #11181d;
+  --bg-surface: #151d23;
+  --bg-raised: #1b252b;
+  --bg-raised-hover: #233039;
+  --bg-overlay: #1b252b;
+  --bg-inset: #0b1014;
+  --bg-hover: rgb(230 244 247 / 0.045);
+  --bg-active: rgb(230 244 247 / 0.075);
+  --bg-selected: rgb(104 201 183 / 0.12);
+  --border-subtle: rgb(230 244 247 / 0.075);
+  --border: rgb(230 244 247 / 0.12);
+  --border-strong: rgb(230 244 247 / 0.2);
+  --border-control: #788b95;
+  --text: #e9eef0;
+  --text-muted: #a5b1b8;
+  --text-faint: #93a2ab;
+  --text-on-accent: #0b2824;
+  --accent: #68c9b7;
+  --accent-hover: #83d6c6;
+  --accent-soft: rgb(104 201 183 / 0.12);
+  --accent-text: #8ad8ca;
+  --focus: #8ad8ca;
+  --cursor: #68c9b7;
+  --success: #76c7a4;
+  --success-soft: rgb(118 199 164 / 0.1);
+  --warning: #e4b66d;
+  --warning-soft: rgb(228 182 109 / 0.1);
+  --danger: #ec8586;
+  --danger-soft: rgb(236 133 134 / 0.1);
+  --info: #8ad8ca;
+  --scrim: rgb(5 12 16 / 0.6);
+  --elevation-1: 0 6px 18px -4px rgb(3 8 11 / 0.4);
+  --elevation-2: 0 20px 56px -16px rgb(3 8 11 / 0.65);
+}
 
-  --success: #14774a;
-  --success-soft: rgb(20 119 74 / 0.1);
-  --warning: #875800;
-  --warning-soft: rgb(196 132 0 / 0.13);
-  --danger: #be2a30;
-  --danger-soft: rgb(190 42 48 / 0.09);
-  --info: #08687a;
+:root[data-palette="verdigris"][data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #f5f7f6;
+  --bg-sidebar: #edf1f0;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #e9efed;
+  --bg-overlay: #ffffff;
+  --bg-inset: #f0f4f2;
+  --bg-field: #ffffff;
+  --bg-hover: rgb(18 45 52 / 0.045);
+  --bg-active: rgb(18 45 52 / 0.075);
+  --bg-selected: rgb(23 109 96 / 0.1);
+  --border-subtle: rgb(18 45 52 / 0.09);
+  --border: rgb(18 45 52 / 0.14);
+  --border-strong: rgb(18 45 52 / 0.23);
+  --border-control: #73858c;
+  --text: #17242a;
+  --text-muted: #52636a;
+  --text-faint: #596c74;
+  --text-on-accent: #ffffff;
+  --accent: #176d60;
+  --accent-hover: #12594e;
+  --accent-soft: rgb(23 109 96 / 0.08);
+  --accent-text: #125f53;
+  --focus: #176d60;
+  --cursor: #176d60;
+  --success: #186c48;
+  --success-soft: rgb(24 108 72 / 0.08);
+  --warning: #80540b;
+  --warning-soft: rgb(168 112 15 / 0.09);
+  --danger: #b32b3b;
+  --danger-soft: rgb(179 43 59 / 0.08);
+  --info: #125f53;
+  --scrim: rgb(18 35 41 / 0.3);
+  --elevation-1: 0 6px 18px -6px rgb(18 35 41 / 0.16);
+  --elevation-2: 0 20px 56px -16px rgb(18 35 41 / 0.28);
+}
 
-  --scrim: rgb(22 25 29 / 0.32);
-  --elevation-1: 0 4px 12px -4px rgb(22 25 29 / 0.16), 0 0 0 1px rgb(22 25 29 / 0.08);
-  --elevation-2: 0 16px 40px -12px rgb(22 25 29 / 0.28), 0 0 0 1px rgb(22 25 29 / 0.08);
+/* =================== Graphite: neutral grays, periwinkle accent =================== */
+:root[data-palette="graphite"] {
+  color-scheme: dark;
+  --bg-app: #101113;
+  --bg-sidebar: #141517;
+  --bg-surface: #191a1d;
+  --bg-raised: #1f2125;
+  --bg-raised-hover: #282a2f;
+  --bg-overlay: #1f2125;
+  --bg-inset: #0b0c0d;
+  --bg-hover: rgb(240 240 245 / 0.05);
+  --bg-active: rgb(240 240 245 / 0.085);
+  --bg-selected: rgb(169 166 247 / 0.14);
+  --border-subtle: rgb(240 240 245 / 0.075);
+  --border: rgb(240 240 245 / 0.12);
+  --border-strong: rgb(240 240 245 / 0.2);
+  --border-control: #85878f;
+  --text: #ececef;
+  --text-muted: #acaeb5;
+  --text-faint: #999ba3;
+  --text-on-accent: #14123a;
+  --accent: #a9a6f7;
+  --accent-hover: #bfbdfa;
+  --accent-soft: rgb(169 166 247 / 0.13);
+  --accent-text: #bdbbf9;
+  --focus: #bdbbf9;
+  --cursor: #a9a6f7;
+  --success: #74cc9c;
+  --success-soft: rgb(116 204 156 / 0.1);
+  --warning: #e5b769;
+  --warning-soft: rgb(229 183 105 / 0.1);
+  --danger: #ef8a8a;
+  --danger-soft: rgb(239 138 138 / 0.1);
+  --info: #bdbbf9;
+  --scrim: rgb(6 6 8 / 0.6);
+  --elevation-1: 0 6px 18px -4px rgb(0 0 0 / 0.45);
+  --elevation-2: 0 20px 56px -16px rgb(0 0 0 / 0.7);
+}
+
+:root[data-palette="graphite"][data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #f6f6f7;
+  --bg-sidebar: #eeeef0;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #ececef;
+  --bg-overlay: #ffffff;
+  --bg-inset: #f1f1f3;
+  --bg-field: #ffffff;
+  --bg-hover: rgb(24 24 32 / 0.045);
+  --bg-active: rgb(24 24 32 / 0.08);
+  --bg-selected: rgb(81 72 201 / 0.1);
+  --border-subtle: rgb(24 24 32 / 0.09);
+  --border: rgb(24 24 32 / 0.14);
+  --border-strong: rgb(24 24 32 / 0.23);
+  --border-control: #7d7e88;
+  --text: #18181d;
+  --text-muted: #51525c;
+  --text-faint: #5d5e69;
+  --text-on-accent: #ffffff;
+  --accent: #5148c9;
+  --accent-hover: #433bad;
+  --accent-soft: rgb(81 72 201 / 0.08);
+  --accent-text: #4a41bd;
+  --focus: #5148c9;
+  --cursor: #5148c9;
+  --success: #1a6f43;
+  --success-soft: rgb(26 111 67 / 0.08);
+  --warning: #80540b;
+  --warning-soft: rgb(168 112 15 / 0.09);
+  --danger: #b42d38;
+  --danger-soft: rgb(180 45 56 / 0.08);
+  --info: #4a41bd;
+  --scrim: rgb(20 20 26 / 0.3);
+  --elevation-1: 0 6px 18px -6px rgb(20 20 26 / 0.16);
+  --elevation-2: 0 20px 56px -16px rgb(20 20 26 / 0.28);
 }
 
 /* =================== Fjord: blue slate, frost accent =================== */

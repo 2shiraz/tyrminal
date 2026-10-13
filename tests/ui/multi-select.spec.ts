@@ -5,7 +5,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { chooseLayout, openApp } from "./fixtures";
+import { uiModifier, chooseLayout, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -29,12 +29,12 @@ test("a click selects one host and shows it; Ctrl/Cmd-click toggles; Shift-click
   // One host picked by a click is not a bulk selection yet.
   await expect(bulkBar(page)).toHaveCount(0);
 
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   expect(await selectedLabels(page)).toEqual(["build-runner-03", "edge-cache"]);
   await expect(bulkBar(page)).toContainText("2 selected");
   await expect(card(page, "edge-cache")).toHaveAttribute("data-selected", "true");
   // Toggling again removes it.
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   expect(await selectedLabels(page)).toEqual(["build-runner-03"]);
 
   // Shift-click: the range from the anchor (the last host clicked without Shift), replacing the
@@ -46,8 +46,8 @@ test("a click selects one host and shows it; Ctrl/Cmd-click toggles; Shift-click
   await nameButton(page, "api-gateway").click();
   expect(await selectedLabels(page)).toEqual(["api-gateway"]);
   // Shift+Ctrl/Cmd adds a range to what is selected.
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
-  await nameButton(page, "staging-web").click({ modifiers: ["Shift", "ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
+  await nameButton(page, "staging-web").click({ modifiers: ["Shift", uiModifier] });
   expect(await selectedLabels(page)).toEqual(["api-gateway", "edge-cache", "Home lab", "staging-web"]);
   // Assistive technology hears "Selected" after each selected name.
   await expect(nameButton(page, "staging-web")).toHaveAccessibleDescription("Selected");
@@ -64,7 +64,7 @@ test("Ctrl/Cmd+A selects every shown host, Escape clears, and arrows move or ext
   await expect(page.getByRole("complementary", { name: "Host details" })).toHaveCount(0);
   await expect(nameButton(page, "api-gateway")).toBeFocused();
   await nameButton(page, "build-runner-03").focus();
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await expect(bulkBar(page)).toContainText("6 selected");
   await page.keyboard.press("Escape");
   await expect(list(page).locator('[data-selected="true"]')).toHaveCount(0);
@@ -83,7 +83,7 @@ test("Ctrl/Cmd+A selects every shown host, Escape clears, and arrows move or ext
 test("double-click on a selection reviews and opens one tab per host; trust stays per session", async ({ page }) => {
   await openHosts(page);
   await nameButton(page, "build-runner-03").click();
-  await nameButton(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "staging-web").click({ modifiers: [uiModifier] });
   await card(page, "staging-web").locator(".host-card-dest").dblclick();
   const review = page.getByRole("dialog", { name: "Open 2 sessions?" });
   await expect(review.getByTestId("connect-all-list").getByRole("listitem")).toHaveCount(2);
@@ -98,8 +98,8 @@ test("double-click on a selection reviews and opens one tab per host; trust stay
 test("Enter on a selection opens it in one tab, split", async ({ page }) => {
   await openHosts(page);
   await nameButton(page, "build-runner-03").click();
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
-  await nameButton(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
+  await nameButton(page, "staging-web").click({ modifiers: [uiModifier] });
   await nameButton(page, "staging-web").focus();
   await page.keyboard.press("Enter");
   const review = page.getByRole("dialog", { name: "Open 3 sessions?" });
@@ -114,7 +114,7 @@ test("Enter on a selection opens it in one tab, split", async ({ page }) => {
 test("the selection bar and the host menu connect the selection; production hosts are confirmed first", async ({ page }) => {
   await openHosts(page);
   await nameButton(page, "api-gateway").click();
-  await nameButton(page, "build-runner-03").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "build-runner-03").click({ modifiers: [uiModifier] });
   await expect(bulkBar(page).getByRole("button", { name: "Connect 2 hosts" })).toBeVisible();
   await card(page, "build-runner-03").click({ button: "right", position: { x: 10, y: 10 } });
   await page.getByRole("menuitem", { name: "Connect 2 hosts" }).click();
@@ -138,14 +138,14 @@ test("opening more hosts than there are free panes is refused, also as one split
   for (let round = 0; round < 2; round++) {
     await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
     await list(page).locator(".host-open").first().focus();
-    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press(`${uiModifier}+a`);
     await bulkBar(page).getByRole("button", { name: "Connect 6 hosts" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Open 6 sessions" }).click();
   }
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(12);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: /^Hosts/ }).click();
   await list(page).locator(".host-open").first().focus();
-  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press(`${uiModifier}+a`);
   await bulkBar(page).getByRole("button", { name: "Connect 6 hosts" }).click();
   const review = page.getByRole("dialog", { name: "Open 6 sessions?" });
   await review.getByText("In one tab, split").click();
@@ -185,7 +185,7 @@ test("Space toggles, Cmd/Ctrl+Enter opens in a split, Shift+Enter in SFTP, and t
   await nameButton(page, "build-runner-03").focus();
   await page.keyboard.press("Space");
   // Cmd/Ctrl+arrow moves without changing the selection; Space adds the next host.
-  await page.keyboard.press("ControlOrMeta+ArrowDown");
+  await page.keyboard.press(`${uiModifier}+ArrowDown`);
   await page.keyboard.press("Space");
   expect(await selectedLabels(page)).toEqual(["build-runner-03", "db-primary"]);
   await page.keyboard.press("Space");
@@ -193,7 +193,7 @@ test("Space toggles, Cmd/Ctrl+Enter opens in a split, Shift+Enter in SFTP, and t
   await page.keyboard.press("Space");
 
   // Cmd/Ctrl+Enter on a selection: the review, with one split tab chosen.
-  await page.keyboard.press("ControlOrMeta+Enter");
+  await page.keyboard.press(`${uiModifier}+Enter`);
   const review = page.getByRole("dialog", { name: "Open 2 sessions?" });
   await expect(review.getByRole("radio", { name: "In one tab, split" })).toBeChecked();
   await review.getByRole("button", { name: "Cancel" }).click();
@@ -222,7 +222,7 @@ test("no checkboxes; from two selected hosts a slim strip offers Connect, Move, 
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await nameButton(page, "api-gateway").click();
   await expect(bulkBar(page)).toHaveCount(0);
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   const bar = bulkBar(page);
   // A slim strip: the common actions, the rest under More….
@@ -250,7 +250,7 @@ test("palette: Enter connects a host, Cmd/Ctrl+Enter beside the session in front
   await page.keyboard.press("Control+Shift+K");
   await page.getByRole("combobox", { name: /Type a command/ }).fill("staging-web");
   await expect(page.locator(".palette-foot")).toContainText("split");
-  await page.keyboard.press("ControlOrMeta+Enter");
+  await page.keyboard.press(`${uiModifier}+Enter`);
   await expect.poll(async () => (await calls(page, "session_open_ssh")).length).toBe(2);
   await expect(page.getByRole("tab", { name: /\(2\)/ })).toHaveCount(1);
 });
@@ -276,8 +276,8 @@ test("right-click on a selected host acts on the selection; outside it, it selec
   await openHosts(page);
   await chooseLayout(page, "List");
   await nameButton(page, "build-runner-03").click();
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
-  await nameButton(page, "staging-web").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
+  await nameButton(page, "staging-web").click({ modifiers: [uiModifier] });
   const row = (label: string) => list(page).locator("li").filter({ has: page.getByRole("button", { name: label, exact: true }) });
 
   await row("edge-cache").click({ button: "right", position: { x: 600, y: 20 } });
@@ -298,7 +298,7 @@ test("right-click on a selected host acts on the selection; outside it, it selec
   await page.keyboard.press("Escape");
 
   // Keyboard: Shift+F10 on a host of a selection.
-  await nameButton(page, "edge-cache").click({ modifiers: ["ControlOrMeta"] });
+  await nameButton(page, "edge-cache").click({ modifiers: [uiModifier] });
   await nameButton(page, "edge-cache").focus();
   await page.keyboard.press("Shift+F10");
   await expect(page.getByRole("menu", { name: "2 hosts" })).toBeVisible();

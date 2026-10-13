@@ -523,7 +523,9 @@ into session**, always through the paste review and without pressing Enter for y
 
 ## Settings, privacy and diagnostics
 
-Settings has **Appearance** (theme: system, light or dark; reduce motion), **Terminal** (color
+Settings has **Appearance** (a color theme for the interface: Cobalt, the blue default, Verdigris,
+Fjord, Graphite or High contrast; a mode: system, light or dark; interface size; reduce motion),
+**Terminal** (color
 scheme, font and size, line height, letter spacing, padding, cursor, scrollback, font
 ligatures, GPU rendering, copy on select, confirmation before multi-line pastes, the shell for
 local terminals, and the editors for remote files), **Vault security**, **Backup and restore**

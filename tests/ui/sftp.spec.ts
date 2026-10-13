@@ -3,7 +3,7 @@
 // crates/core/tests/sessions_lab.rs.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { uiModifier, openApp } from "./fixtures";
 
 type Call = { cmd: string; args: Record<string, unknown> };
 const calls = (page: Page) => page.evaluate(() => (window as unknown as { __mockCalls: Call[] }).__mockCalls);
@@ -321,7 +321,7 @@ test("sftp: a click visibly selects, multi-select and keys work, and opening a f
   await page.mouse.up();
 
   await remote.getByRole("button", { name: "Select README.md" }).click();
-  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: [uiModifier] });
   await expect(footer).toHaveText(/^2 selected/);
   await remote.getByRole("button", { name: "Open app" }).click({ modifiers: ["Shift"] });
   // The anchor moved to deploy.sh with the Ctrl click: the range runs from there up to app.
@@ -329,7 +329,7 @@ test("sftp: a click visibly selects, multi-select and keys work, and opening a f
 
   // Several items: one confirmation names how many.
   await remote.getByRole("button", { name: "Select README.md" }).click();
-  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: ["ControlOrMeta"] });
+  await remote.getByRole("button", { name: "Select deploy.sh" }).click({ modifiers: [uiModifier] });
   await page.keyboard.press("Delete");
   await expect(page.getByRole("alertdialog", { name: "Delete 2 items?" })).toBeVisible();
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();

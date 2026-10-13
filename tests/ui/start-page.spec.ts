@@ -4,7 +4,7 @@
 // it. The sessions themselves are covered by the connection, quick-connect and native suites.
 import { type Page, expect, test } from "@playwright/test";
 
-import { openApp } from "./fixtures";
+import { uiModifier, openApp } from "./fixtures";
 
 const calls = (page: Page, cmd: string) =>
   page.evaluate((c) => (window as unknown as { __mockCalls: { cmd: string; args: Record<string, unknown> }[] }).__mockCalls.filter((x) => x.cmd === c), cmd);
@@ -110,7 +110,7 @@ test("Escape clears the box first, then closes an untouched page", async ({ page
 
 test("the new tab page shortcut opens it", async ({ page }) => {
   await openApp(page);
-  await page.keyboard.press("ControlOrMeta+Shift+KeyN");
+  await page.keyboard.press(`${uiModifier}+Shift+KeyN`);
   await expect(startPage(page)).toBeVisible();
   await expect(sessionTabs(page)).toHaveCount(1);
 });
