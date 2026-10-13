@@ -90,11 +90,12 @@ test("connection feedback uses one truthful loop and errors stay spatially stabl
   await page.clock.runFor(42);
   const track = page.getByTestId("connect-track");
   const loops = await track.evaluate((el) => el.getAnimations({ subtree: true }).filter((animation) => (animation.effect as KeyframeEffect).getTiming().iterations === Number.POSITIVE_INFINITY).map((animation) => (animation as CSSAnimation).animationName));
-  expect(loops).toEqual(["track-spin"]);
+  // One loop: the light on the segment in progress.
+  expect(loops).toEqual(["track-pass"]);
   await emitSessionEvent(page, { type: "state", state: "failed" });
   await emitSessionEvent(page, { type: "closed", error: { code: "AUTH_FAILED", message: "Synthetic authentication rejected." }, exitStatus: null });
   await expect(page.getByRole("alert").filter({ hasText: "The server did not accept the sign-in" })).toBeVisible();
-  const failure = track.locator('[data-state="fail"] .track-dot');
+  const failure = track.locator('.track-stop[data-state="fail"]');
   await expect(failure).toBeVisible();
   expect(await failure.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
   expect(await track.evaluate((el) => el.getAnimations({ subtree: true }).filter((animation) => (animation.effect as KeyframeEffect).getTiming().iterations === Number.POSITIVE_INFINITY).length)).toBe(0);

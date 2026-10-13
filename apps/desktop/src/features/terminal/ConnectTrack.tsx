@@ -1,7 +1,8 @@
 import type { ChainPosition } from "@tyrminal/contracts";
+import type React from "react";
 import type { CSSProperties } from "react";
 
-import { IconCheck, IconPlug, IconTerminal, IconX } from "../../components/ui/icons";
+import { IconCheck, IconFingerprint, IconKeyRound, IconNetwork, IconPlug, IconSearch, IconTerminal, IconUser, IconX, type IconProps } from "../../components/ui/icons";
 import { msgConnect } from "../../lib/messages-connect";
 import type { TimelineEntry } from "./ConnectionSheet";
 import "./connect-track.css";
@@ -16,6 +17,18 @@ const STAGES = [
 ] as const;
 
 export type StageId = (typeof STAGES)[number]["id"];
+
+/** The mark over each segment: what that step is, by stop id (quick connect's own steps included). */
+const STOP_ICONS: Record<string, (props: IconProps) => React.ReactNode> = {
+  protocol: IconNetwork,
+  user: IconUser,
+  signIn: IconKeyRound,
+  resolve: IconSearch,
+  connect: IconPlug,
+  verify: IconFingerprint,
+  auth: IconKeyRound,
+  shell: IconTerminal,
+};
 export type StageState = "done" | "now" | "waiting" | "fail" | "pending";
 
 const stageOf = (step: string) => STAGES.findIndex((s) => (s.steps as readonly string[]).includes(step));
@@ -61,9 +74,10 @@ export function connectionStops(states: StageState[]): TrackStop[] {
 }
 
 /**
- * The track from this computer to the shell. It only follows events: a stop lights when its step
- * arrives, so it never runs ahead of the connection and never holds it back. Decorative (the step
- * list below says the same in words), so it is hidden from assistive technology.
+ * The progress bar from this computer to the shell, one segment for each stop. It only follows
+ * events: a segment fills when its step arrives, so it never runs ahead of the connection and
+ * never holds it back. Decorative (the step list below says the same in words), so it is hidden
+ * from assistive technology. Only the stops are drawn; the other parts carry state for tests.
  */
 export function ConnectTrack({ states, stops: given, lead = [] }: { states?: StageState[]; stops?: TrackStop[]; lead?: TrackStop[] | undefined }) {
   // `lead`: stops passed before the connection began (quick connect's setup), shown done.
@@ -89,15 +103,24 @@ export function ConnectTrack({ states, stops: given, lead = [] }: { states?: Sta
             <span />
           </span>
         )}
-        {stops.map((stop, index) => (
-          <span key={stop.id} className="track-stop" data-stage={stop.id} data-state={stop.state} style={{ "--at": (index + 1) / points } as CSSProperties}>
-            <span className="track-dot">
-              {stop.state === "done" && <IconCheck size={11} />}
-              {stop.state === "fail" && <IconX size={11} />}
+        {stops.map((stop, index) => {
+          const StopIcon = STOP_ICONS[stop.id];
+          return (
+            <span key={stop.id} className="track-stop" data-stage={stop.id} data-state={stop.state} title={stop.label} style={{ "--at": (index + 1) / points } as CSSProperties}>
+              <span className="track-bar" />
+              {StopIcon && (
+                <span className="track-icon">
+                  <StopIcon size={12} />
+                </span>
+              )}
+              <span className="track-dot">
+                {stop.state === "done" && <IconCheck size={11} />}
+                {stop.state === "fail" && <IconX size={11} />}
+              </span>
+              <span className="track-label">{stop.label}</span>
             </span>
-            <span className="track-label">{stop.label}</span>
-          </span>
-        ))}
+          );
+        })}
       </div>
       <span className="track-end track-to" data-state={state}>
         <IconTerminal size={15} />
