@@ -189,7 +189,10 @@ test.describe("Afterglow motion", () => {
         .map((a) => ({ name: (a as CSSAnimation).animationName, pseudo: (a.effect as KeyframeEffect).pseudoElement, duration: (a.effect as KeyframeEffect).getTiming().duration })),
     );
     expect(glow).toContainEqual({ name: "ag-afterglow", pseudo: "::before", duration: 900 });
-    await page.waitForTimeout(1000);
-    expect(await local.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
+    // It ends on its own (one shot, no loop): wait for it to finish, then nothing of it is left.
+    await local.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).filter((a) => (a as CSSAnimation).animationName === "ag-afterglow").map((a) => a.finished)),
+    );
+    expect(await local.evaluate((el) => el.getAnimations({ subtree: true }).map((a) => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty))).not.toContain("ag-afterglow");
   });
 });

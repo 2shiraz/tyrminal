@@ -571,3 +571,12 @@ Each entry says what changed from the plan above and why. Newest last.
     purpose (a toast never covers a control) and finds hover by hit-testing. A swipe needs pointer
     events on the toast, so the deck leaves on its timers instead; hovering (the deck's box and the
     toasts themselves) fans it out and pauses it, and a hidden window pauses it too.
+21. **The new-tab page is main's (M5).** Main shipped a start page for "+" while this branch was in
+    progress; it matches §7.4, so Afterglow styles it instead of adding a second one. It is a tab whose
+    pane is not a terminal yet, so its tab and status bar keep the app's colours.
+22. **Theme cards without hover preview (M5).** Main applies a scheme by saving the preference, so a
+    hover preview would write preferences while the pointer passes over the cards. The cards choose
+    on click; main's select stays as the keyboard and assistive-technology control, and the cards
+    are a pointer shortcut hidden from assistive technology.
+23. **The side panel docks as on main (M5).** Main's panel already enters with a short slide and the
+    terminal fits once; overlay-then-dock would change the terminal's geometry rules for little gain.

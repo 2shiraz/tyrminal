@@ -54,3 +54,14 @@ milestone, newest last.
   (the track mid-connect). Checks: typecheck, exp build, role-based specs (469 passed; the 2
   failures also fail on main's latest build), `afterglow-deck.exp.ts` 3 passed. Next: M5 new-tab
   page, quick connect, theme cards.
+- **M5 new tab, quick connect, theme cards (2026-10-13).** Visible: main's new-tab start page in
+  Afterglow (a large connect field, four action tiles with amber icon wells, recent connections as a
+  rounded list, a faint amber glow from the top), and it keeps the app's colours rather than the
+  terminal scheme's until it becomes a terminal; connection and quick-connect sheets as 16 px cards,
+  with a long track showing only the current stop's label; theme cards in the terminal Appearance
+  panel: every scheme as a card with a tiny ANSI sample, the chosen one ringed in amber with a check
+  that springs in. Screenshots: `*-21-appearance-panel.png`, `*-22-start-page.png`,
+  `*-23-quick-connect.png`, plus SFTP, Tunnels and Recordings (`*-24…27`). Checks: typecheck, exp
+  build, role-based specs (470 passed; 2 fail on main's latest build too; 1 exp spec was timing-
+  sensitive and now waits for the glow to finish), `afterglow-themes.exp.ts` 2 passed. Next: M6
+  unlock rise, remaining screens, light pass.

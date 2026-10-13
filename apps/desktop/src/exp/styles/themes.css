@@ -1,0 +1,95 @@
+/* Afterglow theme cards (plan §6 moment 7): exp/sidepanel/ConnectionPanel.tsx. */
+
+:root[data-ui="afterglow"] {
+  & .ag-side-panel {
+    display: contents;
+  }
+
+  & .theme-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+
+  & .theme-card {
+    position: relative;
+    display: grid;
+    gap: 6px;
+    padding: 4px 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  & .theme-card:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  & .theme-card[data-current] {
+    border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    color: var(--text);
+  }
+
+  /* 16 px card, 4 px padding: a 12 px sample (concentric). */
+  & .theme-sample {
+    display: grid;
+    gap: 1px;
+    padding: 7px 8px;
+    border-radius: var(--r-md);
+    font: 10px / 1.35 var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  & .theme-swatches {
+    display: flex;
+    gap: 3px;
+    margin-top: 4px;
+  }
+
+  & .theme-swatches > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+
+  & .theme-swatches > .theme-cursor {
+    width: 5px;
+    margin-left: auto;
+    border-radius: 1px;
+  }
+
+  & .theme-card-name {
+    padding: 0 4px;
+  }
+
+  /* The chosen card's check springs in (the badge spring, 200 ms). */
+  & .theme-check {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--r-full);
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 0 0 2px var(--bg-canvas);
+    transition:
+      transform var(--spring-badge-duration) var(--spring-badge),
+      opacity var(--duration-fast) var(--ease-out);
+
+    @starting-style {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+  }
+}

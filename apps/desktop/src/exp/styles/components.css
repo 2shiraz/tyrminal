@@ -128,7 +128,7 @@
 
   & .choice:has(input:checked) {
     border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-    background: var(--accent-soft);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface-2));
   }
 
   & .choice input[type="radio"] {

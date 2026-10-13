@@ -10,3 +10,5 @@ import "./styles/tabs.css";
 import "./styles/hosts.css";
 import "./styles/connect.css";
 import "./styles/toasts.css";
+import "./styles/start.css";
+import "./styles/themes.css";

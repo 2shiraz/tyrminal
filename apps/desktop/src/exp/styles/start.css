@@ -1,0 +1,188 @@
+/* Afterglow, M5 (plan §7.4, §7.5): the new-tab page and the connection sheets. Main's start page
+   and quick-connect sheet are kept; this is their Afterglow shape. */
+
+:root[data-ui="afterglow"] {
+  /* ------------------------------------------------------------ the new-tab page */
+
+  & .start-page {
+    background:
+      radial-gradient(640px 360px at 50% 0%, rgb(247 164 64 / 0.05), transparent 70%),
+      var(--bg-canvas);
+  }
+
+  &[data-theme="light"] .start-page {
+    background:
+      radial-gradient(640px 360px at 50% 0%, rgb(179 94 0 / 0.05), transparent 70%),
+      var(--bg-canvas);
+  }
+
+  @media (max-width: 720px) {
+    & .start-actions {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  & .start-inner {
+    gap: var(--space-6);
+    padding-top: max(var(--space-7), 14vh);
+  }
+
+  /* One large field that both finds and connects ("Connect to…"). */
+  & .start-search .input {
+    height: 48px;
+    padding-left: 44px;
+    border-radius: var(--r-md);
+    font-size: 15px;
+    box-shadow: var(--shadow-card), 0 10px 30px -14px rgb(6 4 14 / 0.6);
+  }
+
+  & .start-search .input-with-icon > svg {
+    left: 16px;
+  }
+
+  & .start-search .btn {
+    height: 48px;
+    padding-inline: var(--space-4);
+    border-radius: var(--r-md);
+  }
+
+  & .start-list {
+    padding: 4px;
+    gap: 1px;
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-card);
+  }
+
+  & .start-list > li + li {
+    border-top: 0;
+  }
+
+  & .start-row {
+    min-height: 44px;
+    border-radius: var(--r-md);
+  }
+
+  & .start-quick {
+    border-color: var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-surface-2);
+  }
+
+  /* Actions as tiles: a 40 px icon well over the label, two to four across. */
+  /* Four actions, four across: no orphan tile. */
+  & .start-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  & .start-tile {
+    position: relative;
+    display: grid;
+    align-content: space-between;
+    justify-items: start;
+    min-height: 112px;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-color: var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-surface-2);
+    box-shadow: var(--shadow-card);
+    font-weight: var(--weight-medium);
+  }
+
+  & .start-tile > svg {
+    box-sizing: content-box;
+    padding: 10px;
+    border-radius: var(--r-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  & .start-tile:hover,
+  & .start-tile:focus-visible {
+    border-color: var(--border-strong);
+    background: var(--bg-raised-hover);
+  }
+
+  /* The shortcut sits in the corner, so every tile has the same two rows. */
+  & .start-tile .kbd-group {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+    margin: 0;
+  }
+
+  & .start-recent .eyebrow {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+
+  /* ------------------------------------------------------------ connection and quick-connect sheets */
+
+  & .connection-sheet {
+    padding: var(--space-6);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-overlay);
+    box-shadow: var(--shadow-pop);
+  }
+
+  & .connection-sheet[data-tone="danger"] {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+    box-shadow: var(--shadow-pop);
+  }
+
+  & .connect-head h2 {
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-section);
+  }
+
+  & .quick-identity {
+    border-radius: var(--r-sm);
+  }
+
+  & .btn-split > .btn:first-child {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
+
+  & .btn-split > .btn-split-more {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+}
+
+/* A new tab that is still its start page is not a terminal yet: its tab, the content card and the
+   status bar keep the app's colours, not the terminal scheme's (main applies the scheme to every
+   tab that is not a page or a files-only tab). `inherit` takes back the app's values from .main. */
+:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) :is(.statusbar, .tab[aria-selected="true"]) {
+  --text: inherit;
+  --text-muted: inherit;
+  --text-faint: inherit;
+  --accent-text: inherit;
+  --border: inherit;
+  --border-subtle: inherit;
+  --bg-hover: inherit;
+  --bg-active: inherit;
+  --success: inherit;
+  --success-soft: inherit;
+  --warning: inherit;
+  --warning-soft: inherit;
+  --danger: inherit;
+  --danger-soft: inherit;
+  --tab-fill: var(--bg-control);
+  color: var(--text);
+}
+
+:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) .statusbar,
+:root[data-ui="afterglow"] .main:has(.workspace:not([hidden]) .pane:not([hidden]) .start-page) .content {
+  background: var(--bg-canvas);
+}
+
+/* A long track (quick connect has eight stops): only the stop in progress, waiting or failed keeps
+   its label, so the labels never run into each other; the dots say the rest. */
+:root[data-ui="afterglow"] .track-rail:has(> :nth-child(7 of .track-stop)) .track-stop:not([data-state="now"], [data-state="waiting"], [data-state="fail"]) .track-label {
+  visibility: hidden;
+}

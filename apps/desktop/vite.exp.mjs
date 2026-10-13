@@ -24,6 +24,7 @@ const SWAPS = {
   "components/ui/icons.tsx": "exp/ui/icons.tsx",
   "components/layout/TabStrip.tsx": "exp/layout/TabStrip.tsx",
   "features/hosts/HostPanel.tsx": "exp/hosts/HostPanel.tsx",
+  "features/sidepanel/ConnectionPanel.tsx": "exp/sidepanel/ConnectionPanel.tsx",
 };
 
 /** Vite ids use forward slashes; a Windows drive keeps its letter (C:/...). */

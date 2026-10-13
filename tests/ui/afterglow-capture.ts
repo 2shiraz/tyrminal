@@ -14,18 +14,26 @@ const nav = (page: Page, name: RegExp | string) =>
 
 for (const theme of ["dark", "light"] as const) {
   test(`afterglow ${theme}`, async ({ page }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
+    page.setDefaultTimeout(15_000);
+    /** The terminal side panel, open on `section`, whatever state earlier shots left it in. */
+    const panel = async (section: "Snippets" | "History" | "Appearance") => {
+      if (!(await page.locator(".side-panel").isVisible())) await page.keyboard.press("Control+Shift+S");
+      await page.locator(".panel-sections").getByRole("tab", { name: section, exact: true }).click();
+    };
     /** `fn` prepares the screen; with `own`, it also takes the screenshot itself (mid-motion shots). */
     const shot = async (name: string, fn?: () => Promise<void>, own = false) => {
       if (ONLY && !ONLY.includes(name)) return;
       try {
         if (fn) await fn();
         if (own) return;
+        // Views, panels and dialogs load on first use: let their chunks arrive.
+        await page.waitForLoadState("networkidle");
         await page.mouse.move(1, 719);
         await page.waitForTimeout(250);
         await page.screenshot({ path: `${OUT}/${theme}-${name}.png` });
       } catch (e) {
-        console.log(`skip ${name}: ${String(e).slice(0, 200)}`);
+        console.log(`skip ${name}: ${String(e).slice(0, 1200)}`);
       }
     };
     await openApp(page, { scenario: "onboarding", theme });
@@ -87,6 +95,49 @@ for (const theme of ["dark", "light"] as const) {
       await page.waitForTimeout(40);
       await page.screenshot({ path: `${OUT}/${theme}-18-tab-glide.png` });
     }, true);
+    await shot("19-toast-deck", async () => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.getByRole("tab", { name: /api-gateway/ }).click();
+      await panel("Snippets");
+      const run = page.getByRole("button", { name: "Run Disk usage in the terminal" });
+      for (let i = 0; i < 3; i += 1) await run.click();
+      await expect(page.locator(".toasts > .toast")).toHaveCount(3);
+    });
+    await shot("20-toast-deck-fanned", async () => {
+      await page.locator(".toasts > .toast").last().hover({ force: true });
+      await expect(page.locator(".toasts")).toHaveAttribute("data-expanded", "true");
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${OUT}/${theme}-20-toast-deck-fanned.png` });
+    }, true);
+    await shot("21-appearance-panel", async () => {
+      await page.mouse.move(5, 400);
+      await panel("Appearance");
+      await expect(page.getByRole("complementary", { name: "Appearance" })).toBeVisible();
+    });
+    await shot("22-start-page", async () => {
+      await page.getByRole("button", { name: "New tab", exact: true }).click();
+      await expect(page.locator(".start-page")).toBeVisible();
+    });
+    await shot("23-quick-connect", async () => {
+      await nav(page, /^Hosts/);
+      await page.locator(".hosts-search-input").fill("198.51.100.7");
+      // The search is debounced; Enter acts on its answer.
+      await page.waitForTimeout(600);
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("tab", { name: /198\.51\.100\.7/ })).toHaveAttribute("aria-selected", "true");
+      await page.waitForTimeout(300);
+    });
+    await shot("24-sftp-picker", async () => {
+      await nav(page, "SFTP");
+      await expect(page.getByRole("region", { name: "SFTP file manager" })).toBeVisible();
+    });
+    await shot("25-sftp-panes", async () => {
+      const right = page.getByRole("region", { name: "SFTP file manager" }).getByRole("region", { name: "Right pane", exact: true });
+      await right.getByRole("group", { name: "Select host" }).getByRole("button", { name: /^api-gateway/ }).click();
+      await expect(right.getByRole("grid", { name: /^Contents of / })).toBeVisible();
+    });
+    await shot("26-tunnels", () => nav(page, /^Tunnels/));
+    await shot("27-recordings", () => nav(page, /^Recordings/));
     await openApp(page, { theme, trustPromptFor: "staging-web", renderer: "compatibility" });
     await shot("17-trust-prompt", async () => {
       await nav(page, /^Hosts/);
