@@ -8,8 +8,9 @@ import { MOTD_LINES } from "./motd-fixture";
 // Park the pointer so hover states and tooltips never leak into a baseline.
 const shot = async (page: import("@playwright/test").Page, name: string) => {
   await page.mouse.move(1, 859);
-  // The timeout bounds capture on a busy runner (software WebGL); matching is unchanged.
-  await expect(page).toHaveScreenshot(name, { timeout: 15_000 });
+  // The timeout bounds capture on a busy runner (software WebGL); matching is unchanged. Soft, so
+  // a test still fails on any mismatch but reports every screenshot of its tour, not the first.
+  await expect.soft(page).toHaveScreenshot(name, { timeout: 15_000 });
 };
 
 for (const theme of ["dark", "light"] as const) {
