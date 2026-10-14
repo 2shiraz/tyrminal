@@ -125,10 +125,12 @@ test("records menu presentation frames and a real-clock interaction frame timeli
   await allowMotion(page);
   await page.evaluate(() => {
     const frames: number[] = [];
-    const end = performance.now() + 1400;
+    // At least 1.4 s and at least 31 frames (a loaded runner rendering in software can fall below
+    // 22 fps); the timeline is evidence, not a frame-rate budget. Bounded at 10 s.
+    const start = performance.now();
     const sample = (time: number) => {
       frames.push(time);
-      if (time < end) requestAnimationFrame(sample);
+      if (time - start < 10_000 && (time - start < 1400 || frames.length <= 30)) requestAnimationFrame(sample);
     };
     (window as unknown as { __motionFrames: number[] }).__motionFrames = frames;
     requestAnimationFrame(sample);
@@ -157,7 +159,7 @@ test("records menu presentation frames and a real-clock interaction frame timeli
   await expect(menu).toBeVisible();
   await expect(page.locator("[data-exit-ghost]")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __motionFrames: number[] }).__motionFrames.length)).toBeGreaterThan(30);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __motionFrames: number[] }).__motionFrames.length), { timeout: 12_000 }).toBeGreaterThan(30);
   const frames = await page.evaluate(() => (window as unknown as { __motionFrames: number[] }).__motionFrames);
   const intervals = frames.slice(1).map((time, i) => time - frames[i]);
   expect(intervals.every((interval) => Number.isFinite(interval) && interval > 0)).toBe(true);
