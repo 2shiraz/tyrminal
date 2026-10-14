@@ -17,6 +17,9 @@ const FRAME_MS = 16;
 const LONG_TASK_MS = 50;
 /** The longest task allowed while typing (the results render), set over the measured value. */
 const RESULTS_LONG_TASK_MS = 100;
+// The first key of a query switches the view from the browse list to search results, which
+// replaces the whole list; it gets two frames. Every later key stays within one.
+const SWITCH_KEY_MS = 2 * FRAME_MS + 1;
 /** A human typing pace: the search results (debounced in the view) arrive between keys. */
 const KEY_GAP_MS = 150;
 const QUERY = "bulk-host-9";
@@ -112,11 +115,14 @@ test("perf: typing in the Hosts search with 1,000 hosts fits in a frame", async 
   await expect(list.getByRole("button", { name: "api-gateway", exact: true })).toBeVisible();
 
   const keys: Key[] = [];
+  const switches: number[] = [];
   const longs: number[] = [];
   for (let round = 0; round < 2; round++) {
     await watchLongTasks(page);
-    for (const ch of QUERY) {
-      keys.push(await timedKey(page, ch));
+    for (const [i, ch] of [...QUERY].entries()) {
+      const key = await timedKey(page, ch);
+      if (i === 0) switches.push(key.handlers + key.frame);
+      else keys.push(key);
       await page.waitForTimeout(KEY_GAP_MS);
     }
     // The results for the whole query: bulk-host-9, bulk-host-90..99, bulk-host-900..999.
@@ -134,10 +140,12 @@ test("perf: typing in the Hosts search with 1,000 hosts fits in a frame", async 
     `Hosts search, ${HOSTS} hosts, per keystroke: work median ${median(work).toFixed(1)} ms, p95 ${percentile(work, 0.95).toFixed(1)} ms ` +
       `(handlers ${median(keys.map((k) => k.handlers)).toFixed(1)}, frame ${median(keys.map((k) => k.frame)).toFixed(1)}); ` +
       `input-to-next-paint median ${median(paint).toFixed(1)} ms, p95 ${percentile(paint, 0.95).toFixed(1)} ms (work runs: ${fmt(work)}); ` +
+      `first key of each query (browse -> results): ${fmt(switches)} ms; ` +
       `long tasks while typing: ${longs.length ? fmt(longs) : "none"}`,
   );
   expect(median(work), "keystroke work median").toBeLessThanOrEqual(FRAME_MS);
   expect(percentile(work, 0.95), "keystroke work p95").toBeLessThanOrEqual(FRAME_MS);
+  expect(Math.max(...switches), "first key of a query (browse -> results)").toBeLessThanOrEqual(SWITCH_KEY_MS);
   // The results arrive between keys and replace the list; the 111 results of the full query are
   // fewer than the windowing threshold, so all of them render at once.
   expect(Math.max(0, ...longs), "longest task while typing").toBeLessThanOrEqual(RESULTS_LONG_TASK_MS);

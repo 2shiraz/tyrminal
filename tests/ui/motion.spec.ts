@@ -233,13 +233,22 @@ test.describe("exits", () => {
     const toasts = page.locator(".toasts .toast");
     await expect(toasts).toHaveCount(1);
     await page.waitForTimeout(400);
+    // Count the glides the older toast starts, as they start: a short glide can be over before the
+    // page is asked about it on a loaded runner, so reading getAnimations() afterwards races it.
+    await toasts.first().evaluate((el) => {
+      const counted = el as HTMLElement & { glides?: number };
+      counted.glides = 0;
+      const animate = el.animate.bind(el);
+      el.animate = (keyframes, options) => {
+        const first = Array.isArray(keyframes) ? keyframes[0] : null;
+        if (String(first?.transform ?? "").startsWith("translate(")) counted.glides = (counted.glides ?? 0) + 1;
+        return animate(keyframes, options);
+      };
+    });
     await run.click();
     await expect(toasts).toHaveCount(2);
     // The stack sits on the status bar: the older toast moves up, gliding from where it was.
-    const glides = await toasts.first().evaluate((el) =>
-      el.getAnimations().filter((a) => String((a.effect as KeyframeEffect).getKeyframes()[0]?.transform ?? "").startsWith("translate(")).length,
-    );
-    expect(glides).toBe(1);
+    await expect.poll(() => toasts.first().evaluate((el) => (el as HTMLElement & { glides?: number }).glides)).toBe(1);
   });
 
   test("a hovered toast stays until the pointer leaves", async ({ page }) => {
