@@ -22,6 +22,7 @@ const DEFAULTS: Preferences = {
   confirmMultiOpen: true,
   confirmProductionOpen: true,
   confirmSnippetRun: true,
+  autoLockMinutes: 5,
   terminal: {
     scheme: "tyrminal-night",
     fontFamily: "jetbrains-mono",

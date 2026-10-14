@@ -15,8 +15,6 @@ use crate::state::AppState;
 
 /// Event carrying the non-secret vault status to the main window.
 const VAULT_STATUS_EVENT: &str = "vault-status";
-/// Inactivity after which the vault locks itself.
-const IDLE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 fn storage_error() -> IpcError {
     IpcError::new(ErrorCode::IoError, "Tyrminal could not open its data folder. No data was changed.")
@@ -107,8 +105,9 @@ pub fn run() {
                         let _ = vault.lock().await;
                     });
                 }));
-                // Idle lock, enforced natively (spec §1.3: five minutes by default).
-                tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
+                // Idle lock, enforced natively: five minutes by default, or the user's choice.
+                core.vault.set_idle_timeout(tyrminal_core::idle_lock_timeout(&core.preferences.get()));
+                tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock());
             }
             // Local copies of remote files being edited never outlive the process that made them:
             // anything left by an earlier run (a crash) is removed before the window opens.

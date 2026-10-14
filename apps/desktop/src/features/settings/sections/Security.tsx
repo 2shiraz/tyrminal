@@ -13,6 +13,10 @@ import { msgSettings } from "../messages";
 import { SettingsGroup } from "../SettingsGroup";
 
 /** Vault and unlock: passphrase, recovery key and quick unlock on this device. */
+/** The vault's lock times, as the core accepts them (crates/contracts limits::AUTO_LOCK_MINUTES). */
+const AUTO_LOCK_MINUTES = [1, 5, 15, 30, 60, 240, 480] as const;
+const DEFAULT_AUTO_LOCK_MINUTES = 5;
+
 export function VaultSection() {
   const { prefs, update } = usePreferences();
   const [dialog, setDialog] = useState<"passphrase" | "recovery" | "quick" | null>(null);
@@ -25,6 +29,22 @@ export function VaultSection() {
           <Notice tone="success">{msg.settings.changed}</Notice>
         </div>
       )}
+      <SettingsGroup title={msgSettings.locking}>
+        <SettingRow label={msgSettings.autoLock} hint={msgSettings.autoLockHint} id="auto-lock">
+          <select
+            className="select"
+            aria-label={msgSettings.autoLock}
+            value={String(prefs.autoLockMinutes ?? DEFAULT_AUTO_LOCK_MINUTES)}
+            onChange={(event) => update((p) => ({ ...p, autoLockMinutes: Number(event.target.value) }))}
+          >
+            {AUTO_LOCK_MINUTES.map((minutes) => (
+              <option key={minutes} value={minutes}>
+                {msgSettings.autoLockChoice(minutes)}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+      </SettingsGroup>
       <SettingsGroup title={msgSettings.passphrase}>
         <SettingRow label={msgSettings.passphraseRow} hint={msgSettings.passphraseHint} id="passphrase" variant="action">
           <button type="button" className="btn" onClick={() => setDialog("passphrase")}>

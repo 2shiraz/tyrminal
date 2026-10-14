@@ -411,7 +411,7 @@ confirmOpen: "Ask before opening several sessions",
     changed: "The passphrase was changed.",
     rotateRecovery: "Issue a new recovery key",
     rotateBody: "The old recovery key stops working immediately.",
-    autoLock: "The vault locks after 5 minutes without activity and when you close Tyrminal. Locking ends open sessions.",
+    autoLock: "The vault locks after a while without activity (Settings → Vault and unlock) and when you close Tyrminal. Locking ends open sessions.",
     privacy: "Privacy",
     privacyBody:
       "Tyrminal makes no network connections of its own. The only traffic is the SSH connections you start. There is no account, telemetry, crash upload or automatic update check.",

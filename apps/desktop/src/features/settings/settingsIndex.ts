@@ -63,6 +63,7 @@ export const SETTINGS_INDEX: IndexEntry[] = [
   { section: "terminal", group: m.localShellAndEditors, label: s.editors, hint: s.editorsHint, id: "editors" },
   { section: "shortcuts", group: msgC.keys.title, label: msgC.keys.title, hint: msgC.keys.body, id: "shortcuts" },
   { section: "highlight", group: msgC.highlight.title, label: msgC.highlight.enabled, hint: msgC.highlight.body, id: "highlight" },
+  { section: "security", group: m.locking, label: m.autoLock, hint: m.autoLockHint, id: "auto-lock" },
   { section: "security", group: m.passphrase, label: m.passphraseRow, hint: m.passphraseHint, id: "passphrase" },
   { section: "security", group: m.passphrase, label: m.recoveryRow, hint: m.recoveryHint, id: "recovery-key" },
   { section: "security", group: m.quickUnlock, label: msg.quickUnlock.title, hint: msg.quickUnlock.body, id: "quick-unlock" },

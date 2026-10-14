@@ -558,7 +558,8 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     let dir = TempDir::new().unwrap();
     let (core, _) = created(&dir).await;
     let timeout = Duration::from_millis(400);
-    let timer = tokio::spawn(Arc::clone(&core.vault).run_idle_lock(timeout));
+    core.vault.set_idle_timeout(timeout);
+    let timer = tokio::spawn(Arc::clone(&core.vault).run_idle_lock());
     let mut status = core.vault.subscribe();
 
     // Steady activity for three timeouts: still unlocked.
@@ -595,6 +596,32 @@ async fn the_core_locks_the_vault_after_inactivity_and_rearms_after_unlock() {
     core.vault.note_activity();
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(core.vault.status().await.unwrap().state, VaultState::Locked);
+    timer.abort();
+}
+
+/// The idle time is the user's (Settings): a change reaches a running timer at once, a longer
+/// time keeps the vault open, and a shorter one locks it, measured from the last activity.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_idle_time_applies_to_the_running_timer_at_once() {
+    use std::time::{Duration, Instant};
+    let dir = TempDir::new().unwrap();
+    let (core, _) = created(&dir).await;
+    core.vault.set_idle_timeout(Duration::from_secs(60));
+    let timer = tokio::spawn(Arc::clone(&core.vault).run_idle_lock());
+    let mut status = core.vault.subscribe();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(core.vault.status().await.unwrap().state, VaultState::Unlocked, "a minute has not passed");
+
+    // Shortened while the timer sleeps toward the old time: it locks within the new one, not
+    // the five-second suspend check.
+    core.vault.note_activity();
+    let changed_at = Instant::now();
+    core.vault.set_idle_timeout(Duration::from_millis(300));
+    tokio::time::timeout(Duration::from_secs(2), status.wait_for(|s| s.state == VaultState::Locked))
+        .await
+        .expect("the shorter time applied")
+        .unwrap();
+    assert!(changed_at.elapsed() < Duration::from_secs(2));
     timer.abort();
 }
 
