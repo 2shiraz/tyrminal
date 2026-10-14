@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 
 import { usePreferences } from "../../../app/preferences";
 import { ErrorNotice, Notice, SettingRow, Switch, relativeTime } from "../../../components/ui/controls";
-import { backup, diagnostics, links as linksApi } from "../../../lib/ipc";
+import { backup, diagnostics } from "../../../lib/ipc";
 import { msg } from "../../../lib/messages";
 import { msgB } from "../../../lib/messages-b";
 import { useAction } from "../../../lib/useAsync";
 import { ExportBackupButton, RestoreBackupDialog } from "../../vault/BackupRestore";
 import { msgSettings } from "../messages";
 import { SettingsGroup } from "../SettingsGroup";
+import { UpdatesSetting } from "../UpdatesSetting";
 // OS auto-detection
 import { OsDetectionSetting } from "../../os-detection/OsDetectionSetting";
 
@@ -67,11 +68,7 @@ export function PrivacySection() {
         <OsDetectionSetting />
       </SettingsGroup>
       <SettingsGroup title={msgSettings.updates}>
-        <SettingRow label={msg.settings.updates} hint={msg.settings.updatesBody(__APP_VERSION__)} id="updates" variant="link">
-          <button type="button" className="btn" onClick={() => void linksApi.open(msg.settings.releasesUrl).catch(() => undefined)}>
-            {msg.settings.updatesOpen}
-          </button>
-        </SettingRow>
+        <UpdatesSetting />
       </SettingsGroup>
     </>
   );

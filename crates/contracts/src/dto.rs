@@ -592,6 +592,9 @@ pub struct Preferences {
     /// Show the lines and the target before a snippet of several lines is sent. On by default.
     /// Sessions on production hosts are asked whatever this says.
     pub confirm_snippet_run: bool,
+    /// Look for a newer signed release once a day (UX-05, ADR 0013). Off by default: automatic
+    /// checks are opt-in, and a build without the updater never checks.
+    pub check_updates: bool,
 }
 
 /// One width per resizable panel; `None` is the panel's default width. Only these panels are
@@ -701,6 +704,7 @@ impl Default for Preferences {
             confirm_multi_open: true,
             confirm_production_open: true,
             confirm_snippet_run: true,
+            check_updates: false,
         }
     }
 }
@@ -1115,6 +1119,42 @@ pub enum TransferEvent {
         error: IpcError,
     },
     Cancelled,
+}
+
+// ---------- updates (UX-05, ADR 0013) ----------
+
+/// What this build can do about updates. `availableInBuild` is false for any build made
+/// without the release's update signing key: such a build has no updater and never checks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdateStatus {
+    pub available_in_build: bool,
+    pub current_version: String,
+}
+
+/// A newer release whose manifest the updater accepted. Its artifact is verified against the
+/// built-in public key when it is downloaded, before anything is installed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdateOffer {
+    pub version: String,
+    /// Release date as the manifest states it (RFC 3339), if any.
+    pub date: Option<String>,
+    /// The release notes as plain text, shortened; never rendered as markup.
+    pub notes: Option<String>,
+}
+
+/// Download progress of an update being installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdateProgress {
+    #[ts(type = "number")]
+    pub downloaded: u64,
+    #[ts(type = "number | null")]
+    pub total: Option<u64>,
 }
 
 /// A remote file opened in a local application. `changed`: the local copy differs from what

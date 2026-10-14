@@ -188,6 +188,9 @@
     "allow-glance-host-set",
     "allow-multiplexer-list",
     "allow-os-detection-get",
-    "allow-os-detection-set"
+    "allow-os-detection-set",
+    "allow-update-status",
+    "allow-update-check",
+    "allow-update-install"
   ]
 }

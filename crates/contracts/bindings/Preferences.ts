@@ -80,4 +80,9 @@ confirmProductionOpen: boolean,
  * Show the lines and the target before a snippet of several lines is sent. On by default.
  * Sessions on production hosts are asked whatever this says.
  */
-confirmSnippetRun: boolean, };
+confirmSnippetRun: boolean, 
+/**
+ * Look for a newer signed release once a day (UX-05, ADR 0013). Off by default: automatic
+ * checks are opt-in, and a build without the updater never checks.
+ */
+checkUpdates: boolean, };

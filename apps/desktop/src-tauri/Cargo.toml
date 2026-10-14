@@ -23,6 +23,9 @@ path = "src/main.rs"
 # it lets any local process drive the application. `scripts/check-release.mjs` verifies that
 # release binaries do not contain it.
 e2e = ["dep:tauri-plugin-wdio-webdriver"]
+# The in-app updater (ADR 0013). Enabled only by the release workflow, and only when the update
+# signing key is configured; `scripts/check-release.mjs` keeps it out of the default graph.
+updater = ["dep:tauri-plugin-updater"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
@@ -43,5 +46,14 @@ tauri-plugin-dialog = "=2.8.2"
 # Command-finished desktop notifications (P-23), sent from Rust only: the renderer gets no notification
 # permission and supplies no text; the core builds it from validated fields (ADR 0011).
 tauri-plugin-notification = "=2.6.0"
+# Signed in-app updates (UX-05, ADR 0013), driven from Rust only: the renderer gets no updater
+# permission. Optional: only release builds made with the update signing key enable the `updater`
+# feature, so every other build has no HTTP client at all. Verifies each artifact against the public
+# key built into the release. rustls only (no system TLS), no proxy autodetection.
+tauri-plugin-updater = { version = "=2.13.3", default-features = false, features = ["rustls-tls", "zip"], optional = true }
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }
 tyrminal-core = { path = "../../../crates/core" }
+
+[dev-dependencies]
+# Builds Tauri configurations in the updater tests (already in the graph through tauri).
+serde_json = "1"

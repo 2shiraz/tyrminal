@@ -405,3 +405,9 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
   .sidebar .nav-item[aria-current="page"]::before, .hosts-main .hosts-search::before { forced-color-adjust: none; background: Highlight; }
   .hosts-main .hosts-search::before { background: Canvas; border-color: CanvasText; }
 }
+
+/* Updates (UX-05): the found release, its notes as plain text, and the update item in the status strip. */
+.settings-page .update-offer { display: grid; gap: 10px; border-top: var(--box-rule); }
+.settings-page .update-offer summary { cursor: pointer; color: var(--text-muted); font-size: var(--text-sm); }
+.settings-page .update-notes { max-height: 180px; margin: 8px 0 0; overflow: auto; color: var(--text-muted); font-size: var(--text-xs); white-space: pre-wrap; }
+.statusbar .status-update { color: var(--accent-text); }

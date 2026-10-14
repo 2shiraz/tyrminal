@@ -31,3 +31,5 @@ pub mod layouts;
 pub mod command_history;
 // server at a glance
 pub mod server_glance;
+// signed in-app updates (UX-05, ADR 0013)
+pub mod updates;

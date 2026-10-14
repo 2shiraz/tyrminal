@@ -206,6 +206,10 @@ const COMMANDS: &[&str] = &[
     // OS auto-detection
     "os_detection_get",
     "os_detection_set",
+    // signed in-app updates (UX-05, ADR 0013): main window only
+    "update_status",
+    "update_check",
+    "update_install",
 ];
 
 /// Short hash of the commit being built: CI's `GITHUB_SHA`, else the local checkout, else `dev`.
