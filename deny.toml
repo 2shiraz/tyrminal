@@ -53,9 +53,11 @@ multiple-versions = "allow"
 wildcards = "deny"
 allow-wildcard-paths = true
 # No HTTP client may enter the application graph in local mode (INV-01); check-release.mjs also
-# inspects the release feature graph.
+# inspects the release feature graph. The one exception is the signed in-app updater (ADR 0013):
+# its optional `updater` feature, enabled only for releases built with the update signing key,
+# may bring reqwest in, and nothing else may.
 deny = [
-  { crate = "reqwest", reason = "no vendor network client in local mode" },
+  { crate = "reqwest", reason = "no vendor network client in local mode", wrappers = ["tauri-plugin-updater"] },
   { crate = "openssl-sys", reason = "the SSH and vault stacks use aws-lc-rs / RustCrypto" },
 ]
 
