@@ -141,7 +141,7 @@ describe("terminal with real applications", { concurrency: false }, () => {
     await s.chord([KEYS.ctrl, "D"]);
     const text = await t.waitForText(/^IME-DONE$/m, "od output");
     // The nine UTF-8 bytes of 日本語 and the newline, once.
-    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m);
+    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m, `od printed: ${JSON.stringify(text.split("\n").slice(-8))}`);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
@@ -721,7 +721,7 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
         const marks = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
         throw new Error(`${error.message}; decorations: ${marks}; screen: ${(await t.terminalText()).slice(-300)}`);
       });
-      assert.deepEqual(tones, ["danger", "info"]);
+      assert.deepEqual(tones, ["danger", "info"], `highlighted: ${await s.execute(`return JSON.stringify([...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => [e.dataset.tone, e.textContent]))`)}; screen: ${(await t.terminalText()).slice(-200)}`);
       await t.type("echo STILL-HERE\n");
       await t.waitForText(/^STILL-HERE$/m, "shell responsive");
     } finally {
