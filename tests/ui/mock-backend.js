@@ -1126,7 +1126,7 @@ export function installMockBackend(options) {
     // terminal notifications (P-23): mirrors the native text; records what was asked.
     notify_command_finished: (a) => {
       (window.__mockNotices ??= []).push(structuredClone(a));
-      const s = Math.floor(a.durationMs / 1000);
+      const s = Math.round(a.durationMs / 1000);
       const took = s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
       const body = a.exitStatus === 0 ? `Command finished successfully after ${took}.` : a.exitStatus === null ? `Command finished after ${took}.` : `Command failed with exit status ${a.exitStatus} after ${took}.`;
       return { title: a.tabTitle.trim() || "Tyrminal", body, shown: true };

@@ -13,7 +13,9 @@ fn is_deceptive(c: char) -> bool {
 }
 
 fn duration_text(ms: u64) -> String {
-    let s = ms / 1000;
+    // To the nearest second: the two marks are timed as they arrive, a few milliseconds apart
+    // from the shell's own clock, so a 4 s command can measure 3 999 ms.
+    let s = (ms + 500) / 1000;
     match s {
         0..=59 => format!("{s} s"),
         60..=3599 => format!("{} min {} s", s / 60, s % 60),
@@ -61,6 +63,8 @@ mod tests {
             "Command failed with exit status 2 after 3 min 12 s."
         );
         assert_eq!(command_finished_notice("api", None, 3_900_000).unwrap().1, "Command finished after 1 h 05 min.");
+        assert_eq!(command_finished_notice("api", None, 3_996).unwrap().1, "Command finished after 4 s.");
+        assert_eq!(command_finished_notice("api", None, 4_499).unwrap().1, "Command finished after 4 s.");
     }
 
     #[test]
