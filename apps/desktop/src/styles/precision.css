@@ -279,6 +279,9 @@ dialog[role="alertdialog"] { transition: none !important; transform: none !impor
 .connection-sheet .connect-prompt { margin-left: 0; padding: 16px; border-radius: var(--radius-box); background: var(--bg-surface); }
 .connection-sheet .connect-actions { flex: none; flex-wrap: wrap; margin: 0; padding: 12px 24px 16px; border-top: 1px solid var(--border-subtle); }
 .connection-sheet .connect-actions:empty { display: none; }
+.connection-sheet .connect-hint[data-tone="danger"] { color: var(--danger); }
+/* A quiet text action opening the row lines its words up with the text above, not its padding. */
+.connection-sheet .connect-actions > .btn-ghost:first-child { margin-inline-start: calc(-1 * (var(--space-3) + 1px)); }
 /* Quick connect (an address that is not a saved host) is the same sheet: its form is the column,
    so its heading, progress, choices and actions sit on the same 24 px inset as a connection. */
 .quick-connect-sheet > form { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; overscroll-behavior: contain; }

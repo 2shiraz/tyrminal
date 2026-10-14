@@ -126,6 +126,12 @@ export function installMockBackend(options) {
     for (let n = 0; n < (options.extraKnownHosts ?? 0); n++) {
       state.knownHosts.push({ id: id(20_000 + n), host: `bulk-${String(n + 1).padStart(3, "0")}.example`, port: 22, algorithm: "ssh-ed25519", fingerprint: `SHA256:bulk${n}`, addedAt: now - 86400 });
     }
+    // The host whose key "changed" was trusted with this key; removing that trust (Known hosts, or
+    // Replace the trusted key on the warning) makes the next connection a first-time trust prompt.
+    const changedHost = options.hostKeyChangedFor ? state.hosts.find((h) => h.label === options.hostKeyChangedFor) : null;
+    if (changedHost) {
+      state.knownHosts.push({ id: id(304), host: changedHost.address, port: changedHost.port, algorithm: "ssh-ed25519", fingerprint: "SHA256:71J6v69vG05S8WYY7SBu9DjPz+twOC7FCitOMa8XCzM", addedAt: now - 86400 * 60 });
+    }
     if (options.orphanKnownHost) {
       state.knownHosts.push({ id: id(302), host: "198.51.100.7", port: 2200, algorithm: "ssh-ed25519", fingerprint: "SHA256:q1W2e3R4t5Y6u7I8o9P0a1S2d3F4g5H6j7K8l9Z0x1C", addedAt: now - 86400 });
     }
@@ -175,8 +181,10 @@ export function installMockBackend(options) {
     // Like the core: a Telnet session starts with a notice from Tyrminal (not a server banner).
     if (host?.protocol?.type === "telnet")
       setTimeout(() => channelSend(args.events, { type: "notice", text: "Telnet is not encrypted: anything you type here, including passwords, can be read by others on the network." }), 5);
-    const trustPrompt = kind === "ssh" && options.trustPromptFor === host?.label;
-    const blocked = kind === "ssh" && options.hostKeyChangedFor === host?.label;
+    const keyChangedFor = kind === "ssh" && options.hostKeyChangedFor === host?.label;
+    const stillTrusted = keyChangedFor && state.knownHosts.some((k) => k.host === host.address && k.port === host.port);
+    const blocked = keyChangedFor && stillTrusted;
+    const trustPrompt = kind === "ssh" && (options.trustPromptFor === host?.label || (keyChangedFor && !stillTrusted));
     const passwordPrompt = kind === "ssh" && options.passwordPromptFor === host?.label;
     const keyRejected = kind === "ssh" && options.keyRejectedFor === host?.label && host.auth.kind === "key" && !state.deployed?.has(host.auth.keyId);
     const steps =
@@ -217,7 +225,7 @@ export function installMockBackend(options) {
       }, 40);
       return { sessionId };
     }
-    if (kind === "ssh" && options.hostKeyChangedFor === host?.label) {
+    if (blocked) {
       setTimeout(() => {
         channelSend(s.events, {
           type: "host_key_changed",

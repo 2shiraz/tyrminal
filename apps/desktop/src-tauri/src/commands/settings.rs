@@ -10,7 +10,11 @@ pub async fn prefs_get(state: State<'_, AppState>) -> Result<Preferences, IpcErr
 
 #[tauri::command]
 pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> Result<Preferences, IpcError> {
-    state.core()?.preferences.set(prefs)
+    let core = state.core()?;
+    let saved = core.preferences.set(prefs)?;
+    // The idle lock follows the saved choice at once (validated by the core's sanitizer).
+    core.vault.set_idle_timeout(tyrminal_core::idle_lock_timeout(&saved));
+    Ok(saved)
 }
 
 /// The application to use for editing remote files with `extension`, chosen in a native dialog

@@ -274,13 +274,11 @@ describe("Tyrminal desktop application", { concurrency: false }, () => {
     assert.ok((await s.text(entries[0])).includes(lab.servers.a.hostKeyEd25519Fingerprint));
   });
 
-  test("replacing trust requires a reason and then asks to verify the new key", async () => {
+  test("replacing trust is confirmed and then asks to verify the new key", async () => {
     await s.clickButton("Remove trust");
     await s.waitFor("dialog");
-    const removeDisabled = () =>
-      s.execute(`return [...document.querySelectorAll("dialog button")].find((b) => b.textContent.trim() === "Remove trust")?.disabled`);
-    assert.equal(await removeDisabled(), true, "cannot remove trust without a reason");
-    await s.type(await s.waitFor("dialog textarea"), "lab server rebuilt for the test");
+    // A confirmation with Cancel first; nothing to type (the core notes where the removal came from).
+    assert.equal(await s.execute(`return document.querySelectorAll("dialog textarea").length`), 0);
     await s.clickButton("Remove trust", { within: "dialog" });
     await s.waitGone("dialog");
     // The dialog closes before the list has reloaded, so wait for the reloaded (empty) list.

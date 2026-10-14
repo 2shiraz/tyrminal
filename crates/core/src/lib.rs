@@ -58,7 +58,7 @@ mod port_suggest;
 pub use diagnostics::{ReportInfo, report as diagnostic_report};
 pub use discovery::{BROWSE_DURATION, Discovery, SSH_SERVICE_TYPE, networks as discovery_networks};
 pub use files::{TransferSink, list_local, local_make_dir, local_remove, local_rename, local_set_mode, local_within};
-pub use preferences::PreferencesStore;
+pub use preferences::{PreferencesStore, idle_lock_timeout};
 pub use serial::available_ports as serial_ports;
 pub use sessions::{SessionSink, Sessions};
 pub use tyrminal_contracts as contracts;

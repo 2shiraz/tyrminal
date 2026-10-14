@@ -4,7 +4,7 @@ import { type FormEvent, useRef, useState } from "react";
 import { useVaultData } from "../../app/vaultData";
 import { Dialog } from "../../components/ui/Dialog";
 import { useWindowedList } from "../../components/ui/useWindowedList";
-import { EmptyState, ErrorNotice, Notice, SkeletonRows, TextArea, relativeAge } from "../../components/ui/controls";
+import { EmptyState, ErrorNotice, Notice, SkeletonRows, relativeAge } from "../../components/ui/controls";
 import { IconFingerprint, IconPlus, IconShieldAlert, IconTrash2 } from "../../components/ui/icons";
 import { knownHosts as knownHostsApi } from "../../lib/ipc";
 import { msg } from "../../lib/messages";
@@ -112,19 +112,22 @@ export function KnownHostsView() {
 
 export function RemoveTrustDialog({
   entry,
+  reason = msg.knownHosts.removedReason,
   onClose,
   onDone,
 }: {
   entry: Pick<KnownHostSummary, "id" | "host" | "port">;
+  /** Where the removal came from, kept with the server's trust history (not asked of the user). */
+  reason?: string;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [reason, setReason] = useState("");
   const { pending, error, run } = useAction();
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const ok = await run(async () => {
+      // The core records the removal, with where it came from, before the trust goes.
       await knownHostsApi.remove(entry.id, reason);
       return true;
     });
@@ -135,13 +138,13 @@ export function RemoveTrustDialog({
     <Dialog title={msg.knownHosts.removeTitle(entry.host, entry.port)} role="alertdialog" icon={<IconShieldAlert size={18} />} tone="danger" onDismiss={onClose}>
       <form className="stack" onSubmit={submit}>
         <Notice tone="warning">{msg.knownHosts.removeBody}</Notice>
-        <TextArea label={msg.knownHosts.reason} value={reason} onChange={setReason} hint={msg.knownHosts.reasonHint} rows={3} maxLength={500} autoFocus mono={false} />
         <ErrorNotice error={error} />
         <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose}>
+          {/* Cancel is the default: removing trust is a deliberate step. */}
+          <button type="button" className="btn" onClick={onClose} autoFocus data-autofocus>
             {msg.common.cancel}
           </button>
-          <button type="submit" className="btn btn-danger-solid" disabled={reason.trim().length < 3 || pending}>
+          <button type="submit" className="btn btn-danger-solid" disabled={pending}>
             <IconTrash2 size={15} />
             {msg.knownHosts.remove}
           </button>

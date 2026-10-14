@@ -225,6 +225,9 @@ pub struct VaultService {
     generation: AtomicU32,
     failed_unlocks: AtomicU32,
     last_activity: std::sync::Mutex<std::time::Instant>,
+    /// How long without activity before the vault locks (the user's preference; five minutes
+    /// until the adapter applies it). A watch so a running timer picks up a change at once.
+    idle_timeout: watch::Sender<Duration>,
 }
 
 impl core::fmt::Debug for VaultService {
@@ -234,6 +237,8 @@ impl core::fmt::Debug for VaultService {
 }
 
 const SUSPEND_CHECK_EVERY: Duration = Duration::from_secs(5);
+/// The idle lock until the user's preference is applied (specification: five minutes, configurable).
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// More wall-clock time than monotonic time between two checks means the machine was asleep
 /// (or the clock jumped forward); either way the vault locks.
 const SUSPEND_GAP: Duration = Duration::from_secs(30);
@@ -388,6 +393,7 @@ impl VaultService {
             generation: AtomicU32::new(0),
             failed_unlocks: AtomicU32::new(0),
             last_activity: std::sync::Mutex::new(std::time::Instant::now()),
+            idle_timeout: watch::channel(DEFAULT_IDLE_TIMEOUT).0,
         }
     }
 
@@ -406,19 +412,27 @@ impl VaultService {
         *self.last_activity.lock().unwrap_or_else(|p| p.into_inner()) = std::time::Instant::now();
     }
 
-    /// Locks the vault after `timeout` without activity, for as long as the service lives.
+    /// Sets how long the vault stays unlocked without activity. A running timer uses the new
+    /// value at once, measured from the last activity (so a shorter time can lock immediately).
+    pub fn set_idle_timeout(&self, timeout: Duration) {
+        self.idle_timeout.send_replace(timeout);
+    }
+
+    /// Locks the vault after the idle timeout without activity, for as long as the service lives.
     ///
     /// The timer runs here, not in the renderer: a hung or crashed renderer stops reporting
     /// activity and the vault still locks. (A compromised renderer can report fake activity;
     /// that is inside the stated limits of what an unlocked, compromised renderer can do.)
-    pub async fn run_idle_lock(self: std::sync::Arc<Self>, timeout: Duration) {
+    pub async fn run_idle_lock(self: std::sync::Arc<Self>) {
         let mut status = self.subscribe();
+        let mut timeouts = self.idle_timeout.subscribe();
         loop {
             if status.wait_for(|s| s.state == VaultState::Unlocked).await.is_err() {
                 return;
             }
             self.note_activity();
             loop {
+                let timeout = *timeouts.borrow_and_update();
                 let idle = self.last_activity.lock().unwrap_or_else(|p| p.into_inner()).elapsed();
                 if idle >= timeout {
                     self.lock().await;
@@ -429,6 +443,8 @@ impl VaultService {
                 let (wall, mono) = (SystemTime::now(), std::time::Instant::now());
                 tokio::select! {
                     () = tokio::time::sleep((timeout - idle).min(SUSPEND_CHECK_EVERY)) => {}
+                    // A new idle time from Settings: measure again with it.
+                    _ = timeouts.changed() => {}
                     changed = status.wait_for(|s| s.state != VaultState::Unlocked) => {
                         if changed.is_err() {
                             return;

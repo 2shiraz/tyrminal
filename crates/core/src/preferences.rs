@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tyrminal_contracts::limits::MAX_SCROLLBACK_LINES;
+use tyrminal_contracts::limits::{AUTO_LOCK_MINUTES, MAX_SCROLLBACK_LINES};
 use tyrminal_contracts::{ErrorCode, IpcError, Preferences};
 
 use crate::error::{err, invalid};
@@ -38,6 +38,9 @@ pub fn sanitize(mut prefs: Preferences) -> Result<Preferences, IpcError> {
     }
     if !id_ok(&prefs.palette) {
         return Err(invalid("That color theme is not known."));
+    }
+    if !AUTO_LOCK_MINUTES.contains(&prefs.auto_lock_minutes) {
+        return Err(invalid("Choose one of the offered times for locking the vault."));
     }
     if !matches!(t.font_family.as_str(), "jetbrains-mono" | "system") {
         return Err(invalid("That font is not available."));
@@ -124,6 +127,11 @@ pub fn extension_of(name: &str) -> Option<String> {
     let (stem, ext) = name.rsplit_once('.')?;
     let ext = ext.to_ascii_lowercase();
     (!stem.is_empty() && extension_ok(&ext)).then_some(ext)
+}
+
+/// How long the vault stays unlocked without activity, from saved preferences.
+pub fn idle_lock_timeout(prefs: &Preferences) -> std::time::Duration {
+    std::time::Duration::from_secs(u64::from(prefs.auto_lock_minutes) * 60)
 }
 
 impl PreferencesStore {
@@ -437,5 +445,26 @@ mod tests {
         // Files from before the setting existed read as default widths.
         std::fs::write(&path, br#"{"theme":"dark"}"#).unwrap();
         assert_eq!(PreferencesStore::open(&path).get().panel_widths, None);
+    }
+
+    #[test]
+    fn the_lock_time_is_one_of_the_offered_choices_and_older_files_get_five_minutes() {
+        assert_eq!(Preferences::default().auto_lock_minutes, 5);
+        assert_eq!(idle_lock_timeout(&Preferences::default()), std::time::Duration::from_secs(300));
+        let mut older = serde_json::to_value(Preferences::default()).unwrap();
+        older.as_object_mut().unwrap().remove("autoLockMinutes");
+        let read: Preferences = serde_json::from_value(older).unwrap();
+        assert_eq!(sanitize(read).unwrap().auto_lock_minutes, 5);
+        for minutes in AUTO_LOCK_MINUTES {
+            let kept = sanitize(Preferences { auto_lock_minutes: minutes, ..Preferences::default() }).unwrap();
+            assert_eq!(idle_lock_timeout(&kept), std::time::Duration::from_secs(u64::from(minutes) * 60));
+        }
+        // Never locking, or a time outside the list, is refused rather than stored.
+        for minutes in [0, 2, 481, u32::MAX] {
+            assert!(
+                sanitize(Preferences { auto_lock_minutes: minutes, ..Preferences::default() }).is_err(),
+                "{minutes}"
+            );
+        }
     }
 }

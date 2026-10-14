@@ -592,6 +592,9 @@ pub struct Preferences {
     /// Show the lines and the target before a snippet of several lines is sent. On by default.
     /// Sessions on production hosts are asked whatever this says.
     pub confirm_snippet_run: bool,
+    /// Minutes without activity before the vault locks itself. One of
+    /// `limits::AUTO_LOCK_MINUTES`; files written before it existed read as 5.
+    pub auto_lock_minutes: u32,
 }
 
 /// One width per resizable panel; `None` is the panel's default width. Only these panels are
@@ -701,6 +704,7 @@ impl Default for Preferences {
             confirm_multi_open: true,
             confirm_production_open: true,
             confirm_snippet_run: true,
+            auto_lock_minutes: crate::limits::DEFAULT_AUTO_LOCK_MINUTES,
         }
     }
 }

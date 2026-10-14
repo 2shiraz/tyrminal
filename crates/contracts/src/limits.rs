@@ -129,3 +129,9 @@ pub const GLANCE_MIN_INTERVAL_MS: u64 = 5_000;
 // tmux and screen session awareness (P-31)
 /// At most this many sessions of each multiplexer are listed.
 pub const MAX_MULTIPLEXER_SESSIONS: usize = 64;
+
+/// The vault locks itself after this many minutes without activity (Settings → Vault and unlock).
+/// A short list rather than a free number: every choice still locks an unattended vault.
+pub const AUTO_LOCK_MINUTES: [u32; 7] = [1, 5, 15, 30, 60, 240, 480];
+/// The default: five minutes (specification, "Vault idle lock").
+pub const DEFAULT_AUTO_LOCK_MINUTES: u32 = 5;

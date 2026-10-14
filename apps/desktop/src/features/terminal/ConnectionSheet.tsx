@@ -1,7 +1,8 @@
-import type { ChainPosition, HostOs, IpcError, SessionEvent, SessionState } from "@tyrminal/contracts";
+import type { ChainPosition, HostOs, IpcError, KnownHostSummary, SessionEvent, SessionState } from "@tyrminal/contracts";
 import { type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { useWindowFocused } from "../../components/ui/Wordmark";
+import { knownHosts as knownHostsApi } from "../../lib/ipc";
 import { SecretField, TextField } from "../../components/ui/controls";
 import { IconCheck, IconCircleAlert, IconRefreshCw, IconScrollText, IconShieldAlert, IconX } from "../../components/ui/icons";
 import { msg } from "../../lib/messages";
@@ -266,6 +267,28 @@ export function ConnectionSheet(props: {
   const { ssh, label, identity, timeline, startedAt, trust, auth, changed, closed, autoRetry, banner, interactive } = props;
   const [now, setNow] = useState(() => Date.now());
   const [cancelled, setCancelled] = useState(false);
+  // Replacing a changed key: removes the trust it was refused against and connects again, where the
+  // new key is shown for checking before anything trusts it (INV-03: never a silent replacement).
+  const [replacing, setReplacing] = useState<"working" | "gone" | { error: string } | null>(null);
+  async function replaceKey() {
+    if (!changed || replacing === "working") return;
+    setReplacing("working");
+    try {
+      const trusted: KnownHostSummary[] = await knownHostsApi.list();
+      // Only the keys this server was refused against: the same address, port and fingerprint.
+      const stale = trusted.filter((k) => k.host === changed.host && k.port === changed.port && changed.trustedFingerprints.includes(k.fingerprint));
+      if (stale.length === 0) {
+        setReplacing("gone");
+        return;
+      }
+      // The core records each removal, with where it came from, before the trust goes.
+      for (const k of stale) await knownHostsApi.remove(k.id, msg.terminal.replaceKeyNote);
+      setReplacing(null);
+      props.onReconnect();
+    } catch (caught) {
+      setReplacing({ error: (caught as { message?: string }).message ?? String(caught) });
+    }
+  }
   // Failed attempts while this sheet is up (a lost connection being retried), oldest first.
   const failures = useRef<{ at: number; message: string }[]>([]);
   const lastClosed = useRef<typeof closed>(null);
@@ -345,6 +368,12 @@ export function ConnectionSheet(props: {
           ))}
         </div>
         <p className="connect-hint">{msg.terminal.changedNext}</p>
+        {replacing === "gone" && <p className="connect-hint">{msg.terminal.replaceKeyGone}</p>}
+        {replacing && typeof replacing === "object" && (
+          <p className="connect-hint" role="alert" data-tone="danger">
+            {replacing.error}
+          </p>
+        )}
       </>
     );
     actions = (
@@ -353,6 +382,18 @@ export function ConnectionSheet(props: {
           {msg.terminal.openKnownHosts}
         </button>
         <span className="grow" />
+        {/* Never the default: replacing trust is a deliberate step with a reason, and the new key
+            is still shown for checking before it is trusted (INV-03: no silent replacement). */}
+        {props.canReconnect &&
+          (replacing === "gone" ? (
+            <button type="button" className="btn" onClick={props.onReconnect}>
+              {msg.terminal.reconnect}
+            </button>
+          ) : (
+            <button type="button" className="btn" disabled={replacing === "working"} onClick={() => void replaceKey()}>
+              {msg.terminal.replaceKey}
+            </button>
+          ))}
         {/* The safe choice is the primary and has focus. */}
         <button type="button" className="btn btn-primary" onClick={props.onCloseTab} autoFocus={interactive} data-autofocus>
           {msg.terminal.closeTab}
@@ -542,6 +583,7 @@ export function ConnectionSheet(props: {
           {actions}
         </div>
       </Sheet>
+
     </div>
   );
 }

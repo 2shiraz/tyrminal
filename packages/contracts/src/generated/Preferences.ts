@@ -80,4 +80,9 @@ confirmProductionOpen: boolean,
  * Show the lines and the target before a snippet of several lines is sent. On by default.
  * Sessions on production hosts are asked whatever this says.
  */
-confirmSnippetRun: boolean, };
+confirmSnippetRun: boolean, 
+/**
+ * Minutes without activity before the vault locks itself. One of
+ * `limits::AUTO_LOCK_MINUTES`; files written before it existed read as 5.
+ */
+autoLockMinutes: number, };
