@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Release workflow helper: copies the installers Tauri produced for this platform into one
-// directory under stable, versioned names.
+// directory under stable, versioned names, with the signed update artifacts and their `.sig`
+// files when the build made them (ADR 0013).
 //
 //   node scripts/ci/collect-artifacts.mjs <platform> <tag> <outDir>
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -30,3 +31,22 @@ for (const [dir, pattern] of patterns) {
   }
 }
 if (copied === 0) throw new Error(`no installers found under ${bundle} for ${platform}`);
+
+// Update artifacts: what the in-app updater downloads, each with its minisign signature.
+const updates = {
+  "macos-arm64": [["macos", /\.app\.tar\.gz$/]],
+  "macos-x64": [["macos", /\.app\.tar\.gz$/]],
+  "windows-x64": [["nsis", /-setup\.exe$/]],
+  "linux-x64": [["appimage", /\.AppImage$/]],
+}[platform];
+for (const [dir, pattern] of updates) {
+  const from = join(bundle, dir);
+  if (!existsSync(from)) continue;
+  for (const name of readdirSync(from).filter((n) => pattern.test(n) && existsSync(join(from, `${n}.sig`)))) {
+    const target = `tyrminal-${tag}-${platform}${name.slice(name.search(pattern))}`;
+    // The installer itself is already copied above (Windows, Linux AppImage); the macOS archive is new.
+    if (!existsSync(join(outDir, target))) copyFileSync(join(from, name), join(outDir, target));
+    copyFileSync(join(from, `${name}.sig`), join(outDir, `${target}.sig`));
+    console.log(`${join(from, name)}.sig -> ${target}.sig`);
+  }
+}

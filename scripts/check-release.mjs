@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { updaterPolicy } from "./ci/updater.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriDir = join(root, "apps", "desktop", "src-tauri");
@@ -43,7 +44,15 @@ check(!/(^|[\s;])\*([\s;]|$)/.test(cspText), "CSP contains a wildcard source");
 check((csp["script-src"] ?? "") === "'self'", "script-src must be exactly 'self'");
 check((csp["default-src"] ?? "") === "'none'", "default-src must be 'none'");
 check(config.app?.withGlobalTauri === false, "withGlobalTauri must be false");
-check(!("updater" in (config.plugins ?? {})), "an updater endpoint is configured before an authorized trust root exists");
+// The base configuration never carries the updater: only a release build made with the update
+// signing key gets it, through the overlay checked below (ADR 0013).
+check(!("updater" in (config.plugins ?? {})), "the updater belongs in the release overlay, not tauri.conf.json");
+const overlayAt = process.argv.indexOf("--overlay");
+if (overlayAt > 0) {
+  const overlay = JSON.parse(readFileSync(process.argv[overlayAt + 1], "utf8"));
+  for (const problem of updaterPolicy(overlay.plugins?.updater)) check(false, problem);
+  check(Object.keys(overlay.plugins ?? {}).every((name) => name === "updater"), "the release overlay may add only the updater plugin");
+}
 check(
   JSON.stringify(config.app?.security?.capabilities) === '["main","detached"]',
   "release config must enable exactly the 'main' and 'detached' capabilities",
