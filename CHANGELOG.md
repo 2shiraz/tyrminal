@@ -5,6 +5,21 @@ pre-releases are not stable and have not been independently security reviewed.
 
 ## Unreleased
 
+## 0.2.0-beta.2 — pre-release
+
+Release notes: [docs/releases/v0.2.0-beta.2.md](docs/releases/v0.2.0-beta.2.md).
+
+### Added
+- Signed in-app updates (Settings → Privacy → Updates) in releases built with the update
+  signing key; daily checks are opt-in.
+- A changed server key can be replaced from its warning; the new key goes through the
+  first-time trust prompt.
+- The vault's idle lock time is a setting (1 minute to 8 hours, 5 minutes by default).
+
+### Fixed
+- With quick unlock off, macOS no longer asks for the keychain password on the unlock screen
+  or in Settings.
+
 ## 0.2.0-beta.1 — pre-release
 
 Release notes: [docs/releases/v0.2.0-beta.1.md](docs/releases/v0.2.0-beta.1.md).
