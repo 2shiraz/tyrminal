@@ -797,6 +797,64 @@ async fn quick_unlock_uses_the_os_store_and_never_falls_back() {
     core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
 }
 
+/// A secret store that counts reads, to show what touches it. (macOS asks for the keychain
+/// password on each read an item's access list does not already allow.)
+struct CountingStore {
+    inner: tyrminal_core::MemorySecretStore,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+impl tyrminal_core::SecretStore for CountingStore {
+    fn set(&self, account: &str, secret: &[u8]) -> Result<(), tyrminal_platform::KeystoreError> {
+        self.inner.set(account, secret)
+    }
+    fn get(&self, account: &str) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, tyrminal_platform::KeystoreError> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.get(account)
+    }
+    fn delete(&self, account: &str) -> Result<(), tyrminal_platform::KeystoreError> {
+        self.inner.delete(account)
+    }
+}
+
+/// The unlock screen and Settings ask whether quick unlock is on every time they open. The answer
+/// comes from the vault file: the OS secret store is read only when the user chooses to unlock
+/// with this device, so quick unlock turned off (or never turned on) never prompts for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn asking_whether_quick_unlock_is_on_never_reads_the_os_store() {
+    use std::sync::atomic::Ordering;
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(CountingStore { inner: tyrminal_core::MemorySecretStore::default(), reads: 0.into() });
+    let core = Core::open_with_store(&db_path(&dir), store.clone()).unwrap();
+    core.vault.create(PASSPHRASE.into()).await.unwrap();
+    for _ in 0..3 {
+        assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    }
+    core.vault.lock().await;
+    assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(store.reads.load(Ordering::SeqCst), 0, "off: the store is never read");
+
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    core.vault.disable_quick_unlock().await.unwrap();
+    core.vault.lock().await;
+    let after_turning_off = store.reads.load(Ordering::SeqCst);
+    for _ in 0..3 {
+        assert!(!core.vault.quick_unlock_enabled().await.unwrap());
+    }
+    assert_eq!(store.reads.load(Ordering::SeqCst), after_turning_off, "turned off: still never read");
+
+    core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    core.vault.enable_quick_unlock(PASSPHRASE.into()).await.unwrap();
+    core.vault.lock().await;
+    let before = store.reads.load(Ordering::SeqCst);
+    assert!(core.vault.quick_unlock_enabled().await.unwrap());
+    assert_eq!(store.reads.load(Ordering::SeqCst), before, "on: known from the vault file, not the store");
+    // Choosing to unlock with this device is what reads it.
+    core.vault.unlock_with_device().await.unwrap();
+    assert_eq!(store.reads.load(Ordering::SeqCst), before + 1);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_quick_unlock_entry_opens_nothing_and_is_removed() {
     use tyrminal_core::MemorySecretStore;

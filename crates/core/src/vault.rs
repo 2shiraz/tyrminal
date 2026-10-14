@@ -680,20 +680,15 @@ impl VaultService {
         (bytes.len() == 48).then(|| (id, SecretKey::from_bytes(secret)))
     }
 
-    /// Whether this device can unlock without the passphrase: the vault has the device slot
-    /// named by this device's keychain entry. Works while locked; never reveals the secret.
+    /// Whether this vault has a quick-unlock slot, answered from the vault header alone. Works
+    /// while locked. The OS secret store is not read here: on macOS reading the entry asks for the
+    /// keychain password, and this is asked every time the unlock screen or Settings opens, with
+    /// quick unlock on or off. The entry is read only when the user chooses to unlock with this
+    /// device, which fails plainly if it is missing (`unlock_with_device`).
     pub async fn quick_unlock_enabled(&self) -> Result<bool, IpcError> {
-        let header = {
-            let mut inner = self.inner.lock().await;
-            self.ensure_loaded(&mut inner).await?;
-            match inner.header.clone() {
-                Some(header) => header,
-                None => return Ok(false),
-            }
-        };
-        let account = Self::quick_account(&header.vault_id());
-        let Ok(entry) = self.store_call(move |s| s.get(&account)).await else { return Ok(false) };
-        Ok(entry.and_then(|e| Self::parse_entry(&e)).is_some_and(|(id, _)| header.device_slot_ids().contains(&id)))
+        let mut inner = self.inner.lock().await;
+        self.ensure_loaded(&mut inner).await?;
+        Ok(inner.header.as_ref().is_some_and(|header| !header.device_slot_ids().is_empty()))
     }
 
     /// Turns on quick unlock for this device after re-checking the passphrase with a real unlock.
