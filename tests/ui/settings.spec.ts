@@ -69,11 +69,11 @@ test("settings: diagnostics are off by default, keep only command and code, and 
   expect(reports).toEqual([[{ command: "vault_unlock", code: "WRONG_CREDENTIAL", at: expect.any(Number) }]]);
   expect(JSON.stringify(reports)).not.toContain("not the passphrase");
 
-  // Turning it off forgets what was kept; updates are only ever started by the user.
+  // Turning it off forgets what was kept. This build has no updater: it offers the releases page.
   await toggle.uncheck();
   await toggle.check();
   await expect(page.getByText("0 failures kept")).toBeVisible({ timeout: 5000 });
-  await expect(page.getByText(/never checks for or installs updates by itself/)).toBeVisible();
+  await expect(page.getByText(/This build cannot update itself/)).toBeVisible();
   await page.getByRole("button", { name: "Open the releases page" }).click();
   const opened = await page.evaluate(() =>
     (window as unknown as { __mockCalls: { cmd: string; args: { url?: string } }[] }).__mockCalls.filter((c) => c.cmd === "link_open").map((c) => c.args.url),

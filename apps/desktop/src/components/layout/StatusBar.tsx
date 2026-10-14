@@ -4,7 +4,7 @@ import type { PaneStatus } from "../../features/terminal/TerminalView";
 import { msgSftp } from "../../features/sftp/messages";
 import { msg } from "../../lib/messages";
 import { shortcutText } from "../../lib/shortcuts";
-import { IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun, IconZoomIn, IconZoomOut } from "../ui/icons";
+import { IconArrowUpCircle, IconClipboardCopy, IconCpu, IconFile, IconHardDrive, IconLock, IconMoon, IconRadio, IconScrollText, IconServer, IconShieldCheck, IconSun, IconZoomIn, IconZoomOut } from "../ui/icons";
 // server at a glance
 import { msgG } from "../../lib/messages-glance";
 import { msgI } from "../../lib/messages-input";
@@ -26,6 +26,7 @@ function StatusBarImpl({
   notesOpen,
   onToggleNotes,
   onZoom,
+  update,
 }: {
   pane: Pane | null;
   status: PaneStatus | undefined;
@@ -46,6 +47,8 @@ function StatusBarImpl({
   onToggleNotes?: (() => void) | undefined;
   /** Zoom of the focused terminal pane (this pane only, not saved); absent when none is in front. */
   onZoom?: ((step: "in" | "out" | "reset") => void) | undefined;
+  /** A newer release was found: its version, and where to see and install it (Settings → Privacy). */
+  update?: { version: string; onOpen: () => void } | undefined;
   /** Changes with the user's shortcuts, so this memoized component re-renders its shortcut labels. */
   shortcuts?: unknown;
 }) {
@@ -186,6 +189,12 @@ function StatusBarImpl({
         >
           <IconScrollText size={13} />
           {msg.status.snippets}
+        </button>
+      )}
+      {update && (
+        <button type="button" className="status-button status-update" onClick={update.onOpen} data-tooltip={msg.status.updateOpen} data-tooltip-side="top">
+          <IconArrowUpCircle size={13} />
+          {msg.status.updateAvailable(update.version)}
         </button>
       )}
       <button

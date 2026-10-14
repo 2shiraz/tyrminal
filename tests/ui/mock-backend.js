@@ -1344,6 +1344,18 @@ export function installMockBackend(options) {
       return a.hosts.length;
     },
     key_list: () => structuredClone(state.keys),
+    // signed updates (UX-05): `options.updater` makes this a build with the updater; `offer` is the
+    // newer release its feed announces (none: up to date).
+    update_status: () => ({ availableInBuild: !!options.updater, currentVersion: "0.2.0" }),
+    update_check: () => {
+      if (!options.updater) throw { code: "INVALID_INPUT", message: "This build has no updater. Download new versions from the releases page." };
+      state.updateChecks = (state.updateChecks ?? 0) + 1;
+      return options.updater.offer ?? null;
+    },
+    update_install: () => {
+      if (!options.updater?.offer) throw { code: "NOT_FOUND", message: "Check for updates first." };
+      window.__mockUpdateInstalled = options.updater.offer.version;
+    },
     known_host_list: () => structuredClone(state.knownHosts),
     known_host_remove: (a) => {
       if (String(a.reason ?? "").trim().length < 3) throw { code: "INVALID_INPUT", message: "Say why you are removing this key." };

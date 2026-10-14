@@ -97,6 +97,8 @@ import {
   templateDirty,
   templateTabs,
 } from "./workspace";
+import { updates as updatesApi } from "../lib/ipc";
+import { setUpdateOffer, useUpdateOffer } from "../lib/updateOffer";
 
 export type Destination =
   | "hosts"
@@ -357,6 +359,14 @@ function Shell() {
     setWs((current) => selectTab(current, null));
     setSettingsAt(null);
   }, []);
+  // A newer release found by a check (Settings, or the opt-in daily one): the status strip points to
+  // it, and Settings → Privacy shows and installs it. Nothing installs from here.
+  const updateOffer = useUpdateOffer();
+  useEffect(() => updatesApi.onAvailable(setUpdateOffer), []);
+  const openUpdates = useCallback(() => {
+    navigate("settings");
+    setSettingsAt((current) => ({ section: "privacy", n: (current?.n ?? 0) + 1 }));
+  }, [navigate]);
   const openAbout = useCallback(() => {
     navigate("settings");
     setSettingsAt((current) => ({ section: "about", n: (current?.n ?? 0) + 1 }));
@@ -1171,6 +1181,7 @@ function Shell() {
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           onZoom={terminalVisible && !pageVisible && paneStatus ? zoomFocused : undefined}
+          update={updateOffer ? { version: updateOffer.version, onOpen: openUpdates } : undefined}
           broadcast={terminalVisible && tab ? members.get(tab.id)?.size : undefined}
           onStopBroadcast={stopActiveBroadcast}
           shortcuts={bindings}

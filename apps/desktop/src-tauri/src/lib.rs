@@ -80,8 +80,15 @@ pub fn run() {
     // Command-finished notifications (P-23), used from Rust only (no renderer permission).
     let builder = builder.plugin(tauri_plugin_notification::init());
 
+    // Signed updates (UX-05, ADR 0013), used from Rust only: present only in a release build whose
+    // configuration carries the update public key; every other build has no updater at all.
+    let context = tauri::generate_context!();
+    let updater = commands::updates::configured(context.config());
+    #[cfg(feature = "updater")]
+    let builder = if updater { builder.plugin(tauri_plugin_updater::Builder::new().build()) } else { builder };
+
     let app = builder
-        .setup(|app| {
+        .setup(move |app| {
             let opened = open_core(app);
             let (core, instance_lock) = match opened {
                 Ok((core, lock)) => (Ok(core), Some(lock)),
@@ -116,6 +123,11 @@ pub fn run() {
                 let _ = std::fs::remove_dir_all(&edit_root);
             }
             app.manage(AppState::new(core, instance_lock, edit_root));
+            app.manage(commands::updates::Updates::new(updater));
+            #[cfg(feature = "updater")]
+            if updater {
+                commands::updates::spawn_automatic_checks(app.handle().clone());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -325,8 +337,12 @@ pub fn run() {
             // OS auto-detection
             commands::os_detection::os_detection_get,
             commands::os_detection::os_detection_set,
+            // signed in-app updates (UX-05)
+            commands::updates::update_status,
+            commands::updates::update_check,
+            commands::updates::update_install,
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     match app {
         Ok(app) => app.run(|handle, event| {

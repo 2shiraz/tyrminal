@@ -50,6 +50,8 @@ export interface MockOptions {
   discoveryNetworks?: { id: string; addresses: string[] }[];
   /** Add this many synthetic hosts in no group (bulk-host-001, …) for the windowed Hosts list. */
   extraHosts?: number;
+  /** A build with the signed updater (UX-05); `offer` is what its feed announces (none: up to date). */
+  updater?: { offer?: { version: string; date: string | null; notes: string | null } | null };
   /** Add this many synthetic trusted servers (bulk-001.example, …) for the windowed Known hosts list. */
   extraKnownHosts?: number;
   /** Serve IPC calls one at a time, each taking this long (perf specs: a vault behind one lock). */

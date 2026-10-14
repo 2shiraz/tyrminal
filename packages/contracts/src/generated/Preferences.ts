@@ -85,4 +85,9 @@ confirmSnippetRun: boolean,
  * Minutes without activity before the vault locks itself. One of
  * `limits::AUTO_LOCK_MINUTES`; files written before it existed read as 5.
  */
-autoLockMinutes: number, };
+autoLockMinutes: number, 
+/**
+ * Look for a newer signed release once a day (UX-05, ADR 0013). Off by default: automatic
+ * checks are opt-in, and a build without the updater never checks.
+ */
+checkUpdates: boolean, };

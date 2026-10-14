@@ -7,7 +7,10 @@
 #   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #            and for notarization APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
 #   Windows: WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD
-# Without them the artifacts are unsigned (macOS: ad-hoc signature only) and the notes say so.
+#   Updates: TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD (secrets), with the
+#            matching public key in the repository variable TYRMINAL_UPDATER_PUBKEY (ADR 0013)
+# Without them the artifacts are unsigned (macOS: ad-hoc signature only) and the notes say so;
+# without the update key the build has no in-app updater and no update feed is published.
 name: Release
 
 on:
@@ -80,6 +83,9 @@ jobs:
       - name: Signing configuration (only when secrets exist)
         id: signing
         env:
+          TYRMINAL_RELEASE_TAG: ${{ inputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TYRMINAL_UPDATER_PUBKEY: ${{ vars.TYRMINAL_UPDATER_PUBKEY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -95,16 +101,25 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Signs the update artifacts (minisign); used by the bundler only, never written to disk here.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          FEATURES: ${{ steps.signing.outputs.features }}
         run: |
           # A secret that is not configured arrives as an empty variable, and the Tauri bundler
           # treats a present APPLE_CERTIFICATE as a certificate to import. Drop empty ones so an
           # unsigned build stays unsigned (ad-hoc on macOS) instead of failing.
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then unset "$name"; fi
           done
-          pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
+          # The updater feature (the only HTTP client) only with the update signing key (ADR 0013).
+          if [ -n "$FEATURES" ]; then
+            pnpm run build:desktop --config "${{ steps.signing.outputs.config }}" --features "$FEATURES"
+          else
+            pnpm run build:desktop --config "${{ steps.signing.outputs.config }}"
+          fi
       - name: Release policy against the built binary
-        run: node scripts/check-release.mjs --require-binary
+        run: node scripts/check-release.mjs --require-binary --overlay "${{ steps.signing.outputs.config }}"
       - name: Collect artifacts
         run: node scripts/ci/collect-artifacts.mjs "${{ matrix.platform }}" "${{ inputs.tag }}" dist-release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -160,3 +175,16 @@ jobs:
             --prerelease \
             --title "Tyrminal $TAG (pre-release, unsigned)" \
             --notes-file "docs/releases/$TAG.md"
+      - name: Update feed (only when the update artifacts were signed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          node scripts/ci/updater-feed.mjs dist-release "$TAG" "docs/releases/$TAG.md" latest.json
+          if [ -f latest.json ]; then
+            # One release holds the feed; its latest.json is replaced by each newer release.
+            gh release view updater --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+              gh release create updater --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+                --title "Update feed" --notes "The in-app updater reads latest.json from here. Not an installable release."
+            gh release upload updater latest.json --repo "$GITHUB_REPOSITORY" --clobber
+          fi

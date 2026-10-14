@@ -47,6 +47,7 @@ import type {
   VaultStatus,
 } from "@tyrminal/contracts";
 import type { DiscoveryNetwork, DiscoveryStatus } from "@tyrminal/contracts";
+import type { UpdateOffer, UpdateProgress, UpdateStatus } from "@tyrminal/contracts";
 
 /** An error from the native side: a stable code plus a safe, fixed message. */
 export class AppError extends Error {
@@ -179,6 +180,36 @@ export const keys = {
   deployPreview: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy_preview", { sessionId, keyId }),
   /** Appends the key to the server's authorized keys (an explicit user action). */
   deploy: (sessionId: string, keyId: string) => call<KeyDeployPreview>("key_deploy", { sessionId, keyId }),
+};
+
+/** Native event subscription returning an unsubscribe function (safe before `listen` resolves). */
+function subscribe<T>(event: string, handler: (payload: T) => void): () => void {
+  let active = true;
+  let unlisten: (() => void) | undefined;
+  void listen<T>(event, (e) => {
+    if (active) handler(e.payload);
+  }).then((stop) => {
+    if (active) unlisten = stop;
+    else stop();
+  });
+  return () => {
+    active = false;
+    unlisten?.();
+  };
+}
+
+/**
+ * Signed in-app updates (UX-05, ADR 0013). All of it runs natively: the renderer asks to check or
+ * install and never supplies a URL, key or file. A build without the updater says so in `status`.
+ */
+export const updates = {
+  status: () => call<UpdateStatus>("update_status"),
+  check: () => call<UpdateOffer | null>("update_check"),
+  /** Verifies, installs and restarts; the vault locks first, which ends open sessions. */
+  install: () => call<void>("update_install"),
+  /** An automatic check (opt-in) found a newer release. */
+  onAvailable: (handler: (offer: UpdateOffer) => void) => subscribe<UpdateOffer>("update-available", handler),
+  onProgress: (handler: (progress: UpdateProgress) => void) => subscribe<UpdateProgress>("update-progress", handler),
 };
 
 export const knownHosts = {

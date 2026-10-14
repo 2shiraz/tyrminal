@@ -175,6 +175,8 @@ export const msg = {
     files: "Files",
     notes: "Notes",
     encrypted: "Local · encrypted",
+    updateAvailable: (version: string) => `Update ${version}`,
+    updateOpen: "A newer version is available: see it in Settings",
   },
   hosts: {
     protocol: "Protocol",
