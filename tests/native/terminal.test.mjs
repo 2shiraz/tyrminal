@@ -140,8 +140,8 @@ describe("terminal with real applications", { concurrency: false }, () => {
     await t.type("\n");
     await s.chord([KEYS.ctrl, "D"]);
     const text = await t.waitForText(/^IME-DONE$/m, "od output");
-    // The nine UTF-8 bytes of 日本語 and the newline, once.
-    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m, `od printed: ${JSON.stringify(text.split("\n").slice(-8))}`);
+    // The nine UTF-8 bytes of 日本語 and the newline, once (BSD od on macOS pads with two spaces).
+    assert.match(text, /^\s*e6\s+97\s+a5\s+e6\s+9c\s+ac\s+e8\s+aa\s+9e\s+0a\s*$/m, `od printed: ${JSON.stringify(text.split("\n").slice(-8))}`);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
