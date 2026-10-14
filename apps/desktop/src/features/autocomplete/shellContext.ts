@@ -34,8 +34,10 @@ export type ShellMark =
   | { kind: "prompt"; sessionId: string }
   // command history: `leadingSpace` is set when the line started with a space or tab (the shell
   // convention for "do not remember this"); `command` itself is trimmed.
-  | { kind: "command_start"; sessionId: string; command: string | null; leadingSpace?: boolean }
-  | { kind: "command_end"; sessionId: string; command: string | null; exitStatus: number | null }
+  // `at` (ms since the epoch) is when the output carrying the mark reached the page, not when the
+  // terminal parsed it: a busy page can parse a backlog seconds later.
+  | { kind: "command_start"; sessionId: string; command: string | null; leadingSpace?: boolean; at: number }
+  | { kind: "command_end"; sessionId: string; command: string | null; exitStatus: number | null; at: number }
   | { kind: "folder"; sessionId: string; cwd: string };
 
 const contexts = new Map<string, ShellContext>();
@@ -142,9 +144,10 @@ function startsWithSpace(term: Terminal, start: { line: number; x: number }): bo
 
 /**
  * Follows the marks of one terminal. `sessionId` is read when a mark arrives (the session id is
- * known once the session opened). Returns the cleanup that drops the handlers and the context.
+ * known once the session opened). `arrivedAt` gives when the output being parsed reached the page.
+ * Returns the cleanup that drops the handlers and the context.
  */
-export function attachShellContext(term: Terminal, sessionId: () => string | null): () => void {
+export function attachShellContext(term: Terminal, sessionId: () => string | null, arrivedAt: () => number = Date.now): () => void {
   let promptEnd: { marker: IMarker; x: number } | null = null;
   let running = false;
   const osc7 = term.parser.registerOscHandler(7, (data) => {
@@ -175,12 +178,12 @@ export function attachShellContext(term: Terminal, sessionId: () => string | nul
       promptEnd = null;
       running = true;
       publish(id, { atPrompt: false, command, exitStatus: null });
-      emit({ kind: "command_start", sessionId: id, command, leadingSpace });
+      emit({ kind: "command_start", sessionId: id, command, leadingSpace, at: arrivedAt() });
     } else if (mark === "D" && running) {
       running = false;
       const status = arg !== undefined && /^\d{1,3}$/.test(arg) ? Number(arg) : null;
       publish(id, { exitStatus: status });
-      emit({ kind: "command_end", sessionId: id, command: contexts.get(id)?.command ?? null, exitStatus: status });
+      emit({ kind: "command_end", sessionId: id, command: contexts.get(id)?.command ?? null, exitStatus: status, at: arrivedAt() });
     }
     return true;
   });

@@ -36,7 +36,7 @@ export function useCommandFinished(
     () =>
       shellContexts.onMark((mark) => {
         if (mark.kind === "command_start") {
-          started.current.set(mark.sessionId, Date.now());
+          started.current.set(mark.sessionId, mark.at);
           return;
         }
         if (mark.kind !== "command_end") return;
@@ -44,7 +44,8 @@ export function useCommandFinished(
         started.current.delete(mark.sessionId);
         const { prefs: p, tabOf: find, onFinished: done } = latest.current;
         if (start === undefined || !p.enabled) return;
-        const duration = Date.now() - start;
+        // Both ends from when the marks arrived, so a page busy parsing does not shorten it.
+        const duration = mark.at - start;
         if (duration < p.minSeconds * 1000) return;
         const tab = find(mark.sessionId);
         if (!tab || tab.inView) return;
