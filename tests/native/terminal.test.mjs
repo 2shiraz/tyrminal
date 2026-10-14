@@ -684,7 +684,17 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
         workspace: {
           highlight: {
             enabled: true,
+            // Only the rules below: built-in kinds would also mark the prompt (a macOS host name
+            // has digits, for one).
             ipAddresses: false,
+            numbers: false,
+            urls: false,
+            macAddresses: false,
+            dates: false,
+            quoted: false,
+            paths: false,
+            hex: false,
+            levels: false,
             keywords: [rule("[a-z]{0,99}[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
           },
           bindings: [],
