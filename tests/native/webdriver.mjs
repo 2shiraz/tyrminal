@@ -105,7 +105,10 @@ export class Session {
   async waitGone(selector, { timeout = 15_000 } = {}) {
     const deadline = Date.now() + timeout;
     while (await this.find(selector)) {
-      if (Date.now() > deadline) throw new Error(`timed out waiting for ${selector} to disappear`);
+      if (Date.now() > deadline) {
+        const left = await this.execute(`return [...document.querySelectorAll(arguments[0])].map((e) => e.outerHTML.slice(0, 160)).join(" | ")`, [selector]).catch(() => "?");
+        throw new Error(`timed out waiting for ${selector} to disappear; still there: ${left}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }

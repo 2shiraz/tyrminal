@@ -543,6 +543,11 @@ export function CommandPalette({
             } else if (event.key === "ArrowUp") {
               event.preventDefault();
               setSelected((s) => Math.max(0, s - 1));
+            } else if (event.key === "Escape") {
+              // Handled here rather than by the dialog's own cancel, which WebView2 does not
+              // always deliver.
+              event.preventDefault();
+              dismiss();
             } else if (event.key === "Enter") {
               event.preventDefault();
               choose(selected, (isMac ? event.metaKey : event.ctrlKey) ? "split" : event.shiftKey ? "sftp" : "run");
