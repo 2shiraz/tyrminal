@@ -658,6 +658,8 @@ describe("a tab moved to its own window", { concurrency: false }, () => {
         return list.length === 2 ? list : null;
       }, { describe: "a second window", timeout: 20_000 });
       await s.switchToWindow(handles.find((h) => h !== main));
+      // The new window may still be loading; WebKitGTK can drop a script sent before it has.
+      await s.waitForDocument();
       await s.until(() => s.execute(`return document.querySelector(".detached-head")?.textContent?.includes("Lab") || null`), { describe: "detached window shows the tab", timeout: 20_000 });
       await t.waitForText("LATE-11", "output of the moved session arrives in the new window", 20_000);
       // A fresh terminal here: earlier screen contents do not move with the tab.
