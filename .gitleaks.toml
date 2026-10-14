@@ -11,6 +11,8 @@ paths = [
   '''docs/crypto-format\.md''',
   # A throwaway DSA key that authorizes nothing (tests/fixtures/review/README.md).
   '''tests/fixtures/review/dsa-throwaway\.key''',
+  # A made-up updater public key ("untrusted comment: minisign public key ABCDEF", base64).
+  '''scripts/ci/updater\.test\.mjs''',
 ]
 # Algorithm names in prose match the generic-api-key entropy rule.
 regexes = [
