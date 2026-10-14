@@ -1,4 +1,4 @@
-//! Port forwarding (tunnels): saved rules and running forwards (BUILD_SPEC Phase 07).
+//! Port forwarding (tunnels): saved rules and running forwards (spec Phase 07).
 //!
 //! A saved rule belongs to a host and runs on a connected SSH session to that host. Listeners
 //! bind to loopback unless the rule records an explicit approval for a non-loopback address

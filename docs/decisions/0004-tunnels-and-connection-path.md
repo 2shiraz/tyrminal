@@ -63,11 +63,11 @@ forwarding uses `russh` 0.64.1 (ADR 0002) and `tokio`, both already in the works
 9. **Session recordings: own crate, maintained STREAM, output only.** `crates/session-log` holds the
    recording format (docs/crypto-format.md §11) with no file-system or UI code. Chunks use STREAM-BE32
    from RustCrypto's `aead-stream` **0.6.0** (Apache-2.0 OR MIT; same maintainers and `aead` 0.6 as the
-   `chacha20poly1305` we already use), as BUILD_SPEC §5 asks for "established authenticated-stream
+   `chacha20poly1305` we already use), as spec §5 asks for "established authenticated-stream
    machinery" rather than an ad hoc chunk cipher. It binds chunk order and the final chunk, so a cut,
    reordered or extended file is detected, and a damaged file shows only an authenticated prefix. Each
    file has its own key from `K_logs` and its id. The recorder taps the session's output sink only, so
-   typed input can never be recorded (BUILD_SPEC §8 "never log raw keystrokes").
+   typed input can never be recorded (spec §8 "never log raw keystrokes").
 
 10. **Post-quantum key exchange per host.** The offer keeps `mlkem768x25519-sha256` (ML-KEM-768
     with X25519, as OpenSSH 10 defaults to) first. Each host chooses: *prefer* (default; servers

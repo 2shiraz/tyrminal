@@ -1,11 +1,11 @@
-/* Quiet Precision (DESIGN.md): shared product surfaces. Loaded after global.css; public class names
+/* Quiet Precision (docs/design-system.md): shared product surfaces. Loaded after global.css; public class names
    are unchanged, so every existing workflow consumes this layer. Terminal rendering and transport
    are untouched. Three planes: the page is the canvas (--bg-app), a box or panel is one step up
    (--bg-surface), and things that float (menus, dialogs, the palette) are --bg-overlay. Text fields
    are recessed (--bg-field). */
 
 :root {
-  /* Motion vocabulary (docs/redesign/MOTION.md), aliased onto the existing duration tokens so
+  /* Motion vocabulary, aliased onto the existing duration tokens so
      there is one set of values. Springs are deliberately absent: drags track the pointer 1:1. */
   --motion-instant: 0ms;
   --motion-micro: var(--duration-press);

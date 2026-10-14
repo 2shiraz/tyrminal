@@ -1,4 +1,4 @@
-# Fuzz targets for untrusted-input decoders (BUILD_SPEC §9.1). Not a workspace member: it needs a
+# Fuzz targets for untrusted-input decoders (spec §9.1). Not a workspace member: it needs a
 # nightly toolchain and libFuzzer. Run with `cargo +nightly fuzz run <target>` from this directory.
 [package]
 name = "tyrminal-fuzz"

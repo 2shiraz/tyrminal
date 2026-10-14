@@ -107,7 +107,7 @@ pub fn run() {
                         let _ = vault.lock().await;
                     });
                 }));
-                // Idle lock, enforced natively (BUILD_SPEC §1.3: five minutes by default).
+                // Idle lock, enforced natively (spec §1.3: five minutes by default).
                 tauri::async_runtime::spawn(std::sync::Arc::clone(&core.vault).run_idle_lock(IDLE_LOCK_TIMEOUT));
             }
             // Local copies of remote files being edited never outlive the process that made them:
@@ -292,7 +292,7 @@ pub fn run() {
             // privilege prompts (KEY-18)
             commands::privilege::session_identity,
             commands::privilege::session_insert_identity_password,
-            // identity deletion (BUILD_SPEC §10.2)
+            // identity deletion (spec §10.2)
             commands::inventory::identity_usage,
             // compromised-password check (SEC-11)
             commands::password_check::password_check_status,

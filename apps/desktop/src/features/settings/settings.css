@@ -1,4 +1,4 @@
-/* Settings: a nav pane beside one section (docs/design/revamp.md §6). Tokens only, so light and dark
+/* Settings: a nav pane beside one section. Tokens only, so light and dark
    themes both follow. Groups and the result list are boxes (styles/box.css); this file lays out the
    panes and the setting rows. */
 

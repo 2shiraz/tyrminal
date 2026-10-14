@@ -1,5 +1,5 @@
 //! Command history for suggestions (AUT-01): local, encrypted in the vault, opt-in, and a
-//! setting of its own (separate from session recording and diagnostics, BUILD_SPEC §4.9).
+//! setting of its own (separate from session recording and diagnostics, spec §4.9).
 //!
 //! The renderer submits the command line the shell showed between its prompt-end and
 //! command-start marks (shell integration, OSC 133), so input typed while a command runs, such

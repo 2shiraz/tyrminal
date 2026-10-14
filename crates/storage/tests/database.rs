@@ -1,4 +1,4 @@
-//! Storage tests against real files on disk (BUILD_SPEC §9.3 "Local persistence", INV-16).
+//! Storage tests against real files on disk (spec §9.3 "Local persistence", INV-16).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

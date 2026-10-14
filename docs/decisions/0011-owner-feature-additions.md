@@ -7,8 +7,8 @@ Status: accepted (owner request), 2026-10-12
 The owner asked for these features, which are not in the reference matrix; P-28 to P-31 were
 first chosen by the coordinator under the owner's standing request to add useful features, then
 confirmed by the owner with P-32 and P-33. They are
-recorded as product additions P-23 to P-33 in BUILD_SPEC §12.4 so they are tracked like every other row.
-This ADR sets the security rules each one must follow. AGENTS.md and BUILD_SPEC §0.1 still apply.
+recorded as product additions P-23 to P-33 in spec §12.4 so they are tracked like every other row.
+This ADR sets the security rules each one must follow. The ground rules in CONTRIBUTING.md still apply.
 
 ## Decision
 

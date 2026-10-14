@@ -105,7 +105,10 @@ export class Session {
   async waitGone(selector, { timeout = 15_000 } = {}) {
     const deadline = Date.now() + timeout;
     while (await this.find(selector)) {
-      if (Date.now() > deadline) throw new Error(`timed out waiting for ${selector} to disappear`);
+      if (Date.now() > deadline) {
+        const left = await this.execute(`return [...document.querySelectorAll(arguments[0])].map((e) => e.outerHTML.slice(0, 160)).join(" | ")`, [selector]).catch(() => "?");
+        throw new Error(`timed out waiting for ${selector} to disappear; still there: ${left}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -163,10 +166,13 @@ export class Session {
    * button; Enter and double-click connect.
    */
   async openHost(container, label) {
+    // Enter only once focus has stayed on the button between two polls: focus from a click that
+    // led here (a nav item, say) can still land after an immediate focus() call.
     const focus = `const b = [...document.querySelectorAll(arguments[0] + " button")].find((x) => (x.getAttribute("aria-label") ?? x.textContent.trim()) === arguments[1]);
       if (!b) return false;
+      if (document.activeElement === b) return true;
       b.focus();
-      return document.activeElement === b;`;
+      return false;`;
     await this.until(() => this.execute(focus, [container, label]), { describe: `${label} in ${container}` });
     await this.chord(["\uE007"]);
   }

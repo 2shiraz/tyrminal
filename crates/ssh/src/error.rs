@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::RejectReason;
 
-/// Where in the connection lifecycle something happened (BUILD_SPEC §4.4 session states).
+/// Where in the connection lifecycle something happened (spec §4.4 session states).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Resolving,

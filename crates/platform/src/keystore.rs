@@ -5,7 +5,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 /// Secret-store failures. There is deliberately no variant that leads to a plaintext fallback:
-/// callers must ask for the passphrase again or explain the failure (BUILD_SPEC §4.3, P-11).
+/// callers must ask for the passphrase again or explain the failure (spec §4.3, P-11).
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum KeystoreError {
     #[error("the operating system secret store is not available")]

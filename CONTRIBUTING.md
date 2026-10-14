@@ -1,7 +1,8 @@
 # Contributing
 
-Thank you for helping. Read [AGENTS.md](AGENTS.md) first: its hard rules apply to every change,
-human or automated. [BUILD_SPEC.md](BUILD_SPEC.md) is the implementation baseline.
+Thank you for helping. The ground rules below apply to every change. The product and security
+requirements are in [docs/specification.md](docs/specification.md), and the architecture is
+described in [docs/architecture.md](docs/architecture.md).
 
 ## Ground rules
 
@@ -12,7 +13,8 @@ human or automated. [BUILD_SPEC.md](BUILD_SPEC.md) is the implementation baselin
 - Secrets never go into argv, environment variables, URLs, logs, panics, events or test artifacts.
 - Mocks are allowed only in the browser UI tests (`tests/ui`) and never count as verification.
 - The domain, vault, ssh and storage crates must not depend on Tauri, React or Axum.
-- Every crate has `#![forbid(unsafe_code)]`.
+- Every crate has `#![forbid(unsafe_code)]`, unless an ADR isolates platform FFI.
+- No plaintext fallback when the OS secret store or filesystem fails.
 - A new dependency needs its version, license and reason recorded in an ADR under
   `docs/decisions/`; lockfiles stay committed.
 

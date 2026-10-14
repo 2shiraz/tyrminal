@@ -200,6 +200,8 @@ export class TerminalController {
   readonly commandOutputs: CommandOutputs;
   private disposed = false;
   private pendingAck = 0;
+  /** Arrival times of the output chunks written to the terminal and not yet parsed. */
+  private readonly arrivals: number[] = [];
   private ackTimer: number | undefined;
   private resizeTimer: number | undefined;
   private lastSize = { cols: 0, rows: 0 };
@@ -303,7 +305,7 @@ export class TerminalController {
     // Shell integration marks (OSC 7, OSC 133): folder, prompt and command boundaries. Registered
     // first: xterm calls the most recent handler first and stops at one that returns true, so the
     // handlers registered below only observe these sequences and pass them on (return false).
-    this.cleanups.push(attachShellContext(this.term, () => this.sessionId));
+    this.cleanups.push(attachShellContext(this.term, () => this.sessionId, () => this.arrivals[0] ?? Date.now()));
 
     // OSC 52 (clipboard). Writes go to the owner for a consent decision; a read request ("?")
     // is never answered. Returning true marks the sequence handled so nothing else acts on it.
@@ -694,7 +696,11 @@ export class TerminalController {
     this.counters.rx += bytes.length;
     this.publishCounters();
     this.callbacks.onOutput?.();
+    // When each chunk arrived, oldest first: the terminal parses chunks in order, so the head is
+    // the chunk being parsed while its callback has not run yet.
+    this.arrivals.push(Date.now());
     this.term.write(this.encoding.decode(bytes), () => {
+      this.arrivals.shift();
       this.counters.parsed += bytes.length;
       this.publishCounters();
       this.acknowledge(bytes.length);

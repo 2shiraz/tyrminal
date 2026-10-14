@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release-policy checks (INV-05, INV-09, BUILD_SPEC §4.6, §9.7). Static checks always run; binary
+// Release-policy checks (INV-05, INV-09, spec §4.6, §9.7). Static checks always run; binary
 // checks run when a release binary exists and are reported as BLOCKED when it does not.
 //
 //   node scripts/check-release.mjs [--require-binary]

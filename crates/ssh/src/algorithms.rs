@@ -1,5 +1,5 @@
 //! Explicit algorithm policy. The lists are written out rather than inherited from library
-//! defaults so an upgrade cannot silently widen them (BUILD_SPEC §4.5).
+//! defaults so an upgrade cannot silently widen them (spec §4.5).
 
 use std::borrow::Cow;
 

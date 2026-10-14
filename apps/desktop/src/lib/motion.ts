@@ -1,4 +1,4 @@
-// Motion helpers (docs/design/interaction-polish.md §4, docs/design/overhaul.md "Motion"): short,
+// Motion helpers: short,
 // transform and opacity only, and nothing at all under reduced motion (the OS setting or the
 // in-app switch). CSS handles what it can (styles/global.css); these cover what CSS cannot see:
 // an element about to be removed, and an element that moved.
@@ -51,7 +51,7 @@ export function flashSaved(element: HTMLElement | null | undefined): void {
 }
 
 /**
- * FLIP for the children of `container` that carry `data-flip-key` (docs/design/motion.md, PR 3):
+ * FLIP for the children of `container` that carry `data-flip-key`:
  * - a child that moved slides from where it was on screen to its new place (--duration-glide);
  *   a move that interrupts a slide starts from where the row is now, so nothing jumps;
  * - a child that is new rises in (--duration-fast);

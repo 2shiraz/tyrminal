@@ -1,4 +1,4 @@
-//! Session recordings (BUILD_SPEC Phase 08, LOG-*).
+//! Session recordings (spec Phase 08, LOG-*).
 //!
 //! A recording holds what a session printed, never what was typed. Recording is off until the user
 //! turns it on for the vault; turning it off stops future recording and keeps existing logs, which

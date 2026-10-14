@@ -1,4 +1,4 @@
-// Fewer round trips (docs/design/interaction-polish.md, section 1): hosts, keys, groups and
+// Fewer round trips: hosts, keys, groups and
 // identities load once per unlock and views read that cache instead of listing again on every
 // view switch. Mock backend; UI evidence only.
 import { type Page, expect, test } from "@playwright/test";

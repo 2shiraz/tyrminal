@@ -1,4 +1,4 @@
-// Deleting an identity (BUILD_SPEC §10.2): when hosts or groups use it, the dialog lists them,
+// Deleting an identity (spec §10.2): when hosts or groups use it, the dialog lists them,
 // says how each host would sign in without it, and deletes only after the user picks another
 // identity for them or chooses to remove it from them. Nothing falls back silently.
 

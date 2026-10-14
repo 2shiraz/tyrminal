@@ -1126,7 +1126,7 @@ export function installMockBackend(options) {
     // terminal notifications (P-23): mirrors the native text; records what was asked.
     notify_command_finished: (a) => {
       (window.__mockNotices ??= []).push(structuredClone(a));
-      const s = Math.floor(a.durationMs / 1000);
+      const s = Math.round(a.durationMs / 1000);
       const took = s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
       const body = a.exitStatus === 0 ? `Command finished successfully after ${took}.` : a.exitStatus === null ? `Command finished after ${took}.` : `Command failed with exit status ${a.exitStatus} after ${took}.`;
       return { title: a.tabTitle.trim() || "Tyrminal", body, shown: true };
@@ -1791,7 +1791,7 @@ export function installMockBackend(options) {
       return handlers.identity_list().find((i) => i.id === record.id);
     },
     identity_delete: (a) => {
-      // identity deletion (BUILD_SPEC §10.2): refused while in use unless the caller chooses.
+      // identity deletion (spec §10.2): refused while in use unless the caller chooses.
       const users = [...identityState.uses].filter(([, v]) => v === a.id).map(([k]) => k);
       if (users.length > 0 && !a.references)
         throw { code: "IN_USE", message: "Hosts or groups use this identity. Choose another identity for them or remove it from them." };
@@ -1803,7 +1803,7 @@ export function installMockBackend(options) {
       }
       return users.length;
     },
-    // identity deletion (BUILD_SPEC §10.2)
+    // identity deletion (spec §10.2)
     identity_usage: (a) => {
       const uses = [];
       for (const g of state.groups)

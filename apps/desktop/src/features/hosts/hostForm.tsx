@@ -321,7 +321,7 @@ export interface LiveHost {
   isNew: boolean;
 }
 
-/** One box of the form (docs/design/revamp.md §4): a strip with its heading, then its fields. */
+/** One box of the form: a strip with its heading, then its fields. */
 function Card({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
   return (

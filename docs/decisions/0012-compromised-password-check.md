@@ -9,7 +9,7 @@ protocol (k-anonymity range query): send the first five hexadecimal characters o
 SHA-1 hash, receive every known suffix with that prefix and a count, compare locally. Responses
 can be padded with count-0 decoys so their size does not reveal the prefix's popularity.
 
-BUILD_SPEC §1.1 keeps vendor network activity out of default local mode, and
+Spec §1.1 keeps vendor network activity out of default local mode, and
 `scripts/check-release.mjs` fails a build whose default dependency graph contains an HTTP client
 (`reqwest`, `hyper`, `ureq`, `isahc`). There is no TLS stack in the tree. The check cannot reach
 an HTTPS endpoint without changing that policy, which is the owner's decision.

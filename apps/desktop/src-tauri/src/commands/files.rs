@@ -2,7 +2,7 @@
 //!
 //! Local files and folders are chosen in native dialogs opened from here. Their paths stay on the
 //! native side as grants: the renderer receives an opaque token for the window that chose them,
-//! and every upload or download names a grant, never a path (BUILD_SPEC Phase 06 "scoped file
+//! and every upload or download names a grant, never a path (spec Phase 06 "scoped file
 //! grants").
 
 use std::path::PathBuf;

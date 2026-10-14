@@ -346,7 +346,7 @@ function HostsViewImpl({
     };
   }, [query, hosts.value]);
 
-  // Sections (docs/design/revamp.md): at the top, the top-level groups and the hosts in no group
+  // Sections: at the top, the top-level groups and the hosts in no group
   // (or every host with "Show all hosts"); inside a group, its subgroups and its own hosts. A
   // search is flat: every matching host, with where it lives.
   const searching = query.trim() !== "";
@@ -764,7 +764,7 @@ function HostsViewImpl({
     setPanel(null);
     requestAnimationFrame(() => (back?.isConnected ? back : addButton.current)?.focus());
   }, []);
-  // Host details motion (docs/design/motion.md; owner request). One mechanism: the list takes its
+  // Host details motion. One mechanism: the list takes its
   // new width at once and the cards that move glide there (useFlip on the list), while the panel's
   // content slides in 16 px and fades. Animating the panel's width instead would reflow the grid on
   // every frame, so cards would jump between column counts. Switching hosts with the panel open
@@ -774,17 +774,34 @@ function HostsViewImpl({
   useLayoutEffect(() => {
     const was = shownPanel.current;
     shownPanel.current = panel;
-    const el = layoutRef.current?.querySelector<HTMLElement>(":scope > .host-panel");
-    if (!el || !panel) return;
+    const layout = layoutRef.current;
+    if (!layout || !panel) return;
     const ms = motionMs("--duration-base");
     if (ms <= 0 || openedBy() !== "pointer") return;
-    const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
-    if (!was) {
-      const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
-      for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
-    } else if (was.version !== panel.version) {
-      for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    const play = (el: HTMLElement) => {
+      const content = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("resize-handle"));
+      if (!was) {
+        const ease = getComputedStyle(el).getPropertyValue("--ease-drawer").trim() || "ease-out";
+        for (const c of content) c.animate([{ opacity: 0, transform: "translateX(16px)" }, { opacity: 1, transform: "none" }], { duration: ms, easing: ease });
+      } else if (was.version !== panel.version) {
+        for (const c of content) c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+      }
+    };
+    const el = layout.querySelector<HTMLElement>(":scope > .host-panel");
+    if (el) {
+      play(el);
+      return;
     }
+    // The panel's code loads on first use, so it can mount after this effect: animate it then.
+    // Mutation callbacks run before the next paint, so it never shows unanimated first.
+    const observer = new MutationObserver(() => {
+      const mounted = layout.querySelector<HTMLElement>(":scope > .host-panel");
+      if (!mounted) return;
+      observer.disconnect();
+      play(mounted);
+    });
+    observer.observe(layout, { childList: true });
+    return () => observer.disconnect();
   }, [panel]);
   const panelHostId = panel?.target.kind === "edit" ? panel.target.host.id : null;
   const currentGroupId = filter.kind === "group" ? filter.id : null;

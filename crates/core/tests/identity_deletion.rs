@@ -1,4 +1,4 @@
-//! Deleting an identity that is in use (BUILD_SPEC §10.2) against a real vault: refused unless
+//! Deleting an identity that is in use (spec §10.2) against a real vault: refused unless
 //! the user chooses to reassign its users or remove it from them, after a preview that names
 //! how each affected host signs in instead. Nothing falls back silently.
 

@@ -406,7 +406,7 @@ export function EmptyState({
 
 /**
  * The empty state inside a box: one left-aligned sentence and at most one action, in place of a
- * centred illustration (docs/design/revamp.md §4).
+ * centred illustration.
  */
 export function BoxEmpty({
   children,

@@ -186,7 +186,7 @@ pub async fn key_certificate_remove(state: State<'_, AppState>, key_id: String) 
     state.core()?.vault.remove_key_certificate(&key_id).await
 }
 
-/// Largest private-key file read (BUILD_SPEC §13: 1 MiB imported key payloads).
+/// Largest private-key file read (spec §13: 1 MiB imported key payloads).
 const MAX_KEY_FILE: u64 = 1024 * 1024;
 
 fn key_file_error(message: &'static str) -> IpcError {
@@ -362,13 +362,13 @@ pub async fn identity_save(
 pub async fn identity_delete(
     state: State<'_, AppState>,
     id: String,
-    // identity deletion (BUILD_SPEC §10.2): without it, deleting a used identity is refused.
+    // identity deletion (spec §10.2): without it, deleting a used identity is refused.
     references: Option<tyrminal_core::contracts::IdentityReferences>,
 ) -> Result<u32, IpcError> {
     state.core()?.vault.delete_identity(&id, references).await
 }
 
-// identity deletion (BUILD_SPEC §10.2)
+// identity deletion (spec §10.2)
 #[tauri::command]
 pub async fn identity_usage(
     state: State<'_, AppState>,

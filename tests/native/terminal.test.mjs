@@ -140,8 +140,8 @@ describe("terminal with real applications", { concurrency: false }, () => {
     await t.type("\n");
     await s.chord([KEYS.ctrl, "D"]);
     const text = await t.waitForText(/^IME-DONE$/m, "od output");
-    // The nine UTF-8 bytes of 日本語 and the newline, once.
-    assert.match(text, /^\s*e6 97 a5 e6 9c ac e8 aa 9e 0a\s*$/m);
+    // The nine UTF-8 bytes of 日本語 and the newline, once (BSD od on macOS pads with two spaces).
+    assert.match(text, /^\s*e6\s+97\s+a5\s+e6\s+9c\s+ac\s+e8\s+aa\s+9e\s+0a\s*$/m, `od printed: ${JSON.stringify(text.split("\n").slice(-8))}`);
   });
 
   test("every terminal row is inside the visible terminal area", async () => {
@@ -345,6 +345,23 @@ describe("GPU renderer in the real WebView", { concurrency: false }, () => {
   });
 });
 
+/** Brings a terminal tab to the front by clicking its name (its lead holds the close button on hover). */
+async function selectTab(s, name) {
+  const rect = await s.until(
+    () =>
+      s.execute(
+        `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
+         if (!e) return null; const r = (e.querySelector(".tab-label") ?? e).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`,
+      ),
+    { describe: `tab ${name}` },
+  );
+  await s.clickAt(rect.x, rect.y);
+  await s.until(
+    () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}))?.getAttribute("aria-selected") === "true" || null`),
+    { describe: `tab ${name} in front` },
+  );
+}
+
 /** The command palette shortcut: Cmd+K on macOS, Ctrl+Shift+K elsewhere (lib/shortcuts.ts). */
 const PALETTE = process.platform === "darwin" ? [KEYS.meta, "K"] : [KEYS.ctrl, KEYS.shift, "K"];
 
@@ -374,13 +391,13 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       `const tab = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
        return tab ? { status: tab.dataset.status ?? null, unread: tab.dataset.unread ?? null, selected: tab.getAttribute("aria-selected"), name: tab.textContent } : null;`,
     );
-  /** Clicks a terminal tab with a real pointer. */
+  /** Clicks a terminal tab's name with a real pointer (its lead holds the close button on hover). */
   const clickTab = async (name) => {
     const rect = await s.until(
       () =>
         s.execute(
           `const e = [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
-           if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2 };`,
+           if (!e) return null; const r = (e.querySelector(".tab-label") ?? e).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`,
         ),
       { describe: `tab ${name}` },
     );
@@ -480,7 +497,9 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       { describe: "echo in the focused pane" },
     );
     const panesWithText = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden])")].filter((p) => p.querySelector(".xterm-rows")?.textContent.includes("ONLY-HERE-42")).map((p) => p.dataset.focused)`);
-    assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
+    const where = () =>
+      s.execute(`return JSON.stringify([...document.querySelectorAll(".pane:not([hidden])")].map((p, i) => ({ i, focused: p.dataset.focused, rows: (p.querySelector(".xterm-rows")?.innerText ?? "").replaceAll("\\u00a0", " ").split("\\n").filter((l) => l.trim()).slice(-3) })).filter((p) => p.focused === "true" || p.rows.some((l) => l.includes("ONLY-HERE"))))`);
+    assert.deepEqual(panesWithText, ["true"], `only the focused pane received the input: ${await where()}`);
     await app.screenshot("w03-sixteen-panes");
   });
 
@@ -641,6 +660,8 @@ describe("a tab moved to its own window", { concurrency: false }, () => {
         return list.length === 2 ? list : null;
       }, { describe: "a second window", timeout: 20_000 });
       await s.switchToWindow(handles.find((h) => h !== main));
+      // The new window may still be loading; WebKitGTK can drop a script sent before it has.
+      await s.waitForDocument();
       await s.until(() => s.execute(`return document.querySelector(".detached-head")?.textContent?.includes("Lab") || null`), { describe: "detached window shows the tab", timeout: 20_000 });
       await t.waitForText("LATE-11", "output of the moved session arrives in the new window", 20_000);
       // A fresh terminal here: earlier screen contents do not move with the tab.
@@ -665,7 +686,17 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
         workspace: {
           highlight: {
             enabled: true,
+            // Only the rules below: built-in kinds would also mark the prompt (a macOS host name
+            // has digits, for one).
             ipAddresses: false,
+            numbers: false,
+            urls: false,
+            macAddresses: false,
+            dates: false,
+            quoted: false,
+            paths: false,
+            hex: false,
+            levels: false,
             keywords: [rule("[a-z]{0,99}[a-z]*[a-z]*[a-z]*!", "warning", true), rule("user=\\w+", "info", true), rule("ok", "danger", false)],
           },
           bindings: [],
@@ -704,7 +735,7 @@ describe("output highlighting patterns in the real WebView (TRM-07)", { concurre
         const marks = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => e.dataset.tone).join(",")`).catch(() => "?");
         throw new Error(`${error.message}; decorations: ${marks}; screen: ${(await t.terminalText()).slice(-300)}`);
       });
-      assert.deepEqual(tones, ["danger", "info"]);
+      assert.deepEqual(tones, ["danger", "info"], `highlighted: ${await s.execute(`return JSON.stringify([...document.querySelectorAll(".pane:not([hidden]) .term-highlight")].map((e) => [e.dataset.tone, e.textContent]))`)}; screen: ${(await t.terminalText()).slice(-200)}`);
       await t.type("echo STILL-HERE\n");
       await t.waitForText(/^STILL-HERE$/m, "shell responsive");
     } finally {
@@ -786,7 +817,7 @@ describe("keyboard and mouse customization through native preferences (TRM-08)",
 });
 
 describe("recent connections reopen from the new-tab screen (UX-04)", { concurrency: false }, () => {
-  test("a host connected once is offered on Hosts and in the new-tab menu, and both reconnect", async () => {
+  test("a host connected once is offered on Hosts and on the new-tab page, and both reconnect", async () => {
     const app = await App.launch({ prefs: DOM_RENDERER_PREFS });
     try {
       const s = app.session;
@@ -813,20 +844,20 @@ describe("recent connections reopen from the new-tab screen (UX-04)", { concurre
       await trustOnce();
       await s.until(async () => ((await labTabs()) === 2 ? true : null), { describe: "a second Lab tab from Hosts" });
 
-      // The new-tab menu offers it too.
+      // The new-tab page ("+") offers it too, under recent connections.
       await s.click(await s.waitFor(".tabstrip button.tab-new"));
       const item = await s.until(
         async () => {
-          for (const candidate of await s.findAll('[role="menu"] [role="menuitem"]')) {
-            if ((await s.text(candidate)).trim() === "Lab") return candidate;
+          for (const candidate of await s.findAll(".start-recent .start-row")) {
+            if ((await s.text(candidate)).includes("Lab")) return candidate;
           }
           return null;
         },
-        { describe: "Lab in the new-tab menu" },
+        { describe: "Lab under recent connections on the new-tab page" },
       );
       await s.click(item);
       await trustOnce();
-      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the menu" });
+      await s.until(async () => ((await labTabs()) === 3 ? true : null), { describe: "a third Lab tab from the new-tab page" });
       await t.type("echo REOPENED-$((2+2))\n");
       await t.waitForText("REOPENED-4");
     } finally {
@@ -901,6 +932,14 @@ describe("command-finished notifications from real shell marks (P-23)", { concur
       await t.importKey(lab.keys.ed25519);
       await t.addHost({ label: "Lab", port: lab.servers.a.port, user: lab.user });
       await t.connect("Lab");
+      // The other tab is opened first: starting a local shell is heavy work for the page, and
+      // done while the command runs it would delay when the start mark is seen.
+      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await s.until(
+        () => s.execute(`return [...document.querySelectorAll(".tabstrip .tab:not(.tab-page)")].some((e) => e.textContent.includes("Local terminal") && e.dataset.status === "ok") || null`),
+        { describe: "local shell" },
+      );
+      await selectTab(s, "Lab");
       await t.type("export PS1='tyr$ '; clear\n");
       await t.waitForText("tyr$");
       // The marks an integrated shell prints, around a command that takes 4 seconds; the
@@ -909,7 +948,7 @@ describe("command-finished notifications from real shell marks (P-23)", { concur
         "printf '\\033]133;A\\007$ \\033]133;B\\007echo TOKEN=s3cret\\n\\033]133;C\\007'; sleep 4; printf '\\033]133;D;3\\007'\n",
       );
       // Another tab in front while it runs.
-      await s.clickButton("Local terminal", { within: "nav.sidebar" });
+      await selectTab(s, "Local terminal");
       const announced = await s.until(() => s.execute(`return document.querySelector('[data-testid="command-finished"]')?.textContent || null`), {
         describe: "finished announcement",
         timeout: 20_000,

@@ -1,4 +1,4 @@
-// Immediate pressed feedback (docs/design/interaction-polish.md, section 1): buttons, rows and
+// Immediate pressed feedback: buttons, rows and
 // menu items are marked `data-pressed` on pointer down, before any click handler or render runs,
 // and the CSS shows the pressed state with no transition. First used for file rows (#18).
 

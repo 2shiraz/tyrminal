@@ -2,7 +2,7 @@
 //!
 //! The next hop's SSH session runs over this stream with [`crate::connect_stream`], so it gets
 //! its own key exchange and its own host-key verification before any credential is sent to it:
-//! every hop is verified, not just the first (BUILD_SPEC §4.5). A bastion only ever sees the
+//! every hop is verified, not just the first (spec §4.5). A bastion only ever sees the
 //! next hop's encrypted traffic.
 
 use std::pin::Pin;

@@ -1,4 +1,4 @@
-// Perceived performance (docs/design/interaction-polish.md, section 1): click-to-paint for the
+// Perceived performance: click-to-paint for the
 // most common actions, measured in the page against the UI test mock. The clock starts on the real
 // (trusted) pointerdown in a capture-phase listener; frames are then polled until the expected
 // change is in the DOM, and the clock stops at the next animation frame, after that change painted.

@@ -1,4 +1,4 @@
-// Deleting an identity that is in use (BUILD_SPEC §10.2) against the UI test mock: the dialog
+// Deleting an identity that is in use (spec §10.2) against the UI test mock: the dialog
 // names every user and what each host signs in with afterwards, and deletes only after an
 // explicit choice. The rules are tested in Rust: crates/core/tests/identity_deletion.rs.
 

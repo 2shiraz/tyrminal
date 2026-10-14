@@ -22,7 +22,7 @@ const READ_CHUNK: usize = 16 * 1024;
 const OUTPUT_QUEUE: usize = 64;
 /// Pending input writes before `write` waits.
 const INPUT_QUEUE: usize = 64;
-/// Largest single input write accepted (BUILD_SPEC §13: 64 KiB terminal input chunks).
+/// Largest single input write accepted (spec §13: 64 KiB terminal input chunks).
 pub const MAX_INPUT_CHUNK: usize = 64 * 1024;
 const MAX_DIMENSION: u16 = 1000;
 

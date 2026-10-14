@@ -1,7 +1,7 @@
 import { type ReactNode, useId } from "react";
 
 /**
- * A box (docs/design/revamp.md §4): a section labelled by a 32 px strip (heading, optional count,
+ * A box: a section labelled by a 32 px strip (heading, optional count,
  * actions on the right), filled with rows that touch its edges. The heading names the section, so
  * boxes stay navigable by heading.
  */

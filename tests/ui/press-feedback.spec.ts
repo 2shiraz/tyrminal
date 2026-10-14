@@ -1,4 +1,4 @@
-// Instant feedback (docs/design/interaction-polish.md, section 1): pressed state on pointer down
+// Instant feedback: pressed state on pointer down
 // with no transition, hover in at once and out over 120 ms (none under reduced motion), and
 // skeletons that only show once a wait passes 150 ms. Mock backend; UI evidence only.
 import { type Page, expect, test } from "@playwright/test";

@@ -5,7 +5,7 @@ Status: accepted, 2026-10-12
 ## Context
 
 Matrix row HST-14 (reference: an Android client's network/service discovery) asks for finding SSH
-servers on the local network. BUILD_SPEC §4 allows LAN discovery only with "a user-selected scope
+servers on the local network. Spec §4 allows LAN discovery only with "a user-selected scope
 and explicit start", and providers/imports never scan arbitrary networks. Port scanning is out of
 the question; DNS-SD over multicast DNS (RFC 6762/6763) is how servers announce themselves
 (`_ssh._tcp`, as Avahi, macOS Remote Login and many NAS systems do).

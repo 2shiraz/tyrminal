@@ -571,7 +571,7 @@ export const privilege = {
     call<void>("session_insert_identity_password", { sessionId, identityId }),
 };
 
-// identity deletion (BUILD_SPEC §10.2)
+// identity deletion (spec §10.2)
 export const identityDeletion = {
   /** Hosts and groups the identity applies to, and how each host signs in without it. */
   usage: (id: string) => call<import("@tyrminal/contracts").IdentityUse[]>("identity_usage", { id }),

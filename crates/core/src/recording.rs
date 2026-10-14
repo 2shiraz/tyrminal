@@ -1,4 +1,4 @@
-//! Session recordings (BUILD_SPEC Phase 08, LOG-*): what a session printed, encrypted under the
+//! Session recordings (spec Phase 08, LOG-*): what a session printed, encrypted under the
 //! vault's `K_logs` (docs/crypto-format.md §11).
 //!
 //! Recording taps a session's **output sink** and nothing else: typed input never reaches it, so

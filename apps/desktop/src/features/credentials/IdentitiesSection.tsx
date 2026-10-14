@@ -9,7 +9,7 @@ import { msg } from "../../lib/messages";
 import { msgD } from "../../lib/messages-d";
 import { useAction } from "../../lib/useAsync";
 import { identityEvents } from "./identityEvents";
-// identity deletion (BUILD_SPEC §10.2)
+// identity deletion (spec §10.2)
 import { DeleteIdentityDialog } from "../identities/DeleteIdentityDialog";
 
 export { identityEvents } from "./identityEvents";
@@ -75,7 +75,7 @@ export function IdentitiesSection({ keys }: { keys: KeySummary[] }) {
         />
       )}
 
-      {/* identity deletion (BUILD_SPEC §10.2): an identity in use needs an explicit choice. */}
+      {/* identity deletion (spec §10.2): an identity in use needs an explicit choice. */}
       {deleting && (
         <DeleteIdentityDialog
           identity={deleting}

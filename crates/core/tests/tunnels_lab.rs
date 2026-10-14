@@ -1039,9 +1039,20 @@ async fn a_host_can_turn_post_quantum_off_for_compatibility_or_require_it() {
         // sent; kex_lab proves the same against the server's log, with no other client running.
     }
 
-    // The setting is saved with the host and survives a lock.
+    // The setting is saved with the host and survives a lock. The failed session may still be
+    // closing (and briefly using the vault) right after the lock; the vault then answers
+    // VaultBusy, "try again in a moment", which is what a person would do.
     f.core.vault.lock().await;
-    f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await.unwrap();
+    let mut tries = 0;
+    loop {
+        match f.core.vault.unlock_with_passphrase(PASSPHRASE.into()).await {
+            Err(e) if e.code == ErrorCode::VaultBusy && tries < 50 => {
+                tries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            other => break other.unwrap(),
+        }
+    }
     assert_eq!(f.core.vault.host_connection(&host).await.unwrap().key_exchange, KeyExchangeMode::RequirePostQuantum);
 }
 

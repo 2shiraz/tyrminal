@@ -80,7 +80,9 @@ describe("installing a refused key through the real application", { concurrency:
     await s.until(async () => /Connected/.test(await t.statusText()), { describe: "connected with the key" });
     assert.equal(await s.find('dialog input[type="password"]'), null, "no password was asked for");
 
-    // Leave the lab account as it was.
+    // Leave the lab account as it was, once the shell is at its prompt: typed earlier, the
+    // command echoes before the prompt, which then lands on the output's line.
+    await t.waitForText(/\$\s*$/, "the login shell's prompt");
     await t.type(`grep -vF '${body}' ~/.ssh/authorized_keys > ~/.ssh/ak.tmp; mv ~/.ssh/ak.tmp ~/.ssh/authorized_keys; echo cleaned-$((1+1))\n`);
     await t.waitForText(/^cleaned-2\s*$/m, "cleanup ran");
   });

@@ -155,7 +155,12 @@ export function ui(s) {
     async connect(label) {
       await api.nav("Hosts");
       await s.openHost('[data-testid="host-list"]', label);
-      await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" });
+      await s.until(async () => (await s.find("dialog .fingerprint")) !== null, { describe: "trust prompt" }).catch(async (e) => {
+        const state = await s.execute(
+          `return JSON.stringify({ active: document.activeElement?.className ?? null, dialogs: [...document.querySelectorAll("dialog[open]")].map((d) => d.className + ": " + d.textContent.slice(0, 120)), tabs: [...document.querySelectorAll(".tabstrip .tab")].map((e) => e.textContent) })`,
+        );
+        throw new Error(`${e.message} ${state}`);
+      });
       await s.clickButton("Trust once", { within: "dialog" });
       await s.waitGone("dialog");
       await s.until(async () => /Connected/.test(await api.statusText()), { describe: "connected" });

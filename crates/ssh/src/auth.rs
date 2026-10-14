@@ -6,7 +6,7 @@ use russh::keys::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, Publi
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-/// Maximum accepted private-key text (BUILD_SPEC §13: 1 MiB imported key payloads).
+/// Maximum accepted private-key text (spec §13: 1 MiB imported key payloads).
 pub const MAX_KEY_TEXT_LEN: usize = 1024 * 1024;
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
