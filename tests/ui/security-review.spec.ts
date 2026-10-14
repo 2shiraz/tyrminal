@@ -72,13 +72,13 @@ test("removing a stale trusted key goes through the existing confirmation", asyn
   expect(await calls(page)).not.toContain("known_host_remove");
   await expect(stale).toBeVisible();
 
-  // Removing needs a reason, then the review runs again and both findings for it are gone.
+  // Confirmed, it is removed (noted as from the review), the review runs again and both findings
+  // for it are gone.
   await stale.getByRole("button", { name: "Remove…" }).click();
   dialog = page.getByRole("alertdialog", {
     name: "Remove trust for retired.example port 22?",
   });
-  await expect(dialog.getByRole("button", { name: "Remove" })).toBeDisabled();
-  await dialog.getByRole("textbox").fill("Server retired in 2025");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
   await dialog.getByRole("button", { name: "Remove" }).click();
   await expect(dialog).toBeHidden();
   await expect(section.getByText("retired.example")).toHaveCount(0);

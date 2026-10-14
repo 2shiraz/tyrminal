@@ -13,6 +13,7 @@ import { msgSR } from "../../lib/messages-security-review";
 import { useAction } from "../../lib/useAsync";
 import { GenerateKeyDialog } from "../credentials/KeychainView";
 import { HostEditor } from "../hosts/HostEditor";
+import { msg } from "../../lib/messages";
 import { RemoveTrustDialog } from "../settings/SettingsViews";
 
 /** Mirrors `SecurityFinding::severity` in crates/contracts/src/security_review.rs. */
@@ -228,7 +229,7 @@ export function SecurityReviewSection({ onOpenKeychain }: { onOpenKeychain: () =
       {fix?.kind === "editHost" && editing && (
         <HostEditor host={editing} keys={keys.value ?? []} groups={groups.value ?? []} onClose={() => setFix(null)} onSaved={fixed} />
       )}
-      {fix?.kind === "removeKnownHost" && <RemoveTrustDialog entry={fix} onClose={() => setFix(null)} onDone={fixed} />}
+      {fix?.kind === "removeKnownHost" && <RemoveTrustDialog entry={fix} reason={msg.knownHosts.reviewReason} onClose={() => setFix(null)} onDone={fixed} />}
     </div>
   );
 }
