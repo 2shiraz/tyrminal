@@ -497,7 +497,9 @@ describe("workspaces with real sessions", { concurrency: false }, () => {
       { describe: "echo in the focused pane" },
     );
     const panesWithText = await s.execute(`return [...document.querySelectorAll(".pane:not([hidden])")].filter((p) => p.querySelector(".xterm-rows")?.textContent.includes("ONLY-HERE-42")).map((p) => p.dataset.focused)`);
-    assert.deepEqual(panesWithText, ["true"], "only the focused pane received the input");
+    const where = () =>
+      s.execute(`return JSON.stringify([...document.querySelectorAll(".pane:not([hidden])")].map((p, i) => ({ i, focused: p.dataset.focused, rows: (p.querySelector(".xterm-rows")?.innerText ?? "").replaceAll("\\u00a0", " ").split("\\n").filter((l) => l.trim()).slice(-3) })).filter((p) => p.focused === "true" || p.rows.some((l) => l.includes("ONLY-HERE"))))`);
+    assert.deepEqual(panesWithText, ["true"], `only the focused pane received the input: ${await where()}`);
     await app.screenshot("w03-sixteen-panes");
   });
 
